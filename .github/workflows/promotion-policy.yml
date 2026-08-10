@@ -1,0 +1,76 @@
+name: Promotion Policy
+
+on:
+  # The base branch owns this policy. It never checks out or executes pull-request
+  # code, so promotion candidates cannot weaken the gate that evaluates them.
+  pull_request_target:
+    branches:
+      - test
+      - main
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  branch-flow:
+    name: Enforce branch flow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify promotion source
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [[ "${HEAD_REPOSITORY}" != "${BASE_REPOSITORY}" ]]; then
+            echo "Promotions must come from a branch in ${BASE_REPOSITORY}." >&2
+            exit 1
+          fi
+          if [[ "${BASE_BRANCH}" == "test" && "${HEAD_BRANCH}" != "dev" ]]; then
+            echo "Only dev may be promoted to test." >&2
+            exit 1
+          fi
+          if [[ "${BASE_BRANCH}" == "main" && "${HEAD_BRANCH}" != "test" ]]; then
+            echo "Only test may be promoted to main." >&2
+            exit 1
+          fi
+
+  container-preview:
+    name: Verify test container images
+    if: github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set image references
+        shell: bash
+        run: |
+          owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "API_IMAGE=ghcr.io/${owner_lc}/aperture-chat-api:test-${{ github.event.pull_request.head.sha }}"
+            echo "WEB_IMAGE=ghcr.io/${owner_lc}/aperture-chat-web:test-${{ github.event.pull_request.head.sha }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify API image
+        run: docker buildx imagetools inspect "${API_IMAGE}"
+
+      - name: Verify web image
+        run: docker buildx imagetools inspect "${WEB_IMAGE}"
+
+      - name: Record verified images
+        shell: bash
+        run: |
+          {
+            echo "## Verified test images"
+            echo
+            echo "- \`${API_IMAGE}\`"
+            echo "- \`${WEB_IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

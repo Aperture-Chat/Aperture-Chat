@@ -1,0 +1,1 @@
+"""Aperture Chat API package."""

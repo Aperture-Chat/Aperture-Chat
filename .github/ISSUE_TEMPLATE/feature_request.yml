@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose one focused improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe a narrow first increment rather than a broad redesign.
+    validations:
+      required: true
+  - type: textarea
+    id: roles
+    attributes:
+      label: Roles and workflows affected
+      description: Identify user, tenant-admin, platform-owner, API, or deployment impact.
+  - type: textarea
+    id: proof
+    attributes:
+      label: Mockups or examples
+      description: Optional screenshots or clips must use synthetic data.
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and alternatives
+      description: Note security, privacy, migration, compatibility, and simpler alternatives.

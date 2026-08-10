@@ -1,0 +1,50 @@
+{$APERTURE_CADDY_SITE_ADDRESS:localhost} {
+	encode gzip zstd
+
+	# The API serves its routes WITH these prefixes (/api/auth/..., /v1/chat/
+	# completions, /scim/v2/...), so use handle (prefix preserved), never
+	# handle_path (which strips the prefix and 404s every request).
+	handle /api/* {
+		reverse_proxy api:8000 {
+			transport http {
+				response_header_timeout 75m
+				read_timeout 75m
+				write_timeout 75m
+			}
+		}
+	}
+
+	handle /v1/* {
+		reverse_proxy api:8000 {
+			transport http {
+				response_header_timeout 75m
+				read_timeout 75m
+				write_timeout 75m
+			}
+		}
+	}
+
+	handle /scim/v2/* {
+		reverse_proxy api:8000 {
+			transport http {
+				response_header_timeout 75m
+				read_timeout 75m
+				write_timeout 75m
+			}
+		}
+	}
+
+	handle /health {
+		reverse_proxy api:8000 {
+			transport http {
+				response_header_timeout 75m
+				read_timeout 75m
+				write_timeout 75m
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

@@ -1,0 +1,88 @@
+services:
+  web:
+    image: ${APERTURE_IMAGE_REGISTRY:-ghcr.io/aperture-chat}/aperture-chat-web:${APERTURE_IMAGE_TAG:?set APERTURE_IMAGE_TAG to a reviewed release tag}
+    restart: unless-stopped
+    ports:
+      - "${APERTURE_WEB_BIND:-127.0.0.1:5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: ["local", "vps", "prod"]
+
+  api:
+    image: ${APERTURE_IMAGE_REGISTRY:-ghcr.io/aperture-chat}/aperture-chat-api:${APERTURE_IMAGE_TAG:?set APERTURE_IMAGE_TAG to a reviewed release tag}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APERTURE_SEED_PLATFORM_OWNER_ENABLED: "false"
+      APERTURE_SEED_DEMO_DATA_ENABLED: "false"
+      APERTURE_DEV_HEADER_AUTH_ENABLED: "false"
+      APERTURE_ENVIRONMENT: "production"
+      APERTURE_SECRET_KEY: ${APERTURE_SECRET_KEY:?set a strong secret}
+      APERTURE_RUNTIME_STATE_PATH: /srv/aperture/services/api/data/runtime_state.json
+      APERTURE_VECTOR_DB_PATH: /srv/aperture/services/api/data/knowledge_vectors.sqlite3
+    volumes:
+      - aperture-api-data:/srv/aperture/services/api/data
+    ports:
+      - "${APERTURE_API_BIND:-127.0.0.1:8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    profiles: ["local", "vps", "prod"]
+
+  # Opt-in relational database. Enabling this profile does not silently switch
+  # the API: the operator must set APERTURE_DATABASE_URL after a verified import.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: ${APERTURE_POSTGRES_DB:-aperture}
+      POSTGRES_USER: ${APERTURE_POSTGRES_USER:-aperture}
+      # Intentionally blank by default so ordinary SQLite compose rendering is
+      # unaffected; the Postgres image fails honestly if the profile is enabled
+      # without an operator-supplied password.
+      POSTGRES_PASSWORD: ${APERTURE_POSTGRES_PASSWORD:-}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - aperture-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${APERTURE_POSTGRES_BIND:-127.0.0.1:5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 1m
+
+  # Background work (scheduled automations and Elastic delivery) still runs
+  # inside the single API process. Postgres is not permission to add API
+  # replicas while the remaining stores and scheduler are process-local.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["vps", "prod"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APERTURE_CADDY_SITE_ADDRESS: ${APERTURE_CADDY_SITE_ADDRESS:-localhost}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+
+volumes:
+  aperture-api-data:
+  aperture-postgres-data:
+  caddy-data:
+  caddy-config:

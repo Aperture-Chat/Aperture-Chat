@@ -1,0 +1,154 @@
+{
+  "title": "Harlan Family Estate Plan — Current Structure",
+  "subtitle": "Alden L. Harlan & Dana L. Harlan — Missouri Residents (formerly Kansas) — Est. Combined Net Worth ~$80M",
+  "tag": "Confidential — Attorney Work Product",
+  "rows": [
+    [
+      {
+        "id": "bryan",
+        "title": "ALDEN L. HARLAN",
+        "subtitle": "Missouri Resident (formerly Kansas)",
+        "variant": "banner",
+        "bullets": [
+          "Settlor — Alden L. Harlan Revocable Trust (2017)",
+          "Grantor — 2021 SLAT FBO Dana",
+          "Grantor — 2026 SLAT (Dana L. Harlan Irrevocable Trust)",
+          "Co-Trustee & Beneficiary — Harlan (1997) Family Trust; holds limited power of appointment"
+        ]
+      },
+      {
+        "id": "deborah",
+        "title": "DANA L. HARLAN",
+        "subtitle": "Missouri Resident (formerly Kansas)",
+        "variant": "banner",
+        "bullets": [
+          "Settlor — Dana L. Harlan Revocable Trust (2017)",
+          "Grantor — 2021 SLAT FBO Alden (never funded)",
+          "Trustee — 2021 SLAT FBO Dana & 2026 SLAT",
+          "Co-Trustee & Beneficiary — Harlan (1997) Family Trust"
+        ]
+      }
+    ],
+    [
+      {
+        "id": "bryan-rlt",
+        "title": "ALDEN L. HARLAN REVOCABLE TRUST (2017)",
+        "subtitle": "Revocable Living Trust",
+        "bullets": [
+          "Settlor/Trustee: Alden L. Harlan",
+          "At death: residue to Dana OUTRIGHT (marital deduction) UNLESS Dana disclaims within 9 months",
+          "If disclaimed, or Dana predeceases: Credit Shelter Trust for Dana's life, then per-child trusts",
+          "21-YEAR RULE — NOT a dynasty trust",
+          "Successor Trustee: Dana, then Meridian Trust Bank (no individual in between)",
+          "Governing Law: Kansas"
+        ],
+        "footer": {"text": "SUBJECT TO ESTATE TAX unless disclaimer funds Credit Shelter Trust", "tone": "warning"}
+      },
+      {
+        "id": "deb-rlt",
+        "title": "DANA L. HARLAN REVOCABLE TRUST (2017)",
+        "subtitle": "Mirror image of Alden's Revocable Trust",
+        "bullets": [
+          "Settlor/Trustee: Dana L. Harlan",
+          "At death: residue to Alden OUTRIGHT (marital deduction) UNLESS Alden disclaims within 9 months",
+          "If disclaimed, or Alden predeceases: Credit Shelter Trust for Alden's life, then per-child trusts",
+          "21-YEAR RULE — NOT a dynasty trust",
+          "Successor Trustee: Alden, then Meridian Trust Bank (no individual in between)",
+          "Governing Law: Kansas"
+        ],
+        "footer": {"text": "SUBJECT TO ESTATE TAX unless disclaimer funds Credit Shelter Trust", "tone": "warning"}
+      },
+      {
+        "id": "slat-fbo-deb",
+        "title": "2021 SLAT FBO DANA",
+        "subtitle": "Irrevocable — executed Jan. 21, 2021",
+        "bullets": [
+          "Grantor: Alden | Trustee: Dana",
+          "Successor Trustees: Quinn → Riley → Jordan → Casey",
+          "Governing Law: Missouri",
+          "Grantor Trust status — NO income tax reimbursement to Alden",
+          "FUNDED: 50% of Alden's Arbor Organics Series C Preferred Unit Warrant (transferred Oct. 2024, Wandry valuation clause)",
+          "At Dana's death: divides into GST-exempt Descendants' Separate Trusts, one per child"
+        ],
+        "footer": {"text": "NOT SUBJECT TO ESTATE TAX; GST EXEMPT; NOT SUBJECT TO CREDITORS' CLAIMS", "tone": "positive"}
+      },
+      {
+        "id": "slat-fbo-bryan",
+        "title": "2021 SLAT FBO ALDEN",
+        "subtitle": "Irrevocable — executed Jan. 21, 2021 (same date as SLAT FBO Dana)",
+        "bullets": [
+          "Grantor: Dana | Trustee: Alden",
+          "Nearly identical terms to SLAT FBO Dana",
+          "Governing Law: Kansas",
+          "STATUS: NEVER FUNDED — no assets transferred to date"
+        ],
+        "note": "⚠ RECIPROCAL TRUST DOCTRINE — WATCH ITEM: mirror-image terms with SLAT FBO Dana, same execution date. Currently unfunded, which limits immediate exposure, but the document remains outstanding. Address before any future funding to avoid IRS 'uncrossing' argument (U.S. v. Grace).",
+        "footer": {"text": "DORMANT / UNFUNDED — NO ASSETS AT RISK TODAY", "tone": "warning"}
+      },
+      {
+        "id": "slat-2026",
+        "title": "2026 SLAT (Dana L. Harlan Irrevocable Trust)",
+        "subtitle": "Signature pages dated May 22, 2026 (controlling)",
+        "bullets": [
+          "Grantor: Alden | Trustee: Dana | Successor Trustee: Quinn",
+          "Trust Protector: Marcus T. Field (broad amendment powers)",
+          "Governing Law: Missouri",
+          "Grantor Trust — Independent Trustee MAY reimburse Alden for income taxes",
+          "At Dana's death: divides into GST-exempt Harlan Family Trusts, one per child"
+        ],
+        "note": "Opening recital misdated 'November 17, 2023' — signature pages correctly dated May 22, 2026; this is the controlling date. Recital correction recommended via Trust Protector amendment.",
+        "footer": {"text": "NOT SUBJECT TO ESTATE TAX; GST EXEMPT; DYNASTY TRUST (360-YEAR MO PERPETUITIES PERIOD)", "tone": "positive"}
+      }
+    ],
+    [
+      {
+        "id": "cst",
+        "title": "CREDIT SHELTER TRUST",
+        "subtitle": "Funded only upon disclaimer, or first spouse's death without a completed marital transfer",
+        "bullets": [
+          "For surviving spouse's life (whichever spouse survives / did not disclaim)",
+          "At survivor's death: divides into PER-CHILD TRUSTS",
+          "21-YEAR RULE — trusts terminate & distribute outright to each child — NOT a dynasty structure",
+          "Governed by Kansas law (per RLT terms)"
+        ],
+        "footer": {"text": "NOT SUBJECT TO ESTATE TAX (sheltered by exemption) — but growth after 21-yr distribution loses GST protection", "tone": "positive"}
+      },
+      {
+        "id": "desc-trusts",
+        "title": "DESCENDANTS' SEPARATE TRUSTS",
+        "subtitle": "One per child — created at Dana's death",
+        "bullets": [
+          "Funded from 2021 SLAT FBO Dana",
+          "GST-exempt dynasty structure",
+          "Holds 50% Arbor Organics Series C Preferred Unit Warrant interest, plus growth since Oct. 2024"
+        ],
+        "footer": {"text": "NOT SUBJECT TO ESTATE TAX; GST EXEMPT", "tone": "positive"}
+      },
+      {
+        "id": "hansel-family-trusts",
+        "title": "HARLAN FAMILY TRUSTS",
+        "subtitle": "One per child — created at Dana's death",
+        "bullets": [
+          "Funded from 2026 SLAT",
+          "GST-exempt dynasty structure — 360-year Missouri perpetuities period",
+          "Trust Protector (Marcus T. Field) retains broad amendment powers"
+        ],
+        "footer": {"text": "NOT SUBJECT TO ESTATE TAX; GST EXEMPT; DYNASTY TRUST", "tone": "positive"}
+      },
+      {
+        "id": "third-party",
+        "title": "THE HARLAN (1997) FAMILY TRUST",
+        "subtitle": "THIRD-PARTY TRUST — NOT part of Alden's or Dana's taxable estate",
+        "bullets": [
+          "Grantor: Ruth A. Harlan (Alden's mother)",
+          "Alden & Dana are Co-Trustees and beneficiaries",
+          "Alden holds a limited power of appointment",
+          "Governing Law: Minnesota"
+        ],
+        "footer": {"text": "NOT PART OF ALDEN'S OR DEB'S TAXABLE ESTATE", "tone": "positive"}
+      }
+    ],
+    [
+      {"id": "tyler", "title": "QUINN HARLAN", "subtitle": "Adult Child — Ultimate Beneficiary", "bullets": ["Successor Trustee, 2021 SLAT FBO Dana (1st in line)", "Successor Trustee, 2026 SLAT", "Beneficiary of per-child trust under each structure"]},
+      {"id": "haley", "title": "RILEY HARLAN", "subtitle": "Adult Child — Ultimate Beneficiary", "bullets": ["Successor Trustee, 2021 SLAT FBO Dana (2nd in line)", "Beneficiary of per-child trust under each structure"]},
+      {"id": "megan", "title": "JORDAN HARLAN",

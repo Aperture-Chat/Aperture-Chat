@@ -1,0 +1,159 @@
+name: Docker Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v-prefixed tag to publish
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  REQUESTED_RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+jobs:
+  docker-release:
+    name: Promote inspected images and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Prepare release metadata
+        shell: bash
+        run: |
+          owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          tag="${REQUESTED_RELEASE_TAG}"
+          if [[ "${tag}" != v* ]]; then
+            echo "Release tag must start with v: ${tag}" >&2
+            exit 1
+          fi
+
+          release_commit="$(git rev-list -n 1 "${tag}")"
+          git fetch origin main --no-tags
+          if ! git merge-base --is-ancestor "${release_commit}" origin/main; then
+            echo "Release tag must resolve to a commit already on main: ${release_commit}" >&2
+            exit 1
+          fi
+
+          if git rev-parse --verify --quiet "${release_commit}^2" >/dev/null; then
+            preview_commit="$(git rev-parse "${release_commit}^2")"
+          else
+            preview_commit="${release_commit}"
+          fi
+          if [[ "$(git rev-parse "${release_commit}^{tree}")" != "$(git rev-parse "${preview_commit}^{tree}")" ]]; then
+            echo "Release tree differs from the inspected test commit ${preview_commit}." >&2
+            exit 1
+          fi
+          {
+            echo "IMAGE_REGISTRY=ghcr.io/${owner_lc}"
+            echo "RELEASE_TAG=${tag}"
+            echo "API_IMAGE=ghcr.io/${owner_lc}/aperture-chat-api"
+            echo "WEB_IMAGE=ghcr.io/${owner_lc}/aperture-chat-web"
+            echo "PREVIEW_TAG=test-${preview_commit}"
+            echo "PREVIEW_COMMIT=${preview_commit}"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify inspected multi-architecture images
+        run: |
+          docker buildx imagetools inspect "${API_IMAGE}:${PREVIEW_TAG}"
+          docker buildx imagetools inspect "${WEB_IMAGE}:${PREVIEW_TAG}"
+
+      - name: Promote the inspected image manifests
+        run: |
+          docker buildx imagetools create \
+            --tag "${API_IMAGE}:${RELEASE_TAG}" \
+            --tag "${API_IMAGE}:latest" \
+            "${API_IMAGE}:${PREVIEW_TAG}"
+          docker buildx imagetools create \
+            --tag "${WEB_IMAGE}:${RELEASE_TAG}" \
+            --tag "${WEB_IMAGE}:latest" \
+            "${WEB_IMAGE}:${PREVIEW_TAG}"
+
+      - name: Create Docker deploy bundle
+        shell: bash
+        run: |
+          bundle="aperture-chat-docker-${RELEASE_TAG}.tar.gz"
+          tar -czf "${bundle}" \
+            docker-compose.release.yml \
+            .env.example \
+            infra/caddy/Caddyfile \
+            docs/DOCKER_RELEASE.md \
+            README.md \
+            LICENSE.md \
+            NOTICE.md
+          echo "RELEASE_BUNDLE=${bundle}" >> "$GITHUB_ENV"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          {
+          cat <<EOF
+          # Aperture Chat ${RELEASE_TAG}
+
+          Docker container release for Aperture Chat.
+
+          ## Highlights
+          EOF
+
+          awk '
+            /^## New Since / { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' docs/DOCKER_RELEASE.md
+
+          cat <<EOF
+
+          ## Published images
+
+          - \`${API_IMAGE}:${RELEASE_TAG}\`
+          - \`${WEB_IMAGE}:${RELEASE_TAG}\`
+
+          Promoted without rebuilding from inspected test commit \`${PREVIEW_COMMIT}\`.
+
+          The \`latest\` tag is also updated for both images.
+
+          ## Deploy
+
+          Download \`${RELEASE_BUNDLE}\`, copy \`.env.example\` to \`.env\`, then run:
+
+          \`\`\`bash
+          APERTURE_IMAGE_TAG=${RELEASE_TAG} docker compose -f docker-compose.release.yml --profile local up -d
+          \`\`\`
+
+          Fresh deploys start with no users or demo data. The first account created from the browser becomes the platform owner, and runtime state persists on the \`aperture-api-data\` volume.
+
+          See \`docs/DOCKER_RELEASE.md\` in the bundle for the full runbook.
+          EOF
+          } > release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${RELEASE_TAG}" "${RELEASE_BUNDLE}" \
+            --title "Aperture Chat ${RELEASE_TAG}" \
+            --notes-file release-notes.md \
+            --verify-tag

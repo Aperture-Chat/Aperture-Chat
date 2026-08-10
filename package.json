@@ -1,0 +1,21 @@
+{
+  "name": "aperture-chat",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "version": "0.3.13",
+  "description": "Aperture Chat production v1 scaffold: secure enterprise AI chat, admin, model gateway, and Hermes jobs.",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "check:node-baseline": "node scripts/check-node-baseline.mjs",
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "test:web": "npm --workspace apps/web run test",
+    "test:api": "cd services/api && .venv/bin/python -m pytest",
+    "test": "npm run test:web && npm run test:api"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
