@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { DismissibleNotice, Panel, Pill, StableLabel, Toggle } from "./Primitives";
 import { connectorEnabled, isMcpRuntimeTool } from "../lib/connectors";
+import { MEDIA_UPLOAD_EXTENSIONS } from "../lib/mediaUploads";
 import { ToolLibraryManager } from "./ToolLibraryManager";
 import {
   createAdminKnowledgeConfig,
@@ -1432,9 +1433,11 @@ export function LibraryConsole({
                         <div className="knowledge-create-source-input-heading">
                           <strong>Add documents</strong>
                           <small>
-                            PDF, Word, images, and text-based files up to 250 MB
-                            each. Scanned pages and photos use local OCR before
-                            content is chunked and indexed.
+                            PDF, Word, images, audio, video, and text-based files
+                            up to 250 MB each. Scanned pages use local OCR.
+                            Audio is transcribed and video stills are described
+                            with Gemini Flash before content is chunked and
+                            indexed, including videos that have no audio track.
                           </small>
                         </div>
                         <div className="knowledge-create-upload-controls">
@@ -2289,13 +2292,15 @@ export function LibraryConsole({
                                             <div className="knowledge-source-card-heading">
                                               <strong>Upload documents</strong>
                                               <small>
-                                                Index multiple local files into
-                                                this knowledge base.
+                                                Index local documents, images, audio, or
+                                                video. Speech is transcribed and video
+                                                stills are described even when there is
+                                                no audio track.
                                               </small>
                                             </div>
                                             <label
                                               className="secondary-button knowledge-file-button"
-                                              data-tooltip={`Choose local files to index into ${knowledgeItem.name}`}
+                                                data-tooltip={`Choose local files to index into ${knowledgeItem.name}. Audio is transcribed and video stills are described first.`}
                                             >
                                               <Upload size={14} />
                                               <span>
@@ -3602,7 +3607,7 @@ type KnowledgeCreateSourceOption = {
 };
 
 const KNOWLEDGE_UPLOAD_MAX_BYTES = 250 * 1024 * 1024;
-const KNOWLEDGE_UPLOAD_EXTENSIONS = [
+const KNOWLEDGE_DOCUMENT_EXTENSIONS = [
   ".bmp",
   ".csv",
   ".docx",
@@ -3624,13 +3629,17 @@ const KNOWLEDGE_UPLOAD_EXTENSIONS = [
   ".webp",
   ".xml",
 ] as const;
+const KNOWLEDGE_UPLOAD_EXTENSIONS = [
+  ...KNOWLEDGE_DOCUMENT_EXTENSIONS,
+  ...MEDIA_UPLOAD_EXTENSIONS,
+] as const;
 const KNOWLEDGE_UPLOAD_ACCEPT = KNOWLEDGE_UPLOAD_EXTENSIONS.join(",");
 
 const KNOWLEDGE_CREATE_SOURCES: KnowledgeCreateSourceOption[] = [
   {
     value: "upload",
     label: "Document uploads",
-    helper: "Upload files from your computer.",
+    helper: "Upload files from your computer, including audio and video.",
     defaultName: "Uploaded Document Knowledge Base",
     defaultSource: "Manual document uploads",
     defaultDescription:
