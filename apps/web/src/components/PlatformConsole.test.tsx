@@ -715,7 +715,9 @@ test("audit tab drills into user prompts and acknowledges security alerts", asyn
       created_at: "Jul 6, 2026, 5:00 PM UTC",
       created_at_iso: "2026-07-06T23:00:00+00:00",
       response_message_id: "message-jane-response-1",
-      response_content: "The model found that the redacted value may be stored only under the approved matter policy.",
+      response_content:
+        "## Finding\n\nThe model found that the redacted value may be **stored only under the " +
+        "approved matter policy**.\n\n| Control | State |\n| --- | --- |\n| Retention | 30 days |",
       response_status: "ok",
       response_truncated: false,
       response_images: ["/api/chat/generated-images/jane-audit-image.jpg?token=fresh-token"],
@@ -773,7 +775,13 @@ test("audit tab drills into user prompts and acknowledges security alerts", asyn
   fireEvent.click(within(promptList).getByText("Review DLP boundaries"));
   const previewDialog = screen.getByRole("dialog", { name: "Prompt and model output" });
   expect(within(previewDialog).getByText(/redacted card value/)).toBeInTheDocument();
+  // The audit view renders the output the way the user saw it: markdown
+  // structure, not the raw source with its "##" and pipe characters.
   expect(within(previewDialog).getByText(/stored only under the approved matter policy/)).toBeInTheDocument();
+  expect(within(previewDialog).getByRole("heading", { name: "Finding" })).toBeInTheDocument();
+  expect(within(previewDialog).getByRole("table")).toBeInTheDocument();
+  expect(within(previewDialog).getByRole("columnheader", { name: "Control" })).toBeInTheDocument();
+  expect(previewDialog.textContent).not.toContain("## Finding");
   // Generated images saved with the output render for audit review.
   const auditImage = within(previewDialog).getByRole("img", {
     name: "Generated image saved with this model output",

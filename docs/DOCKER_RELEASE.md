@@ -69,6 +69,16 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.3.14
+
+- Chat and knowledge uploads transcribe audio and video with Gemini Flash.
+  Videos without a soundtrack still produce visual notes from extracted stills.
+- The API image includes ffmpeg so MP4/MOV and similar formats can be processed
+  on the same path as composer dictation.
+- Drafting workspace: structural inline AI edits, quieter status chrome, and
+  related document-craft adjustments from the v0.4.0 line.
+- Role guides include identity-provider and troubleshooting appendices.
+
 ## Test Promotion Images
 
 Pull requests promoted from `dev` to `test` publish immutable review images.

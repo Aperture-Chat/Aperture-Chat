@@ -1967,10 +1967,9 @@ button:disabled {
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--teal-strong);
-  background: var(--surface);
-  border: 1px solid var(--teal-border);
-  border-radius: var(--radius-pill);
-  padding: 3px 8px;
+  background: none;
+  border: 0;
+  padding: 0;
 }
 
 .owner-video-transcript summary svg {
@@ -2302,19 +2301,16 @@ button:disabled {
 
 .account-api-state {
   flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-soft);
+  border: 0;
+  background: none;
   color: var(--muted);
-  padding: 3px 7px;
+  padding: 0;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.02em;
 }
 
 .account-api-state.is-enabled {
-  border-color: var(--teal-border);
-  background: var(--teal-soft);
   color: var(--teal-strong);
 }
 
@@ -4148,24 +4144,22 @@ button:disabled {
 
 .draft-history-status {
   width: max-content;
-  border-radius: 999px;
   margin: 4px 0;
-  padding: 3px 7px;
-  background: var(--surface);
+  padding: 0;
+  background: none;
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .draft-history-status.is-running {
-  background: color-mix(in srgb, var(--teal-soft) 72%, var(--surface));
   color: var(--teal-strong);
 }
 
 .draft-history-status.is-failed {
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
   color: var(--danger);
 }
 
@@ -5072,33 +5066,35 @@ button:disabled {
   opacity: 0.48;
 }
 
+/* Save state reads as a word in its own color — Saved, Editing, Local only —
+   with the icon carrying the shape. It is still a button, so the affordance
+   moves to hover and focus instead of a permanent tinted border. */
 .document-toolbar .document-edits-toggle {
   width: auto;
-  min-width: 78px;
+  min-width: 0;
   margin-left: 0;
   gap: 6px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  padding: 0 6px;
+  border: 1px solid transparent;
+  background: none;
   font-size: 12.5px;
   font-weight: 720;
 }
 
+.document-toolbar .document-edits-toggle:hover {
+  border-color: var(--border);
+  background: var(--surface-soft);
+}
+
 .document-toolbar .document-edits-toggle.is-on {
-  border-color: var(--green-border);
-  background: var(--green-soft);
-  color: var(--green);
+  color: var(--teal-strong);
 }
 
 .document-toolbar .document-edits-toggle.is-editing {
-  border-color: color-mix(in srgb, #d97706 42%, var(--border));
-  background: color-mix(in srgb, #fef3c7 72%, var(--surface));
   color: #92400e;
 }
 
 .document-toolbar .document-edits-toggle.is-saved {
-  border-color: color-mix(in srgb, var(--green) 28%, var(--border));
-  background: color-mix(in srgb, var(--green-soft) 55%, var(--surface));
   color: var(--green);
 }
 
@@ -5110,8 +5106,8 @@ button:disabled {
   width: 100%;
   min-height: 42px;
   padding: 8px clamp(18px, 3vw, 40px);
-  border-bottom: 1px solid var(--green-border);
-  background: color-mix(in srgb, var(--green-soft) 62%, var(--surface));
+  border-bottom: 1px solid var(--teal-border);
+  background: color-mix(in srgb, var(--teal-soft) 62%, var(--surface));
   color: var(--text);
   font-size: 13px;
 }
@@ -5144,7 +5140,7 @@ button:disabled {
 }
 
 .document-change-summary button:hover {
-  background: color-mix(in srgb, var(--green-soft) 74%, var(--surface));
+  background: color-mix(in srgb, var(--teal-soft) 74%, var(--surface));
   color: var(--text-strong);
 }
 
@@ -5476,23 +5472,25 @@ button:disabled {
 }
 
 /* A real provider edit gives the paper a living perimeter so long-running
-   revisions remain visually legible without covering or dimming the content. */
+   revisions remain visually legible without covering or dimming the content.
+   Every AI marking on this surface is accent-role, so it follows the tenant's
+   accent (--teal family) rather than a fixed hue. */
 @keyframes document-ai-editing-edge {
   0%,
   100% {
-    border-color: color-mix(in srgb, var(--green) 72%, #71e59a);
+    border-color: color-mix(in srgb, var(--teal) 72%, var(--teal-2, var(--teal)));
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--green) 18%, transparent),
-      0 0 0 1px color-mix(in srgb, var(--green) 34%, transparent),
-      0 0 16px 3px color-mix(in srgb, var(--green) 24%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--teal) 18%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--teal) 34%, transparent),
+      0 0 16px 3px color-mix(in srgb, var(--teal) 24%, transparent),
       0 20px 60px rgba(15, 35, 45, 0.08);
   }
   50% {
-    border-color: color-mix(in srgb, var(--green) 46%, #71e59a);
+    border-color: color-mix(in srgb, var(--teal) 46%, var(--teal-2, var(--teal)));
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, #38d976 34%, transparent),
-      0 0 0 2px color-mix(in srgb, #38d976 42%, transparent),
-      0 0 30px 7px color-mix(in srgb, #38d976 30%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--teal-2, var(--teal)) 34%, transparent),
+      0 0 0 2px color-mix(in srgb, var(--teal-2, var(--teal)) 42%, transparent),
+      0 0 30px 7px color-mix(in srgb, var(--teal-2, var(--teal)) 30%, transparent),
       0 20px 60px rgba(15, 35, 45, 0.08);
   }
 }
@@ -5506,11 +5504,11 @@ button:disabled {
 
 .document-canvas.is-ai-editing:not(.is-paginated),
 .document-canvas.is-paginated.is-ai-editing .document-page {
-  border-color: color-mix(in srgb, var(--green) 62%, #71e59a);
+  border-color: color-mix(in srgb, var(--teal) 62%, var(--teal-2, var(--teal)));
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--green) 20%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--green) 34%, transparent),
-    0 0 20px 4px color-mix(in srgb, var(--green) 26%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--teal) 20%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--teal) 34%, transparent),
+    0 0 20px 4px color-mix(in srgb, var(--teal) 26%, transparent),
     0 20px 60px rgba(15, 35, 45, 0.08);
   animation: document-ai-editing-edge 1.8s ease-in-out infinite;
 }
@@ -5590,7 +5588,7 @@ button:disabled {
 }
 
 .document-rich-editor.show-edits {
-  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--green) 72%, transparent);
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--teal) 72%, transparent);
 }
 
 .theme-dark .document-canvas {
@@ -5781,6 +5779,38 @@ button:disabled {
   text-align: left;
 }
 
+/* A money column reads as one: figures line up on the decimal and share the
+   table's tabular figures, so an invoice or budget column scans like a ledger.
+   Alignment itself comes from the markdown separator row (---:). */
+.document-data-table td[style*="right"],
+.document-data-table th[style*="right"] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Legal clause numbering: nested ordered lists indent as 1. / 1.1 / (a) with a
+   hanging indent, the way an instrument's subsections sit under their section
+   instead of drifting into the margin. */
+.document-canvas ol {
+  list-style-position: outside;
+}
+
+.document-canvas ol ol {
+  margin: 6px 0 6px;
+  list-style-type: decimal;
+}
+
+.document-canvas ol ol ol {
+  list-style-type: lower-alpha;
+}
+
+.document-canvas ol > li {
+  padding-left: 2px;
+}
+
+.document-canvas ol > li::marker {
+  font-weight: 700;
+}
+
 .document-data-table th {
   background: #eef6f7;
   color: #173247;
@@ -5876,10 +5906,177 @@ button:disabled {
   vertical-align: super;
 }
 
+/* A fill-in rule: signature, printed name, date. One consistent solid line
+   that never wraps mid-rule, rather than a run of underscores whose length
+   drifts with the font. The non-breaking spaces inside carry the rule through
+   plain-text and DOCX round-trips; the width here is what the reader sees. */
+.document-signature-line {
+  display: inline-block;
+  min-width: 15em;
+  max-width: 100%;
+  border-bottom: 1px solid currentColor;
+  white-space: nowrap;
+  /* Sits on the text baseline like a typed rule, not below the descenders. */
+  vertical-align: baseline;
+}
+
+/* An AI edit is marked in the document permanently, but it is only *lit* while
+   it is fresh (the first 10 seconds), while the AI edit trail is open, or while
+   a trail entry is being pointed at. Unlit, the edit reads as ordinary text —
+   so a draft opened next week, printed, or exported carries no stale glow. */
 .document-ai-suggestion {
   border-radius: 5px;
-  background: color-mix(in srgb, var(--green-soft) 70%, #fff);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--green) 40%, transparent);
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color 900ms ease,
+    box-shadow 900ms ease;
+}
+
+.has-fresh-ai-edits .document-ai-suggestion,
+.show-ai-edits .document-ai-suggestion,
+.document-ai-suggestion.is-ai-edit-flash {
+  background: color-mix(in srgb, var(--teal-soft) 70%, #fff);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--teal) 40%, transparent);
+}
+
+/* A structural edit (new bullets, headings, tables, signature blocks) marks
+   whole blocks. Those get a bar drawn just outside the block instead of the
+   inline underline, which would otherwise run under every wrapped line. The
+   bar is an outer shadow, so marking a block shifts no text. */
+.has-fresh-ai-edits p.document-ai-suggestion,
+.has-fresh-ai-edits h1.document-ai-suggestion,
+.has-fresh-ai-edits h2.document-ai-suggestion,
+.has-fresh-ai-edits h3.document-ai-suggestion,
+.has-fresh-ai-edits h4.document-ai-suggestion,
+.has-fresh-ai-edits h5.document-ai-suggestion,
+.has-fresh-ai-edits h6.document-ai-suggestion,
+.has-fresh-ai-edits li.document-ai-suggestion,
+.has-fresh-ai-edits ul.document-ai-suggestion,
+.has-fresh-ai-edits ol.document-ai-suggestion,
+.has-fresh-ai-edits blockquote.document-ai-suggestion,
+.has-fresh-ai-edits pre.document-ai-suggestion,
+.has-fresh-ai-edits table.document-ai-suggestion,
+.has-fresh-ai-edits figure.document-ai-suggestion,
+.show-ai-edits p.document-ai-suggestion,
+.show-ai-edits h1.document-ai-suggestion,
+.show-ai-edits h2.document-ai-suggestion,
+.show-ai-edits h3.document-ai-suggestion,
+.show-ai-edits h4.document-ai-suggestion,
+.show-ai-edits h5.document-ai-suggestion,
+.show-ai-edits h6.document-ai-suggestion,
+.show-ai-edits li.document-ai-suggestion,
+.show-ai-edits ul.document-ai-suggestion,
+.show-ai-edits ol.document-ai-suggestion,
+.show-ai-edits blockquote.document-ai-suggestion,
+.show-ai-edits pre.document-ai-suggestion,
+.show-ai-edits table.document-ai-suggestion,
+.show-ai-edits figure.document-ai-suggestion {
+  box-shadow: -7px 0 0 -4px color-mix(in srgb, var(--teal) 45%, transparent);
+}
+
+/* Jumping to a trail entry flashes it a little harder than the resting
+   highlight, so the reader's eye lands on the right block. */
+.document-ai-suggestion.is-ai-edit-flash {
+  background: color-mix(in srgb, var(--teal-soft) 100%, #fff);
+  box-shadow:
+    inset 0 -2px 0 color-mix(in srgb, var(--teal) 70%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--teal) 26%, transparent);
+}
+
+/* Toolbar toggle for the trail, with its recorded-edit count. */
+.document-ai-trail-toggle {
+  position: relative;
+}
+
+.document-ai-trail-toggle.is-on {
+  border-color: color-mix(in srgb, var(--teal) 46%, var(--border));
+  background: color-mix(in srgb, var(--teal-soft) 60%, transparent);
+  color: var(--teal-strong);
+}
+
+.document-ai-trail-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--teal);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+}
+
+.document-ai-trail-popover {
+  width: min(360px, 92vw);
+}
+
+.document-ai-trail-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.document-ai-trail-list {
+  display: grid;
+  gap: 6px;
+  /* Long histories scroll inside the popover instead of growing past it. */
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Scoped past `.document-toolbar .inline-ai-popover button`, which pins every
+   popover button to a single 34px row — a trail entry is two lines. */
+.document-toolbar .document-ai-trail-popover .document-ai-trail-list > li > button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  height: auto;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-weight: 600;
+  text-align: left;
+}
+
+.document-toolbar .document-ai-trail-popover .document-ai-trail-list > li > button:hover {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--border));
+  background: color-mix(in srgb, var(--teal-soft) 42%, var(--surface-soft));
+}
+
+.document-ai-trail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.document-ai-trail-meta em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--teal-strong);
+}
+
+.document-ai-trail-text {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  /* Two lines of the edit is enough to recognize it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .document-citation-panel {
@@ -5993,8 +6190,8 @@ button:disabled {
 
 .document-canvas .document-added-line {
   position: relative;
-  border-left: 3px solid var(--green);
-  background: color-mix(in srgb, var(--green-soft) 72%, #ffffff);
+  border-left: 3px solid var(--teal);
+  background: color-mix(in srgb, var(--teal-soft) 72%, #ffffff);
   padding: 8px 10px 8px 13px;
   border-radius: 6px;
 }
@@ -6006,61 +6203,80 @@ button:disabled {
 }
 
 /* ---------- Pills / badges ---------- */
-.pill,
-.count-badge {
+/* Status labels are text, not capsules. A tinted pill around every state
+   ("Saved", "Connected", "Always on") reads as decoration and crowds the row
+   it sits in; the state itself is carried by the word and its color. What is
+   left is a tone dot, the label, and the space around it. Interactive chips
+   and counters keep their chrome — they need the affordance. */
+.pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--surface-soft);
+  border: 0;
+  border-radius: 0;
+  background: none;
   color: var(--text);
-  min-height: 26px;
-  padding: 0 11px;
+  min-height: 20px;
+  padding: 0;
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
-  line-height: 1;
+  line-height: 1.25;
 }
 
 .pill svg {
   flex: 0 0 auto;
 }
 
+/* A pill that brings its own icon says what it means already; one without an
+   icon gets a small tone dot so a row of states still scans vertically. */
+.pill:not(:has(svg))::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.pill:not(:has(svg)):not([class*="pill-"])::before {
+  background: var(--border-strong);
+}
+
 .pill-success {
-  border-color: var(--green-border);
   color: var(--green);
-  background: var(--green-soft);
 }
 
 .pill-warning {
-  border-color: var(--orange-border);
   color: var(--orange);
-  background: var(--orange-soft);
 }
 
 .pill-danger {
-  border-color: var(--red-border);
   color: var(--red);
-  background: var(--red-soft);
 }
 
 .pill-info {
-  border-color: var(--blue-border);
   color: var(--blue);
-  background: var(--blue-soft);
 }
 
+/* A count is a number that needs an edge to read as a count, so it keeps its
+   badge — it was never the pill problem. */
 .count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 20px;
   min-width: 20px;
-  justify-content: center;
   padding: 0 6px;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: var(--teal-soft);
-  border-color: transparent;
   color: var(--teal-strong);
+  font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
+  line-height: 1;
 }
 
 /* ---------- Composer ---------- */
@@ -11737,6 +11953,35 @@ dd {
 
 .prompt-output-message header svg {
   color: var(--teal);
+}
+
+/* The audited prompt and output render through the same markdown component
+   chat uses, so an auditor reads what the user actually saw — headings,
+   tables, and diagrams included — inside a bounded, scrollable pane. */
+.prompt-output-rendered {
+  max-height: min(300px, 32dvh);
+  overflow: auto;
+  padding: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.prompt-output-rendered .markdown {
+  font-size: 13px;
+}
+
+.prompt-output-rendered .markdown > *:first-child {
+  margin-top: 0;
+}
+
+.prompt-output-rendered .markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.prompt-output-plain {
+  margin: 0;
+  color: var(--muted);
 }
 
 .prompt-output-message pre {
@@ -20483,12 +20728,12 @@ button.owner-doc-card:hover {
 .draft-redline-qualifier {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 22px;
-  border: 1px solid color-mix(in srgb, var(--amber, #b45309) 38%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, #f59e0b 10%, var(--surface));
-  color: var(--text-strong);
-  padding: 0 9px;
+  border: 0;
+  background: none;
+  color: #92400e;
+  padding: 0;
   font-size: 11.5px;
   font-weight: 760;
 }
@@ -21210,16 +21455,16 @@ button.owner-doc-card:hover {
     box-shadow 280ms ease;
 }
 
-/* Same green working edge as the document canvas, on the open slide, for as
+/* Same accent working edge as the document canvas, on the open slide, for as
    long as any deck AI operation is running. Deliberately bright: while the
    artwork pass runs this is the strongest "still working" signal on stage. */
 .deck-stage.is-ai-editing {
-  border-color: color-mix(in srgb, var(--green) 88%, #52e08a);
+  border-color: color-mix(in srgb, var(--teal) 88%, var(--teal-2, var(--teal)));
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--green) 38%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--green) 62%, transparent),
-    0 0 22px 6px color-mix(in srgb, var(--green) 55%, transparent),
-    0 0 44px 12px color-mix(in srgb, var(--green) 30%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--teal) 38%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--teal) 62%, transparent),
+    0 0 22px 6px color-mix(in srgb, var(--teal) 55%, transparent),
+    0 0 44px 12px color-mix(in srgb, var(--teal) 30%, transparent),
     0 20px 60px rgba(15, 35, 45, 0.08);
   animation: document-ai-editing-edge 1.8s ease-in-out infinite;
 }

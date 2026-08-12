@@ -271,6 +271,35 @@ test("steward-diagram fences render the structure chart with a card editor", asy
   expect(JSON.parse(nextSource).rows[1][0].title).toBe("Alden Revocable Trust (2017)");
 });
 
+test("a diagram a model labelled yaml or json still renders as a diagram", async () => {
+  // JSON is valid YAML, so models routinely tag structure-diagram data as
+  // ```yaml. The intent is a diagram either way.
+  const body = JSON.stringify({
+    title: "Deal Structure",
+    rows: [[{ id: "holdco", title: "HoldCo", bullets: ["Delaware"] }]],
+  });
+  for (const tag of ["yaml", "yml", "json"]) {
+    const { unmount } = render(<Markdown content={`\`\`\`${tag}\n${body}\n\`\`\``} />);
+    expect(screen.getByRole("img", { name: "Deal Structure" })).toBeInTheDocument();
+    unmount();
+  }
+
+  // Same for a Mermaid diagram under a yaml fence.
+  render(<Markdown content={"```yaml\nflowchart LR\n  A --> B\n```"} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "PNG" })).toBeInTheDocument());
+});
+
+test("ordinary yaml and json stay code blocks", () => {
+  render(
+    <Markdown
+      content={'```yaml\nservice: steward\nreplicas: 2\n```\n\n```json\n{"replicas": 2}\n```'}
+    />,
+  );
+  expect(screen.getByText("yaml")).toBeInTheDocument();
+  expect(screen.getByText("json")).toBeInTheDocument();
+  expect(screen.queryByText("structure")).not.toBeInTheDocument();
+});
+
 test("an invalid steward-diagram fence falls back to an honest code block", async () => {
   render(<Markdown content={'```steward-diagram\n{"rows": "broken"\n```'} />);
   expect(screen.getByText("Rendering diagram…")).toBeInTheDocument();

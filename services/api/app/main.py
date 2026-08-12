@@ -123,7 +123,7 @@ app = FastAPI(
         "Secure enterprise AI chat: auth and SSO, platform-owner controls, tenant "
         "admin, SCIM, chat, knowledge, tools, agents, and scheduled automations."
     ),
-    version="0.3.13",
+    version="0.4.1",
     lifespan=lifespan,
 )
 
