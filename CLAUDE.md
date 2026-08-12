@@ -15,6 +15,9 @@ every tool or model working in this repository.
 - Use synthetic data in tests and visual proof.
 - Never access, copy, or expose private deployment configuration while working
   on public source.
+- Local-only instructions may be consulted for authorized operations, but their
+  SSH key paths, host details, and deployment secrets must never be reproduced
+  in tracked files, commits, logs, screenshots, reviews, or chat output.
 
 ## Review-ready output
 
