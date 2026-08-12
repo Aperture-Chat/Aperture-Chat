@@ -108,6 +108,7 @@ import { splitAssistantThinking } from "../lib/assistantThinking";
 import { loadLiveStreamPreference, storeLiveStreamPreference } from "../lib/streamPreference";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { DictationControl } from "./DictationControl";
+import { isMediaUploadFile } from "../lib/mediaUploads";
 import { Markdown } from "./Markdown";
 import { ApertureMark, Pill } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
@@ -467,6 +468,21 @@ const KIND_BY_EXT: Record<string, string> = {
   md: "Text",
   eml: "Email",
   zip: "Archive",
+  mp3: "Audio",
+  wav: "Audio",
+  m4a: "Audio",
+  aac: "Audio",
+  ogg: "Audio",
+  oga: "Audio",
+  flac: "Audio",
+  mp4: "Video",
+  mov: "Video",
+  m4v: "Video",
+  webm: "Video",
+  mkv: "Video",
+  avi: "Video",
+  mpeg: "Video",
+  mpg: "Video",
 };
 
 function fileKind(name: string): string {
@@ -1967,7 +1983,11 @@ export function ChatWorkspace({
                 <strong>{file.name}</strong>
                 <small>
                   {file.size} · {file.kind}
-                  {file.uploadStatus === "uploading" ? " · Uploading" : ""}
+                  {file.uploadStatus === "uploading"
+                    ? isMediaUploadFile(file.file ?? { name: file.name, type: file.mime_type ?? "" })
+                      ? " · Uploading and transcribing"
+                      : " · Uploading"
+                    : ""}
                   {file.uploadStatus === "error" ? " · Upload failed" : ""}
                 </small>
               </span>
@@ -2237,13 +2257,13 @@ export function ChatWorkspace({
                   type="button"
                   role="menuitem"
                   className="attach-option"
-                  data-tooltip="Pick files from this device to attach to your message"
+                  data-tooltip="Pick files from this device to attach to your message. Audio is transcribed and video stills are described when you send, even if the video has no audio."
                   onClick={openFilePicker}
                 >
                   <Upload size={16} />
                   <span>
                     <strong>Upload from computer</strong>
-                    <small>Choose files on this device</small>
+                    <small>Documents, images, audio, or video</small>
                   </span>
                 </button>
                 <button
