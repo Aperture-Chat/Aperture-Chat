@@ -2,6 +2,7 @@ import { Bot, Eye, MessageSquareText, UserRound, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { Role, UserPromptRecord } from "../lib/types";
+import { Markdown } from "./Markdown";
 import { Pill } from "./Primitives";
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -161,7 +162,9 @@ export function PromptActivityList({
                   <header>
                     <span><UserRound size={15} /> User prompt</span>
                   </header>
-                  <pre>{selected.content}</pre>
+                  <div className="prompt-output-rendered">
+                    <Markdown content={selected.content} />
+                  </div>
                 </section>
 
                 <section className="prompt-output-message is-response" aria-label="Saved model output">
@@ -171,7 +174,16 @@ export function PromptActivityList({
                   </header>
                   {selected.response_message_id || selected.response_content != null ? (
                     <>
-                      <pre>{selected.response_content || "The saved model output was empty."}</pre>
+                      <div className="prompt-output-rendered">
+                        {selected.response_content ? (
+                          // The audit view shows what the user saw: the same
+                          // renderer chat uses, so markdown, tables, and
+                          // diagrams read the way they were sent.
+                          <Markdown content={selected.response_content} />
+                        ) : (
+                          <p className="prompt-output-plain">The saved model output was empty.</p>
+                        )}
+                      </div>
                       {(selected.response_images?.length ?? 0) > 0 && (
                         <div
                           className="prompt-output-images"

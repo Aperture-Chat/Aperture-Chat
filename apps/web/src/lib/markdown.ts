@@ -1,9 +1,11 @@
+export type MarkdownColumnAlign = "left" | "center" | "right" | null;
+
 export type MarkdownBlock =
   | { kind: "heading"; level: number; text: string }
   | { kind: "image"; alt: string; url: string; title?: string }
   | { kind: "paragraph"; lines: string[] }
   | { kind: "list"; ordered: boolean; items: string[] }
-  | { kind: "table"; headers: string[]; rows: string[][] }
+  | { kind: "table"; headers: string[]; rows: string[][]; aligns: MarkdownColumnAlign[] }
   | { kind: "rule" }
   | { kind: "code"; language: string; text: string }
   | { kind: "quote"; lines: string[] }
@@ -161,9 +163,26 @@ const MERMAID_KEYWORD_PATTERN = new RegExp(
 export function isMermaidBlock(language: string, text: string): boolean {
   const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
   if (MERMAID_LANGUAGE_ALIASES.has(tag)) return true;
-  if (tag && !["text", "txt", "plaintext", "plain"].includes(tag)) return false;
+  if (!GENERIC_FENCE_TAGS.has(tag)) return false;
   return MERMAID_KEYWORD_PATTERN.test(mermaidDiagramSource(text));
 }
+
+/** Fence tags that carry no rendering intent of their own. A model that meant
+ * a diagram often labels it with one of these instead of the diagram tag —
+ * `yaml` most of all, because JSON is valid YAML — so these are sniffed by
+ * content rather than taken at their word. Anything else (```python, ```sql)
+ * is trusted and stays a code block. */
+const GENERIC_FENCE_TAGS = new Set([
+  "",
+  "text",
+  "txt",
+  "plain",
+  "plaintext",
+  "yaml",
+  "yml",
+  "json",
+  "json5",
+]);
 
 /** Diagram source with fence artifacts removed — some models repeat the
  * language tag as the first line inside the block. */
@@ -184,9 +203,40 @@ const STEWARD_DIAGRAM_LANGUAGES = new Set([
   "stewarddiagram",
 ]);
 
-/** True when a fenced block is a Steward structure diagram (JSON card chart). */
-export function isStewardDiagramBlock(language: string): boolean {
-  return STEWARD_DIAGRAM_LANGUAGES.has(language.trim().toLowerCase().split(/\s+/)[0] ?? "");
+/**
+ * True when a fenced block is a structure diagram (JSON card chart).
+ * The dedicated tag counts, and so does a generic-tagged fence whose body is
+ * a diagram spec — a model that emits the card data under ```yaml or ```json
+ * still meant a diagram. The renderer re-parses and falls back to a code block
+ * if the body does not hold up, so sniffing can never fake a diagram.
+ */
+export function isStewardDiagramBlock(language: string, text?: string): boolean {
+  const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  if (STEWARD_DIAGRAM_LANGUAGES.has(tag)) return true;
+  if (text === undefined || !GENERIC_FENCE_TAGS.has(tag)) return false;
+  return looksLikeStewardDiagramSource(text);
+}
+
+/** Cheap structural check for a diagram spec: the same precondition the real
+ * parser starts from (JSON holding a `rows` array of cards). Kept here rather
+ * than importing the parser so the markdown layer stays free of the diagram
+ * renderer's dependencies. */
+export function looksLikeStewardDiagramSource(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return false;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(trimmed);
+  } catch {
+    return false;
+  }
+  if (!raw || typeof raw !== "object") return false;
+  const rows = (raw as Record<string, unknown>).rows;
+  if (!Array.isArray(rows)) return false;
+  return rows.some((row) => {
+    const cards = Array.isArray(row) ? row : (row as Record<string, unknown>)?.cards;
+    return Array.isArray(cards) && cards.length > 0;
+  });
 }
 
 /** Replaces the body of the fenced diagram block (Mermaid or steward-diagram)
@@ -209,7 +259,7 @@ export function replaceDiagramFence(content: string, previousSource: string, nex
     let bodyEnd = bodyStart;
     while (bodyEnd < lines.length && !/^`{3,}\s*$/.test((lines[bodyEnd] ?? "").trim())) bodyEnd += 1;
     const body = lines.slice(bodyStart, bodyEnd).join("\n");
-    const matches = isStewardDiagramBlock(language)
+    const matches = isStewardDiagramBlock(language, body)
       ? body.trim() === wanted
       : isMermaidBlock(language, body) && mermaidDiagramSource(body).trim() === wanted;
     if (matches) {
@@ -249,10 +299,19 @@ export function markdownToDocumentHtml(source: string): string {
         return `<figure class="document-image-figure"><img src="${escapeAttribute(imageUrlWithFallback(block.url, block.alt))}" alt="${alt}"><figcaption>${caption}</figcaption></figure>`;
       }
       if (block.kind === "table") {
+        const cellStyle = (index: number) => {
+          const align = block.aligns[index];
+          return align ? ` style="text-align: ${align}"` : "";
+        };
         return `<table class="document-data-table"><thead><tr>${block.headers
-          .map((header) => `<th>${inlineMarkdownToHtml(header)}</th>`)
+          .map((header, index) => `<th${cellStyle(index)}>${inlineMarkdownToHtml(header)}</th>`)
           .join("")}</tr></thead><tbody>${block.rows
-          .map((row) => `<tr>${block.headers.map((_, cellIndex) => `<td>${inlineMarkdownToHtml(row[cellIndex] ?? "")}</td>`).join("")}</tr>`)
+          .map(
+            (row) =>
+              `<tr>${block.headers
+                .map((_, cellIndex) => `<td${cellStyle(cellIndex)}>${inlineMarkdownToHtml(row[cellIndex] ?? "")}</td>`)
+                .join("")}</tr>`,
+          )
           .join("")}</tbody></table>`;
       }
       if (block.kind === "rule") {
@@ -263,7 +322,7 @@ export function markdownToDocumentHtml(source: string): string {
         // source into a PNG data-URL <img> (inline SVG would be dropped by the
         // DOCX export and AI-revision walkers). Until — or unless — that render
         // succeeds, the source stays visible as an honest code block.
-        if (isStewardDiagramBlock(block.language)) {
+        if (isStewardDiagramBlock(block.language, block.text)) {
           const diagramSource = block.text.trim();
           return (
             `<figure class="document-media-block document-diagram-figure" contenteditable="false"` +
@@ -372,8 +431,10 @@ function readTable(lines: string[], startIndex: number) {
 
   let cursor = startIndex + 1;
   let hasSeparator = false;
+  let aligns: MarkdownColumnAlign[] = [];
   if (cursor < lines.length && isTableSeparatorLine((lines[cursor] ?? "").trim())) {
     hasSeparator = true;
+    aligns = tableAlignsFromSeparator((lines[cursor] ?? "").trim());
     cursor += 1;
   } else if (cursor >= lines.length || !looksLikeTableRow((lines[cursor] ?? "").trim())) {
     return null;
@@ -403,6 +464,7 @@ function readTable(lines: string[], startIndex: number) {
       kind: "table" as const,
       headers,
       rows: rows.map((row) => normalizeCells(row, columnCount)),
+      aligns: Array.from({ length: columnCount }, (_, index) => aligns[index] ?? null),
     },
     nextIndex: cursor,
   };
@@ -427,6 +489,20 @@ function isTableSeparatorLine(line: string) {
   if (!line.includes("|")) return false;
   const cells = parseTableRow(line);
   return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+/** Column alignment from a table's separator row (`---:` right, `:---:`
+ * center, `:---`/`---` left). Numeric columns in an invoice or a budget are
+ * unreadable ragged-left, and markdown already has the notation for it. */
+function tableAlignsFromSeparator(line: string): MarkdownColumnAlign[] {
+  return parseTableRow(line).map((cell) => {
+    const trimmed = cell.trim();
+    const left = trimmed.startsWith(":");
+    const right = trimmed.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    return null;
+  });
 }
 
 function isRuleLine(line: string) {

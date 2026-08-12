@@ -311,8 +311,15 @@ function jpegDimensions(bytes: Uint8Array) {
 
 /* ------------------------------ block model ------------------------------ */
 
+/** A fill-in rule exported as an underlined run of non-breaking spaces, the
+ * way Word itself draws a signature line. `rule` keeps it from being dropped
+ * as whitespace by the empty-paragraph check. */
+export const DOCX_SIGNATURE_LINE_CLASS = "document-signature-line";
+const DOCX_SIGNATURE_LINE_FILL = "\u00a0".repeat(24);
+
 type DocRun = {
   text: string;
+  rule?: boolean;
   bold: boolean;
   italic: boolean;
   underline?: boolean;
@@ -335,7 +342,10 @@ type DocBlock =
   | { kind: "code"; text: string }
   | { kind: "caption"; runs: DocRun[] }
   | { kind: "image"; index: number; src: string; alt: string; layout: ExportImageLayout; caption: string }
-  | { kind: "table"; rows: { header: boolean; cells: DocRun[][] }[] }
+  | {
+      kind: "table";
+      rows: { header: boolean; cells: DocRun[][]; aligns?: (DocBlockAlignment | undefined)[] }[];
+    }
   | { kind: "divider" }
   | { kind: "page-break" };
 
@@ -513,6 +523,11 @@ function collectDocBlocks(node: Node, blocks: DocBlock[], imageCounter: { value:
       .map((row) => ({
         header: row.querySelector("th") !== null || row.closest("thead") !== null,
         cells: Array.from(row.querySelectorAll("th,td")).map((cell) => collectDocRuns(cell)),
+        // Numeric columns carry their alignment from the markdown separator
+        // row through to Word, where a right-aligned total still reads as one.
+        aligns: Array.from(row.querySelectorAll("th,td")).map((cell) =>
+          blockAlignment(cell as HTMLElement),
+        ),
       }))
       .filter((row) => row.cells.length > 0);
     if (rows.length) blocks.push({ kind: "table", rows });
@@ -544,6 +559,16 @@ function collectDocRuns(
     }
     if (!(child instanceof HTMLElement)) return;
     if (child.matches(".document-page-label")) return;
+    if (child.classList.contains(DOCX_SIGNATURE_LINE_CLASS)) {
+      // Emitted whole so the rule keeps its length: the text-node path
+      // collapses runs of whitespace, and non-breaking spaces are whitespace.
+      runs.push({
+        text: DOCX_SIGNATURE_LINE_FILL,
+        rule: true,
+        ...runFormatForElement(child, format),
+      });
+      return;
+    }
     const tag = child.tagName;
     if (tag === "BR") {
       runs.push({ text: "\n", ...format });
@@ -585,6 +610,9 @@ function runFormatForElement(element: HTMLElement, inherited: DocRunFormat): Doc
     underline:
       inherited.underline ||
       tag === "U" ||
+      // A fill-in rule is drawn with a CSS border on screen; Word draws the
+      // same rule as an underlined run of the spaces the element carries.
+      element.classList.contains(DOCX_SIGNATURE_LINE_CLASS) ||
       /(^|;)\s*text-decoration(?:-line)?\s*:[^;]*\bunderline\b/i.test(style),
     strike:
       inherited.strike ||
@@ -691,7 +719,7 @@ function safeDocumentAnchor(value: string | null) {
 }
 
 function docRunsHaveText(runs: DocRun[]) {
-  return runs.some((run) => run.text.trim().length > 0);
+  return runs.some((run) => run.rule || run.text.trim().length > 0);
 }
 
 /* ------------------------------ images ------------------------------ */
@@ -915,7 +943,7 @@ function imageDrawingXml(resource: DocxImageResource, index: number, alt: string
 }
 
 function tableXml(
-  rows: { header: boolean; cells: DocRun[][] }[],
+  rows: { header: boolean; cells: DocRun[][]; aligns?: (DocBlockAlignment | undefined)[] }[],
   hyperlinks: Map<string, string>,
 ) {
   const columnCount = Math.max(1, ...rows.map((row) => row.cells.length));
@@ -939,9 +967,11 @@ function tableXml(
           },
           hyperlinks,
         );
+        const align = row.aligns?.[column];
+        const jc = align ? `<w:jc w:val="${align === "justify" ? "both" : align}"/>` : "";
         return (
           `<w:tc><w:tcPr><w:tcW w:w="${columnWidth}" w:type="dxa"/>${shading}</w:tcPr>` +
-          `<w:p><w:pPr><w:spacing w:after="60" w:line="276" w:lineRule="auto"/></w:pPr>${runs}</w:p></w:tc>`
+          `<w:p><w:pPr><w:spacing w:after="60" w:line="276" w:lineRule="auto"/>${jc}</w:pPr>${runs}</w:p></w:tc>`
         );
       }).join("");
       return `<w:tr>${cells}</w:tr>`;

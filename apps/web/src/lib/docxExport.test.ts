@@ -170,3 +170,42 @@ test("re-joins paginator-split paragraphs so Word gets one flowing paragraph", a
   expect(documentXml).not.toContain("data-split-continuation");
   expect(documentXml.match(/<w:pageBreakBefore\/>/g)).toHaveLength(1);
 });
+
+test("exports a signature rule as an underlined run Word can sign on", async () => {
+  const bytes = await buildDocxExportDocument(
+    "Engagement Letter",
+    `<section class="document-page" data-page-number="1">
+      <h1>Engagement Letter</h1>
+      <p>Signature: <span class="document-signature-line">\u00a0\u00a0</span></p>
+      <p><span class="document-signature-line">\u00a0\u00a0</span></p>
+    </section>`,
+  );
+
+  const documentXml = storedZipEntry(bytes, "word/document.xml");
+  expectWellFormedXml(documentXml);
+  expect(documentXml).toContain('<w:u w:val="single"/>');
+  // The rule keeps its width instead of collapsing to a single space, and a
+  // paragraph holding nothing but a rule still survives the empty check.
+  const ruleRuns = documentXml.match(/<w:t xml:space="preserve">\u00a0{20,}<\/w:t>/g) ?? [];
+  expect(ruleRuns).toHaveLength(2);
+});
+
+test("a right-aligned amounts column exports right aligned to Word", async () => {
+  const bytes = await buildDocxExportDocument(
+    "March Invoice",
+    `<section class="document-page" data-page-number="1">
+      <h1>Invoice 1042</h1>
+      <table class="document-data-table">
+        <thead><tr><th>Description</th><th style="text-align: right">Amount</th></tr></thead>
+        <tbody><tr><td>Advisory</td><td style="text-align: right">$4,800.00</td></tr></tbody>
+      </table>
+    </section>`,
+  );
+
+  const documentXml = storedZipEntry(bytes, "word/document.xml");
+  expectWellFormedXml(documentXml);
+  // Two right-aligned cells (header + body), and the description column is
+  // left alone.
+  expect(documentXml.match(/<w:jc w:val="right"\/>/g) ?? []).toHaveLength(2);
+  expect(documentXml).toContain("$4,800.00");
+});

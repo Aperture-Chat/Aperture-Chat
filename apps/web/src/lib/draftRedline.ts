@@ -164,7 +164,14 @@ const ALLOWED_TAGS = new Set([
  * is not allowlisted wholesale either: it passes through a strict
  * per-declaration filter (see `sanitizeStyleAttribute`) so only the
  * formatting the drafting toolbar legitimately produces survives. */
-const GLOBAL_ALLOWED_ATTRIBUTES = new Set(["class"]);
+const GLOBAL_ALLOWED_ATTRIBUTES = new Set([
+  "class",
+  // Provenance the drafting editor writes on AI-authored runs: when the edit
+  // landed and which model produced it. The AI edit trail reads these back,
+  // so they have to survive the round trip through storage.
+  "data-ai-edit-at",
+  "data-ai-edit-by",
+]);
 
 /** Strict value patterns for the few CSS properties the drafting toolbar
  * writes (text color, highlight, alignment, font size). Anything with

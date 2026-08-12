@@ -190,6 +190,13 @@ import { useViewportWidth } from "../lib/useViewport";
  * document gets the full screen instead of being pushed down a vertical stack. */
 const DRAFT_RAIL_DRAWER_WIDTH = 1180;
 
+/** How long a fresh AI edit stays highlighted before it settles into the page.
+ * The edit itself is still recorded — the AI edit trail brings the highlight
+ * back on demand. */
+const AI_EDIT_GLOW_MS = 10_000;
+/** How long a trail entry flashes after the reader jumps to it. */
+const AI_EDIT_FLASH_MS = 2_000;
+
 /** Ruler indent markers, Word-style: first-line, left (both), and right. */
 type RulerMarker = "first" | "left" | "right";
 
@@ -991,7 +998,7 @@ function buildImportedDraftState(initialDraft: DraftImportPayload) {
   const importedAt = initialDraft.createdAtIso || new Date().toISOString();
   const title = initialDraft.title.trim() || "Transferred Chat Draft";
   const content = paginateTransferredDocumentHtml(
-    markdownToDocumentHtml(initialDraft.content),
+    documentHtmlFromMarkdown(initialDraft.content),
     `${title}\n\n${initialDraft.content}`,
   );
   const summary = `Transferred from chat${initialDraft.createdAt ? ` at ${initialDraft.createdAt}` : ""}`;
@@ -1102,6 +1109,14 @@ export function DocumentAssistantWorkspace({
   const [content, setContent] = useState(importedDraftState?.content ?? "");
   const [instruction, setInstruction] = useState("");
   const [showEdits, setShowEdits] = useState(false);
+  /** A just-landed AI edit glows for AI_EDIT_GLOW_MS and then settles into the
+   * page. Freshness lives on the editor element, never in the saved HTML, so
+   * reopening a draft does not re-glow edits made days ago. */
+  const [aiEditsFresh, setAiEditsFresh] = useState(false);
+  /** The AI edit trail: highlights every recorded AI edit still in the
+   * document, however long ago it landed. */
+  const [aiTrailOpen, setAiTrailOpen] = useState(false);
+  const aiEditGlowTimerRef = useRef<number | null>(null);
   const [activeAssistantTool, setActiveAssistantTool] = useState<AssistantTool | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [pendingSaveExportFormat, setPendingSaveExportFormat] = useState<ExportAction | null>(null);
@@ -1550,6 +1565,7 @@ export function DocumentAssistantWorkspace({
       active = false;
     };
   }, [completionUserId, draftScope, draftTenantSlug]);
+  const aiEditTrail = useMemo(() => aiEditTrailFromHtml(content), [content]);
   const reviewModeStatus = hasUnsavedEdits
     ? "Editing in progress. Save a version when the document is ready."
     : serverSaveDegraded
@@ -1726,6 +1742,14 @@ export function DocumentAssistantWorkspace({
   useEffect(() => {
     if (!railIsDrawer && railOpen) setRailOpen(false);
   }, [railIsDrawer, railOpen]);
+
+  // Never leave the fresh-edit glow timer running past this workspace.
+  useEffect(
+    () => () => {
+      if (aiEditGlowTimerRef.current !== null) window.clearTimeout(aiEditGlowTimerRef.current);
+    },
+    [],
+  );
 
   // Surface the work trace automatically when a draft starts generating in
   // drawer mode, so the user still sees progress after collapsing the panel.
@@ -4617,7 +4641,7 @@ export function DocumentAssistantWorkspace({
       advanceDraftTrace("generate");
       const markdownWithSources = appendWebCitationList(reply.content, reply.citations);
       let nextContentHtml = paginateTransferredDocumentHtml(
-        markdownToDocumentHtml(markdownWithSources),
+        documentHtmlFromMarkdown(markdownWithSources),
         `${requestText}\n\n${reply.content}`,
       );
       if (!isAutomatedTestMode()) {
@@ -4889,7 +4913,7 @@ export function DocumentAssistantWorkspace({
         );
       }
       const restoredRevisionHtml = restoreRevisionAssetsInHtml(
-        markdownToDocumentHtml(revisedMarkdown),
+        documentHtmlFromMarkdown(revisedMarkdown),
         revisionSnapshot.assets,
       );
       let revisedHtml = paginateTransferredDocumentHtml(
@@ -5948,6 +5972,58 @@ export function DocumentAssistantWorkspace({
     setInlineEditState(EMPTY_INLINE_AI_EDIT_STATE);
   }
 
+  /** Glows the edits that just landed, then lets them settle. A second edit
+   * inside the window restarts the clock so the whole batch fades together. */
+  function glowFreshAiEdits() {
+    if (aiEditGlowTimerRef.current !== null) window.clearTimeout(aiEditGlowTimerRef.current);
+    setAiEditsFresh(true);
+    aiEditGlowTimerRef.current = window.setTimeout(() => {
+      aiEditGlowTimerRef.current = null;
+      setAiEditsFresh(false);
+    }, AI_EDIT_GLOW_MS);
+  }
+
+  /** Scrolls to a recorded edit and flashes it, so a trail entry points at
+   * real text in the page rather than just describing it. */
+  function revealAiEdit(entry: AiEditTrailEntry) {
+    const editor = editorRef.current;
+    const run = editor?.querySelectorAll<HTMLElement>("[data-ai-edit-at]")[entry.index];
+    if (!run) {
+      setStatus("That AI edit is no longer in the document.");
+      return;
+    }
+    setAiTrailOpen(true);
+    run.scrollIntoView({ block: "center", behavior: "smooth" });
+    run.classList.add("is-ai-edit-flash");
+    window.setTimeout(() => run.classList.remove("is-ai-edit-flash"), AI_EDIT_FLASH_MS);
+  }
+
+  /** Accepts every recorded AI edit: the text stays, the marks and their
+   * provenance go. */
+  function clearAiEditTrail() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const runs = Array.from(editor.querySelectorAll<HTMLElement>("[data-ai-edit-at]"));
+    if (!runs.length) return;
+    recordUndoSnapshot(editor.innerHTML);
+    runs.forEach((run) => {
+      run.removeAttribute("data-ai-edit-at");
+      run.removeAttribute("data-ai-edit-by");
+      run.classList.remove("document-ai-suggestion");
+      if (!run.classList.length) run.removeAttribute("class");
+      // A bare span that only carried the mark is no longer doing anything.
+      if (run.tagName === "SPAN" && !run.attributes.length) {
+        const fragment = document.createDocumentFragment();
+        while (run.firstChild) fragment.appendChild(run.firstChild);
+        run.replaceWith(fragment);
+      }
+    });
+    setAiTrailOpen(false);
+    commitEditorHtml(
+      `${runs.length} AI edit mark${runs.length === 1 ? "" : "s"} cleared. The text is unchanged.`,
+    );
+  }
+
   async function applyInlineAiEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const editor = editorRef.current;
@@ -5980,6 +6056,8 @@ export function DocumentAssistantWorkspace({
               documentTitle,
               instruction: instructionText,
               selectedText: inlineEditState.selectedText,
+              selectedHtml: inlineAiSelectionHtml(range),
+              structureHint: inlineAiStructureHint(editor, range),
             }),
           },
         ],
@@ -5993,8 +6071,8 @@ export function DocumentAssistantWorkspace({
           maxCompletionTokens: 2000,
         },
       });
-      const replacement = inlineAiReplacementFromReply(reply.content);
-      if (!replacement) {
+      const replacementHtml = inlineAiReplacementHtmlFromReply(reply.content);
+      if (!replacementHtml) {
         throw new Error("The selected model did not return replacement text.");
       }
       if (!isRangeInsideEditor(editor, range)) {
@@ -6002,16 +6080,18 @@ export function DocumentAssistantWorkspace({
       }
 
       recordUndoSnapshot(editor.innerHTML);
-      const marker = document.createElement("span");
-      marker.className = "document-ai-suggestion";
-      marker.textContent = replacement;
-      range.deleteContents();
-      range.insertNode(marker);
+      const inserted = insertInlineAiSuggestion(editor, range, replacementHtml, {
+        at: draftNowIso(),
+        by: selectedAgent.name,
+      });
+      if (!inserted) {
+        throw new Error("The selected model did not return replacement text.");
+      }
 
       const selection = window.getSelection?.();
       if (selection) {
         const nextRange = document.createRange();
-        nextRange.setStartAfter(marker);
+        nextRange.setStartAfter(inserted);
         nextRange.collapse(true);
         selection.removeAllRanges();
         selection.addRange(nextRange);
@@ -6020,6 +6100,7 @@ export function DocumentAssistantWorkspace({
       commitEditorHtml(`Inline AI edit applied through ${selectedAgent.name}.`);
       rememberDocumentSnapshot(documentTitle, editor.innerHTML, "Inline AI edit applied");
       setShowEdits(true);
+      glowFreshAiEdits();
       closeInlineAiEdit();
       window.setTimeout(() => editorRef.current?.focus(), 0);
     } catch (error) {
@@ -7689,6 +7770,84 @@ export function DocumentAssistantWorkspace({
               >
                 <Sparkles size={18} />
               </button>
+              <button
+                type="button"
+                className={`document-ai-trail-toggle ${aiTrailOpen ? "is-on" : ""}`}
+                aria-label="AI edit trail"
+                aria-pressed={aiTrailOpen}
+                disabled={!aiEditTrail.length}
+                data-tooltip={
+                  aiEditTrail.length
+                    ? "Show every AI edit still in this document, newest first"
+                    : "No AI edits have been recorded in this document yet"
+                }
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  const next = !aiTrailOpen;
+                  setAiTrailOpen(next);
+                  setStatus(
+                    next
+                      ? `${aiEditTrail.length} AI edit${aiEditTrail.length === 1 ? "" : "s"} highlighted in this document.`
+                      : "AI edit highlights hidden.",
+                  );
+                }}
+              >
+                <History size={18} />
+                {aiEditTrail.length > 0 && (
+                  <span className="document-ai-trail-count">{aiEditTrail.length}</span>
+                )}
+              </button>
+              {aiTrailOpen && aiEditTrail.length > 0 && (
+                <div
+                  className="inline-ai-popover document-ai-trail-popover"
+                  role="dialog"
+                  aria-label="AI edit trail"
+                >
+                  <div className="inline-ai-popover-header">
+                    <strong>AI edit trail</strong>
+                    <button
+                      type="button"
+                      aria-label="Close AI edit trail"
+                      data-tooltip="Hide the AI edit highlights and close this list"
+                      onClick={() => setAiTrailOpen(false)}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                  <p className="document-ai-trail-intro">
+                    Every AI edit still in this document, newest first. The text is yours to
+                    keep or change — clearing only removes the marks.
+                  </p>
+                  <ul className="document-ai-trail-list" aria-label="Recorded AI edits">
+                    {aiEditTrail.map((entry) => (
+                      <li key={`${entry.at}-${entry.index}`}>
+                        <button
+                          type="button"
+                          data-tooltip="Jump to this edit in the document"
+                          onClick={() => revealAiEdit(entry)}
+                        >
+                          <span className="document-ai-trail-meta">
+                            <Clock3 size={13} />
+                            {formatTimestamp(entry.at)}
+                            <em>{entry.by}</em>
+                            {entry.runs > 1 && <span>{entry.runs} blocks</span>}
+                          </span>
+                          <span className="document-ai-trail-text">{entry.text || "(no text)"}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="inline-ai-actions">
+                    <button
+                      type="button"
+                      data-tooltip="Keep every AI edit and remove its highlight from the document"
+                      onClick={clearAiEditTrail}
+                    >
+                      Clear marks
+                    </button>
+                  </div>
+                </div>
+              )}
               {linkEditState.open && (
                 <form
                   className="inline-ai-popover document-link-popover"
@@ -8998,6 +9157,8 @@ export function DocumentAssistantWorkspace({
                   isPaginatedDocument ? "is-paginated" : ""
                 } ${showEdits ? "show-edits" : ""} ${
                   documentAiEditing ? "is-ai-editing" : ""
+                } ${aiEditsFresh ? "has-fresh-ai-edits" : ""} ${
+                  aiTrailOpen ? "show-ai-edits" : ""
                 }`}
                 aria-label="Document body"
                 aria-busy={documentAiEditing}
@@ -9343,19 +9504,126 @@ function templateStructureContext(template: DraftTemplate) {
   ].join("\n");
 }
 
+/** Words that identify the genre of document being asked for. A drafting
+ * model writes a far more realistic instrument when it is told the conventions
+ * of that genre, so the request (and the chosen template, when there is one)
+ * picks the craft rules below. */
+const LEGAL_INSTRUMENT_PATTERN =
+  /\b(contract|agreement|nda|non-?disclosure|msa|sow|statement of work|engagement letter|retainer|lease|sublease|amendment|addendum|assignment|waiver|release|indemnit|term sheet|letter of intent|loi|bylaws|operating agreement|partnership|promissory note|deed|easement|will|codicil|trust|power of attorney|settlement|licen[cs]e agreement|terms of service|privacy policy|employment offer|severance|consulting agreement|purchase agreement|bill of sale|memorandum of understanding|mou|stipulation|affidavit|declaration|pleading|motion|complaint|brief)\b/i;
+
+const FISCAL_DOCUMENT_PATTERN =
+  /\b(invoice|statement of account|remittance|quote|quotation|estimate|purchase order|expense report|budget|forecast|p&l|profit and loss|income statement|balance sheet|cash flow|financial statement|fee schedule|rate card|capitalization table|cap table|payroll|reimbursement)\b/i;
+
+/** Shared craft rules: what separates a real deliverable from AI-shaped prose,
+ * in the terms the editor can actually render. */
+const DOCUMENT_CRAFT_BASE = [
+  "Write the finished deliverable itself. No preamble, no closing commentary, no notes about what you did, and no headings such as \"Draft\" or \"Document\" wrapped around the real title.",
+  "Where a fact is not supplied, leave a bracketed placeholder such as [Party Legal Name], [Effective Date], or [Address] — never invent parties, addresses, dollar amounts, dates, statutes, or case citations.",
+  "Where the reader is meant to write or sign on the page, put a run of underscores (________________); the editor renders those as true ruled lines.",
+  "Match the length and density the document type actually has. A real instrument is complete, not a summary of itself.",
+  "Include a code block only when the request actually asks for code or the document is an engineering deliverable that needs it. A business, legal, or financial document carries prose, tables, and lists — never a script.",
+];
+
+const LEGAL_INSTRUMENT_CRAFT = [
+  "This is a legal instrument. Draft it the way a practicing attorney would, in this order:",
+  "1. Title in capitals on its own line, then a preamble identifying the instrument, its effective date, and each party by full legal name, entity type, jurisdiction of formation, and address — giving each a short defined term in quotes and parentheses, e.g. (\"Provider\").",
+  "2. Recitals as WHEREAS paragraphs when the instrument type conventionally uses them, closing with the NOW, THEREFORE consideration clause.",
+  "3. Operative provisions as numbered Articles or Sections. Give every one a real Markdown heading that carries its number and title (## ARTICLE 1. SERVICES, then ### 1.1 Scope of Services) — never a bold paragraph standing in for a heading — and number subsections hierarchically (1., 1.1, 1.1(a)). Keep one obligation per clause.",
+  "4. Include the provisions this deal actually needs, in conventional order — scope, term and termination, fees and payment terms, taxes, intellectual property, confidentiality, representations and warranties, indemnification, limitation of liability, insurance, assignment, notices with addresses, governing law and venue, dispute resolution, force majeure, entire agreement, amendment, waiver, severability, and counterparts/electronic signature — and leave out the ones that do not fit.",
+  "5. Define a term once, capitalize it consistently after that, and never use a defined term before it is defined.",
+  "6. Write amounts, periods, and deadlines the way instruments do: Thirty (30) days, $50,000 (Fifty Thousand and 00/100 Dollars), \"within ten (10) business days after receipt\".",
+  "7. Close with an IN WITNESS WHEREOF paragraph and a signature block for each party: entity name, then By, Name, Title, and Date lines with underscore rules.",
+  "8. Put any exhibit, schedule, or annex after the signature block under its own heading, and reference it from the clause that uses it.",
+  "9. An executed instrument carries no research apparatus: never annotate clauses with [Source: ...] notes, statute lookups, or verification brackets. Cite authority only where the instrument itself would — a governing-law clause, a statutory definition it adopts, a regulation it requires compliance with.",
+];
+
+const FISCAL_DOCUMENT_CRAFT = [
+  "This is a financial document. Draft it the way an accounting or finance team would:",
+  "1. Open with the issuing organization and the recipient, then the document's identifying details — number, issue date, period covered, payment due date — as short labelled lines. Use real Markdown headings for each section of the document rather than bold paragraphs.",
+  "2. Put every figure in a Markdown pipe table with a separator row. Right-align numeric columns using the ---: form in that separator so the editor renders them as real numeric columns.",
+  "3. Itemize before you total: description, quantity, rate, and amount per line, then subtotal, adjustments (discount, tax, retainer draw), and the final total as its own bolded row.",
+  "4. Do the arithmetic and make it consistent — every total must equal its lines. Format currency with the symbol and thousands separators ($12,450.00) and use the same currency throughout.",
+  "5. State payment terms, accepted methods, and remittance instructions explicitly (Net 30, late-fee terms, account details as bracketed placeholders — never invent bank or tax identifiers).",
+  "6. Finish with the notes, assumptions, or approval lines the document type carries.",
+];
+
+const GENERAL_DOCUMENT_CRAFT = [
+  "Structure the document the way this kind of document is actually structured in professional practice: a real title, then the sections a reader of this document expects, in their conventional order. Section titles are Markdown headings (## / ###), not bold paragraphs, so the document keeps a real outline.",
+  "Lead each section with its conclusion, then support it. Use tables for anything tabular, and lists only for genuinely parallel items.",
+  "Close the way the document type closes — next steps, approvals, signature lines, or appendices — rather than trailing off.",
+];
+
+/** Stand-in when a revision has no template: genre detection then rests on the
+ * document's own title and the request. */
+const BLANK_CRAFT_TEMPLATE = {
+  name: "",
+  description: "",
+  keywords: [] as string[],
+};
+
+type DocumentGenre = "legal" | "fiscal" | "general";
+
+function documentGenre(
+  request: string,
+  template: Pick<DraftTemplate, "name" | "description" | "keywords">,
+): DocumentGenre {
+  const haystack = `${request} ${template.name} ${template.description} ${template.keywords.join(" ")}`;
+  if (LEGAL_INSTRUMENT_PATTERN.test(haystack)) return "legal";
+  if (FISCAL_DOCUMENT_PATTERN.test(haystack)) return "fiscal";
+  return "general";
+}
+
+/** Template categories that would fight the detected genre. A request for a
+ * master services agreement can keyword-match the "Implementation Plan"
+ * starter on the word "implementation"; naming that as the draft type invites
+ * an engineering deliverable, code listings and all. */
+const GENRE_TEMPLATE_CATEGORIES: Record<DocumentGenre, string[] | null> = {
+  legal: ["Legal", "Business", "Uploaded", "Library"],
+  fiscal: ["Finance", "Business", "Uploaded", "Library"],
+  general: null,
+};
+
+function templateSuitsGenre(template: Pick<DraftTemplate, "category">, genre: DocumentGenre) {
+  const allowed = GENRE_TEMPLATE_CATEGORIES[genre];
+  return !allowed || allowed.includes(template.category);
+}
+
+/** True for documents that are executed or issued as-is. Research apparatus —
+ * inline source notes, verification brackets — belongs in a memo, never in the
+ * body of an agreement or an invoice. */
+function genreRejectsResearchNotes(genre: DocumentGenre) {
+  return genre === "legal" || genre === "fiscal";
+}
+
+/** Craft rules for the requested document, whether or not a template is in
+ * play. This is what makes a from-scratch contract read like a contract. */
+function documentCraftGuidance(genre: DocumentGenre) {
+  const craft =
+    genre === "legal"
+      ? LEGAL_INSTRUMENT_CRAFT
+      : genre === "fiscal"
+        ? FISCAL_DOCUMENT_CRAFT
+        : GENERAL_DOCUMENT_CRAFT;
+  return [...craft, ...DOCUMENT_CRAFT_BASE].join("\n");
+}
+
 function providerDraftPrompt(
   template: DraftTemplate,
   request: string,
   context: DraftContextOptions,
 ) {
+  const genre = documentGenre(request, template);
   const contextLines = [
     `User request: ${request}`,
-    `Draft type: ${template.name}`,
+    templateSuitsGenre(template, genre)
+      ? `Draft type: ${template.name}`
+      : `Draft type: taken from the user request, not from a starter template. Ignore any unrelated document type you might infer from the workspace.`,
     `Drafting agent: ${context.agentName}`,
     "Write the complete requested document, not an outline or plan.",
     "Return only editable Markdown for the document body.",
     "Do not wrap the document in a code fence (```); output the Markdown directly.",
     "When the request calls for tabular content, use editable Markdown pipe tables with a separator row so the editor renders real document tables.",
+    documentCraftGuidance(genre),
   ];
   if (parseRequestedPageCount(request) > 1) {
     contextLines.push(
@@ -9365,12 +9633,16 @@ function providerDraftPrompt(
   if (context.useWebSearch) {
     contextLines.push(
       "Use provider-hosted public web search for current public facts, names, dates, and source-backed claims.",
-      "Include source links or source names inline where they support factual claims.",
+      genreRejectsResearchNotes(genre)
+        ? "Let research inform the drafting, but keep the document clean: no inline source annotations in an executed or issued document. An unverified detail stays a bracketed placeholder."
+        : "Include source links or source names inline where they support factual claims.",
     );
   } else {
     contextLines.push(
       "Use the selected model directly. Do not claim live web research unless web search is enabled.",
-      "If a claim depends on an external source that is not in context, mark it for verification instead of inventing a citation.",
+      genreRejectsResearchNotes(genre)
+        ? "If a fact is not supplied, leave a bracketed placeholder in the document itself. Never add [Source: ...] notes, verification brackets, or research commentary to the body of a document that is meant to be executed or issued."
+        : "If a claim depends on an external source that is not in context, mark it for verification instead of inventing a citation.",
     );
   }
   if (context.useWorkspaceSources) {
@@ -9407,6 +9679,7 @@ function providerRevisionPrompt(
     "Preserve existing tables as Markdown pipe tables unless the user explicitly asks to remove or convert them.",
     "When adding or editing table content, include a Markdown separator row such as |---|---| so the editor renders a native table.",
     "Keep the prose in natural document flow. Do not add horizontal rules merely to preserve the old page count; the editor repaginates the revised content to real page capacity.",
+    documentCraftGuidance(documentGenre(`${documentTitle} ${request}`, template ?? BLANK_CRAFT_TEMPLATE)),
   ];
   if (context.useWebSearch) {
     contextLines.push(
@@ -9667,6 +9940,9 @@ function documentInlineNodeToRevisionMarkdown(node: Node, assets: RevisionAsset[
   if (!(node instanceof HTMLElement)) return "";
   const tag = node.tagName.toLowerCase();
   if (tag === "br") return "\n";
+  // A ruled line is blank text; the model needs to see that a fill-in rule is
+  // there, and the underscores it reads back become a rule again on the way in.
+  if (node.classList.contains(SIGNATURE_LINE_CLASS)) return "__________";
   if (tag === "img") return documentImageToRevisionMarkdown(node as HTMLImageElement, assets);
   if (tag === "a") {
     const href = node.getAttribute("href")?.trim();
@@ -11279,6 +11555,112 @@ function isRangeInsideEditor(editor: HTMLElement, range: Range) {
   return ancestor === editor || editor.contains(ancestor);
 }
 
+/** Fill-in rules — signature, printed name, date — render as a real ruled
+ * line. A run of underscores is not one: it wraps mid-rule, changes length
+ * with the font, and exports as literal characters instead of a line. The
+ * element carries non-breaking spaces so the rule survives plain-text and
+ * DOCX round-trips, while CSS gives it its consistent on-screen width. */
+const SIGNATURE_LINE_CLASS = "document-signature-line";
+const SIGNATURE_LINE_FILL = "\u00a0".repeat(24);
+/** What the model writes when it ignores the markup instruction, and what a
+ * pasted or transferred document carries. Four is past any `snake_case` or
+ * `__dunder__` name. */
+const SIGNATURE_UNDERSCORE_RUN = /_{4,}/;
+
+function signatureLineElement() {
+  const line = document.createElement("span");
+  line.className = SIGNATURE_LINE_CLASS;
+  line.textContent = SIGNATURE_LINE_FILL;
+  return line;
+}
+
+/**
+ * Makes every fill-in blank in AI-authored document HTML a real ruled line:
+ * underscore runs become rules, an empty rule the model returned gets the
+ * spaces it needs to draw, and a signature-block label left dangling gets the
+ * rule it was asking for. Code blocks are left alone — underscores there are
+ * content.
+ */
+function normalizeSignatureLines(root: ParentNode & Node) {
+  root.querySelectorAll(`.${SIGNATURE_LINE_CLASS}`).forEach((line) => {
+    if (!/[^\s_\u00a0]/.test(line.textContent ?? "")) line.textContent = SIGNATURE_LINE_FILL;
+  });
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node as Text;
+    if (!SIGNATURE_UNDERSCORE_RUN.test(text.data)) continue;
+    // `.document-blank` is an imported template's own blank, whose underscore
+    // width came from the source document and is left as the author wrote it.
+    if (text.parentElement?.closest(`pre, code, span.document-blank, .${SIGNATURE_LINE_CLASS}`)) {
+      continue;
+    }
+    targets.push(text);
+  }
+  targets.forEach((text) => {
+    const fragment = document.createDocumentFragment();
+    // Split keeps the separators, so odd indexes are the underscore runs.
+    text.data.split(/(_{4,})/).forEach((part, index) => {
+      if (index % 2 === 1) fragment.appendChild(signatureLineElement());
+      else if (part) fragment.appendChild(document.createTextNode(part));
+    });
+    text.replaceWith(fragment);
+  });
+  appendMissingSignatureRules(root);
+}
+
+/** Signature-block fields a model writes as a bare label. Asked not to draw
+ * the blank with underscores, models routinely write "Signature:" and stop,
+ * which leaves a form nobody can sign — so the rule the label is asking for is
+ * added. Only these known fill-in fields qualify, and only when nothing at all
+ * follows the colon. */
+const FILL_IN_LABEL =
+  /(?:signature|signed|printed name|print name|name|date|dated|by|title|witness|notary|attest|address)\s*:\s*$/i;
+
+/** The node the rule should follow: the label's own text node, or the inline
+ * wrapper it closes (`<strong>Signature:</strong>`), so the rule lands outside
+ * the bold rather than inside it. Returns null when anything else follows the
+ * label on that line — "Name: Jane Doe" is filled in already. */
+function lineEndAfterLabel(text: Text): ChildNode | null {
+  let node: ChildNode = text;
+  while (!node.nextSibling) {
+    const parent = node.parentElement;
+    if (!parent || !INLINE_AI_INLINE_TAGS.has(parent.tagName.toLowerCase())) return node;
+    node = parent;
+  }
+  const next = node.nextSibling;
+  return next instanceof HTMLElement && next.tagName === "BR" ? node : null;
+}
+
+function appendMissingSignatureRules(root: ParentNode & Node) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets: ChildNode[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node as Text;
+    if (!FILL_IN_LABEL.test(text.data)) continue;
+    if (text.parentElement?.closest(`pre, code, a, .${SIGNATURE_LINE_CLASS}`)) continue;
+    const anchor = lineEndAfterLabel(text);
+    if (anchor) targets.push(anchor);
+  }
+  targets.forEach((anchor) => {
+    anchor.after(document.createTextNode(" "), signatureLineElement());
+  });
+}
+
+function applyDocumentSignatureLines(html: string) {
+  if (typeof document === "undefined") return html;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  normalizeSignatureLines(template.content);
+  return template.innerHTML;
+}
+
+/** Every AI-authored draft body enters the editor through here, so a fill-in
+ * rule is a real line no matter which surface produced it. */
+function documentHtmlFromMarkdown(markdown: string) {
+  return applyDocumentSignatureLines(markdownToDocumentHtml(markdown));
+}
+
 function documentImageSources(contentHtml: string) {
   if (typeof document === "undefined") return [];
   const template = document.createElement("template");
@@ -11288,17 +11670,37 @@ function documentImageSources(contentHtml: string) {
     .filter((src, index, sources) => Boolean(src) && sources.indexOf(src) === index);
 }
 
+/** Formatting the document surface can actually render, so the model is told
+ * what it may return instead of guessing and falling back to markdown syntax
+ * that would land in the page as literal characters. */
+const INLINE_AI_FORMAT_RULES = [
+  "Formatting rules:",
+  "- Return an HTML fragment whenever the instruction needs structure or formatting, and plain text when it does not.",
+  "- Allowed tags: p, h1, h2, h3, ul, ol, li, table, thead, tbody, tr, th, td, blockquote, pre, code, strong, em, u, s, sup, sub, a, br, hr, span.",
+  '- Never write markdown syntax such as "-", "*", "#", or "**" as literal characters. Express that structure with the tags above.',
+  "- Match the highlighted passage: return <li> elements when the highlight is in a list, and inline content only when the highlight is part of a sentence.",
+  `- Draw a fill-in rule (signature, printed name, date, blank to complete) with <span class="${SIGNATURE_LINE_CLASS}"></span> — for example <p>Signature: <span class="${SIGNATURE_LINE_CLASS}"></span></p>. Never draw one with underscores, hyphens, or dots, and never leave the label with nothing after it.`,
+  '- Inline styles are limited to color, background-color, text-align, font-size, and font-family on <span style="…">.',
+].join("\n");
+
 function inlineRewritePrompt({
   documentTitle,
   instruction,
   selectedText,
+  selectedHtml = "",
+  structureHint = "",
   surface = "document",
 }: {
   documentTitle: string;
   instruction: string;
   selectedText: string;
+  /** Markup of the highlight itself, so a reply can mirror the structure it
+   * replaces. Empty when the highlight is plain text. */
+  selectedHtml?: string;
+  /** One sentence describing where the highlight sits in the document. */
+  structureHint?: string;
   /** Same rewrite contract on both drafting surfaces; only the framing noun
-   * changes, and slides additionally forbid markdown (regions are plain runs). */
+   * changes, and slides additionally forbid markup (regions are plain runs). */
   surface?: "document" | "slide";
 }) {
   return [
@@ -11308,34 +11710,444 @@ function inlineRewritePrompt({
     "Rewrite only the highlighted passage according to the user's instruction.",
     surface === "slide"
       ? "Return only the replacement text as plain text — no quotes, no markdown, no headings, no explanations, and no surrounding slide content."
-      : "Return only the replacement text. Do not add headings, labels, explanations, bullets unless requested, or any surrounding document section.",
+      : "Return only the replacement text. Do not add labels, explanations, or any surrounding document section.",
+    ...(surface === "slide" ? [] : ["", INLINE_AI_FORMAT_RULES]),
     "",
     "User instruction:",
     instruction,
+    ...(structureHint ? ["", "Where the highlight sits:", structureHint] : []),
+    ...(selectedHtml ? ["", "Highlighted passage (HTML):", selectedHtml] : []),
     "",
     "Highlighted passage:",
     selectedText,
   ].join("\n");
 }
 
-function inlineAiReplacementFromReply(value: string) {
+/** Tags the reply may use inside a sentence. Anything else it returns is
+ * block-level and has to be spliced in as a real block. */
+const INLINE_AI_INLINE_TAGS = new Set([
+  "span",
+  "strong",
+  "b",
+  "em",
+  "i",
+  "u",
+  "s",
+  "del",
+  "ins",
+  "mark",
+  "code",
+  "sup",
+  "sub",
+  "a",
+  "br",
+  "small",
+  "cite",
+  "q",
+  "time",
+]);
+
+/** Blocks the inline edit can split or replace outright. */
+const INLINE_AI_BLOCK_SELECTOR =
+  "p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,dt,dd,figcaption,td,th";
+
+const INLINE_AI_BLOCK_LABELS: Record<string, string> = {
+  p: "paragraph",
+  h1: "heading",
+  h2: "heading",
+  h3: "heading",
+  h4: "heading",
+  h5: "heading",
+  h6: "heading",
+  blockquote: "block quote",
+  pre: "code block",
+  td: "table cell",
+  th: "table header cell",
+  dt: "term",
+  dd: "definition",
+  figcaption: "figure caption",
+};
+
+/**
+ * Turns the model's reply into document HTML the editor can render. Markdown
+ * replies are converted rather than pasted, so bullets and headings arrive as
+ * real elements instead of literal "-" and "#" characters, and everything is
+ * sanitized before it can reach the page. A reply that is a single paragraph of
+ * running text is unwrapped to inline content so a one-sentence rewrite stays
+ * inside the sentence it replaces.
+ */
+const INLINE_AI_REPLY_LABEL = /^(?:replacement|rewrite|revised(?: text)?|edited(?: text)?):\s*/i;
+
+function inlineAiReplacementHtmlFromReply(value: string) {
   const unfenced = value
     .trim()
     .replace(/^```(?:html|markdown|md|text)?\s*\n([\s\S]*?)\n```$/i, "$1")
     .trim();
-  let replacement: string;
-  if (typeof document !== "undefined" && /<\/?[a-z][\s\S]*>/i.test(unfenced)) {
-    const template = document.createElement("template");
-    template.innerHTML = unfenced;
-    template.content.querySelectorAll("script, style").forEach((node) => node.remove());
-    replacement = documentHtmlToText(template.innerHTML);
-  } else {
-    replacement = documentHtmlToText(markdownToDocumentHtml(unfenced));
+  if (!unfenced) return "";
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(unfenced);
+  const rawHtml = looksLikeHtml
+    ? unfenced
+    : markdownToDocumentHtml(
+        unfenced.replace(INLINE_AI_REPLY_LABEL, "").replace(/^["“]|["”]$/g, "").trim(),
+      );
+  const sanitized = sanitizeDocumentHtml(rawHtml).trim();
+  if (typeof document === "undefined") return sanitized;
+  const template = document.createElement("template");
+  template.innerHTML = sanitized;
+  stripInlineAiReplyLabel(template.content);
+  normalizeSignatureLines(template.content);
+  return unwrapSoleInlineParagraph(template.content);
+}
+
+/** Drops a "Replacement:" style preamble the model sometimes writes ahead of
+ * the rewrite, including when it sits inside the first block it returned. */
+function stripInlineAiReplyLabel(root: DocumentFragment) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const text = node.textContent ?? "";
+    if (text.trim()) {
+      node.textContent = text.replace(/^\s+/, "").replace(INLINE_AI_REPLY_LABEL, "");
+      return;
+    }
+    node = walker.nextNode();
   }
-  return replacement
-    .replace(/^(?:replacement|rewrite|revised(?: text)?|edited(?: text)?):\s*/i, "")
-    .replace(/^["“]|["”]$/g, "")
-    .trim();
+}
+
+/** `<p>one sentence</p>` is what a plain-text reply becomes after the markdown
+ * pass; inside running text that paragraph wrapper is noise, so it is dropped
+ * when it carries nothing but inline content. */
+function unwrapSoleInlineParagraph(root: DocumentFragment) {
+  const html = (root.firstChild ? containerHtml(root) : "").trim();
+  const nodes = Array.from(root.childNodes).filter(
+    (node) => node.nodeType !== Node.TEXT_NODE || (node.textContent ?? "").trim(),
+  );
+  const only = nodes[0];
+  if (nodes.length !== 1 || !(only instanceof HTMLElement) || only.tagName !== "P") return html;
+  if (only.getAttribute("style") || only.getAttribute("class")) return html;
+  const hasBlockChild = Array.from(only.children).some(
+    (child) => !INLINE_AI_INLINE_TAGS.has(child.tagName.toLowerCase()),
+  );
+  return hasBlockChild ? html : only.innerHTML.trim();
+}
+
+function containerHtml(root: DocumentFragment) {
+  const holder = document.createElement("div");
+  holder.appendChild(root.cloneNode(true));
+  return holder.innerHTML;
+}
+
+function inlineAiBlockAncestor(node: Node, editor: HTMLElement) {
+  const element = node instanceof HTMLElement ? node : node.parentElement;
+  const block = element?.closest<HTMLElement>(INLINE_AI_BLOCK_SELECTOR) ?? null;
+  return block && block !== editor && editor.contains(block) ? block : null;
+}
+
+/** True when the highlight spans everything inside its block, which means a
+ * structural reply can replace the block instead of splitting it. */
+function rangeCoversBlock(block: HTMLElement, range: Range) {
+  try {
+    const before = document.createRange();
+    before.selectNodeContents(block);
+    before.setEnd(range.startContainer, range.startOffset);
+    const after = document.createRange();
+    after.selectNodeContents(block);
+    after.setStart(range.endContainer, range.endOffset);
+    return !before.toString().trim() && !after.toString().trim();
+  } catch {
+    return false;
+  }
+}
+
+/** Describes the highlight's surroundings for the prompt so the model returns
+ * markup that fits where it lands. */
+function inlineAiStructureHint(editor: HTMLElement, range: Range) {
+  const block = inlineAiBlockAncestor(range.startContainer, editor);
+  if (!block) return "The highlight sits directly in the document body.";
+  const tag = block.tagName.toLowerCase();
+  const scope = rangeCoversBlock(block, range) ? "covers the whole" : "covers part of a";
+  if (tag === "li") {
+    const listTag = block.parentElement?.tagName.toLowerCase() === "ol" ? "ol" : "ul";
+    const listLabel = listTag === "ol" ? "numbered" : "bulleted";
+    return `The highlight ${scope} list item inside a ${listLabel} list (<${listTag}> > <li>). Return <li> elements so new items join that list.`;
+  }
+  const label = INLINE_AI_BLOCK_LABELS[tag] ?? "block";
+  return `The highlight ${scope} ${label} (<${tag}>). Return inline content unless the instruction asks for new blocks.`;
+}
+
+/** Markup of the highlight itself, capped so a large selection cannot dominate
+ * the prompt. Returns "" when the highlight carries no markup worth showing. */
+function inlineAiSelectionHtml(range: Range) {
+  try {
+    const holder = document.createElement("div");
+    holder.appendChild(range.cloneContents());
+    const html = sanitizeDocumentHtml(holder.innerHTML).trim();
+    if (!html.includes("<")) return "";
+    return html.length > 4000 ? `${html.slice(0, 4000)}…` : html;
+  } catch {
+    return "";
+  }
+}
+
+function isInlineAiNode(node: Node) {
+  if (node.nodeType === Node.TEXT_NODE) return true;
+  return node instanceof HTMLElement && INLINE_AI_INLINE_TAGS.has(node.tagName.toLowerCase());
+}
+
+/** When an AI edit landed and which model made it. Stamped on every inserted
+ * run so the AI edit trail reports real provenance instead of a guess. */
+type AiEditStamp = { at: string; by: string };
+
+function markInlineAiSuggestion<T extends HTMLElement>(element: T, stamp?: AiEditStamp) {
+  element.classList.add("document-ai-suggestion");
+  if (stamp) {
+    element.setAttribute("data-ai-edit-at", stamp.at);
+    element.setAttribute("data-ai-edit-by", stamp.by);
+  }
+  return element;
+}
+
+export type AiEditTrailEntry = {
+  /** Index of this edit's first run among the document's stamped runs, which
+   * is how the trail scrolls back to it. */
+  index: number;
+  at: string;
+  by: string;
+  text: string;
+  runs: number;
+};
+
+/** Reads the AI edit trail out of stored document HTML. Runs that share a
+ * timestamp and model are one edit — a single inline edit can leave several
+ * paragraphs or list items behind. Newest first. */
+export function aiEditTrailFromHtml(html: string): AiEditTrailEntry[] {
+  if (typeof document === "undefined" || !html.includes("data-ai-edit-at")) return [];
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const entries = new Map<string, AiEditTrailEntry>();
+  Array.from(template.content.querySelectorAll<HTMLElement>("[data-ai-edit-at]")).forEach(
+    (run, index) => {
+      const at = run.getAttribute("data-ai-edit-at") ?? "";
+      const by = run.getAttribute("data-ai-edit-by") ?? "";
+      const text = (run.textContent ?? "").replace(/\s+/g, " ").trim();
+      const key = `${at}|${by}`;
+      const existing = entries.get(key);
+      if (!existing) {
+        entries.set(key, { index, at, by, text, runs: 1 });
+        return;
+      }
+      existing.runs += 1;
+      if (text) existing.text = existing.text ? `${existing.text} ${text}` : text;
+    },
+  );
+  return Array.from(entries.values()).sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** Whether a node still carries something a reader would see. A lone `<br>`
+ * does not count: contenteditable leaves those behind in emptied blocks. */
+function hasRenderableContent(node: ParentNode & Node) {
+  return Boolean((node.textContent ?? "").trim() || node.querySelector("img,table,figure,hr"));
+}
+
+/** Flattens a list-shaped reply into the `<li>` elements it is made of, or
+ * returns null when the reply is not purely list content. */
+function inlineAiListItems(nodes: Node[]) {
+  const items: HTMLElement[] = [];
+  for (const node of nodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if ((node.textContent ?? "").trim()) return null;
+      continue;
+    }
+    if (!(node instanceof HTMLElement)) return null;
+    const tag = node.tagName.toLowerCase();
+    if (tag === "li") {
+      items.push(node);
+      continue;
+    }
+    if (tag !== "ul" && tag !== "ol") return null;
+    Array.from(node.children).forEach((child) => {
+      if (child instanceof HTMLElement && child.tagName.toLowerCase() === "li") items.push(child);
+    });
+  }
+  return items.length ? items : null;
+}
+
+/** A model editing a bullet often answers with plain lines rather than `<li>`
+ * elements. Inside a list that intent is unambiguous, so simple paragraphs
+ * become items instead of breaking the list apart. Returns null when the reply
+ * carries real structure (a heading, table, or quote) that belongs outside the
+ * list. */
+function paragraphsAsListItems(blocks: HTMLElement[]) {
+  const items: HTMLElement[] = [];
+  for (const block of blocks) {
+    if (block.tagName !== "P" || block.getAttribute("style")) return null;
+    const hasBlockChild = Array.from(block.children).some(
+      (child) => !INLINE_AI_INLINE_TAGS.has(child.tagName.toLowerCase()),
+    );
+    if (hasBlockChild) return null;
+    const item = document.createElement("li");
+    while (block.firstChild) item.appendChild(block.firstChild);
+    items.push(item);
+  }
+  return items.length ? items : null;
+}
+
+/** Groups a structural reply into top-level blocks, wrapping any loose inline
+ * runs in a paragraph so nothing is inserted as a bare text node between
+ * blocks. */
+function inlineAiBlockNodes(nodes: Node[]) {
+  const blocks: HTMLElement[] = [];
+  let pending: Node[] = [];
+  const flush = () => {
+    const carried = pending;
+    pending = [];
+    if (!carried.some((node) => (node.textContent ?? "").trim())) return;
+    const paragraph = document.createElement("p");
+    carried.forEach((node) => paragraph.appendChild(node));
+    blocks.push(paragraph);
+  };
+  nodes.forEach((node) => {
+    if (isInlineAiNode(node)) {
+      pending.push(node);
+      return;
+    }
+    flush();
+    if (node instanceof HTMLElement) blocks.push(node);
+  });
+  flush();
+  return blocks;
+}
+
+/** Moves whatever follows the caret in `block` into a copy of that block placed
+ * right after it, so replacement blocks can sit between the two halves. Returns
+ * null when nothing followed the caret. */
+function splitInlineAiBlock(block: HTMLElement, caret: Range) {
+  let tailContents: DocumentFragment;
+  try {
+    const tailRange = document.createRange();
+    tailRange.selectNodeContents(block);
+    tailRange.setStart(caret.startContainer, caret.startOffset);
+    tailContents = tailRange.extractContents();
+  } catch {
+    return null;
+  }
+  if (!hasRenderableContent(tailContents)) return null;
+  const tail = block.cloneNode(false) as HTMLElement;
+  tail.classList.remove("document-ai-suggestion");
+  tail.appendChild(tailContents);
+  block.after(tail);
+  return tail;
+}
+
+/** Places blocks after the list that `item` belongs to, carrying the items that
+ * followed it into a second list, so a paragraph or table never ends up as an
+ * invalid child of `<ul>`. */
+function insertBlocksAroundListItem(item: HTMLElement, blocks: HTMLElement[]) {
+  const list = item.parentElement;
+  if (!list || !/^(ul|ol)$/i.test(list.tagName)) return false;
+  const trailing: Element[] = [];
+  let sibling = item.nextElementSibling;
+  while (sibling) {
+    trailing.push(sibling);
+    sibling = sibling.nextElementSibling;
+  }
+  const fragment = document.createDocumentFragment();
+  blocks.forEach((block) => fragment.appendChild(block));
+  list.after(fragment);
+  if (trailing.length) {
+    const nextList = list.cloneNode(false) as HTMLElement;
+    trailing.forEach((node) => nextList.appendChild(node));
+    blocks[blocks.length - 1].after(nextList);
+  }
+  return true;
+}
+
+/** Removes a list the edit emptied, so no bare `<ul></ul>` is left behind. */
+function removeEmptiedList(list: Element | null | undefined) {
+  if (!list?.isConnected || !/^(ul|ol)$/i.test(list.tagName)) return;
+  if (!list.querySelector("li")) list.remove();
+}
+
+/**
+ * Replaces the highlighted range with the model's reply, keeping the reply's
+ * own structure. Inline replies stay inside the sentence they replace; list,
+ * heading, and table replies are spliced in as real blocks — including out of a
+ * list when the reply is not list content. Returns the last inserted node so
+ * the caret can be parked after the edit, or null when the reply was empty.
+ */
+function insertInlineAiSuggestion(
+  editor: HTMLElement,
+  range: Range,
+  html: string,
+  stamp: AiEditStamp,
+): Node | null {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const nodes = Array.from(template.content.childNodes);
+  if (!nodes.length) return null;
+
+  const block = inlineAiBlockAncestor(range.startContainer, editor);
+  const blockTag = block?.tagName.toLowerCase() ?? "";
+
+  if (nodes.every(isInlineAiNode)) {
+    const marker = markInlineAiSuggestion(document.createElement("span"), stamp);
+    nodes.forEach((node) => marker.appendChild(node));
+    range.deleteContents();
+    range.insertNode(marker);
+    return marker;
+  }
+
+  const endBlock = inlineAiBlockAncestor(range.endContainer, editor);
+  const blocks = inlineAiBlockNodes(nodes);
+  if (!blocks.length) return null;
+  const listItems =
+    blockTag === "li" ? (inlineAiListItems(nodes) ?? paragraphsAsListItems(blocks)) : null;
+  if (block && listItems) {
+    listItems.forEach((item) => markInlineAiSuggestion(item, stamp));
+    if (endBlock === block && !rangeCoversBlock(block, range)) {
+      // Only part of one item was highlighted: the first new item takes the
+      // highlighted words' place and the rest follow as their own bullets.
+      const [first, ...rest] = listItems;
+      const marker = markInlineAiSuggestion(document.createElement("span"), stamp);
+      while (first.firstChild) marker.appendChild(first.firstChild);
+      range.deleteContents();
+      range.insertNode(marker);
+      if (rest.length) block.after(...rest);
+      return rest.length ? rest[rest.length - 1] : marker;
+    }
+    // Whole items — possibly several — were highlighted, so the new items take
+    // their place and any item the highlight emptied is dropped.
+    range.deleteContents();
+    block.after(...listItems);
+    [block, endBlock].forEach((item) => {
+      if (item?.isConnected && item.tagName === "LI" && !hasRenderableContent(item)) item.remove();
+    });
+    return listItems[listItems.length - 1];
+  }
+
+  blocks.forEach((node) => markInlineAiSuggestion(node, stamp));
+
+  // Table cells and the page body already hold blocks, so the reply can drop in
+  // where the highlight was.
+  if (!block || blockTag === "td" || blockTag === "th") {
+    range.deleteContents();
+    const fragment = document.createDocumentFragment();
+    blocks.forEach((node) => fragment.appendChild(node));
+    range.insertNode(fragment);
+    return blocks[blocks.length - 1];
+  }
+
+  const list = blockTag === "li" ? block.parentElement : null;
+  range.deleteContents();
+  splitInlineAiBlock(block, range);
+  if (blockTag !== "li" || !insertBlocksAroundListItem(block, blocks)) {
+    const fragment = document.createDocumentFragment();
+    blocks.forEach((node) => fragment.appendChild(node));
+    block.after(fragment);
+  }
+  if (!hasRenderableContent(block)) block.remove();
+  removeEmptiedList(list);
+  return blocks[blocks.length - 1];
 }
 
 function escapeHtml(value: string) {

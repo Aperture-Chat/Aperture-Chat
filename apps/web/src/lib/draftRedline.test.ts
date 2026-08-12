@@ -52,6 +52,19 @@ test("stored formatting survives a sanitize round-trip", () => {
   expect(sanitized).toContain('href="https://example.com"');
 });
 
+test("AI edit provenance survives storage while other data attributes do not", () => {
+  const sanitized = sanitizeDocumentHtml(
+    '<p class="document-ai-suggestion" data-ai-edit-at="2026-08-11T20:31:00.000Z" ' +
+      'data-ai-edit-by="Client Update Agent" data-tracking-id="nope">Revised sentence.</p>',
+  );
+
+  // The AI edit trail reads these back after a reload, so they are allowlisted.
+  expect(sanitized).toContain('data-ai-edit-at="2026-08-11T20:31:00.000Z"');
+  expect(sanitized).toContain('data-ai-edit-by="Client Update Agent"');
+  expect(sanitized).toContain('class="document-ai-suggestion"');
+  expect(sanitized).not.toContain("data-tracking-id");
+});
+
 test("extracts document structure while excluding page-navigation chrome", () => {
   const blocks = extractRedlineBlocks(
     sanitizeDocumentHtml(
