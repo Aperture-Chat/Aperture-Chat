@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from app.core.box import BoxError, BoxItem, get_box_client
@@ -25,9 +25,22 @@ from app.core.knowledge_ingestion import (
     extract_segments,
     extract_segments_from_file,
 )
+from app.core.media_transcription import (
+    MediaTranscriptionError,
+    is_media_upload,
+    transcribe_media_file,
+)
 from app.core.net_guard import EgressBlocked, validate_public_url
 from app.core.sessions import sign_oidc_state, verify_oidc_state
 from app.core.uploads import validate_upload_within_limit
+from app.core.usage_budget import UsageBudgetError, new_accounting_id
+from app.core.usage_budget_runtime import (
+    TenantUsageBudgetOrchestrator,
+    UsageBudgetRequestContext,
+    UsageProviderExecutionRefused,
+    UsageTenantScopeError,
+    map_usage_budget_error,
+)
 from app.core.web_fetch import WebFetchError, fetch_web_source
 from app.core.policy import (
     assert_group_permission,
@@ -50,7 +63,7 @@ from app.models.schemas import (
     Role,
     User,
 )
-from app.repositories.deps import get_store
+from app.repositories.deps import get_store, get_usage_budget_orchestrator
 from app.repositories.seed import SeedStore, knowledge_sync_status
 from app.routes.dependencies import current_user
 
@@ -278,8 +291,10 @@ def sync(
 async def upload_documents(
     config_id: str,
     files: list[UploadFile] = File(...),
+    tenant_slug: str | None = Header(default=None, alias="X-Aperture-Tenant"),
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
+    usage_orchestrator: TenantUsageBudgetOrchestrator = Depends(get_usage_budget_orchestrator),
 ) -> KnowledgeSyncResponse:
     config = _get_operable_config(config_id, actor, store)
     synced_at = _sync_time()
@@ -287,37 +302,79 @@ async def upload_documents(
     new_chunks: list[KnowledgeChunk] = []
     uploaded_bytes = 0
     settings = get_settings()
-    for file in files:
-        filename = _safe_source_name(file.filename, fallback="uploaded-source")
-        file_bytes = await validate_upload_within_limit(
-            file,
-            settings.knowledge_upload_max_bytes,
-            detail=(
-                f"'{filename}' exceeds the {settings.knowledge_upload_max_mb} MB "
-                "knowledge upload limit."
-            ),
-        )
-        uploaded_bytes += file_bytes
-        segments = await run_in_threadpool(
-            extract_segments_from_file,
-            filename,
-            file.file,
-            file.content_type,
-            max_chars=settings.knowledge_max_extracted_chars,
-            ocr_enabled=settings.knowledge_ocr_enabled,
-            ocr_max_pages=settings.knowledge_ocr_max_pages,
-            ocr_page_timeout_seconds=settings.knowledge_ocr_page_timeout_seconds,
-        )
-        document, chunks = _document_from_segments(
-            config,
-            name=filename,
-            source_type="upload",
-            source_uri=f"upload://knowledge/{config.id}/{uuid4()}-{filename}",
-            segments=segments,
-            synced_at=synced_at,
-        )
-        new_documents.append(document)
-        new_chunks.extend(chunks)
+    usage_context: UsageBudgetRequestContext | None = None
+    try:
+        for file in files:
+            filename = _safe_source_name(file.filename, fallback="uploaded-source")
+            file_bytes = await validate_upload_within_limit(
+                file,
+                settings.knowledge_upload_max_bytes,
+                detail=(
+                    f"'{filename}' exceeds the {settings.knowledge_upload_max_mb} MB "
+                    "knowledge upload limit."
+                ),
+            )
+            uploaded_bytes += file_bytes
+            if is_media_upload(filename, file.content_type):
+                content = await file.read()
+                if usage_context is None:
+                    usage_context = _begin_knowledge_media_usage(
+                        usage_orchestrator,
+                        actor=actor,
+                        store=store,
+                        tenant_id=config.tenant_id,
+                        tenant_slug=tenant_slug,
+                    )
+                result = await run_in_threadpool(
+                    _transcribe_knowledge_media,
+                    content,
+                    filename,
+                    file.content_type,
+                    store,
+                    config.tenant_id,
+                    usage_context,
+                )
+                segments = [ExtractedSegment(text=result.text, locator="transcript")]
+            else:
+                segments = await run_in_threadpool(
+                    extract_segments_from_file,
+                    filename,
+                    file.file,
+                    file.content_type,
+                    max_chars=settings.knowledge_max_extracted_chars,
+                    ocr_enabled=settings.knowledge_ocr_enabled,
+                    ocr_max_pages=settings.knowledge_ocr_max_pages,
+                    ocr_page_timeout_seconds=settings.knowledge_ocr_page_timeout_seconds,
+                )
+            document, chunks = _document_from_segments(
+                config,
+                name=filename,
+                source_type="upload",
+                source_uri=f"upload://knowledge/{config.id}/{uuid4()}-{filename}",
+                segments=segments,
+                synced_at=synced_at,
+            )
+            new_documents.append(document)
+            new_chunks.extend(chunks)
+        if usage_context is not None:
+            _close_knowledge_media_usage(usage_context)
+    except MediaTranscriptionError as exc:
+        if usage_context is not None:
+            _fail_knowledge_media_usage(usage_context)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except UsageBudgetError as exc:
+        if usage_context is not None:
+            _fail_knowledge_media_usage(usage_context)
+        failure = map_usage_budget_error(exc)
+        raise HTTPException(
+            status_code=failure.status_code,
+            detail=failure.detail,
+            headers=dict(failure.headers),
+        ) from exc
+    except Exception:
+        if usage_context is not None:
+            _fail_knowledge_media_usage(usage_context)
+        raise
     config, documents, synced_at = await run_in_threadpool(
         _append_indexed_sources,
         store,
@@ -598,6 +655,86 @@ def add_api_source(
         provider_status="live",
         provider_message=f"Registered API source {name} and stored the credential in the backend vault.",
     )
+
+
+def _begin_knowledge_media_usage(
+    orchestrator: TenantUsageBudgetOrchestrator,
+    *,
+    actor: User,
+    store: SeedStore,
+    tenant_id: str,
+    tenant_slug: str | None,
+) -> UsageBudgetRequestContext:
+    del tenant_slug  # Tenant comes from the knowledge base, not the Host slug.
+    try:
+        return orchestrator.begin_request(
+            actor=actor,
+            request_id=new_accounting_id(),
+            explicit_tenant_id=tenant_id if actor.role == Role.PLATFORM_OWNER else None,
+            resource_tenant_id=tenant_id,
+            known_tenant_ids=store.tenants.keys(),
+        )
+    except UsageTenantScopeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except UsageProviderExecutionRefused as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Usage accounting already owns this request; no new provider "
+                "execution is authorized."
+            ),
+        ) from exc
+    except UsageBudgetError as exc:
+        failure = map_usage_budget_error(exc)
+        raise HTTPException(
+            status_code=failure.status_code,
+            detail=failure.detail,
+            headers=dict(failure.headers),
+        ) from exc
+
+
+def _transcribe_knowledge_media(
+    content: bytes,
+    filename: str,
+    mime_type: str | None,
+    store: SeedStore,
+    tenant_id: str,
+    usage_context: UsageBudgetRequestContext,
+):
+    return transcribe_media_file(
+        content,
+        filename,
+        mime_type,
+        store=store,
+        tenant_id=tenant_id,
+        usage_context=usage_context,
+    )
+
+
+def _close_knowledge_media_usage(context: UsageBudgetRequestContext) -> None:
+    if context.status != "active":
+        return
+    if context.settled_child_count:
+        context.complete_success()
+        return
+    try:
+        context.abandon()
+    except UsageBudgetError as exc:
+        failure = map_usage_budget_error(exc)
+        raise HTTPException(
+            status_code=failure.status_code,
+            detail=failure.detail,
+            headers=dict(failure.headers),
+        ) from exc
+
+
+def _fail_knowledge_media_usage(context: UsageBudgetRequestContext) -> None:
+    if context.status != "active":
+        return
+    try:
+        context.fail()
+    except UsageBudgetError:
+        return
 
 
 def _get_readable_config(config_id: str, actor: User, store: SeedStore) -> KnowledgeConfig:

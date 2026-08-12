@@ -194,7 +194,12 @@ export function Markdown({
                 <thead>
                   <tr>
                     {block.headers.map((header, cellIndex) => (
-                      <th key={cellIndex}>{renderInline(header, preview)}</th>
+                      <th
+                        key={cellIndex}
+                        style={block.aligns[cellIndex] ? { textAlign: block.aligns[cellIndex]! } : undefined}
+                      >
+                        {renderInline(header, preview)}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -202,7 +207,12 @@ export function Markdown({
                   {block.rows.map((row, rowIndex) => (
                     <tr key={rowIndex}>
                       {block.headers.map((_, cellIndex) => (
-                        <td key={cellIndex}>{renderInline(row[cellIndex] ?? "", preview)}</td>
+                        <td
+                          key={cellIndex}
+                          style={block.aligns[cellIndex] ? { textAlign: block.aligns[cellIndex]! } : undefined}
+                        >
+                          {renderInline(row[cellIndex] ?? "", preview)}
+                        </td>
                       ))}
                     </tr>
                   ))}
@@ -224,7 +234,7 @@ export function Markdown({
           // Steward structure diagrams: JSON card charts with a dedicated
           // renderer and card-level editor. The fallback is the honest code
           // block so an invalid source never pretends to be a diagram.
-          if (isStewardDiagramBlock(block.language)) {
+          if (isStewardDiagramBlock(block.language, block.text)) {
             return (
               <StewardDiagramFigure
                 fallback={<MarkdownCodeBlock language="json" preview={preview} text={block.text} />}

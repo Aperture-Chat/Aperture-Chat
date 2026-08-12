@@ -13,12 +13,16 @@ WORKDIR /srv/aperture/services/api
 
 # Local OCR keeps uploaded legal documents inside the Aperture deployment.
 # Tesseract handles scanned images while pypdfium2 (installed below) renders
-# image-only PDF pages for OCR.
+# image-only PDF pages for OCR. ffmpeg extracts speech and stills from
+# uploaded audio/video so those files can be transcribed with Gemini Flash
+# (the same path used for composer dictation). Videos without an audio track
+# still yield visual notes from extracted stills.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
         tesseract-ocr \
         tesseract-ocr-eng \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Runtime dependencies only; dev extras (pytest, ruff) stay out of the image.

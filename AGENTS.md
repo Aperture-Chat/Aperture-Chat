@@ -12,6 +12,10 @@ be read by anyone.
 - Keep environment-specific instructions in an ignored `AGENTS.local.md` or
   another private system. Use placeholders such as `your-host` and
   `https://your-instance.example` in tracked examples.
+- Automated contributors may consult local-only instructions for authorized
+  operations, but must never copy, quote, summarize, or reveal SSH key paths,
+  host details, or other deployment secrets in tracked files, commits, logs,
+  screenshots, issue text, pull requests, or chat output.
 - Use synthetic data for screenshots and recordings. Review visual assets for
   names, account details, keys, and private infrastructure before committing.
 - Do not add generated success states, fabricated provider responses, or other

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { DocumentAssistantWorkspace } from "./DocumentAssistantWorkspace";
 import { sampleData } from "../data/sampleData";
@@ -1508,6 +1508,131 @@ test("drafts a paper from a prompt library selection without showing prompt meta
   expect(documentText()).not.toContain("[Compose the response");
 });
 
+test("a from-scratch legal instrument request carries drafting craft rules", async () => {
+  const chatRequests = installChatCompletionFetchMock(
+    "# MASTER SERVICES AGREEMENT\n\nEffective as of [Effective Date].",
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  // No template chosen — the request alone has to produce instrument craft.
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value: "Draft a master services agreement between an accounting firm and a software vendor.",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const prompt = String(
+    (chatRequests[0] as { messages: Array<{ content?: string }> }).messages[0]?.content ?? "",
+  );
+  expect(prompt).toContain("This is a legal instrument");
+  expect(prompt).toContain("WHEREAS");
+  expect(prompt).toContain("IN WITNESS WHEREOF");
+  expect(prompt).toContain("number subsections hierarchically");
+  // Section titles must be real headings, and an executed instrument carries
+  // no research annotations.
+  expect(prompt).toContain("never a bold paragraph standing in for a heading");
+  expect(prompt).toContain("never annotate clauses with [Source: ...] notes");
+  // The sourcing rule matches the genre: an instrument gets placeholders, not
+  // "mark it for verification" annotations.
+  expect(prompt).toContain("Never add [Source: ...] notes, verification brackets");
+  expect(prompt).not.toContain("mark it for verification instead of inventing a citation");
+  expect(prompt).toContain("governing law and venue");
+  // Placeholders over invention, and real ruled lines for anything signed.
+  expect(prompt).toContain("[Party Legal Name]");
+  expect(prompt).toContain("run of underscores");
+  expect(prompt).not.toContain("This is a financial document");
+});
+
+test("a research paper keeps its inline sourcing rule", async () => {
+  const chatRequests = installChatCompletionFetchMock("# Research Paper\n\nBody.");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Write a research paper on merchandising economics." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const prompt = String(
+    (chatRequests[0] as { messages: Array<{ content?: string }> }).messages[0]?.content ?? "",
+  );
+  expect(prompt).toContain("mark it for verification instead of inventing a citation");
+  expect(prompt).not.toContain("This is a legal instrument");
+});
+
+test("an unrelated starter template never sets the draft type for an instrument", async () => {
+  const chatRequests = installChatCompletionFetchMock("# MASTER SERVICES AGREEMENT\n\nBody.");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  // "implementation services" keyword-matches the engineering starter; the
+  // request is still an agreement, and that is what the model must be told.
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value:
+        "Draft a master services agreement with a software vendor for implementation services and milestone payments.",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const prompt = String(
+    (chatRequests[0] as { messages: Array<{ content?: string }> }).messages[0]?.content ?? "",
+  );
+  expect(prompt).toContain("Draft type: taken from the user request");
+  expect(prompt).not.toContain("Draft type: Implementation Plan");
+  expect(prompt).toContain("This is a legal instrument");
+  // And a contract never carries a script.
+  expect(prompt).toContain("never a script");
+});
+
+test("a financial document request carries figure and totals rules instead", async () => {
+  const chatRequests = installChatCompletionFetchMock("# Invoice 1042\n\n| Item | Amount |\n| --- | ---: |");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Create an invoice for the March engagement hours." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const prompt = String(
+    (chatRequests[0] as { messages: Array<{ content?: string }> }).messages[0]?.content ?? "",
+  );
+  expect(prompt).toContain("This is a financial document");
+  expect(prompt).toContain("Right-align numeric columns");
+  expect(prompt).toContain("every total must equal its lines");
+  expect(prompt).toContain("never invent bank or tax identifiers");
+  expect(prompt).not.toContain("This is a legal instrument");
+});
+
+test("a right-aligned money column stays right aligned in the document", async () => {
+  installChatCompletionFetchMock(
+    "# Invoice 1042\n\n| Description | Hours | Amount |\n| --- | ---: | ---: |\n| Advisory | 12 | $4,800.00 |\n| **Total** | | **$4,800.00** |",
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Create an invoice for the March engagement hours." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(documentText()).toContain("$4,800.00"));
+  const table = documentBody().querySelector("table.document-data-table")!;
+  const headers = Array.from(table.querySelectorAll("th"));
+  expect(headers[0].getAttribute("style")).toBeNull();
+  expect(headers[1].getAttribute("style")).toContain("text-align: right");
+  expect(headers[2].getAttribute("style")).toContain("text-align: right");
+  const firstRow = Array.from(table.querySelectorAll("tbody tr")).at(0)!;
+  expect(firstRow.querySelectorAll("td")[2].getAttribute("style")).toContain("text-align: right");
+});
+
 test("honors requested MLA, screenplay, and contract formats from prompts", async () => {
   const chatRequests = installChatCompletionFetchMock((payload) => {
     const prompt = String(
@@ -2139,7 +2264,7 @@ test("adds citations and applies inline AI edits only to highlighted text", asyn
   expect(documentText()).toContain("discovery deadline remains confirmed");
 });
 
-test("normalizes provider HTML into plain inline replacement text", async () => {
+test("keeps provider HTML formatting in the inline replacement", async () => {
   const chatRequests = installChatCompletionFetchMock(
     "<p>Replacement: The spaceship crossed <strong>deep space</strong> on its new course.</p>",
   );
@@ -2175,6 +2300,382 @@ test("normalizes provider HTML into plain inline replacement text", async () => 
   expect(documentText()).not.toContain("<strong>");
   expect(documentText()).not.toContain("Replacement:");
   expect(documentText()).toContain("Keep this second paragraph unchanged.");
+  // The bold run the model asked for survives as real markup, and the single
+  // paragraph it wrapped the sentence in does not split the paragraph it
+  // replaced.
+  const suggestion = documentBody().querySelector("span.document-ai-suggestion");
+  expect(suggestion?.querySelector("strong")?.textContent).toBe("deep space");
+  expect(suggestion?.closest("p")).not.toBeNull();
+  expect(documentBody().querySelectorAll("p.document-ai-suggestion")).toHaveLength(0);
+});
+
+test("inline AI edit adds list items as real bullets instead of markdown text", async () => {
+  installChatCompletionFetchMock((payload) => {
+    const prompt = (payload.messages as Array<{ content: string }>)[0]?.content ?? "";
+    if (prompt.includes("Highlighted passage:")) {
+      return [
+        "- 2017 Mirrored Revocable Trusts (Kansas law)",
+        "- 2019 Pour-Over Wills naming the trusts as beneficiary",
+      ].join("\n");
+    }
+    return "";
+  });
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "inline-list-transfer",
+        title: "Estate Plan Summary",
+        sourceLabel: "transferred chat",
+        createdAt: "9:45 PM",
+        content: "# Estate Plan Summary\n\n- Existing durable powers of attorney\n- Existing healthcare directives\n\nKeep this closing paragraph unchanged.",
+      }}
+    />,
+  );
+
+  const selectedText = "Existing durable powers of attorney";
+  await waitFor(() => {
+    expect(documentText()).toContain(selectedText);
+  });
+  selectEditorText(selectedText);
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+    target: { value: "Add the other estate documents as bullets." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+  await waitFor(() => {
+    expect(documentText()).toContain("2017 Mirrored Revocable Trusts (Kansas law)");
+  });
+  const suggestedItems = Array.from(
+    documentBody().querySelectorAll("li.document-ai-suggestion"),
+  );
+  expect(suggestedItems).toHaveLength(2);
+  suggestedItems.forEach((item) => {
+    expect(item.parentElement?.tagName).toBe("UL");
+  });
+  // The literal markdown dash must not survive anywhere in the page, and the
+  // suggestion must not be a span stranded inside the list.
+  expect(documentText()).not.toContain("- 2017 Mirrored Revocable Trusts");
+  expect(documentBody().querySelector("ul > span")).toBeNull();
+  expect(documentText()).toContain("Existing healthcare directives");
+  expect(documentText()).toContain("Keep this closing paragraph unchanged.");
+});
+
+test("inline AI edit keeps plain-paragraph replies inside the list they edit", async () => {
+  // What the live model actually returns when asked to extend a bullet: plain
+  // lines, no <li> markup. Inside a list those are bullets, not a list break.
+  installChatCompletionFetchMock((payload) => {
+    const prompt = (payload.messages as Array<{ content: string }>)[0]?.content ?? "";
+    if (prompt.includes("Highlighted passage:")) {
+      return [
+        "Existing durable powers of attorney",
+        "Revocable living trust agreement and any amendments",
+        "Pour-over will",
+      ].join("\n\n");
+    }
+    return "";
+  });
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "inline-paragraph-list-transfer",
+        title: "Estate Plan Summary",
+        sourceLabel: "transferred chat",
+        createdAt: "9:47 PM",
+        content: "# Estate Plan Summary\n\n- Existing durable powers of attorney\n- Existing healthcare directives\n",
+      }}
+    />,
+  );
+
+  selectEditorText("Existing durable powers of attorney");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+    target: { value: "Add the trust and pour-over will bullets." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+  await waitFor(() => {
+    expect(documentText()).toContain("Pour-over will");
+  });
+  const lists = documentBody().querySelectorAll("ul");
+  expect(lists).toHaveLength(1);
+  expect(documentBody().querySelectorAll("li.document-ai-suggestion")).toHaveLength(3);
+  expect(documentBody().querySelectorAll("p.document-ai-suggestion")).toHaveLength(0);
+  expect(Array.from(lists[0].children).map((item) => item.textContent)).toEqual([
+    "Existing durable powers of attorney",
+    "Revocable living trust agreement and any amendments",
+    "Pour-over will",
+    "Existing healthcare directives",
+  ]);
+});
+
+test("inline AI edit splits a paragraph for a structural signature block", async () => {
+  installChatCompletionFetchMock((payload) => {
+    const prompt = (payload.messages as Array<{ content: string }>)[0]?.content ?? "";
+    if (prompt.includes("Highlighted passage:")) {
+      return [
+        "<p><strong>IN WITNESS WHEREOF</strong>, the parties sign below.</p>",
+        "<p>Name: ______________________<br>Date: ______________________</p>",
+      ].join("");
+    }
+    return "";
+  });
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "inline-signature-transfer",
+        title: "Engagement Letter",
+        sourceLabel: "transferred chat",
+        createdAt: "9:50 PM",
+        content: "# Engagement Letter\n\nSigned by the client.\n\nKeep this closing paragraph unchanged.",
+      }}
+    />,
+  );
+
+  selectEditorText("Signed by the client.");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+    target: { value: "Make this a realistic signature block." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+  await waitFor(() => {
+    expect(documentText()).toContain("IN WITNESS WHEREOF");
+  });
+  const suggested = Array.from(documentBody().querySelectorAll("p.document-ai-suggestion"));
+  expect(suggested).toHaveLength(2);
+  expect(suggested[0].querySelector("strong")?.textContent).toBe("IN WITNESS WHEREOF");
+  expect(suggested[1].querySelector("br")).not.toBeNull();
+  // The model's underscore runs become real ruled lines: one element per
+  // blank, carrying non-breaking spaces instead of underscore characters.
+  const rules = Array.from(suggested[1].querySelectorAll("span.document-signature-line"));
+  expect(rules).toHaveLength(2);
+  rules.forEach((rule) => {
+    expect(rule.textContent).toMatch(/^\u00a0+$/);
+  });
+  expect(documentText()).toContain("Name:");
+  expect(documentText()).toContain("Date:");
+  expect(documentBody().innerHTML).not.toContain("____");
+  expect(documentText()).not.toContain("Signed by the client.");
+  expect(documentText()).toContain("Keep this closing paragraph unchanged.");
+});
+
+test("a generated draft's fill-in blanks arrive as ruled lines, not underscores", async () => {
+  installChatCompletionFetchMock(
+    [
+      "# Engagement Letter",
+      "Signature: ______________________",
+      "Printed Name: ______________________",
+      "Client reference: file_2026 stays plain text.",
+    ].join("\n\n"),
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "generated-signature-transfer",
+        title: "Engagement Letter",
+        sourceLabel: "transferred chat",
+        createdAt: "10:02 PM",
+        content: [
+          "# Engagement Letter",
+          "Signature: ______________________",
+          "Printed Name: ______________________",
+          "Client reference: file_2026 stays plain text.",
+        ].join("\n\n"),
+      }}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(documentText()).toContain("Printed Name:");
+  });
+  expect(documentBody().querySelectorAll("span.document-signature-line")).toHaveLength(2);
+  expect(documentBody().innerHTML).not.toContain("____");
+  // Single underscores inside ordinary words are left alone.
+  expect(documentText()).toContain("file_2026");
+});
+
+test("inline AI edit rules a signature label the model left dangling", async () => {
+  // What Gemini 3.6 Flash actually returns once told not to use underscores:
+  // the labels, and no blank at all.
+  installChatCompletionFetchMock((payload) => {
+    const prompt = (payload.messages as Array<{ content: string }>)[0]?.content ?? "";
+    if (prompt.includes("Highlighted passage:")) {
+      return "Signature: \n\nPrinted Name: \n\nDate:";
+    }
+    return "";
+  });
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "inline-dangling-label-transfer",
+        title: "Engagement Letter",
+        sourceLabel: "transferred chat",
+        createdAt: "10:10 PM",
+        content: "# Engagement Letter\n\nSigned by the client.\n\nContact: Jane Doe",
+      }}
+    />,
+  );
+
+  selectEditorText("Signed by the client.");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+    target: { value: "Make this a realistic signature block." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+  await waitFor(() => {
+    expect(documentText()).toContain("Printed Name:");
+  });
+  const rules = documentBody().querySelectorAll("span.document-signature-line");
+  expect(rules).toHaveLength(3);
+  rules.forEach((rule) => {
+    expect(rule.previousSibling?.textContent).toMatch(/(Signature|Printed Name|Date):\s*$/);
+  });
+  // A field that already has a value is not a blank.
+  expect(documentBody().innerHTML).toContain("Contact: Jane Doe");
+  expect(documentBody().querySelector("p:last-child span.document-signature-line")).toBeNull();
+});
+
+test("a fresh AI edit glows for ten seconds, then settles into the page", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    installChatCompletionFetchMock("The revised sentence reads clearly.");
+    render(
+      <DocumentAssistantWorkspace
+        data={sampleData}
+        brandName="S.F. Steward"
+        initialDraft={{
+          id: "ai-glow-transfer",
+          title: "Client Note",
+          sourceLabel: "transferred chat",
+          createdAt: "10:20 PM",
+          content: "# Client Note\n\nThe original sentence is muddy.",
+        }}
+      />,
+    );
+
+    selectEditorText("The original sentence is muddy.");
+    fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+    fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+      target: { value: "Make it clearer." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+    await waitFor(() => {
+      expect(documentText()).toContain("The revised sentence reads clearly.");
+    });
+    expect(documentBody()).toHaveClass("has-fresh-ai-edits");
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(documentBody()).not.toHaveClass("has-fresh-ai-edits");
+    // The edit itself is still recorded — only the glow went away.
+    expect(documentBody().querySelector("[data-ai-edit-at]")).not.toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the AI edit trail lists recorded edits, re-lights them, and clears the marks", async () => {
+  const scrollIntoView = vi.fn();
+  Element.prototype.scrollIntoView = scrollIntoView;
+  installChatCompletionFetchMock("The revised sentence reads clearly.");
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "ai-trail-transfer",
+        title: "Client Note",
+        sourceLabel: "transferred chat",
+        createdAt: "10:25 PM",
+        content: "# Client Note\n\nThe original sentence is muddy.",
+      }}
+    />,
+  );
+
+  // Nothing recorded yet, so the tool is honestly unavailable.
+  expect(screen.getByRole("button", { name: "AI edit trail" })).toBeDisabled();
+
+  selectEditorText("The original sentence is muddy.");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+    target: { value: "Make it clearer." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+  await waitFor(() => {
+    expect(documentText()).toContain("The revised sentence reads clearly.");
+  });
+
+  const trailToggle = screen.getByRole("button", { name: "AI edit trail" });
+  expect(trailToggle).toBeEnabled();
+  fireEvent.click(trailToggle);
+
+  const trail = screen.getByRole("dialog", { name: "AI edit trail" });
+  expect(documentBody()).toHaveClass("show-ai-edits");
+  const entries = within(trail).getAllByRole("button", { name: /revised sentence/ });
+  expect(entries).toHaveLength(1);
+  // The entry reports which model actually made the edit.
+  expect(trail).toHaveTextContent("Client Update Agent");
+
+  fireEvent.click(entries[0]);
+  expect(scrollIntoView).toHaveBeenCalled();
+
+  fireEvent.click(within(trail).getByRole("button", { name: "Clear marks" }));
+  await waitFor(() => {
+    expect(screen.getByText(/AI edit mark.* cleared/)).toBeInTheDocument();
+  });
+  expect(documentBody().innerHTML).not.toContain("data-ai-edit-at");
+  expect(documentBody().innerHTML).not.toContain("document-ai-suggestion");
+  // The edited text stays exactly as it was.
+  expect(documentText()).toContain("The revised sentence reads clearly.");
+  expect(screen.getByRole("button", { name: "AI edit trail" })).toBeDisabled();
+});
+
+test("inline AI edit prompt describes where the highlight sits", async () => {
+  const chatRequests = installChatCompletionFetchMock("Refreshed bullet text.");
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="S.F. Steward"
+      initialDraft={{
+        id: "inline-context-transfer",
+        title: "Estate Plan Summary",
+        sourceLabel: "transferred chat",
+        createdAt: "9:55 PM",
+        content: "# Estate Plan Summary\n\n- Existing durable powers of attorney\n",
+      }}
+    />,
+  );
+
+  selectEditorText("Existing durable powers of attorney");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
+    target: { value: "Tighten this bullet." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+
+  await waitFor(() => {
+    expect(documentText()).toContain("Refreshed bullet text.");
+  });
+  const prompt = (
+    (chatRequests[0] as { messages: Array<{ content: string }> }).messages[0]?.content ?? ""
+  );
+  expect(prompt).toContain("Never write markdown syntax");
+  expect(prompt).toContain("bulleted list (<ul> > <li>)");
 });
 
 test("shows the document editing glow only while inline AI is working", async () => {
