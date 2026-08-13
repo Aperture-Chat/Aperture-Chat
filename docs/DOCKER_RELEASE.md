@@ -69,6 +69,15 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.4.1
+
+- Chat replies stay resumable after a hard refresh: pending bubbles are kept,
+  partial streams persist, and a silent SSE socket reconnects instead of
+  dropping the answer.
+- Mermaid and structure diagrams always render as visuals in chat, and
+  Transfer to Drafts rasterizes those figures so the document keeps the image.
+- Composer prompt-improver rail and streaming visualizer polish.
+
 ## New Since v0.3.14
 
 - Chat and knowledge uploads transcribe audio and video with Gemini Flash.

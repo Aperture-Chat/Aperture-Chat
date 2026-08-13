@@ -873,6 +873,118 @@ function pendingMcpApprovalFromState(
   };
 }
 
+function chatTitleCollidesWithActions(
+  titleWidth: number,
+  rowWidth: number,
+  actionsWidth: number,
+  gap: number,
+) {
+  if (actionsWidth <= 0 || rowWidth <= 0) return false;
+  return titleWidth > rowWidth - actionsWidth - gap;
+}
+
+function ChatTitleDisplay({
+  title,
+  showRename,
+  showAiRename,
+  renameDisabled,
+  aiRenameDisabled,
+  aiRenaming,
+  onRename,
+  onAiRename,
+}: {
+  title: string;
+  showRename: boolean;
+  showAiRename: boolean;
+  renameDisabled: boolean;
+  aiRenameDisabled: boolean;
+  aiRenaming: boolean;
+  onRename: () => void;
+  onAiRename: () => void;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const [collides, setCollides] = useState(false);
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const label = titleRef.current;
+    if (!row || !label) {
+      setCollides(false);
+      return;
+    }
+
+    const update = () => {
+      const actions = row.querySelector(".chat-title-actions");
+      if (!(actions instanceof HTMLElement)) {
+        setCollides(false);
+        return;
+      }
+      const gap = Number.parseFloat(getComputedStyle(row).gap) || 0;
+      setCollides(
+        chatTitleCollidesWithActions(
+          label.getBoundingClientRect().width,
+          row.clientWidth,
+          actions.offsetWidth,
+          gap,
+        ),
+      );
+    };
+
+    update();
+    if (typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(row);
+    observer.observe(label);
+    const actions = row.querySelector(".chat-title-actions");
+    if (actions) observer.observe(actions);
+    return () => observer.disconnect();
+  }, [title, showRename, showAiRename]);
+
+  return (
+    <div
+      ref={rowRef}
+      className={`chat-title-display${collides ? " is-colliding" : ""}`}
+    >
+      <h1 data-tooltip={title}>
+        <span ref={titleRef} className="chat-title-label">
+          {title}
+        </span>
+      </h1>
+      {showRename && (
+        <div className="chat-title-actions">
+          <button
+            className="chat-title-rename-button"
+            type="button"
+            aria-label="Rename chat"
+            data-tooltip="Rename this chat everywhere it appears"
+            disabled={renameDisabled}
+            onClick={onRename}
+          >
+            <Pencil size={14} />
+          </button>
+          {showAiRename && (
+            <button
+              className="chat-title-rename-button"
+              type="button"
+              aria-label="Rename chat with AI"
+              data-tooltip="Let AI rename this chat from the latest conversation"
+              disabled={aiRenameDisabled}
+              onClick={onAiRename}
+            >
+              {aiRenaming ? (
+                <Loader2 size={14} className="chat-title-ai-spinner" />
+              ) : (
+                <Sparkles size={14} />
+              )}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatWorkspace({
   data,
   chat,
@@ -930,6 +1042,8 @@ export function ChatWorkspace({
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [dictationError, setDictationError] = useState<string | null>(null);
   const [isImproving, setIsImproving] = useState(false);
+  const [improveRail, setImproveRail] = useState<"off" | "run" | "done">("off");
+  const [improveProgress, setImproveProgress] = useState(0);
   const [improveError, setImproveError] = useState<string | null>(null);
   const [pendingToolApproval, setPendingToolApproval] = useState<PendingToolApproval | null>(null);
   const [toolApprovalNotice, setToolApprovalNotice] = useState<string | null>(null);
@@ -957,6 +1071,30 @@ export function ChatWorkspace({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!isImproving) return;
+    setImproveRail("run");
+    setImproveProgress(7);
+    const started = Date.now();
+    const tick = window.setInterval(() => {
+      const elapsed = Date.now() - started;
+      setImproveProgress(7 + 83 * (1 - Math.exp(-elapsed / 4500)));
+    }, 80);
+    return () => window.clearInterval(tick);
+  }, [isImproving]);
+
+  useEffect(() => {
+    if (isImproving || improveRail !== "run") return;
+    setImproveProgress(100);
+    setImproveRail("done");
+    const hide = window.setTimeout(() => setImproveRail("off"), 4500);
+    const reset = window.setTimeout(() => setImproveProgress(0), 5300);
+    return () => {
+      window.clearTimeout(hide);
+      window.clearTimeout(reset);
+    };
+  }, [isImproving, improveRail]);
   const width = useViewportWidth();
   const inspectorOverlay = width <= BREAKPOINTS.inspectorOverlay;
 
@@ -1932,6 +2070,7 @@ export function ChatWorkspace({
     !isImproving &&
     !isUploadingAttachments;
   const canOpenSendOptions = chat.enabledModels.length > 0 && !isSending && !isUploadingAttachments;
+  const hasDraftText = draft.trim().length > 0;
 
   function toggleComposerTool(tool: keyof ComposerTools) {
     setComposerTools((current) => {
@@ -1960,11 +2099,29 @@ export function ChatWorkspace({
   const composerForm = (
     <form
       className={`composer ${hasMessages ? "" : "composer-empty"}${isImproving ? " is-improving" : ""}`}
+      aria-busy={isImproving}
       onSubmit={(event) => {
         event.preventDefault();
         void submitDraft();
       }}
     >
+      <div
+        className={`composer-improve-rail${improveRail !== "off" ? " is-visible" : ""}${improveRail === "run" ? " is-running" : ""}${improveRail === "done" ? " is-done" : ""}`}
+        role={improveRail === "run" ? "progressbar" : undefined}
+        aria-label={improveRail === "run" ? "Improving prompt" : undefined}
+        aria-valuemin={improveRail === "run" ? 0 : undefined}
+        aria-valuemax={improveRail === "run" ? 100 : undefined}
+        aria-valuenow={improveRail === "run" ? Math.round(improveProgress) : undefined}
+        aria-hidden={improveRail === "off"}
+      >
+        <span className="composer-improve-rail-track" />
+        <span className="composer-improve-rail-fill" style={{ width: `${improveProgress}%` }} />
+      </div>
+      {isImproving && (
+        <span className="sr-only" role="status">
+          Improving prompt
+        </span>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -2378,35 +2535,39 @@ export function ChatWorkspace({
             ))}
         </div>
         <div className="send-actions" ref={sendRef}>
-          <DictationControl
-            userId={data.me.id}
-            disabled={isSending}
-            onError={setDictationError}
-            onTranscript={(text) => {
-              setDraft((current) => {
-                if (!current.trim()) return text;
-                return `${current.replace(/\s+$/, "")} ${text}`;
-              });
-              textareaRef.current?.focus();
-            }}
-          />
-          <button
-            type="button"
-            className={`prompt-improve-button${isImproving ? " is-improving" : ""}`}
-            aria-label="Improve prompt"
-            data-tooltip={
-              isImproving
-                ? "Improving your prompt..."
-                : "Rewrite your prompt with AI — clearer wording and more detail, grounded in any attached knowledge, tools, and files"
-            }
-            disabled={!draft.trim() || isImproving || isSending || chat.enabledModels.length === 0}
-            onClick={() => void improveDraftPrompt()}
-          >
-            <span className="prompt-improve-icon" aria-hidden="true">
-              <Pencil size={15} />
-              <Sparkles size={12} />
-            </span>
-          </button>
+          <div className={`composer-draft-actions${hasDraftText ? " has-text" : ""}`}>
+            <DictationControl
+              userId={data.me.id}
+              disabled={isSending || isImproving}
+              onError={setDictationError}
+              onTranscript={(text) => {
+                setDraft((current) => {
+                  if (!current.trim()) return text;
+                  return `${current.replace(/\s+$/, "")} ${text}`;
+                });
+                textareaRef.current?.focus();
+              }}
+            />
+            <button
+              type="button"
+              className={`prompt-improve-button${isImproving ? " is-improving" : ""}`}
+              aria-label="Improve prompt"
+              aria-hidden={!hasDraftText}
+              tabIndex={hasDraftText ? 0 : -1}
+              data-tooltip={
+                isImproving
+                  ? "Improving your prompt..."
+                  : "Rewrite your prompt with AI — clearer wording and more detail, grounded in any attached knowledge, tools, and files"
+              }
+              disabled={!hasDraftText || isImproving || isSending || chat.enabledModels.length === 0}
+              onClick={() => void improveDraftPrompt()}
+            >
+              <span className="prompt-improve-icon" aria-hidden="true">
+                <Pencil size={15} />
+                <Sparkles size={12} />
+              </span>
+            </button>
+          </div>
           {chat.enabledModels.length > 0 && (
             <ContextWindowIndicator status={contextWindowStatus} onOpenDetails={() => setIsInspectorOpen(true)} />
           )}
@@ -2725,43 +2886,21 @@ export function ChatWorkspace({
                 </button>
               </form>
             ) : (
-              <div className="chat-title-display">
-                <h1 data-tooltip={activeThread?.title ?? "New chat"}>{activeThread?.title ?? "New chat"}</h1>
-                {activeThread && activeThread.messages.length > 0 && (
-                  <div className="chat-title-actions">
-                    <button
-                      className="chat-title-rename-button"
-                      type="button"
-                      aria-label="Rename chat"
-                      data-tooltip="Rename this chat everywhere it appears"
-                      disabled={threadTitleGenerating}
-                      onClick={() => {
-                        setThreadTitleDraft(activeThread.title);
-                        setThreadTitleError(null);
-                        setEditingThreadTitle(true);
-                      }}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    {hasCompletedAssistantReply && (
-                      <button
-                        className="chat-title-rename-button"
-                        type="button"
-                        aria-label="Rename chat with AI"
-                        data-tooltip="Let AI rename this chat from the latest conversation"
-                        disabled={threadTitleGenerating || isSending}
-                        onClick={() => void generateThreadTitle()}
-                      >
-                        {threadTitleGenerating ? (
-                          <Loader2 size={14} className="chat-title-ai-spinner" />
-                        ) : (
-                          <Sparkles size={14} />
-                        )}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              <ChatTitleDisplay
+                title={activeThread?.title ?? "New chat"}
+                showRename={Boolean(activeThread && activeThread.messages.length > 0)}
+                showAiRename={hasCompletedAssistantReply}
+                renameDisabled={threadTitleGenerating}
+                aiRenameDisabled={threadTitleGenerating || isSending}
+                aiRenaming={threadTitleGenerating}
+                onRename={() => {
+                  if (!activeThread) return;
+                  setThreadTitleDraft(activeThread.title);
+                  setThreadTitleError(null);
+                  setEditingThreadTitle(true);
+                }}
+                onAiRename={() => void generateThreadTitle()}
+              />
             )}
             {threadTitleError && <p className="chat-title-error" role="alert">{threadTitleError}</p>}
           </div>

@@ -143,6 +143,37 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
  */
 const MERMAID_LANGUAGE_ALIASES = new Set(["mermaid", "mmd", "mermaidjs", "mermaid-js"]);
 
+// Fence tags that are themselves a Mermaid diagram type (` ```timeline `).
+// The header keyword is prepended when the body omitted it.
+const MERMAID_TAG_HEADERS: Record<string, string> = {
+  timeline: "timeline",
+  flowchart: "flowchart",
+  sequence: "sequenceDiagram",
+  sequencediagram: "sequenceDiagram",
+  classdiagram: "classDiagram",
+  classdiagramv2: "classDiagram",
+  statediagram: "stateDiagram-v2",
+  statediagramv2: "stateDiagram-v2",
+  erdiagram: "erDiagram",
+  journey: "journey",
+  gantt: "gantt",
+  pie: "pie",
+  gitgraph: "gitGraph",
+  mindmap: "mindmap",
+  quadrantchart: "quadrantChart",
+  requirementdiagram: "requirementDiagram",
+  zenuml: "zenuml",
+  sankey: "sankey-beta",
+  "sankey-beta": "sankey-beta",
+  xychart: "xychart-beta",
+  "xychart-beta": "xychart-beta",
+  kanban: "kanban",
+  c4context: "C4Context",
+  c4container: "C4Container",
+};
+
+const OTHER_DIAGRAM_TAGS = new Set(["dot", "graphviz", "gv", "plantuml", "puml", "uml"]);
+
 // First-line grammar keywords that identify a Mermaid diagram when a fence
 // carries no usable language tag. `graph`/`flowchart` require a direction so
 // DOT graphs and prose never false-positive.
@@ -162,9 +193,17 @@ const MERMAID_KEYWORD_PATTERN = new RegExp(
  */
 export function isMermaidBlock(language: string, text: string): boolean {
   const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
-  if (MERMAID_LANGUAGE_ALIASES.has(tag)) return true;
+  if (MERMAID_LANGUAGE_ALIASES.has(tag) || tag in MERMAID_TAG_HEADERS) return true;
   if (!GENERIC_FENCE_TAGS.has(tag)) return false;
-  return MERMAID_KEYWORD_PATTERN.test(mermaidDiagramSource(text));
+  return MERMAID_KEYWORD_PATTERN.test(mermaidDiagramSource(text, language));
+}
+
+/** Mermaid plus similar diagram fences (Graphviz, PlantUML) that must render
+ * as a visual, never as a Copy/Preview/Edit code panel. */
+export function isVisualDiagramBlock(language: string, text: string): boolean {
+  const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  if (OTHER_DIAGRAM_TAGS.has(tag)) return true;
+  return isMermaidBlock(language, text);
 }
 
 /** Fence tags that carry no rendering intent of their own. A model that meant
@@ -185,13 +224,21 @@ const GENERIC_FENCE_TAGS = new Set([
 ]);
 
 /** Diagram source with fence artifacts removed — some models repeat the
- * language tag as the first line inside the block. */
-export function mermaidDiagramSource(text: string): string {
+ * language tag as the first line inside the block. A ` ```timeline ` fence
+ * whose body omitted the keyword gets that header prepended so mermaid and
+ * the fallback parsers see a complete diagram. */
+export function mermaidDiagramSource(text: string, language = ""): string {
   const lines = text.split("\n");
   let start = 0;
   while (start < lines.length && !(lines[start] ?? "").trim()) start += 1;
   if (MERMAID_LANGUAGE_ALIASES.has((lines[start] ?? "").trim().toLowerCase())) start += 1;
-  return lines.slice(start).join("\n").trim();
+  let body = lines.slice(start).join("\n").trim();
+  const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  const header = MERMAID_TAG_HEADERS[tag];
+  if (header && body && !MERMAID_KEYWORD_PATTERN.test(body)) {
+    body = `${header}\n${body}`;
+  }
+  return body;
 }
 
 const STEWARD_DIAGRAM_LANGUAGES = new Set([
@@ -261,7 +308,7 @@ export function replaceDiagramFence(content: string, previousSource: string, nex
     const body = lines.slice(bodyStart, bodyEnd).join("\n");
     const matches = isStewardDiagramBlock(language, body)
       ? body.trim() === wanted
-      : isMermaidBlock(language, body) && mermaidDiagramSource(body).trim() === wanted;
+      : isVisualDiagramBlock(language, body) && mermaidDiagramSource(body, language).trim() === wanted;
     if (matches) {
       const replaced = [...lines.slice(0, bodyStart), nextSource.trim(), ...lines.slice(bodyEnd)];
       // A truncated reply can end mid-fence with no closing line; saving an
@@ -276,9 +323,13 @@ export function replaceDiagramFence(content: string, previousSource: string, nex
 
 export function unwrapFullDocumentFence(source: string): string {
   const trimmed = source.trim();
-  const match = /^```[A-Za-z0-9_-]*\n([\s\S]*)\n```$/.exec(trimmed);
+  const match = /^```([A-Za-z0-9_-]*)\n([\s\S]*)\n```$/.exec(trimmed);
   if (!match) return source;
-  const inner = match[1];
+  const language = match[1] ?? "";
+  const inner = match[2];
+  // A reply that is only a diagram fence must stay a diagram. Unwrapping
+  // ```mermaid / ```timeline would turn the body into prose.
+  if (isVisualDiagramBlock(language, inner) || isStewardDiagramBlock(language, inner)) return source;
   return inner.includes("```") ? source : inner;
 }
 
@@ -320,25 +371,14 @@ export function markdownToDocumentHtml(source: string): string {
       if (block.kind === "code") {
         // Diagram blocks become diagram figures: a client pass rasterizes the
         // source into a PNG data-URL <img> (inline SVG would be dropped by the
-        // DOCX export and AI-revision walkers). Until — or unless — that render
-        // succeeds, the source stays visible as an honest code block.
+        // DOCX export and AI-revision walkers). The figure starts as a visual
+        // placeholder — never the mermaid/JSON source — so Transfer to Drafts
+        // shows a diagram slot rather than a code block.
         if (isStewardDiagramBlock(block.language, block.text)) {
-          const diagramSource = block.text.trim();
-          return (
-            `<figure class="document-media-block document-diagram-figure" contenteditable="false"` +
-            ` data-diagram-kind="structure" data-diagram-source="${encodeURIComponent(diagramSource)}">` +
-            `<pre class="document-code-block document-diagram-source"><code>${escapeHtml(diagramSource)}</code></pre>` +
-            `</figure>`
-          );
+          return documentDiagramFigureHtml("structure", block.text.trim());
         }
-        if (isMermaidBlock(block.language, block.text)) {
-          const diagramSource = mermaidDiagramSource(block.text);
-          return (
-            `<figure class="document-media-block document-diagram-figure" contenteditable="false"` +
-            ` data-diagram-source="${encodeURIComponent(diagramSource)}">` +
-            `<pre class="document-code-block document-diagram-source"><code>${escapeHtml(diagramSource)}</code></pre>` +
-            `</figure>`
-          );
+        if (isVisualDiagramBlock(block.language, block.text)) {
+          return documentDiagramFigureHtml("mermaid", mermaidDiagramSource(block.text, block.language));
         }
         return `<pre class="document-code-block"><code>${escapeHtml(block.text)}</code></pre>`;
       }
@@ -353,6 +393,17 @@ export function markdownToDocumentHtml(source: string): string {
       return `<p>${block.lines.map((line) => inlineMarkdownToHtml(line)).join("<br>")}</p>`;
     })
     .join("");
+}
+
+function documentDiagramFigureHtml(kind: "mermaid" | "structure", diagramSource: string) {
+  const kindAttr = kind === "structure" ? ` data-diagram-kind="structure"` : "";
+  const label = kind === "structure" ? "Structure diagram" : "Diagram";
+  return (
+    `<figure class="document-media-block document-diagram-figure" contenteditable="false"` +
+    `${kindAttr} data-diagram-source="${encodeURIComponent(diagramSource)}">` +
+    `<div class="document-diagram-pending">${label} will render on this page.</div>` +
+    `</figure>`
+  );
 }
 
 export function markdownToPlainText(source: string): string {

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
+import mermaid from "mermaid";
 import { Markdown } from "./Markdown";
 
 vi.mock("mermaid", () => ({
@@ -11,6 +12,13 @@ vi.mock("mermaid", () => ({
       .mockResolvedValue({ svg: '<svg viewBox="0 0 120 60" data-testid="mermaid-svg"></svg>' }),
   },
 }));
+
+function restoreMermaidMock() {
+  vi.mocked(mermaid.parse).mockResolvedValue(true);
+  vi.mocked(mermaid.render).mockResolvedValue({
+    svg: '<svg viewBox="0 0 120 60" data-testid="mermaid-svg"></svg>',
+  });
+}
 
 test("code blocks expose copy, preview, line numbers, and inline editing", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
@@ -47,16 +55,119 @@ test("code blocks expose copy, preview, line numbers, and inline editing", async
 test("mermaid code fences render as diagrams with copy and export actions", async () => {
   render(<Markdown content={"```mermaid\nflowchart LR\n  A --> B\n```"} />);
 
-  expect(screen.getByText("Rendering diagram…")).toBeInTheDocument();
+  expect(document.querySelector(".md-diagram-panel")).toBeInTheDocument();
+  expect(document.querySelector(".md-diagram-canvas")).toBeInTheDocument();
+  expect(screen.queryByText("Rendering diagram…")).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("button", { name: "PNG" })).toBeInTheDocument());
   expect(screen.getByRole("button", { name: "SVG" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+  expect(document.querySelector(".md-code-panel")).toBeNull();
   expect(screen.getByText("flowchart")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Code" }));
   expect(screen.getByText("flowchart LR")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Diagram" }));
   await waitFor(() => expect(screen.queryByText("flowchart LR")).not.toBeInTheDocument());
+});
+
+test("mermaid timeline fences auto-preview as diagrams, not code panels", async () => {
+  render(
+    <Markdown
+      content={
+        "```mermaid\ntimeline\n    title Figure 6. Selected international and Chinese LENR milestones\n    1989 : Fleischmann and Pons announce cold fusion\n```"
+      }
+    />,
+  );
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument());
+  expect(screen.getByText("timeline")).toBeInTheDocument();
+  expect(document.querySelector(".md-diagram-panel")).toBeInTheDocument();
+  expect(document.querySelector(".md-diagram-canvas")).toBeInTheDocument();
+  expect(document.querySelector(".md-code-panel")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+});
+
+test("a mermaid render failure stays a diagram panel with a visual, not a code panel", async () => {
+  vi.mocked(mermaid.render).mockRejectedValue(new Error("Parse error on line 2"));
+  try {
+    render(<Markdown content={"```mermaid\nflowchart LR\n  A[Start] --> B[End]\n```"} />);
+    expect(document.querySelector(".md-diagram-panel")).toBeInTheDocument();
+    expect(document.querySelector(".md-diagram-canvas svg")).toBeInTheDocument();
+    expect(screen.getByText("Start")).toBeInTheDocument();
+    expect(screen.getByText("End")).toBeInTheDocument();
+    expect(document.querySelector(".md-code-panel")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument();
+  } finally {
+    restoreMermaidMock();
+  }
+});
+
+test("a mermaid timeline still shows a visual when mermaid.js cannot draw it", async () => {
+  vi.mocked(mermaid.render).mockRejectedValue(new Error("CSSStyleSheet is not defined"));
+  try {
+    render(
+      <Markdown
+        content={"```mermaid\ntimeline\n    title Selected LENR milestones\n    1989 : Cold fusion announced\n```"}
+      />,
+    );
+    expect(document.querySelector(".md-diagram-canvas svg")).toBeInTheDocument();
+    expect(screen.getByText("Selected LENR milestones")).toBeInTheDocument();
+    expect(document.querySelector(".md-code-panel")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+  } finally {
+    restoreMermaidMock();
+  }
+});
+
+const LENR_TIMELINE_FENCE = `\`\`\`mermaid
+timeline
+title Figure 6. Selected international and Chinese LENR milestones
+1989 : Fleischmann and Pons announce cold fusion
+: Worldwide replication campaign begins
+: First US DOE review is negative
+1990 : Tsinghua team reports precursor studies
+1991 : Miles reports helium measurements in US Navy work
+1990s : Japanese New Hydrogen Energy programme
+: Continued US, Italian, Russian and Indian studies
+2002 : ICCF-9 held at Tsinghua University in Beijing
+: Chinese resonant-tunnelling papers presented
+2004 : Second US DOE review remains inconclusive
+2008 : Jiang team reports very-low-rate charged particles
+2009 : CR-39 triple-track paper published internationally
+2014 : China Institute team reports neutron bursts
+2015 : Chinese Ni-H translated heat reports circulate
+2019 : Google-supported Nature review reports no effect
+2020 : NASA reports accelerator-assisted lattice fusion
+: EU CleanHME project begins
+2023 : US ARPA-E funds eight LENR test projects
+2025 : CleanHME project ends
+: Nature reports electrochemically enhanced beam fusion
+2026 : Chinese LENR authors continue specialist-journal theory
+\`\`\``;
+
+test("the reported LENR timeline fence is a visual figure, never a mermaid code panel", () => {
+  vi.mocked(mermaid.render).mockRejectedValue(new Error("Parse error on line 3"));
+  try {
+    render(<Markdown content={LENR_TIMELINE_FENCE} />);
+    const panel = document.querySelector("figure.md-diagram-panel");
+    expect(panel).not.toBeNull();
+    expect(panel).toHaveAttribute("data-diagram-type", "timeline");
+    expect(document.querySelector(".md-diagram-canvas svg")).toBeInTheDocument();
+    expect(screen.getByText("Figure 6. Selected international and Chinese LENR milestones")).toBeInTheDocument();
+    expect(screen.getByText("Fleischmann and Pons announce cold fusion")).toBeInTheDocument();
+    const canvas = document.querySelector(".md-diagram-canvas")?.innerHTML ?? "";
+    expect(canvas).toContain("specialist-journal");
+    expect(canvas).toContain("2026");
+    expect(document.querySelector("figure.md-code-panel")).toBeNull();
+    expect(screen.queryByText("23 lines")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument();
+  } finally {
+    restoreMermaidMock();
+  }
 });
 
 test("mermaid renders as a diagram for every fence variant models emit", async () => {

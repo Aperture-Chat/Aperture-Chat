@@ -1,0 +1,20 @@
+---
+description: Sync every source change to the live development instance; commit only when asked.
+alwaysApply: true
+---
+
+# Live development preview
+
+The owner's VPS is the development environment. Every source change must be
+synced there before the work is considered done. Do not wait to be asked.
+
+- After editing, immediately copy the changed tracked source to the live
+  development instance and rebuild or restart only the affected container.
+  Consult ignored `AGENTS.local.md` for connection details. Never copy those
+  details into tracked files, commits, or chat.
+- Preserve volumes and runtime data. Never reset volumes or bring the stack
+  down with volume wipes.
+- Do not commit, push to Git, or open a pull request unless the owner
+  explicitly asks.
+- Never copy remote `.env`, compose overrides, databases, or other private
+  runtime files into Git.
