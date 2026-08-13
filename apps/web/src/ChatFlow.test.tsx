@@ -455,6 +455,67 @@ test("a failed stream keeps the streamed text and shows a compact failure note",
   expect(screen.getByText(/GLP-1 drugs are only the beginning\./)).toBeInTheDocument();
 });
 
+test("reloads a pending chat and continues the partial reply", async () => {
+  assistantReply = "the rest of the draft.";
+  window.localStorage.setItem(
+    "aperture-chats-v2-user-admin",
+    JSON.stringify([
+      {
+        id: "thread-resume-pending",
+        tenant_id: "tenant-example",
+        owner_user_id: "user-admin",
+        title: "Artemis paper",
+        model_id: "gpt-4o-mini",
+        group_id: "group-litigation",
+        pinned: false,
+        archived: false,
+        folder_id: null,
+        used_agent: false,
+        updated_at: "Just now",
+        messages: [
+          {
+            id: "msg-user-resume",
+            role: "user",
+            content: "Write the Artemis paper",
+            createdAt: "9:00 AM",
+            status: "ok",
+          },
+          {
+            id: "msg-assistant-resume",
+            role: "assistant",
+            content: "Partial draft already streamed.",
+            createdAt: "9:00 AM",
+            status: "pending",
+            startedAtMs: Date.now() - 5000,
+          },
+        ],
+      },
+    ]),
+  );
+
+  await renderApp();
+
+  await waitFor(() => {
+    expect(
+      chatRequests.some((body) => {
+        const messages = body.messages as Array<{ role: string; content: string }> | undefined;
+        return (
+          Array.isArray(messages) &&
+          messages.some((message) =>
+            message.content.includes("Continue exactly where the previous answer stopped"),
+          )
+        );
+      }),
+    ).toBe(true);
+  });
+
+  const sidebar = openChatHistorySection("Recent");
+  fireEvent.click(within(sidebar).getByText("Artemis paper"));
+  expect(await screen.findByText(/Partial draft already streamed/)).toBeInTheDocument();
+  expect(await screen.findByText(/the rest of the draft/)).toBeInTheDocument();
+  expect(screen.queryByText(/interrupted before it finished/)).not.toBeInTheDocument();
+});
+
 test("Stream replies toggled off keeps the finished-only pending view and persists", async () => {
   const sse = stagedSseResponse();
   stubSseChatFetch(sse);
@@ -2373,7 +2434,7 @@ test("provider cards resolve real brand marks with an honest letter fallback", a
   expect(providerBrandIconPath("Cerebras", "openai-compatible")).toBeNull();
 });
 
-test("prompt improver rewrites the draft in place with the composer glowing while it runs", async () => {
+test("prompt improver stays hidden until there is a draft, then rewrites in place", async () => {
   assistantReply = "Review the attached Q3 vendor policy for compliance gaps, citing each violated clause.";
   let releaseCompletion!: () => void;
   chatCompletionGate = new Promise<void>((resolve) => {
@@ -2384,26 +2445,26 @@ test("prompt improver rewrites the draft in place with the composer glowing whil
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   const textarea = (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
 
-  // Empty draft: nothing to improve, the control is honestly disabled.
-  const improveButton = screen.getByRole("button", { name: "Improve prompt" });
-  expect(improveButton).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Improve prompt" })).not.toBeInTheDocument();
 
   fireEvent.change(textarea, { target: { value: "check policy ok?" } });
-  expect(improveButton).not.toBeDisabled();
+  const improveButton = screen.getByRole("button", { name: "Improve prompt" });
+  expect(improveButton).toBeEnabled();
   fireEvent.click(improveButton);
 
-  // While the rewrite runs: the composer carries the glow state, the draft is
-  // locked, and sending is blocked so the old text cannot slip out mid-rewrite.
+  // While the rewrite runs: the composer carries the progress rail, the draft
+  // is locked, and sending is blocked so the old text cannot slip out mid-rewrite.
   await waitFor(() => {
     expect(document.querySelector(".composer.is-improving")).toBeTruthy();
   });
+  expect(document.querySelector(".composer-improve-rail.is-running")).toBeTruthy();
   expect(textarea).toHaveAttribute("readonly");
   expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
 
   releaseCompletion();
 
   // The rewrite lands in the composer — nothing was sent to the conversation —
-  // and the glow stops so the user can review and send the improved prompt.
+  // and the improving state stops so the user can review and send.
   await waitFor(() => {
     expect(textarea.value).toBe(
       "Review the attached Q3 vendor policy for compliance gaps, citing each violated clause.",

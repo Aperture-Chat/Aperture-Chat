@@ -173,8 +173,7 @@ import { parseDeckTemplate, type DeckTemplateParseResponse } from "../lib/api/de
 import { markdownOutlineFromDeck } from "../lib/deck/deckToDocument";
 import { PPTX_MIME_TYPE, buildPptxExportDocument } from "../lib/pptxExport";
 import { markdownToDocumentHtml } from "../lib/markdown";
-import { diagramTypeLabel, renderMermaidPngDataUrl } from "../lib/mermaidRender";
-import { renderStewardDiagramPngDataUrl } from "../lib/stewardDiagram";
+import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "../lib/documentDiagrams";
 import { approvedWorkspaceModels, isModelUsable, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
 import {
   ReasoningSlider,
@@ -1666,10 +1665,10 @@ export function DocumentAssistantWorkspace({
     }, 250);
   }
 
-  /** Rasterizes ```mermaid diagram figures into PNG data-URL images so the
-   * canvas, DOCX export, and AI revisions all carry the real diagram. Runs
-   * off-DOM and applies like a layout normalization, never a user edit.
-   * Figures whose source cannot render keep their visible code block. */
+  /** Rasterizes diagram figures into PNG data-URL images so the canvas, DOCX
+   * export, and AI revisions all carry the real diagram. Runs off-DOM and
+   * applies like a layout normalization, never a user edit. Figures whose
+   * source cannot render keep a visual error, not mermaid source text. */
   function scheduleDocumentDiagramHydration(sourceHtml: string) {
     if (isAutomatedTestMode() || !hasUnrenderedDocumentDiagram(sourceHtml)) return;
     const runId = ++diagramHydrationRunRef.current;
@@ -12602,58 +12601,6 @@ async function resolveWebImageResult(subject: string): Promise<WebImageResult> {
     caption: `Visual result for ${subject}`,
     source: "Aperture local fallback",
   };
-}
-
-function hasUnrenderedDocumentDiagram(html: string) {
-  return /<figure[^>]*data-diagram-source(?![^>]*data-diagram-rendered)/.test(html);
-}
-
-/** Off-DOM transform: renders every pending diagram figure to a light-theme
- * PNG data URL. Data-URL <img> is the one vector-safe form that survives the
- * DOCX walker and the AI-revision asset protection; inline <svg> does not. */
-async function hydrateDocumentDiagramFigures(
-  sourceHtml: string,
-): Promise<{ html: string; rendered: number } | null> {
-  const template = document.createElement("template");
-  template.innerHTML = sourceHtml;
-  const figures = Array.from(
-    template.content.querySelectorAll<HTMLElement>(
-      "figure[data-diagram-source]:not([data-diagram-rendered])",
-    ),
-  );
-  if (!figures.length) return null;
-  let rendered = 0;
-  for (const figure of figures) {
-    let source = "";
-    try {
-      source = decodeURIComponent(figure.getAttribute("data-diagram-source") ?? "");
-    } catch {
-      source = "";
-    }
-    const isStructure = figure.getAttribute("data-diagram-kind") === "structure";
-    const dataUrl = !source.trim()
-      ? null
-      : isStructure
-        ? await renderStewardDiagramPngDataUrl(source)
-        : await renderMermaidPngDataUrl(source);
-    if (!dataUrl) {
-      // The source stays visible as a code block; the marker stops retry loops.
-      figure.setAttribute("data-diagram-rendered", "failed");
-      continue;
-    }
-    const label = isStructure ? "structure" : diagramTypeLabel(source);
-    const image = document.createElement("img");
-    image.className = "document-diagram-image";
-    image.src = dataUrl;
-    image.alt = isStructure ? "Structure diagram" : label === "diagram" ? "Mermaid diagram" : `${label} diagram`;
-    const caption = document.createElement("figcaption");
-    caption.textContent =
-      label === "diagram" ? "Diagram" : `${label.charAt(0).toUpperCase()}${label.slice(1)} diagram`;
-    figure.replaceChildren(image, caption);
-    figure.setAttribute("data-diagram-rendered", "true");
-    rendered += 1;
-  }
-  return { html: template.innerHTML, rendered };
 }
 
 function webImageHtml(result: WebImageResult, subject: string) {

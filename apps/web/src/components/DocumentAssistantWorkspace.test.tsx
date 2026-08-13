@@ -1906,6 +1906,40 @@ test("keeps export single-flight while Word packaging is in progress", async () 
   expect(close).toHaveBeenCalledTimes(1);
 });
 
+test("transferred mermaid fences land as diagram figures, not mermaid source text", () => {
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "chat-transfer-mermaid",
+        title: "LENR milestones",
+        sourceLabel: "Chat response",
+        createdAt: "9:17 AM",
+        content: `# LENR milestones
+
+\`\`\`mermaid
+timeline
+    title Figure 6. Selected international and Chinese LENR milestones
+    1989 : Fleischmann and Pons announce cold fusion
+         : Worldwide replication campaign begins
+\`\`\`
+
+Author-created timeline based on the primary papers.`,
+      }}
+    />,
+  );
+
+  const body = documentBody();
+  expect(body.querySelector(".document-diagram-figure")).toBeInTheDocument();
+  expect(body.querySelector(".document-diagram-pending")).toBeInTheDocument();
+  expect(body.querySelector(".document-code-block")).toBeNull();
+  expect(body.querySelector(".md-code-panel")).toBeNull();
+  expect(documentText()).not.toContain("Fleischmann and Pons announce cold fusion");
+  expect(documentText()).not.toContain("Worldwide replication campaign begins");
+  expect(documentText()).toContain("Author-created timeline based on the primary papers");
+});
+
 test("transferred image papers use content-backed Word-ready pages", async () => {
   const downloadSpy = installDownloadSpy();
 

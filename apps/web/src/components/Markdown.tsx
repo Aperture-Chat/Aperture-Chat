@@ -1,17 +1,18 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { Check, Code2, Copy, Download, Eye, LoaderCircle, Pencil, Workflow, X } from "lucide-react";
+import { Check, Code2, Copy, Download, Eye, LoaderCircle, Pencil, TriangleAlert, Workflow, X } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyCodeToClipboard, triggerBlobDownload } from "../lib/clipboard";
 import {
   imageFallbackUrl,
   imageUrlWithFallback,
-  isMermaidBlock,
+  isVisualDiagramBlock,
   isStewardDiagramBlock,
   mermaidDiagramSource,
   parseMarkdownBlocks,
 } from "../lib/markdown";
-import { diagramTypeLabel, renderMermaidSvg, svgToPngBlob } from "../lib/mermaidRender";
+import { diagramTypeLabel, renderMermaidSvgResult, svgToPngBlob } from "../lib/mermaidRender";
+import { renderMermaidFallbackSvg } from "../lib/mermaidFallback";
 import { DiagramEditorModal } from "./DiagramEditorModal";
 import { StewardDiagramFigure } from "./StewardDiagram";
 import { StableLabel } from "./Primitives";
@@ -44,7 +45,7 @@ function previewBlockWeight(block: MarkdownBlock) {
     case "image":
       return 720;
     case "code":
-      return isMermaidBlock(block.language, block.text) ? 760 : Math.min(block.text.length, 900);
+      return isVisualDiagramBlock(block.language, block.text) ? 760 : Math.min(block.text.length, 900);
     case "table":
       return 520 + block.headers.join(" ").length + block.rows.flat().join(" ").length;
     case "heading":
@@ -245,17 +246,18 @@ export function Markdown({
               />
             );
           }
-          // Mermaid renders as a diagram for every model and provider: tag
-          // aliases and untagged fences opening with Mermaid grammar all
-          // count, not just a verbatim ```mermaid fence.
-          if (isMermaidBlock(block.language, block.text)) {
+          // Diagram fences always mount as a visual figure. Mermaid, type
+          // tags (` ```timeline `), untagged grammar, Graphviz, and PlantUML
+          // all count. The fallback SVG is synchronous so a failed or slow
+          // mermaid.js draw never leaves a Copy/Preview/Edit code panel.
+          if (isVisualDiagramBlock(block.language, block.text)) {
             return (
               <MermaidDiagram
                 defer={deferDiagrams}
                 key={index}
                 onUpdate={onUpdateDiagram}
                 preview={preview}
-                source={mermaidDiagramSource(block.text)}
+                source={mermaidDiagramSource(block.text, block.language)}
               />
             );
           }
@@ -516,14 +518,17 @@ function MermaidDiagram({
 }) {
   const deferredRef = useRef<HTMLElement | null>(null);
   const [shouldRender, setShouldRender] = useState(!defer);
-  const [svg, setSvg] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [exhausted, setExhausted] = useState(false);
+  const [dark, setDark] = useState(isDarkTheme);
+  const fallbackSvg = useMemo(() => renderMermaidFallbackSvg(source, dark), [source, dark]);
+  const [mermaidSvg, setMermaidSvg] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(true);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [pngStatus, setPngStatus] = useState<"idle" | "failed">("idle");
   const [editing, setEditing] = useState(false);
-  const [dark, setDark] = useState(isDarkTheme);
+  const svg = mermaidSvg ?? fallbackSvg;
+  const typeLabel = diagramTypeLabel(source);
 
   useEffect(() => {
     if (!defer || shouldRender) return;
@@ -551,20 +556,25 @@ function MermaidDiagram({
     return () => observer.disconnect();
   }, []);
 
-  // Debounced render keeps streaming cheap: partial sources that fail to parse
-  // leave the last good diagram (or the loading state) in place.
+  // Fallback SVG is synchronous so the figure is a visual on the first paint.
+  // mermaid.js may replace it; a hang or throw keeps the fallback. Code view
+  // is opt-in and this figure is never swapped for a code panel.
   useEffect(() => {
     if (!shouldRender) return;
     let cancelled = false;
+    setMermaidSvg(null);
+    setWaiting(true);
+    setRenderError(null);
     const timer = window.setTimeout(() => {
       void (async () => {
-        const rendered = await renderMermaidSvg(source, dark);
+        const rendered = await renderMermaidSvgResult(source, dark);
         if (cancelled) return;
-        if (rendered) {
-          setSvg(rendered);
-          setFailed(false);
+        setWaiting(false);
+        if (rendered.svg) {
+          setMermaidSvg(rendered.svg);
+          setRenderError(null);
         } else {
-          setFailed(true);
+          setRenderError(rendered.error);
         }
       })();
     }, 200);
@@ -573,13 +583,6 @@ function MermaidDiagram({
       window.clearTimeout(timer);
     };
   }, [source, dark, shouldRender]);
-
-  // A source that stays unparseable (not just mid-stream) falls back to the code view.
-  useEffect(() => {
-    if (!failed || svg) return;
-    const timer = window.setTimeout(() => setExhausted(true), 2400);
-    return () => window.clearTimeout(timer);
-  }, [failed, svg, source]);
 
   async function copySource() {
     try {
@@ -600,7 +603,7 @@ function MermaidDiagram({
     if (!svg) return;
     try {
       const blob = await svgToPngBlob(svg, dark);
-      triggerBlobDownload(blob, `aperture-${diagramTypeLabel(source)}-diagram.png`);
+      triggerBlobDownload(blob, `aperture-${typeLabel}-diagram.png`);
     } catch {
       setPngStatus("failed");
       window.setTimeout(() => setPngStatus("idle"), 2200);
@@ -610,22 +613,19 @@ function MermaidDiagram({
   function downloadSvg() {
     if (!svg) return;
     const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    triggerBlobDownload(blob, `aperture-${diagramTypeLabel(source)}-diagram.svg`);
+    triggerBlobDownload(blob, `aperture-${typeLabel}-diagram.svg`);
   }
 
   if (!shouldRender) {
     return (
-      <figure className="md-diagram-panel is-deferred" ref={deferredRef}>
+      <figure className="md-diagram-panel is-deferred" data-diagram-type={typeLabel} ref={deferredRef}>
         <div className="md-diagram-loading">Diagram loads as you scroll</div>
       </figure>
     );
   }
-  if (!svg && exhausted) {
-    return <MarkdownCodeBlock language="mermaid" preview={preview} text={source} />;
-  }
-  if (!svg) {
+  if (!svg && waiting) {
     return (
-      <figure className="md-diagram-panel is-loading">
+      <figure className="md-diagram-panel is-loading" data-diagram-type={typeLabel}>
         <div className="md-diagram-loading">
           <LoaderCircle className="is-spinning" size={14} />
           <span>Rendering diagram…</span>
@@ -634,11 +634,11 @@ function MermaidDiagram({
     );
   }
   return (
-    <figure className="md-diagram-panel">
+    <figure className="md-diagram-panel" data-diagram-type={typeLabel}>
       <figcaption className="md-code-toolbar">
         <span className="md-code-toolbar-main">
           <Workflow size={15} />
-          <strong>{diagramTypeLabel(source)}</strong>
+          <strong>{typeLabel}</strong>
           <span>diagram</span>
         </span>
         {!preview && <span className="md-code-actions">
@@ -654,24 +654,28 @@ function MermaidDiagram({
               reserve={["Copied", "Failed", "Copy"]}
             />
           </button>
-          <button
-            className="md-code-action"
-            type="button"
-            data-tooltip="Download the diagram as a PNG image"
-            onClick={() => void downloadPng()}
-          >
-            <Download size={14} />
-            <StableLabel label={pngStatus === "failed" ? "Failed" : "PNG"} reserve={["Failed", "PNG"]} />
-          </button>
-          <button
-            className="md-code-action"
-            type="button"
-            data-tooltip="Download the diagram as an SVG file"
-            onClick={downloadSvg}
-          >
-            <Download size={14} />
-            SVG
-          </button>
+          {svg && (
+            <>
+              <button
+                className="md-code-action"
+                type="button"
+                data-tooltip="Download the diagram as a PNG image"
+                onClick={() => void downloadPng()}
+              >
+                <Download size={14} />
+                <StableLabel label={pngStatus === "failed" ? "Failed" : "PNG"} reserve={["Failed", "PNG"]} />
+              </button>
+              <button
+                className="md-code-action"
+                type="button"
+                data-tooltip="Download the diagram as an SVG file"
+                onClick={downloadSvg}
+              >
+                <Download size={14} />
+                SVG
+              </button>
+            </>
+          )}
           <button
             className="md-code-action"
             type="button"
@@ -703,8 +707,16 @@ function MermaidDiagram({
       )}
       {showSource ? (
         <CodeLines lines={source.split("\n")} preview={preview} />
-      ) : (
+      ) : svg ? (
         <div className="md-diagram-canvas" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <p className="md-diagram-notice">
+          <TriangleAlert size={13} />
+          <span>
+            {renderError || "This diagram could not be rendered."} Open Code to inspect the source
+            {onUpdate ? ", or Edit to fix it" : ""}.
+          </span>
+        </p>
       )}
     </figure>
   );

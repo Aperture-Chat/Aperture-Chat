@@ -5878,6 +5878,22 @@ button:disabled {
   border-radius: 0;
 }
 
+.document-diagram-pending,
+.document-diagram-error {
+  margin: 0;
+  padding: 28px 16px;
+  color: #52677a;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  background: #f7fafc;
+}
+
+.document-diagram-error {
+  color: #8a3b16;
+  background: #fff6ee;
+}
+
 /* Manual page breaks in a continuous draft render as a real sheet gap: the
  * canvas behind the paper shows through, with shadowed page edges above and
  * below. Paginated drafts split into separate .document-page sheets instead. */
@@ -6604,6 +6620,12 @@ button:disabled {
   flex: 0 0 auto;
 }
 
+.composer-draft-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
 .send-button {
   width: 38px;
   min-width: 38px;
@@ -7052,44 +7074,57 @@ button:disabled {
 /* Live streamed reply: text writes in top-to-bottom, and the writing edge
  * carries a soft accent-colored flowing glow — a thin animated gradient line
  * under the newest text plus a faint wash rising above it. Display-only
- * chrome; it never sits between the user and the real streamed tokens. */
+ * chrome; it never sits between the user and the real streamed tokens.
+ * The wash and the line share one full-width edge so a leftover "track"
+ * never shows past the bar. */
 .message-stream-live {
   position: relative;
   padding-bottom: 12px;
 }
 
-.message-stream-live::before {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 2px;
-  left: 0;
-  height: 46px;
-  border-radius: 0 0 8px 8px;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--teal) 8%, transparent));
-  pointer-events: none;
-}
-
+.message-stream-live::before,
 .message-stream-live::after {
   content: "";
   position: absolute;
-  right: 14%;
-  bottom: 0;
   left: 0;
-  height: 3px;
-  border-radius: 999px;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 8px,
+    #000 calc(100% - 8px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 8px,
+    #000 calc(100% - 8px),
+    transparent 100%
+  );
+}
+
+.message-stream-live::before {
+  height: 12px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--teal) 10%, transparent)
+  );
+}
+
+.message-stream-live::after {
+  height: 2px;
   background: linear-gradient(
     90deg,
-    transparent,
     var(--teal),
     var(--teal-2),
-    var(--teal),
-    transparent
+    var(--teal)
   );
   background-size: 220% 100%;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--teal) 40%, transparent);
   animation: apx-stream-flow 1.6s linear infinite;
-  pointer-events: none;
 }
 
 @keyframes apx-stream-flow {
@@ -19693,12 +19728,14 @@ button.owner-doc-card:hover {
 }
 
 /* ---------- Composer: prompt improver ---------- */
-/* Pencil with a magic spark, sized like its dictation neighbor. */
+/* Pencil with a magic spark, sized like its dictation neighbor. Hidden until
+   the composer has text so the microphone sits in its place; when a draft
+   appears the mic slides left and the pencil unfolds beside it. */
 .prompt-improve-button {
   display: grid;
   place-items: center;
-  width: 32px;
-  min-width: 32px;
+  width: 0;
+  min-width: 0;
   height: 32px;
   min-height: 32px;
   padding: 0;
@@ -19707,6 +19744,25 @@ button.owner-doc-card:hover {
   background: transparent;
   color: var(--teal-strong);
   box-shadow: none;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: scale(0.72);
+  transform-origin: center;
+  transition:
+    width 280ms var(--ease),
+    min-width 280ms var(--ease),
+    opacity 200ms var(--ease),
+    transform 280ms var(--ease);
+}
+
+.composer-draft-actions.has-text .prompt-improve-button {
+  width: 32px;
+  min-width: 32px;
+  opacity: 1;
+  overflow: visible;
+  pointer-events: auto;
+  transform: scale(1);
 }
 
 .prompt-improve-button:not(:disabled):hover {
@@ -19765,26 +19821,95 @@ button.owner-doc-card:hover {
   }
 }
 
-/* The whole composer glows while the rewrite runs, then settles back the
-   moment the improved prompt lands. */
-.composer.is-improving {
-  border-color: color-mix(in srgb, var(--teal) 70%, var(--border-strong));
-  animation: composer-improve-glow 1.5s var(--ease) infinite;
+/* A quiet teal rail along the composer floor while the rewrite runs. The
+   overlay is inset to the inner border and clipped to the composer radius
+   so the bar follows the rounded bottom instead of spilling past it. */
+.composer-improve-rail {
+  position: absolute;
+  inset: 1px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: calc(var(--radius-lg) - 1px);
+  transition: opacity 800ms var(--ease);
 }
 
-@keyframes composer-improve-glow {
+.composer-improve-rail.is-visible {
+  opacity: 1;
+}
+
+.composer-improve-rail-track,
+.composer-improve-rail-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+}
+
+.composer-improve-rail-track {
+  background: color-mix(in srgb, var(--teal) 16%, transparent);
+}
+
+.composer-improve-rail-fill {
+  display: block;
+  right: auto;
+  width: 0;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: linear-gradient(90deg, var(--teal) 0%, var(--teal-2) 100%);
+  transition: width 90ms linear;
+}
+
+.composer-improve-rail.is-done .composer-improve-rail-fill {
+  transition: width 280ms var(--ease);
+}
+
+.composer-improve-rail.is-running .composer-improve-rail-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 42px;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, #fff 72%, var(--teal-2))
+  );
+  animation: composer-improve-sheen 1.6s var(--ease) infinite;
+}
+
+@keyframes composer-improve-sheen {
   0%,
   100% {
-    box-shadow:
-      var(--shadow),
-      0 0 0 3px color-mix(in srgb, var(--teal) 22%, transparent),
-      0 0 18px color-mix(in srgb, var(--teal) 30%, transparent);
+    opacity: 0.35;
   }
   50% {
-    box-shadow:
-      var(--shadow),
-      0 0 0 5px color-mix(in srgb, var(--teal) 36%, transparent),
-      0 0 34px color-mix(in srgb, var(--teal) 52%, transparent);
+    opacity: 1;
+  }
+}
+
+/* Steady teal ring while the rewrite runs — the rail carries the motion so
+   the composer itself does not pulse. */
+.composer.is-improving {
+  border-color: color-mix(in srgb, var(--teal) 62%, var(--border-strong));
+  box-shadow:
+    var(--shadow),
+    0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-improve-button,
+  .composer-draft-actions.has-text .prompt-improve-button,
+  .composer-improve-rail,
+  .composer-improve-rail-fill,
+  .composer-improve-rail.is-done .composer-improve-rail-fill {
+    transition: none;
+  }
+
+  .prompt-improve-button.is-improving .prompt-improve-icon svg:last-child,
+  .composer-improve-rail.is-running .composer-improve-rail-fill::after {
+    animation: none;
   }
 }
 

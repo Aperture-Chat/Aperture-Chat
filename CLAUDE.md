@@ -7,8 +7,8 @@ every tool or model working in this repository.
 ## Working agreement
 
 - Inspect the current branch and working tree before editing.
-- Treat the live development instance as the review environment: apply the
-  change there after editing, and wait for an explicit ask before committing.
+- Treat the live development instance as the review environment: sync every
+  source change there immediately, and wait for an explicit ask before committing.
 - Keep the requested scope narrow; do not combine unrelated cleanup with a
   feature or fix.
 - Do not fabricate runtime behavior, test evidence, screenshots, or completion.

@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { settleInterruptedThread, targetModelForRequest, type ChatResponseVersion } from "./chatStore";
+import {
+  preservePendingTraceState,
+  resumablePendingAssistant,
+  targetModelForRequest,
+  type ChatResponseVersion,
+} from "./chatStore";
 import type { ChatMessage, ChatThread, ModelConfig } from "./types";
 
 function thread(messages: ChatMessage[]): ChatThread {
@@ -59,45 +64,42 @@ test("honors an explicit agent profile model override", () => {
   ).toBe("agent-client-update");
 });
 
-test("settles a stored pending assistant message into an honest interrupted error", () => {
+test("keeps a stored pending assistant message resumable after reload", () => {
   const pending: ChatMessage = {
     id: "msg-assistant",
     role: "assistant",
-    content: "",
+    content: "Partial draft already streamed.",
     createdAt: "2:25 PM",
     status: "pending",
     startedAtMs: 1000,
   };
-  const settled = settleInterruptedThread(thread([userMessage, pending]));
-  const assistant = settled.messages[1];
-  expect(assistant.status).toBe("error");
-  expect(assistant.content).toContain("interrupted");
-  expect(assistant.content).toContain("Regenerate or resend");
+  const source = thread([userMessage, pending]);
+  expect(resumablePendingAssistant(source)?.id).toBe("msg-assistant");
+  expect(resumablePendingAssistant(source)?.content).toContain("Partial draft");
 });
 
-test("settles pending response versions without touching completed ones", () => {
+test("keeps pending response versions resumable without touching completed ones", () => {
   const versions: ChatResponseVersion[] = [
     { id: "v1", label: "Version 1", content: "Finished draft", status: "ok" },
-    { id: "v2", label: "Version 2", content: "", status: "pending" },
+    { id: "v2", label: "Version 2", content: "New partial", status: "pending" },
   ];
   const message: ChatMessage = {
     id: "msg-assistant",
     role: "assistant",
-    content: "",
+    content: "New partial",
     createdAt: "2:25 PM",
     status: "pending",
     metadata: { responseVersions: versions, activeResponseVersionIndex: 1 },
   };
-  const settled = settleInterruptedThread(thread([userMessage, message]));
-  const assistant = settled.messages[1];
-  expect(assistant.status).toBe("error");
-  const settledVersions = assistant.metadata?.responseVersions as ChatResponseVersion[];
-  expect(settledVersions[0]).toEqual(versions[0]);
-  expect(settledVersions[1].status).toBe("error");
-  expect(settledVersions[1].content).toContain("interrupted");
+  const pending = resumablePendingAssistant(thread([userMessage, message]));
+  expect(pending?.status).toBe("pending");
+  const pendingVersions = pending?.metadata?.responseVersions as ChatResponseVersion[];
+  expect(pendingVersions[0]).toEqual(versions[0]);
+  expect(pendingVersions[1].status).toBe("pending");
+  expect(pendingVersions[1].content).toBe("New partial");
 });
 
-test("leaves threads without pending messages untouched (same reference)", () => {
+test("leaves threads without pending messages untouched", () => {
   const done: ChatMessage = {
     id: "msg-assistant",
     role: "assistant",
@@ -106,5 +108,44 @@ test("leaves threads without pending messages untouched (same reference)", () =>
     status: "ok",
   };
   const source = thread([userMessage, done]);
-  expect(settleInterruptedThread(source)).toBe(source);
+  expect(resumablePendingAssistant(source)).toBeNull();
+});
+
+test("server merge keeps the local pending bubble over an older snapshot", () => {
+  const pending: ChatMessage = {
+    id: "msg-assistant",
+    role: "assistant",
+    content: "Later partial",
+    createdAt: "2:25 PM",
+    status: "pending",
+    startedAtMs: 2000,
+  };
+  const local = thread([userMessage, pending]);
+  const server = thread([
+    userMessage,
+    { ...pending, content: "", startedAtMs: 1000 },
+  ]);
+  const merged = preservePendingTraceState(local, server);
+  expect(merged.messages[1].content).toBe("Later partial");
+  expect(merged.messages[1].status).toBe("pending");
+});
+
+test("a completed server snapshot wins over a stale local pending bubble", () => {
+  const pending: ChatMessage = {
+    id: "msg-assistant",
+    role: "assistant",
+    content: "Stale partial",
+    createdAt: "2:25 PM",
+    status: "pending",
+  };
+  const completed: ChatMessage = {
+    id: "msg-assistant",
+    role: "assistant",
+    content: "Finished on another tab",
+    createdAt: "2:26 PM",
+    status: "ok",
+  };
+  const merged = preservePendingTraceState(thread([userMessage, pending]), thread([userMessage, completed]));
+  expect(merged.messages[1].status).toBe("ok");
+  expect(merged.messages[1].content).toBe("Finished on another tab");
 });
