@@ -116,3 +116,30 @@ use those. Notes below are the non-obvious environment caveats.
  embeddings download `BAAI/bge-small-en-v1.5` via `fastembed` to
  `/opt/aperture-models` on first ingestion (needs outbound network); this is not
  exercised by startup or the hello-world flow.
+
+- **Second repo.** The marketing site lives in the `ApertureChat-Website`
+ repository (static `index.html` / `guide.html`, product reels, and `deploy/`
+ highlight pipeline). This product repo stays `dev` -> `test` -> `main`. The
+ website repo can push `main`, but non-trivial website changes should still use
+ a branch and pull request. Media on the marketing page is cache-busted with a
+ `?v=YYYYMMDD<letter>` query string; bump the letter when replacing a video or
+ poster.
+
+- **VPS is production.** SSH is for build and deploy work the owner requested,
+ not for harvesting data. Never copy production users, password hashes, or the
+ provider-key vault into this environment or any repo. Use synthetic or seeded
+ data when the local app needs to feel populated. The VPS login can run
+ `docker` / `docker compose` without sudo; `sudo` itself needs a password this
+ agent does not have. Back up a live file before overwriting it. Never run
+ destructive commands (`rm -rf`, `docker system prune`, volume deletes) without
+ explicit instruction. Ask before anything outward-facing, irreversible, or
+ outside the current request. Connection details stay in ignored
+ `AGENTS.local.md` or Cursor secrets (secret name `CURSOR_VPS_SSH_KEY`) — never
+ in tracked files, PRs, or chat.
+
+- **Docs drift.** The downloadable role-guide PDFs under
+ `apps/web/public/docs/` (and `docs/aperture-owner-guide.pdf`) include
+ identity-provider and troubleshooting appendices that are not yet in the
+ in-app training decks at `apps/web/src/components/trainingDecks/`. Porting
+ that content is a separate review-worthy task; there is no committed PDF
+ generator.
