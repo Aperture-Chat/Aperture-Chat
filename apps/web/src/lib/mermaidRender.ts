@@ -6,6 +6,9 @@
  * inline SVG does not survive the DOCX export or AI-revision round-trips.
  */
 
+import { renderMermaidFallbackSvg } from "./mermaidFallback";
+import { repairMermaidTimelineSource } from "./mermaidTimeline";
+
 export const MERMAID_FONT_FAMILY =
   '"Plus Jakarta Sans", "SF Pro Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif';
 
@@ -28,9 +31,8 @@ function mermaidConfig(dark: boolean) {
     securityLevel: "strict" as const,
     theme: "base" as const,
     fontFamily: MERMAID_FONT_FAMILY,
-    // A render-time failure must throw so the caller falls back to the code
-    // block; without this, mermaid draws its "Syntax error in text" bomb SVG
-    // and reports success, and the bomb reaches the reader.
+    // A render-time failure must throw so the caller can show an error (or
+    // a timeline fallback) instead of Mermaid's "Syntax error in text" bomb.
     suppressErrorRendering: true,
     // HTML (foreignObject) labels taint the canvas during SVG→PNG
     // rasterization (chat PNG download, Drafts document raster). The
@@ -41,6 +43,14 @@ function mermaidConfig(dark: boolean) {
     // that renders under strict security with SVG text — raw <b>/<i> tags come
     // out as literal text. Auto-wrap keeps long detail lines inside the box.
     markdownAutoWrap: true,
+    fontSize: 16,
+    // Timeline's default textPlacement is foreignObject; that taints PNG
+    // rasterization and is the first thing DOMPurify strips under strict
+    // security. SVG text (tspan) still draws the diagram.
+    timeline: {
+      textPlacement: "tspan",
+      useMaxWidth: true,
+    },
     flowchart: {
       htmlLabels: false,
       curve: "linear" as const,
@@ -111,10 +121,26 @@ export function repairMermaidLabelQuotes(source: string): string {
   return source.replace(/`[^`]*`/g, (span) => span.replace(/"/g, "'"));
 }
 
+export function prepareMermaidSource(source: string): string {
+  return repairMermaidTimelineSource(repairMermaidLabelQuotes(source)).trim();
+}
+
+export type MermaidRenderResult = {
+  svg: string | null;
+  error: string | null;
+};
+
 /** Renders Mermaid source to an SVG string, or null when the source does not
  * parse (partial streaming input, model mistakes). Never throws. */
 export async function renderMermaidSvg(rawSource: string, dark: boolean): Promise<string | null> {
-  const source = repairMermaidLabelQuotes(rawSource);
+  return (await renderMermaidSvgResult(rawSource, dark)).svg;
+}
+
+/** Same as renderMermaidSvg, but keeps a readable error when drawing fails so
+ * the chat figure can explain itself instead of silently becoming a code panel. */
+export async function renderMermaidSvgResult(rawSource: string, dark: boolean): Promise<MermaidRenderResult> {
+  const source = prepareMermaidSource(rawSource);
+  if (!source) return { svg: null, error: "The diagram source is empty." };
   try {
     const mermaid = await loadMermaid();
     const themeKey = dark ? "dark" : "light";
@@ -122,8 +148,6 @@ export async function renderMermaidSvg(rawSource: string, dark: boolean): Promis
       mermaid.initialize(mermaidConfig(dark));
       mermaidActiveTheme = themeKey;
     }
-    const valid = await mermaid.parse(source, { suppressErrors: true });
-    if (!valid) return null;
     const renderNodeId = `aperture-diagram-${++mermaidRenderId}`;
     try {
       const rendered = await mermaid.render(renderNodeId, source);
@@ -134,18 +158,32 @@ export async function renderMermaidSvg(rawSource: string, dark: boolean): Promis
         rendered.svg.includes('aria-roledescription="error"') ||
         rendered.svg.includes("Syntax error in text")
       ) {
-        return null;
+        return fallbackMermaidSvg(source, dark, "Mermaid could not parse this diagram.");
       }
-      return rendered.svg;
+      return { svg: rendered.svg, error: null };
     } finally {
       // Mermaid parks a measuring container (id "d<render id>") in
       // document.body and leaves it behind when render fails — without this
       // cleanup a failed render strands an error SVG at the end of the page.
       document.getElementById(`d${renderNodeId}`)?.remove();
     }
-  } catch {
-    return null;
+  } catch (error) {
+    return fallbackMermaidSvg(source, dark, mermaidErrorMessage(error));
   }
+}
+
+function fallbackMermaidSvg(source: string, dark: boolean, error: string): MermaidRenderResult {
+  const svg = renderMermaidFallbackSvg(source, dark, MERMAID_FONT_FAMILY);
+  return svg ? { svg, error: null } : { svg: null, error };
+}
+
+function mermaidErrorMessage(error: unknown): string {
+  if (typeof error === "string" && error.trim()) return error.trim().slice(0, 240);
+  if (error instanceof Error && error.message.trim()) {
+    const first = error.message.split("\n")[0]?.trim() ?? error.message;
+    return first.slice(0, 240);
+  }
+  return "Mermaid could not render this diagram.";
 }
 
 function svgDimensions(svgMarkup: string) {

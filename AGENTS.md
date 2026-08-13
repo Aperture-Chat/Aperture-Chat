@@ -21,6 +21,14 @@ be read by anyone.
 - Do not add generated success states, fabricated provider responses, or other
   behavior that makes the product appear more complete than it is.
 
+## Live development preview
+
+When a live development instance is configured in ignored local instructions,
+sync every source change there immediately and rebuild the affected container
+so the owner can review it. Do not wait to be asked. Do not commit, push, or
+open a pull request until the owner asks. Never copy local connection details
+into this file or into chat.
+
 ## Contribution flow
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md). In summary:
