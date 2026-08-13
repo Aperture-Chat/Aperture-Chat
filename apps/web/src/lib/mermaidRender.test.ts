@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { repairMermaidLabelQuotes } from "./mermaidRender";
+import { prepareMermaidSource, repairMermaidLabelQuotes } from "./mermaidRender";
 
 test("interior double quotes inside markdown-string labels become apostrophes", () => {
   const source = 'flowchart TD\n  WATCH["`⚠ **RISK**\nIRS "uncrossing" doctrine\n(U.S. v. Grace)`"]\n  A --> WATCH';
@@ -13,4 +13,12 @@ test("interior double quotes inside markdown-string labels become apostrophes", 
 test("sources without markdown strings pass through byte-identical", () => {
   const source = 'flowchart LR\n  A["plain label"] -->|go| B\n  C -. "edge label" .-> B';
   expect(repairMermaidLabelQuotes(source)).toBe(source);
+});
+
+test("timeline period lines get a space before the colon so Mermaid can parse them", () => {
+  const repaired = prepareMermaidSource(
+    "timeline\n    title Milestones\n    1989: Fleischmann and Pons\n         : DOE: negative review",
+  );
+  expect(repaired).toContain("1989 : Fleischmann and Pons");
+  expect(repaired).toContain(": DOE — negative review");
 });

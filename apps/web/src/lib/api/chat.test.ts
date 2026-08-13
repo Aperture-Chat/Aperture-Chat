@@ -179,4 +179,54 @@ describe("sendChatStream resume hardening", () => {
     expect(error.message).toBe("The response was cancelled before it finished.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  test("replays already-streamed text on the first request after a reload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sse('data: {"delta":"Second half."}\n\ndata: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n'),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await sendChatStream("user-1", {
+      ...request,
+      initialText: "First half.",
+      stallTimeoutMs: 0,
+    });
+
+    expect(reply.content).toBe("First half.\n\nSecond half.");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages).toEqual([
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "First half." },
+      { role: "user", content: expect.stringContaining("Continue exactly where the previous answer stopped") },
+    ]);
+  });
+
+  test("aborts a silent stream and resumes from the partial output", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        (_url: string, init?: RequestInit) =>
+          new Promise((resolve, reject) => {
+            const abort = () => reject(new DOMException("Aborted", "AbortError"));
+            if (init?.signal?.aborted) {
+              abort();
+              return;
+            }
+            init?.signal?.addEventListener("abort", abort, { once: true });
+          }),
+      )
+      .mockResolvedValueOnce(
+        sse('data: {"delta":"Recovered after stall."}\n\ndata: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n'),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await sendChatStream("user-1", {
+      ...request,
+      resumeDelaysMs: [0],
+      stallTimeoutMs: 25,
+    });
+
+    expect(reply.content).toBe("Recovered after stall.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

@@ -1,7 +1,10 @@
 import { expect, test } from "vitest";
 import {
+  isMermaidBlock,
+  isVisualDiagramBlock,
   markdownToDocumentHtml,
   markdownToPlainText,
+  mermaidDiagramSource,
   parseMarkdownBlocks,
   replaceDiagramFence,
   unwrapFullDocumentFence,
@@ -34,6 +37,13 @@ test("pipe tables render as editable document tables", () => {
 test("unwrapFullDocumentFence leaves replies containing nested fences alone", () => {
   const reply = "```\nouter\n```python\ninner\n```\n```";
   expect(unwrapFullDocumentFence(reply)).toBe(reply);
+});
+
+test("unwrapFullDocumentFence does not unwrap a reply that is only a diagram fence", () => {
+  const mermaid = "```mermaid\ntimeline\n    1989 : Cold fusion announced\n```";
+  expect(unwrapFullDocumentFence(mermaid)).toBe(mermaid);
+  const tagged = "```timeline\n1989 : Cold fusion announced\n```";
+  expect(unwrapFullDocumentFence(tagged)).toBe(tagged);
 });
 
 test("preserves underscores and query strings inside document hyperlinks", () => {
@@ -103,14 +113,28 @@ test("document HTML and plain text keep display math as honest source", () => {
   expect(markdownToPlainText("$$E = mc^2$$")).toBe("$$E = mc^2$$");
 });
 
-test("mermaid fences become document diagram figures with visible source fallback", () => {
+test("mermaid fences become document diagram figures without mermaid source text", () => {
   const html = markdownToDocumentHtml("# Bracket\n\n```mermaid\nflowchart LR\n  A --> B\n```");
   expect(html).toContain('class="document-media-block document-diagram-figure"');
   expect(html).toContain(`data-diagram-source="${encodeURIComponent("flowchart LR\n  A --> B")}"`);
-  expect(html).toContain("flowchart LR");
+  expect(html).toContain("document-diagram-pending");
+  expect(html).not.toContain("document-diagram-source");
+  expect(html).not.toContain(">flowchart LR");
   expect(markdownToDocumentHtml("```python\nprint('hi')\n```")).not.toContain(
     "document-diagram-figure",
   );
+});
+
+test("timeline language tags and plantuml fences are diagram figures, not code", () => {
+  expect(isMermaidBlock("timeline", "1989 : Cold fusion announced")).toBe(true);
+  expect(mermaidDiagramSource("1989 : Cold fusion announced", "timeline")).toBe(
+    "timeline\n1989 : Cold fusion announced",
+  );
+  expect(isVisualDiagramBlock("plantuml", "@startuml\nA --> B\n@enduml")).toBe(true);
+  const html = markdownToDocumentHtml("```timeline\n1989 : Cold fusion announced\n```");
+  expect(html).toContain("document-diagram-figure");
+  expect(html).toContain("document-diagram-pending");
+  expect(html).not.toContain("1989 : Cold fusion announced");
 });
 
 test("replaceDiagramFence swaps only the matching diagram block", () => {
@@ -156,7 +180,7 @@ test("steward-diagram fences become structure diagram figures in documents", () 
   expect(html).toContain('class="document-media-block document-diagram-figure"');
   expect(html).toContain('data-diagram-kind="structure"');
   expect(html).toContain(`data-diagram-source="${encodeURIComponent(body)}"`);
-  // The honest fallback stays visible until the client pass rasterizes it.
-  expect(html).toContain("document-diagram-source");
+  expect(html).toContain("document-diagram-pending");
+  expect(html).not.toContain("document-diagram-source");
   expect(markdownToDocumentHtml("```json\n{}\n```")).not.toContain("data-diagram-kind");
 });

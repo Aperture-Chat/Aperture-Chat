@@ -258,6 +258,7 @@ const STOPPED_RESPONSE_MESSAGE =
   "You stopped this response before it finished. Regenerate or resend the message to run it again.";
 
 const STREAM_RENDER_INTERVAL_MS = 80;
+const STREAM_PERSIST_INTERVAL_MS = 2500;
 
 function createThrottledStreamUpdate(render: (fullText: string) => void) {
   let latest = "";
@@ -286,6 +287,46 @@ function createThrottledStreamUpdate(render: (fullText: string) => void) {
       timer = undefined;
     },
   };
+}
+
+function createThrottledPersist(save: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let lastSavedAt = 0;
+  const flush = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    lastSavedAt = Date.now();
+    save();
+  };
+  return {
+    touch() {
+      const remaining = STREAM_PERSIST_INTERVAL_MS - (Date.now() - lastSavedAt);
+      if (remaining <= 0) {
+        flush();
+      } else if (timer === undefined) {
+        timer = setTimeout(flush, remaining);
+      }
+    },
+    cancel() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
+function withStreamedPendingContent(message: ChatMessage, fullText: string): ChatMessage {
+  const rawVersions = message.metadata?.responseVersions;
+  if (Array.isArray(rawVersions) && rawVersions.length > 0) {
+    const versions = responseVersionsForMessage(message);
+    return withResponseVersions(
+      message,
+      versions.map((version, index, currentVersions) =>
+        index === currentVersions.length - 1 ? { ...version, content: fullText } : version,
+      ),
+      versions.length - 1,
+    );
+  }
+  return { ...message, content: fullText };
 }
 
 function streamedFailureContent(
@@ -320,51 +361,17 @@ function actionableRequestMessage(error: ChatRequestError): string {
   return error.message;
 }
 
-const INTERRUPTED_RESPONSE_MESSAGE =
-  "This response was interrupted before it finished — the page was closed or reloaded while the model was still working, so the run did not complete. Regenerate or resend the message to run it again.";
-
 /**
- * A stored "pending" assistant message is only honest while the session that
- * started the request is alive; the completion request dies with its browser
- * session. When threads hydrate (page load, persona switch, or server merge
- * for threads this session is not actively sending), settle leftover pending
- * state into an explicit interrupted error so the activity trace never claims
- * work that is no longer running.
+ * The in-browser SSE request dies on refresh, but the partial answer is
+ * kept as pending so the store can reopen the same completion and continue.
  */
-function settleInterruptedMessage(message: ChatMessage): ChatMessage {
-  if (message.role !== "assistant") return message;
-  let next = message;
-  const rawVersions = next.metadata?.responseVersions;
-  if (
-    Array.isArray(rawVersions) &&
-    rawVersions.some((version) => isChatResponseVersion(version) && version.status === "pending")
-  ) {
-    next = {
-      ...next,
-      metadata: {
-        ...(next.metadata ?? {}),
-        responseVersions: rawVersions.map((version) =>
-          isChatResponseVersion(version) && version.status === "pending"
-            ? { ...version, status: "error" as const, content: INTERRUPTED_RESPONSE_MESSAGE }
-            : version,
-        ),
-      },
-    };
+export function resumablePendingAssistant(thread: ChatThread): ChatMessage | null {
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    const message = thread.messages[index];
+    const active = messageWithActiveResponseVersion(message);
+    if (active.role === "assistant" && active.status === "pending") return message;
   }
-  if (next.status === "pending") {
-    next = { ...next, status: "error", content: INTERRUPTED_RESPONSE_MESSAGE };
-  }
-  return next;
-}
-
-export function settleInterruptedThread(thread: ChatThread): ChatThread {
-  let changed = false;
-  const messages = thread.messages.map((message) => {
-    const settled = settleInterruptedMessage(message);
-    if (settled !== message) changed = true;
-    return settled;
-  });
-  return changed ? { ...thread, messages } : thread;
+  return null;
 }
 
 function isThreadArray(value: unknown): value is ChatThread[] {
@@ -388,7 +395,7 @@ function loadThreads(persona: string): ChatThread[] {
       if (isThreadArray(parsed) && parsed.length > 0) {
         return parsed
           .filter((thread) => !thread.owner_user_id || thread.owner_user_id === persona)
-          .map((thread) => settleInterruptedThread(normalizeThread(thread)));
+          .map((thread) => normalizeThread(thread));
       }
     }
   } catch {
@@ -616,9 +623,11 @@ function mergeServerThreads(
   return [...ownedServerThreads, ...localOnly].map(normalizeThread);
 }
 
-function preservePendingTraceState(current: ChatThread, saved: ChatThread): ChatThread {
+export function preservePendingTraceState(current: ChatThread, saved: ChatThread): ChatThread {
   const pendingById = new Map(
-    current.messages.filter((message) => message.status === "pending").map((message) => [message.id, message]),
+    current.messages
+      .filter((message) => messageWithActiveResponseVersion(message).status === "pending")
+      .map((message) => [message.id, message]),
   );
   if (pendingById.size === 0) return saved;
 
@@ -627,16 +636,94 @@ function preservePendingTraceState(current: ChatThread, saved: ChatThread): Chat
     messages: saved.messages.map((message) => {
       const pending = pendingById.get(message.id);
       if (!pending) return message;
-      return {
-        ...message,
-        content: pending.content,
-        status: pending.status,
-        citations: pending.citations,
-        activityTrace: pending.activityTrace,
-        startedAtMs: pending.startedAtMs,
-      };
+      // A completed server snapshot from another tab wins over a stale local
+      // pending bubble so a finished answer is never reopened as in-flight.
+      if (messageWithActiveResponseVersion(message).status === "ok") return message;
+      return pending;
     }),
   };
+}
+
+function wireHistoryForPendingResume(thread: ChatThread, pendingMessage: ChatMessage): ChatWireMessage[] {
+  const versions = responseVersionsForMessage(pendingMessage);
+  const activeIndex = activeResponseVersionIndex(pendingMessage);
+  const activeVersion = versions[activeIndex];
+  const regeneratedFromUserId = activeVersion?.metadata?.regeneratedFromUserMessageId;
+  if (typeof regeneratedFromUserId === "string") {
+    const priorUserIndex = thread.messages.findIndex((message) => message.id === regeneratedFromUserId);
+    if (priorUserIndex >= 0) {
+      const priorVersion =
+        versions.find((version, index) => index !== activeIndex && version.status === "ok") ?? versions[0];
+      const qualitySource: ChatMessage = {
+        ...pendingMessage,
+        content: priorVersion?.content ?? "",
+        status: "ok",
+      };
+      return [
+        regenerationQualityMessage(qualitySource),
+        ...wireMessagesFrom(thread.messages.slice(0, priorUserIndex + 1)),
+      ].filter((message): message is ChatWireMessage => Boolean(message));
+    }
+  }
+  return wireMessagesFrom(thread.messages);
+}
+
+function finalizeAssistantMessage(
+  message: ChatMessage,
+  patch: {
+    content: string;
+    status: "ok" | "error";
+    citations?: ChatMessage["citations"];
+    usage?: ChatMessage["usage"];
+    memoryUsed?: number;
+    memorySaved?: ChatMessage["memorySaved"];
+    completed: PlatformTimestamp;
+    executedAt?: string | null;
+    durationMs: number | null;
+    failureNotice?: string | null;
+  },
+): ChatMessage {
+  const notice = patch.failureNotice;
+  const applied = {
+    content: patch.content,
+    status: patch.status,
+    citations: patch.citations ?? message.citations,
+    usage: patch.usage ?? null,
+    memoryUsed: patch.memoryUsed,
+    memorySaved: patch.memorySaved,
+    createdAt: patch.completed.label,
+    createdAtIso: patch.completed.iso,
+    executedAt: patch.executedAt ?? message.executedAt,
+    completedAt: patch.completed.iso,
+    durationMs: patch.durationMs,
+    metadata: {
+      ...(message.metadata ?? {}),
+      clockSource: patch.completed.source,
+      ...(notice ? { failureNotice: notice } : { failureNotice: undefined }),
+    },
+  };
+  const rawVersions = message.metadata?.responseVersions;
+  if (Array.isArray(rawVersions) && rawVersions.length > 0) {
+    const versions = responseVersionsForMessage(message);
+    return withResponseVersions(
+      message,
+      versions.map((version, index, currentVersions) =>
+        index === currentVersions.length - 1
+          ? {
+              ...version,
+              ...applied,
+              metadata: {
+                ...(version.metadata ?? {}),
+                clockSource: patch.completed.source,
+                ...(notice ? { failureNotice: notice } : { failureNotice: undefined }),
+              },
+            }
+          : version,
+      ),
+      versions.length - 1,
+    );
+  }
+  return { ...message, ...applied };
 }
 
 function wireMessagesFrom(messages: ChatMessage[]): ChatWireMessage[] {
@@ -769,6 +856,9 @@ export function useChatStore(
   // One in-flight completion request per thread. Stop aborts the fetch, which
   // also closes the connection so the API cancels the provider work.
   const activeSendControllers = useRef<Map<string, { controller: AbortController; stopped: boolean }>>(new Map());
+  // Pending assistant ids already handed to continuePendingAssistant so a
+  // thread-list rerender cannot start a second completion for the same bubble.
+  const resumedPendingIds = useRef(new Set<string>());
 
   const setThreadSending = useCallback((threadId: string, sending: boolean) => {
     const next = new Set(sendingThreadIdsRef.current);
@@ -790,6 +880,7 @@ export function useChatStore(
     if (!enabled) return;
     if (hydratedPersona.current === persona) return;
     hydratedPersona.current = persona;
+    resumedPendingIds.current = new Set();
     const next = withBlankChat(loadThreads(persona), data, fallbackModel);
     setThreads(next.threads);
     setActiveId(next.activeId);
@@ -806,9 +897,10 @@ export function useChatStore(
       .then((serverThreads) => {
         if (!active || hydrationRequest.current !== requestId) return;
         const current = threadsRef.current;
-        const merged = mergeServerThreads(current, serverThreads, persona).map((thread) =>
-          sendingThreadIdsRef.current.has(thread.id) ? thread : settleInterruptedThread(thread),
-        );
+        const merged = mergeServerThreads(current, serverThreads, persona).map((thread) => {
+          const local = current.find((item) => item.id === thread.id);
+          return local ? preservePendingTraceState(local, thread) : thread;
+        });
         const next = withBlankChat(merged, data, fallbackModel);
         const activeThread = current.find((thread) => thread.id === activeIdRef.current);
         setThreads(next.threads);
@@ -870,6 +962,190 @@ export function useChatStore(
     },
     [enabled, persona],
   );
+
+  const continuePendingAssistant = useCallback(
+    (thread: ChatThread, pendingMessage: ChatMessage) => {
+      const targetId = thread.id;
+      if (!enabled || sendingThreadIdsRef.current.has(targetId)) return;
+      const activePending = messageWithActiveResponseVersion(pendingMessage);
+      const pendingIndex = thread.messages.findIndex((message) => message.id === pendingMessage.id);
+      let priorUser: ChatMessage | undefined;
+      for (let index = pendingIndex - 1; index >= 0; index -= 1) {
+        if (thread.messages[index].role === "user") {
+          priorUser = thread.messages[index];
+          break;
+        }
+      }
+      const runtime = runtimeFromMessage(activePending) ?? runtimeFromMessage(priorUser);
+      const targetModel = targetModelForRequest(enabledModels, thread.model_id, fallbackModel, runtime);
+      if (!targetModel) return;
+
+      const files = priorUser?.attachments ?? [];
+      const initialText = activePending.content ?? "";
+      const wireHistory = wireHistoryForPendingResume(thread, pendingMessage);
+
+      setThreadSending(targetId, true);
+      void (async () => {
+        const sendControl = { controller: new AbortController(), stopped: false };
+        activeSendControllers.current.set(targetId, sendControl);
+        let streamedText = initialText;
+        const streamRenderer = createThrottledStreamUpdate((fullText) => {
+          setThreads((current) =>
+            current.map((currentThread) =>
+              currentThread.id !== targetId
+                ? currentThread
+                : {
+                    ...currentThread,
+                    messages: currentThread.messages.map((message) =>
+                      message.id === pendingMessage.id ? withStreamedPendingContent(message, fullText) : message,
+                    ),
+                  },
+            ),
+          );
+        });
+        const streamPersist = createThrottledPersist(() => {
+          const current = threadsRef.current.find((item) => item.id === targetId);
+          if (current) void persistThread(current);
+        });
+        try {
+          const reply = await sendChatStream(persona, {
+            model: targetModel,
+            messages: wireHistory,
+            initialText,
+            signal: sendControl.controller.signal,
+            onDelta: (fullText) => {
+              streamedText = fullText;
+              streamRenderer.push(fullText);
+              streamPersist.touch();
+            },
+            runtime: {
+              ...runtime,
+              surface: "chat",
+              threadId: targetId,
+              clientStartedAt: activePending.executedAt ?? activePending.createdAtIso ?? undefined,
+              attachmentIds: files.map((file) => file.id).filter((id): id is string => Boolean(id)),
+              attachmentNames: files.map((file) => file.name),
+              contextAttachmentIds: contextImageAttachmentIds(
+                thread.messages.slice(0, Math.max(pendingIndex, 0)),
+              ),
+            },
+          });
+          streamRenderer.cancel();
+          streamPersist.cancel();
+          const completed = await platformTimestamp(persona);
+          const durationMs =
+            activePending.startedAtMs != null ? Math.max(0, Date.now() - activePending.startedAtMs) : null;
+          let savedThread: ChatThread = {
+            ...thread,
+            updated_at: completed.label,
+            messages: thread.messages.map((message) =>
+              message.id === pendingMessage.id
+                ? finalizeAssistantMessage(message, {
+                    content: reply.content,
+                    status: "ok",
+                    citations: reply.citations,
+                    usage: reply.usage ?? null,
+                    memoryUsed: reply.memoryUsed,
+                    memorySaved: reply.memorySaved,
+                    completed,
+                    executedAt: activePending.executedAt,
+                    durationMs,
+                  })
+                : message,
+            ),
+          };
+          setThreads((current) =>
+            current.map((currentThread) => {
+              if (currentThread.id !== targetId) return currentThread;
+              savedThread = {
+                ...currentThread,
+                updated_at: completed.label,
+                messages: currentThread.messages.map((message) =>
+                  message.id === pendingMessage.id
+                    ? finalizeAssistantMessage(message, {
+                        content: reply.content,
+                        status: "ok",
+                        citations: reply.citations,
+                        usage: reply.usage ?? null,
+                        memoryUsed: reply.memoryUsed,
+                        memorySaved: reply.memorySaved,
+                        completed,
+                        executedAt: activePending.executedAt,
+                        durationMs,
+                      })
+                    : message,
+                ),
+              };
+              return savedThread;
+            }),
+          );
+          persistThread(savedThread);
+        } catch (error: unknown) {
+          streamRenderer.cancel();
+          streamPersist.cancel();
+          const completed = await platformTimestamp(persona);
+          const durationMs =
+            activePending.startedAtMs != null ? Math.max(0, Date.now() - activePending.startedAtMs) : null;
+          const failure = streamedFailureContent(error, sendControl.stopped, streamedText);
+          let savedThread: ChatThread = {
+            ...thread,
+            updated_at: completed.label,
+            messages: thread.messages.map((message) =>
+              message.id === pendingMessage.id
+                ? finalizeAssistantMessage(message, {
+                    content: failure.content,
+                    status: "error",
+                    completed,
+                    executedAt: activePending.executedAt,
+                    durationMs,
+                    failureNotice: failure.notice,
+                  })
+                : message,
+            ),
+          };
+          setThreads((current) =>
+            current.map((currentThread) => {
+              if (currentThread.id !== targetId) return currentThread;
+              savedThread = {
+                ...currentThread,
+                updated_at: completed.label,
+                messages: currentThread.messages.map((message) =>
+                  message.id === pendingMessage.id
+                    ? finalizeAssistantMessage(message, {
+                        content: failure.content,
+                        status: "error",
+                        completed,
+                        executedAt: activePending.executedAt,
+                        durationMs,
+                        failureNotice: failure.notice,
+                      })
+                    : message,
+                ),
+              };
+              return savedThread;
+            }),
+          );
+          persistThread(savedThread);
+        } finally {
+          activeSendControllers.current.delete(targetId);
+          setThreadSending(targetId, false);
+        }
+      })();
+    },
+    [enabled, enabledModels, fallbackModel, persistThread, persona, setThreadSending],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    for (const thread of threads) {
+      const pending = resumablePendingAssistant(thread);
+      if (!pending) continue;
+      if (sendingThreadIdsRef.current.has(thread.id)) continue;
+      if (resumedPendingIds.current.has(pending.id)) continue;
+      resumedPendingIds.current.add(pending.id);
+      continuePendingAssistant(thread, pending);
+    }
+  }, [continuePendingAssistant, enabled, threads]);
 
   const selectThread = useCallback((id: string) => {
     setActiveId(id);
@@ -1161,6 +1437,7 @@ export function useChatStore(
         };
         const nextVersions = [...versions, nextVersion];
         const pendingMessage = withResponseVersions(sourceMessage, nextVersions, nextVersions.length - 1);
+        resumedPendingIds.current.add(pendingMessage.id);
         const regeneratedMessages = sourceThread.messages.map((message, index) =>
           index === sourceIndex ? pendingMessage : message,
         );
@@ -1189,21 +1466,15 @@ export function useChatStore(
                 : {
                     ...thread,
                     messages: thread.messages.map((message) =>
-                      message.id === sourceMessage.id
-                        ? withResponseVersions(
-                            message,
-                            responseVersionsForMessage(message).map((version, index, currentVersions) =>
-                              index === currentVersions.length - 1
-                                ? { ...version, content: fullText }
-                                : version,
-                            ),
-                            responseVersionsForMessage(message).length - 1,
-                          )
-                        : message,
+                      message.id === sourceMessage.id ? withStreamedPendingContent(message, fullText) : message,
                     ),
                   },
             ),
           );
+        });
+        const streamPersist = createThrottledPersist(() => {
+          const current = threadsRef.current.find((item) => item.id === targetId);
+          if (current) void persistThread(current);
         });
 
         try {
@@ -1214,6 +1485,7 @@ export function useChatStore(
             onDelta: (fullText) => {
               streamedText = fullText;
               streamRenderer.push(fullText);
+              streamPersist.touch();
             },
             runtime: {
               ...runtime,
@@ -1226,6 +1498,7 @@ export function useChatStore(
             },
           });
           streamRenderer.cancel();
+          streamPersist.cancel();
           const completed = await platformTimestamp(persona);
           const durationMs = timestampDurationMs(started, completed);
           let savedThread: ChatThread = {
@@ -1307,6 +1580,7 @@ export function useChatStore(
           persistThread(savedThread);
         } catch (error: unknown) {
           streamRenderer.cancel();
+          streamPersist.cancel();
           const completed = await platformTimestamp(persona);
           const durationMs = timestampDurationMs(started, completed);
           const failure = streamedFailureContent(error, sendControl.stopped, streamedText);
@@ -1475,6 +1749,7 @@ export function useChatStore(
           metadata: { clockSource: started.source, ...(storedRuntime ? { chatRuntime: storedRuntime } : {}) },
         };
         const pendingId = uid("msg");
+        resumedPendingIds.current.add(pendingId);
         const pendingMessage: ChatMessage = {
           id: pendingId,
           role: "assistant",
@@ -1515,11 +1790,15 @@ export function useChatStore(
                 : {
                     ...currentThread,
                     messages: currentThread.messages.map((message) =>
-                      message.id === pendingId ? { ...message, content: fullText } : message,
+                      message.id === pendingId ? withStreamedPendingContent(message, fullText) : message,
                     ),
                   },
             ),
           );
+        });
+        const streamPersist = createThrottledPersist(() => {
+          const current = threadsRef.current.find((item) => item.id === targetId);
+          if (current) void persistThread(current);
         });
 
         try {
@@ -1530,6 +1809,7 @@ export function useChatStore(
             onDelta: (fullText) => {
               streamedText = fullText;
               streamRenderer.push(fullText);
+              streamPersist.touch();
             },
             runtime: {
               ...runtime,
@@ -1542,6 +1822,7 @@ export function useChatStore(
             },
           });
           streamRenderer.cancel();
+          streamPersist.cancel();
           const completed = await platformTimestamp(persona);
           const durationMs = timestampDurationMs(started, completed);
           let savedThread: ChatThread = {
@@ -1627,6 +1908,7 @@ export function useChatStore(
           }
         } catch (error: unknown) {
           streamRenderer.cancel();
+          streamPersist.cancel();
           const completed = await platformTimestamp(persona);
           const durationMs = timestampDurationMs(started, completed);
           const failure = streamedFailureContent(error, sendControl.stopped, streamedText);

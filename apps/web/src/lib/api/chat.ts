@@ -262,6 +262,9 @@ const STREAM_CONTINUATION_PROMPT =
  */
 const MAX_STREAM_RESUME_ATTEMPTS = 20;
 const STREAM_RESUME_BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
+/** Abort a streaming attempt when no bytes — including SSE keep-alives —
+ * arrive. Idle thinking is not a stall; the API comments every 10s. */
+const STREAM_STALL_MS = 45_000;
 
 function resumeBackoff(attempt: number, delays: number[]): number {
   return delays[Math.min(Math.max(attempt - 1, 0), delays.length - 1)] ?? 0;
@@ -283,6 +286,36 @@ function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+/** Watchdog for a silent TCP/SSE socket. Any received chunk, including
+ * keep-alive comments, resets the timer. timeoutMs <= 0 disables it. */
+function createStallWatchdog(timeoutMs: number, onStall: () => void) {
+  if (timeoutMs <= 0) {
+    return { bump() {}, didStall: () => false, stop() {} };
+  }
+  let stalled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bump = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      stalled = true;
+      onStall();
+    }, timeoutMs);
+  };
+  bump();
+  return {
+    bump,
+    didStall: () => stalled,
+    stop() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
 /**
  * Matches the API's segment join: continuation text flows straight on when
  * the partial ends with whitespace, otherwise starts a new paragraph.
@@ -301,19 +334,34 @@ export async function sendChatStream(
     runtime?: ChatRuntimeOptions;
     signal?: AbortSignal;
     onDelta?: (fullText: string) => void;
+    /**
+     * Already-streamed assistant text, used after a page reload or a dropped
+     * connection so the next attempt continues instead of starting over.
+     */
+    initialText?: string;
     /** Test hook: overrides the reconnect backoff schedule. */
     resumeDelaysMs?: number[];
+    /** Test hook: overrides the no-bytes stall timeout. 0 disables it. */
+    stallTimeoutMs?: number;
   },
 ): Promise<ChatAssistantReply> {
-  const { model, messages, runtime, signal, onDelta, resumeDelaysMs = STREAM_RESUME_BACKOFF_MS } = options;
-  let fullText = "";
+  const {
+    model,
+    messages,
+    runtime,
+    signal,
+    onDelta,
+    initialText = "",
+    resumeDelaysMs = STREAM_RESUME_BACKOFF_MS,
+    stallTimeoutMs = STREAM_STALL_MS,
+  } = options;
+  let fullText = initialText;
   let stalledAttempts = 0;
 
-  // A generation ends only three ways: the completion marker arrives, the
-  // provider reports a non-retryable failure, or the user hits stop. Idle
-  // periods never end it — reasoning models legitimately go silent while they
-  // think — and dropped connections resume automatically, re-sending the
-  // partial output as context so the model continues where it stopped.
+  // A generation ends when the completion marker arrives, the provider
+  // reports a non-retryable failure, or the user hits stop. Thinking time
+  // with keep-alives is not a stall. A socket that goes silent — no deltas
+  // and no keep-alives — is aborted and resumed with the partial text.
   while (true) {
     const progressBefore = fullText.length;
     try {
@@ -329,6 +377,7 @@ export async function sendChatStream(
         runtime,
         signal,
         baseText: fullText,
+        stallTimeoutMs,
         onText: (text) => {
           fullText = text;
         },
@@ -360,16 +409,18 @@ async function streamChatOnce(
     runtime?: ChatRuntimeOptions;
     signal?: AbortSignal;
     baseText: string;
+    stallTimeoutMs: number;
     onText: (fullText: string) => void;
     onDelta?: (fullText: string) => void;
   },
 ): Promise<ChatAssistantReply> {
-  const { model, messages, runtime, signal, baseText, onText, onDelta } = options;
+  const { model, messages, runtime, signal, baseText, stallTimeoutMs, onText, onDelta } = options;
   const controller = new AbortController();
   if (signal) {
     if (signal.aborted) controller.abort();
     else signal.addEventListener("abort", () => controller.abort(), { once: true });
   }
+  const watchdog = createStallWatchdog(stallTimeoutMs, () => controller.abort());
   let fullText = baseText;
   // Prepended to the first delta of a resumed attempt; empty on a fresh run.
   let joiner = segmentJoiner(baseText);
@@ -386,6 +437,7 @@ async function streamChatOnce(
       body: JSON.stringify(chatRequestBody(model, messages, runtime, true)),
       signal: controller.signal,
     });
+    watchdog.bump();
 
     if (!response.ok) {
       const detail = await readApiError(response);
@@ -465,6 +517,7 @@ async function streamChatOnce(
 
     while (!doneEventSeen) {
       const chunk = await reader.read();
+      watchdog.bump();
       if (chunk.done) {
         buffer += decoder.decode();
         break;
@@ -493,9 +546,16 @@ async function streamChatOnce(
     return { content: fullText, citations, usage, memoryUsed, memorySaved };
   } catch (error) {
     if (error instanceof ChatRequestError) throw error;
-    if (error instanceof DOMException && error.name === "AbortError") {
-      // Only the user's stop aborts this request; there is no idle timeout.
-      throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, fullText);
+    if (isAbortError(error)) {
+      if (signal?.aborted) {
+        throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, fullText);
+      }
+      throw new ChatRequestError(
+        "The chat stream stalled before the completion marker arrived.",
+        undefined,
+        fullText,
+        true,
+      );
     }
     throw new ChatRequestError(
       "Could not reach the model. Check your connection and try again.",
@@ -503,6 +563,8 @@ async function streamChatOnce(
       fullText,
       true,
     );
+  } finally {
+    watchdog.stop();
   }
 }
 

@@ -24,10 +24,10 @@ be read by anyone.
 ## Live development preview
 
 When a live development instance is configured in ignored local instructions,
-sync UI and runtime changes there after editing so the owner can review them
-before they are committed. Do not commit, push, or open a pull request until
-the owner asks. Never copy local connection details into this file or into
-chat.
+sync every source change there immediately and rebuild the affected container
+so the owner can review it. Do not wait to be asked. Do not commit, push, or
+open a pull request until the owner asks. Never copy local connection details
+into this file or into chat.
 
 ## Contribution flow
 

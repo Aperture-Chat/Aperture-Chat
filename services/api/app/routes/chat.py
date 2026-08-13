@@ -198,6 +198,11 @@ MAX_CONTINUATION_CALLS = 3
 # SSE wire still needs periodic bytes so proxies and the browser can tell a
 # thinking model from a dead connection.
 KEEPALIVE_INTERVAL_SECONDS = 10.0
+_SSE_RESPONSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 MAX_VALIDATION_REVISION_CALLS = 2
 MAX_CLOUD_PICKER_ITEMS = 100
 MAX_CLOUD_ATTACHMENT_IMPORTS = 10
@@ -3177,6 +3182,7 @@ def _streaming_response(
             usage_context=usage_context,
         ),
         media_type="text/event-stream",
+        headers=_SSE_RESPONSE_HEADERS,
     )
 
 
@@ -3206,6 +3212,7 @@ def _openai_streaming_response(
             usage_context=usage_context,
         ),
         media_type="text/event-stream",
+        headers=_SSE_RESPONSE_HEADERS,
     )
 
 
