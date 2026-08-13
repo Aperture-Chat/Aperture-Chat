@@ -2812,19 +2812,31 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
   min-width: 0;
 }
 
-/* Long titles slide beneath the title actions and fade out under them instead
-   of ellipsizing, so the buttons never crowd the heading on narrow widths.
-   The right padding reserves the overlap zone; the negative margin hands that
-   same zone to the buttons, and the mask fades the text inside it. The fade
-   must reach full transparency before the first button starts (the buttons
-   occupy the last ~60px), or the pencil icon washes out against the text. */
 .workspace-header .chat-title-display h1 {
   min-width: 0;
   flex: 0 1 auto;
+  overflow: visible;
   text-overflow: clip;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.chat-title-label {
+  display: inline-block;
+}
+
+/* Fade only when the title is actually colliding with rename actions. A
+   shrink-wrapped heading must not carry the mask — its box is the text, so
+   the gradient would eat the last letters of short names like "New chat".
+   overflow: hidden is also reserved for the colliding state so bold glyphs
+   are not clipped. */
+.workspace-header .chat-title-display.is-colliding h1 {
+  flex: 1 1 auto;
+  overflow: hidden;
   padding-right: 67px;
   margin-right: -67px;
   -webkit-mask-image: linear-gradient(

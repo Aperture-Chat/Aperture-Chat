@@ -873,6 +873,118 @@ function pendingMcpApprovalFromState(
   };
 }
 
+function chatTitleCollidesWithActions(
+  titleWidth: number,
+  rowWidth: number,
+  actionsWidth: number,
+  gap: number,
+) {
+  if (actionsWidth <= 0 || rowWidth <= 0) return false;
+  return titleWidth > rowWidth - actionsWidth - gap;
+}
+
+function ChatTitleDisplay({
+  title,
+  showRename,
+  showAiRename,
+  renameDisabled,
+  aiRenameDisabled,
+  aiRenaming,
+  onRename,
+  onAiRename,
+}: {
+  title: string;
+  showRename: boolean;
+  showAiRename: boolean;
+  renameDisabled: boolean;
+  aiRenameDisabled: boolean;
+  aiRenaming: boolean;
+  onRename: () => void;
+  onAiRename: () => void;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const [collides, setCollides] = useState(false);
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const label = titleRef.current;
+    if (!row || !label) {
+      setCollides(false);
+      return;
+    }
+
+    const update = () => {
+      const actions = row.querySelector(".chat-title-actions");
+      if (!(actions instanceof HTMLElement)) {
+        setCollides(false);
+        return;
+      }
+      const gap = Number.parseFloat(getComputedStyle(row).gap) || 0;
+      setCollides(
+        chatTitleCollidesWithActions(
+          label.getBoundingClientRect().width,
+          row.clientWidth,
+          actions.offsetWidth,
+          gap,
+        ),
+      );
+    };
+
+    update();
+    if (typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(row);
+    observer.observe(label);
+    const actions = row.querySelector(".chat-title-actions");
+    if (actions) observer.observe(actions);
+    return () => observer.disconnect();
+  }, [title, showRename, showAiRename]);
+
+  return (
+    <div
+      ref={rowRef}
+      className={`chat-title-display${collides ? " is-colliding" : ""}`}
+    >
+      <h1 data-tooltip={title}>
+        <span ref={titleRef} className="chat-title-label">
+          {title}
+        </span>
+      </h1>
+      {showRename && (
+        <div className="chat-title-actions">
+          <button
+            className="chat-title-rename-button"
+            type="button"
+            aria-label="Rename chat"
+            data-tooltip="Rename this chat everywhere it appears"
+            disabled={renameDisabled}
+            onClick={onRename}
+          >
+            <Pencil size={14} />
+          </button>
+          {showAiRename && (
+            <button
+              className="chat-title-rename-button"
+              type="button"
+              aria-label="Rename chat with AI"
+              data-tooltip="Let AI rename this chat from the latest conversation"
+              disabled={aiRenameDisabled}
+              onClick={onAiRename}
+            >
+              {aiRenaming ? (
+                <Loader2 size={14} className="chat-title-ai-spinner" />
+              ) : (
+                <Sparkles size={14} />
+              )}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatWorkspace({
   data,
   chat,
@@ -2725,43 +2837,21 @@ export function ChatWorkspace({
                 </button>
               </form>
             ) : (
-              <div className="chat-title-display">
-                <h1 data-tooltip={activeThread?.title ?? "New chat"}>{activeThread?.title ?? "New chat"}</h1>
-                {activeThread && activeThread.messages.length > 0 && (
-                  <div className="chat-title-actions">
-                    <button
-                      className="chat-title-rename-button"
-                      type="button"
-                      aria-label="Rename chat"
-                      data-tooltip="Rename this chat everywhere it appears"
-                      disabled={threadTitleGenerating}
-                      onClick={() => {
-                        setThreadTitleDraft(activeThread.title);
-                        setThreadTitleError(null);
-                        setEditingThreadTitle(true);
-                      }}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    {hasCompletedAssistantReply && (
-                      <button
-                        className="chat-title-rename-button"
-                        type="button"
-                        aria-label="Rename chat with AI"
-                        data-tooltip="Let AI rename this chat from the latest conversation"
-                        disabled={threadTitleGenerating || isSending}
-                        onClick={() => void generateThreadTitle()}
-                      >
-                        {threadTitleGenerating ? (
-                          <Loader2 size={14} className="chat-title-ai-spinner" />
-                        ) : (
-                          <Sparkles size={14} />
-                        )}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              <ChatTitleDisplay
+                title={activeThread?.title ?? "New chat"}
+                showRename={Boolean(activeThread && activeThread.messages.length > 0)}
+                showAiRename={hasCompletedAssistantReply}
+                renameDisabled={threadTitleGenerating}
+                aiRenameDisabled={threadTitleGenerating || isSending}
+                aiRenaming={threadTitleGenerating}
+                onRename={() => {
+                  if (!activeThread) return;
+                  setThreadTitleDraft(activeThread.title);
+                  setThreadTitleError(null);
+                  setEditingThreadTitle(true);
+                }}
+                onAiRename={() => void generateThreadTitle()}
+              />
             )}
             {threadTitleError && <p className="chat-title-error" role="alert">{threadTitleError}</p>}
           </div>
