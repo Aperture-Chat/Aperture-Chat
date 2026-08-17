@@ -34,6 +34,7 @@ from app.core.usage_budget import (
     BudgetPeriod,
     ReportedUsage,
     SIGNED_BIGINT_MAX,
+    TemporaryAccessGrantExhausted,
     UsageBudgetExceeded,
     UsageBudgetUnavailable,
     UsagePermitConflict,
@@ -438,6 +439,40 @@ class TenantUsageBudgetRepository:
 
         return self._run_read(operation)
 
+    def get_principal_lifetime_usage(
+        self,
+        tenant_id: str,
+        *,
+        principal_type: str,
+        principal_id: str,
+        through_date: date | None = None,
+    ) -> tuple[int, int, date, date, bool]:
+        """Return the durable all-time token total for a non-renewing grant."""
+
+        end = through_date or datetime.now(UTC).date()
+
+        def operation(session: Session) -> tuple[int, int, date, date, bool]:
+            rows = session.scalars(
+                select(PrincipalDailyUsageRow).where(
+                    PrincipalDailyUsageRow.tenant_id == tenant_id,
+                    PrincipalDailyUsageRow.principal_type == principal_type,
+                    PrincipalDailyUsageRow.principal_id == principal_id,
+                    PrincipalDailyUsageRow.usage_date <= end,
+                )
+            ).all()
+            tokens, overflowed = _saturated_sum(
+                (row.reported_tokens for row in rows),
+                any(row.reported_tokens_overflowed for row in rows),
+            )
+            completions, _ = _saturated_sum(
+                (row.metered_completions for row in rows),
+                False,
+            )
+            start = min((row.usage_date for row in rows), default=end)
+            return tokens, completions, start, end, overflowed
+
+        return self._run_read(operation)
+
     def abandon_started_permits(self, *, now: datetime | None = None) -> int:
         """Close permits orphaned by a prior process before accepting new work.
 
@@ -465,6 +500,7 @@ class TenantUsageBudgetRepository:
         tenant_id: str,
         request_id: str | None = None,
         principals: Sequence[tuple[str, str]] | None = None,
+        hard_token_limits: Mapping[tuple[str, str], int] | None = None,
         now: datetime | None = None,
     ) -> PermitAcquireResult:
         """Atomically admit and claim one request's provider-execution right.
@@ -502,6 +538,7 @@ class TenantUsageBudgetRepository:
                 principals=principals,
                 admission_date=admission_date,
                 acquired_at=acquired_at,
+                hard_token_limits=hard_token_limits,
             )
 
             budget = session.scalar(
@@ -1187,6 +1224,7 @@ def _check_principal_budgets(
     principals: Sequence[tuple[str, str]] | None,
     admission_date: date,
     acquired_at: datetime,
+    hard_token_limits: Mapping[tuple[str, str], int] | None = None,
 ) -> None:
     """Deny admission when any configured user/group allocation is spent.
 
@@ -1197,6 +1235,26 @@ def _check_principal_budgets(
 
     if not principals:
         return
+    principal_set = set(principals)
+    for (principal_type, principal_id), token_limit in (hard_token_limits or {}).items():
+        if (principal_type, principal_id) not in principal_set or token_limit <= 0:
+            continue
+        lifetime_rows = session.scalars(
+            select(PrincipalDailyUsageRow).where(
+                PrincipalDailyUsageRow.tenant_id == tenant_id,
+                PrincipalDailyUsageRow.principal_type == principal_type,
+                PrincipalDailyUsageRow.principal_id == principal_id,
+            )
+        ).all()
+        reported, overflowed = _saturated_sum(
+            (row.reported_tokens for row in lifetime_rows),
+            any(row.reported_tokens_overflowed for row in lifetime_rows),
+        )
+        if overflowed or reported >= token_limit:
+            raise TemporaryAccessGrantExhausted(
+                token_limit=token_limit,
+                reported_tokens=reported,
+            )
     budgets = session.scalars(
         select(PrincipalUsageBudgetRow).where(
             PrincipalUsageBudgetRow.tenant_id == tenant_id,

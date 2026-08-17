@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.usage_budget import (
+    TemporaryAccessGrantExhausted,
     UsageBudgetExceeded,
     UsageBudgetUnavailable,
     UsageMeteringInvalid,
@@ -193,6 +194,66 @@ def test_budget_errors_map_to_honest_http_ready_fail_closed_data() -> None:
         assert mapped.headers == {}
         assert mapped.retry_after_seconds is None
         assert str(error) not in mapped.detail
+
+
+def test_temp_user_has_a_non_renewing_30000_token_grant_and_requires_exact_metering(tmp_path: Path) -> None:
+    engine, repository, orchestrator = _runtime(tmp_path)
+    actor = _actor(role=Role.TEMP_USER)
+    now = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    try:
+        repository.provision_budget("tenant-a", updated_by="owner", now=now)
+        unmetered = orchestrator.begin_request(
+            actor=actor,
+            request_id=new_accounting_id(),
+            known_tenant_ids={"tenant-a"},
+            now=now,
+        )
+        with pytest.raises(UsageMeteringInvalid):
+            unmetered.settle_provider_child(
+                completion_id=new_accounting_id(),
+                usage=None,
+                attribution=ProviderUsageAttribution(
+                    model_id="gpt-5.6-luna",
+                    provider_name="OpenAI",
+                    surface="chat",
+                ),
+            )
+        unmetered.fail(now=now)
+
+        granted = orchestrator.begin_request(
+            actor=actor,
+            request_id=new_accounting_id(),
+            known_tenant_ids={"tenant-a"},
+            now=now,
+        )
+        granted.settle_provider_child(
+            completion_id=new_accounting_id(),
+            usage={"prompt_tokens": 20_000, "completion_tokens": 10_000},
+            attribution=ProviderUsageAttribution(
+                model_id="gpt-5.6-luna",
+                provider_name="OpenAI",
+                surface="chat",
+            ),
+            completed_at=now,
+        )
+        granted.complete_success(now=now)
+
+        with pytest.raises(TemporaryAccessGrantExhausted) as raised:
+            orchestrator.begin_request(
+                actor=actor,
+                request_id=new_accounting_id(),
+                known_tenant_ids={"tenant-a"},
+                now=now + timedelta(days=60),
+            )
+        assert raised.value.token_limit == 30_000
+        assert raised.value.reported_tokens == 30_000
+        mapped = map_usage_budget_error(raised.value)
+        assert mapped.status_code == 429
+        assert mapped.code == "temporary_access_exhausted"
+        assert mapped.headers == {}
+        assert mapped.budget_period == "lifetime"
+    finally:
+        engine.dispose()  # type: ignore[union-attr]
 
 
 def test_orchestrator_settles_multiple_children_with_exact_attribution_and_no_estimates(

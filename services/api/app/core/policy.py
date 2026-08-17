@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 from fastapi import HTTPException, status
@@ -26,6 +27,22 @@ def is_tenant_admin(user: User) -> bool:
 
 def is_pending_platform_user(user: User) -> bool:
     return user.active and user.role not in {Role.PLATFORM_OWNER, Role.TENANT_ADMIN} and not user.group_ids
+
+
+def is_temp_user(user: User) -> bool:
+    return user.role == Role.TEMP_USER
+
+
+def is_temp_user_model(model: ModelConfig) -> bool:
+    """The deliberately narrow model contract for temporary accounts.
+
+    Luna is matched against stable catalog identifiers as well as its display
+    name because provider syncs may prefix either value. Word boundaries avoid
+    granting an unrelated model whose identifier merely contains the letters.
+    """
+
+    candidates = (model.id, model.upstream_model_id or "", model.name)
+    return any("luna" in {part for part in re.split(r"[^a-z0-9]+", value.casefold()) if part} for value in candidates)
 
 
 def require_platform_owner(user: User) -> None:
@@ -100,6 +117,8 @@ def model_access_allowed(user: User, model: ModelConfig, explicit_deny: bool = F
         return False
     if model.tenant_id is not None and not is_platform_owner(user) and user.tenant_id != model.tenant_id:
         return False
+    if is_temp_user(user):
+        return model.platform_enabled and not is_workspace_agent_profile(model) and is_temp_user_model(model)
     if is_workspace_agent_profile(model):
         return agent_profile_access_allowed(user, model)
     if not model.platform_enabled:

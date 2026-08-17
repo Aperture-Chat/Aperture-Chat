@@ -3,6 +3,7 @@ import type { Role, User } from "./types";
 const ROLE_LABELS: Record<Role, string> = {
   PLATFORM_OWNER: "Platform Owner",
   TENANT_ADMIN: "Admin",
+  TEMP_USER: "Temp User",
   POWER_USER: "Power User",
   AUDITOR: "Auditor",
   AGENT_APPROVER: "Agent Approver",
