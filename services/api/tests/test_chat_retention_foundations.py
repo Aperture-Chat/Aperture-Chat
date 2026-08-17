@@ -18,8 +18,6 @@ from app.db import create_application_engine, upgrade_database
 from app.db.orm import (
     ChatAttachmentRow,
     ChatThreadRow,
-    ChatThreadTagRow,
-    RetentionHoldThreadRow,
     TenantRow,
 )
 from app.models.schemas import (
