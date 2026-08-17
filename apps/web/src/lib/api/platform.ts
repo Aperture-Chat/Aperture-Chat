@@ -391,10 +391,11 @@ export function listPlatformAuditEvents(
 
 export function listPlatformPromptActivity(
   userId: string,
-  options: ApiMutationOptions & { targetUserId?: string; limit?: number } = {},
+  options: ApiMutationOptions & { targetUserId?: string; threadId?: string; limit?: number } = {},
 ): Promise<UserPromptRecord[]> {
   const params = new URLSearchParams();
   if (options.targetUserId) params.set("user_id", options.targetUserId);
+  if (options.threadId) params.set("thread_id", options.threadId);
   if (options.limit) params.set("limit", String(options.limit));
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiRequest<UserPromptRecord[]>(userId, `/api/platform/prompt-activity${query}`, {

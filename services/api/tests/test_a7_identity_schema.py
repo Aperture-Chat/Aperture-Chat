@@ -92,7 +92,7 @@ def test_a7_fresh_upgrade_has_authority_tables_and_no_fabricated_receipt(
         upgrade_database(engine)
         inspector = inspect(engine)
 
-        assert current_schema_revision(engine) == HEAD_REVISION == "20260807_0015"
+        assert current_schema_revision(engine) == HEAD_REVISION == "20260816_0016"
         assert A7_TABLES <= set(inspector.get_table_names())
         assert {column["name"] for column in inspector.get_columns("provider_keys")} == {
             "id",
@@ -259,7 +259,7 @@ def test_a7_down_up_keeps_prior_schema_rows_and_never_creates_receipts(tmp_path:
             )
 
         upgrade_database(engine)
-        assert current_schema_revision(engine) == "20260807_0015"
+        assert current_schema_revision(engine) == "20260816_0016"
         with engine.connect() as connection:
             assert (
                 connection.execute(

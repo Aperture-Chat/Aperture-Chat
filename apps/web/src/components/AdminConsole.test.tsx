@@ -81,6 +81,52 @@ test("admin console does not keep a local user when create fails", async () => {
   expect(screen.queryByText("Duplicate Jane")).not.toBeInTheDocument();
 });
 
+test("admin reviews a pending request and approves Luna-only temporary access", async () => {
+  const data = cloneData();
+  const pending: User = {
+    id: "user-request-jamie",
+    tenant_id: "tenant-example",
+    email: "jamie@example.com",
+    display_name: "Jamie Rivera",
+    role: "USER",
+    group_ids: [],
+    active: false,
+    last_active: "Never",
+    auth_method: "sso",
+    access_request_status: "pending",
+    access_requested_at: "2026-08-13T12:00:00Z",
+  };
+  data.users.push(pending);
+  data.visibleUsers.push(pending);
+  const approved: User = {
+    ...pending,
+    role: "TEMP_USER",
+    active: true,
+    group_ids: ["group-default-users"],
+    access_request_status: "approved",
+    access_reviewed_at: "2026-08-13T12:05:00Z",
+  };
+  const approveAccessRequest = vi.fn(async () => approved);
+
+  renderAdmin({ approveAccessRequest }, data);
+  expect(screen.getByRole("heading", { name: "Access requests" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Access level for Jamie Rivera"), {
+    target: { value: "TEMP_USER" },
+  });
+  expect(screen.getByText("Luna only; requests stop after 30,000 reported tokens.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+  expect(await screen.findByText(/approved as a Temp User with Luna-only access and a 30,000-token grant/)).toBeInTheDocument();
+  expect(approveAccessRequest).toHaveBeenCalledWith(
+    "user-admin",
+    pending.id,
+    "TEMP_USER",
+    expect.any(Object),
+  );
+  expect(screen.queryByRole("heading", { name: "Access requests" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Role for Jamie Rivera")).toHaveValue("TEMP_USER");
+});
+
 test("admin console applies role changes only from the returned API user", async () => {
   const updatedJane: User = {
     ...cloneData().visibleUsers.find((user) => user.id === "user-jane")!,
@@ -812,6 +858,91 @@ test("audit and analytics user filters narrow records and exports to one user", 
   expect(screen.queryByText("Jane thread")).not.toBeInTheDocument();
 });
 
+test("prompt preview loads and shows the clicked thread's full conversation", async () => {
+  // Only the newest exchange fits the activity list window; the older turn
+  // must come back from the thread drilldown fetch.
+  const listedRecords: UserPromptRecord[] = [
+    {
+      id: "message-jane-turn-2",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      user_email: "jane@aperture.local",
+      user_role: "USER",
+      thread_id: "thread-jane-multi",
+      thread_title: "Jane multi-turn intake",
+      model_id: "gpt-4o",
+      content: "Second question about retention windows.",
+      created_at: "Jul 6, 2026, 6:00 PM UTC",
+      created_at_iso: "2026-07-07T00:00:00Z",
+      response_message_id: "message-jane-turn-2-response",
+      response_content: "Second saved answer about retention.",
+      response_status: "ok",
+      alert_count: 0,
+    },
+  ];
+  const fullThread: UserPromptRecord[] = [
+    listedRecords[0],
+    {
+      id: "message-jane-turn-1",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      user_email: "jane@aperture.local",
+      user_role: "USER",
+      thread_id: "thread-jane-multi",
+      thread_title: "Jane multi-turn intake",
+      model_id: "gpt-4o",
+      content: "First question about the intake form.",
+      created_at: "Jul 6, 2026, 5:00 PM UTC",
+      created_at_iso: "2026-07-06T23:00:00Z",
+      response_message_id: "message-jane-turn-1-response",
+      response_content: "First saved answer about intake.",
+      response_status: "ok",
+      alert_count: 0,
+    },
+  ];
+  const adminApi: AdminConsoleApi = {
+    listPromptActivity: vi.fn(async () => listedRecords),
+    listThreadPromptActivity: vi.fn(async () => fullThread),
+    listSecurityAlerts: vi.fn(async () => []),
+  };
+
+  renderAdmin(adminApi);
+  selectTab("Audit");
+  expect(await screen.findByText("User Prompt Activity")).toBeInTheDocument();
+  expandPanel("User Prompt Activity");
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Preview prompt and model output: Jane multi-turn intake",
+    }),
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "Prompt and model output" });
+  await waitFor(() =>
+    expect(adminApi.listThreadPromptActivity).toHaveBeenCalledWith(
+      "user-admin",
+      "thread-jane-multi",
+      expect.any(Object),
+    ),
+  );
+  // The older exchange never appeared in the list; the drilldown fills it in.
+  expect(
+    await within(dialog).findByText("First question about the intake form."),
+  ).toBeInTheDocument();
+  expect(within(dialog).getByText("First saved answer about intake.")).toBeInTheDocument();
+  expect(within(dialog).getByText("Second question about retention windows.")).toBeInTheDocument();
+  expect(within(dialog).getByText("Second saved answer about retention.")).toBeInTheDocument();
+  expect(within(dialog).getByText(/2 exchanges in this conversation, oldest first/)).toBeInTheDocument();
+
+  // Exchanges read oldest-first and the clicked one is marked.
+  const firstExchange = within(dialog).getByRole("article", { name: "Exchange 1 of 2" });
+  const secondExchange = within(dialog).getByRole("article", { name: "Exchange 2 of 2" });
+  expect(within(firstExchange).getByText("First question about the intake form.")).toBeInTheDocument();
+  expect(within(secondExchange).getByText("Second question about retention windows.")).toBeInTheDocument();
+  expect(firstExchange.className).not.toContain("is-selected");
+  expect(secondExchange.className).toContain("is-selected");
+  expect(within(secondExchange).getByText("Selected exchange")).toBeInTheDocument();
+});
+
 test("connector configuration form saves provider credentials and runs a live test", async () => {
   const saveConnectorConfig = vi.fn(async (_actor: string, connector: { id: string }, payload: { auth_type?: string | null; settings?: Record<string, unknown> | null }) => ({
     connector: {
@@ -1120,7 +1251,7 @@ test("policies expose neutral service availability and persist downstream defaul
   selectTab("Policies");
 
   expect(screen.getByRole("heading", { name: "Policy Controls" })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(2);
+  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(3);
   expandPanel("Policy Controls");
   expect(screen.getByText("Service policy defines which capabilities are available.", { exact: false })).toBeInTheDocument();
   expect(screen.getByText("Administrator accounts")).toBeInTheDocument();
@@ -1168,10 +1299,218 @@ test("every policy panel is collapsed by default when memory is available", () =
   expect(screen.getByRole("heading", { name: "Policy Controls" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Personalization Memory" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Memory by User" })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(3);
+  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(4);
   expect(screen.queryByText("Service policy defines which capabilities are available.", { exact: false })).not.toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: "Memory for this organization" })).not.toBeInTheDocument();
   expect(screen.queryByText("No memories stored yet")).not.toBeInTheDocument();
+});
+
+test("retention tags live in the audit prompt panel and policies keep the toggles", async () => {
+  const policy = {
+    tenant_id: "tenant-synthetic",
+    enabled: false,
+    chat_retention_days: 0,
+    retention_basis: "last_activity" as const,
+    action: "purge" as const,
+    grace_days: 0,
+    notify_admins: false,
+    mcp_tagging_enabled: false,
+    attachment_tagging_enabled: false,
+    subject_tagging_enabled: false,
+    external_tags_enabled: false,
+    rules: [],
+    updated_at: "",
+  };
+  const getRetentionPolicy = vi.fn(async () => policy);
+  const updateRetentionPolicy = vi.fn(
+    async (
+      _actorId: string,
+      patch: { mcp_tagging_enabled?: boolean; attachment_tagging_enabled?: boolean },
+    ) => ({ ...policy, ...patch }),
+  );
+  const listRetentionThreads = vi.fn(async () => [
+    {
+      thread_id: "thread-box-1",
+      title: "Box contract review",
+      owner_user_id: "user-jane",
+      tags: [
+        {
+          id: "tag-1",
+          tenant_id: "tenant-synthetic",
+          thread_id: "thread-box-1",
+          namespace: "mcp",
+          key: "tool-box",
+          value: "Box",
+          source: "auto" as const,
+          applied_at: "2026-08-16T00:00:00Z",
+        },
+      ],
+    },
+    {
+      thread_id: "thread-plain-1",
+      title: "Untagged research chat",
+      owner_user_id: "user-jane",
+      archived: true,
+      tags: [],
+    },
+  ]);
+
+  renderAdmin({ getRetentionPolicy, updateRetentionPolicy, listRetentionThreads });
+  selectTab("Audit");
+  expandPanel("User Prompt Activity");
+  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  expect(await screen.findByText("Box contract review")).toBeInTheDocument();
+  expect(screen.getByText("mcp: tool-box / Box")).toBeInTheDocument();
+  // Untagged chats list too — batch actions must cover every conversation.
+  expect(screen.getByText("Untagged research chat")).toBeInTheDocument();
+  expect(screen.getByText("archived")).toBeInTheDocument();
+  // The search box and namespace filter narrow the bounded list.
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search chats and tags" }), {
+    target: { value: "box" },
+  });
+  expect(screen.queryByText("Untagged research chat")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search chats and tags" }), {
+    target: { value: "" },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter by tag type" }), {
+    target: { value: "untagged" },
+  });
+  expect(screen.queryByText("Box contract review")).not.toBeInTheDocument();
+  expect(screen.getByText("Untagged research chat")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter by tag type" }), {
+    target: { value: "all" },
+  });
+
+  selectTab("Policies");
+  expect(await screen.findByRole("heading", { name: "Data Retention" })).toBeInTheDocument();
+  expandPanel("Data Retention");
+  const toggle = screen.getByRole("switch", { name: "Tag chats that use MCP connections" });
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(updateRetentionPolicy).toHaveBeenCalledWith(
+      "user-admin",
+      { mcp_tagging_enabled: true },
+      expect.any(Object),
+    ),
+  );
+  expect(await screen.findByText("Retention policy saved.")).toBeInTheDocument();
+
+  const uploadsToggle = screen.getByRole("switch", { name: "Tag chats with file uploads" });
+  fireEvent.click(uploadsToggle);
+  await waitFor(() =>
+    expect(updateRetentionPolicy).toHaveBeenCalledWith(
+      "user-admin",
+      { attachment_tagging_enabled: true },
+      expect.any(Object),
+    ),
+  );
+
+  const subjectToggle = screen.getByRole("switch", { name: "Tag chats by subject" });
+  fireEvent.click(subjectToggle);
+  await waitFor(() =>
+    expect(updateRetentionPolicy).toHaveBeenCalledWith(
+      "user-admin",
+      { subject_tagging_enabled: true },
+      expect.any(Object),
+    ),
+  );
+});
+
+test("data retention rows preview the full conversation and batch delete with confirm", async () => {
+  const policy = {
+    tenant_id: "tenant-synthetic",
+    enabled: false,
+    chat_retention_days: 0,
+    retention_basis: "last_activity" as const,
+    action: "purge" as const,
+    grace_days: 0,
+    notify_admins: false,
+    mcp_tagging_enabled: true,
+    attachment_tagging_enabled: false,
+    subject_tagging_enabled: false,
+    external_tags_enabled: false,
+    rules: [],
+    updated_at: "",
+  };
+  const tag = (threadId: string) => ({
+    id: `tag-${threadId}`,
+    tenant_id: "tenant-synthetic",
+    thread_id: threadId,
+    namespace: "mcp",
+    key: "tool-box",
+    value: "Box",
+    source: "auto" as const,
+    applied_at: "2026-08-16T00:00:00Z",
+  });
+  const getRetentionPolicy = vi.fn(async () => policy);
+  const listRetentionThreads = vi.fn(async () => [
+    { thread_id: "thread-box-1", title: "Box contract review", owner_user_id: "user-jane", tags: [tag("thread-box-1")] },
+    { thread_id: "thread-box-2", title: "Box billing", owner_user_id: "user-jane", tags: [tag("thread-box-2")] },
+  ]);
+  const listThreadPromptActivity = vi.fn(async (_actorId: string, threadId: string) => [
+    {
+      id: "p2",
+      user_id: "user-jane",
+      user_name: "Jane",
+      user_email: "jane@example.test",
+      thread_id: threadId,
+      thread_title: "Box contract review",
+      model_id: "model-synthetic",
+      content: "Second question",
+      created_at: "10:05 AM",
+      alert_count: 0,
+      response_content: "Second answer",
+    },
+    {
+      id: "p1",
+      user_id: "user-jane",
+      user_name: "Jane",
+      user_email: "jane@example.test",
+      thread_id: threadId,
+      thread_title: "Box contract review",
+      model_id: "model-synthetic",
+      content: "First question",
+      created_at: "10:00 AM",
+      alert_count: 0,
+      response_content: "First answer",
+    },
+  ]);
+  const runRetentionBatch = vi.fn(async () => ({
+    action: "delete",
+    requested: 2,
+    disposed: 1,
+    skipped_held: 1,
+    skipped_missing: 0,
+  }));
+
+  renderAdmin({ getRetentionPolicy, listRetentionThreads, listThreadPromptActivity, runRetentionBatch });
+  selectTab("Audit");
+  expandPanel("User Prompt Activity");
+  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Preview the full conversation: Box contract review" }),
+  );
+  expect(await screen.findByRole("dialog", { name: "Tagged conversation" })).toBeInTheDocument();
+  expect(await screen.findByText("First question")).toBeInTheDocument();
+  expect(screen.getByText("Second answer")).toBeInTheDocument();
+  expect(screen.getByText(/2 exchanges in this conversation, oldest first\./)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close conversation preview" }));
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select all listed chats" }));
+  fireEvent.click(screen.getByRole("button", { name: /Delete selected/ }));
+  expect(screen.getByText(/This cannot be undone/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Yes, delete/ }));
+  await waitFor(() =>
+    expect(runRetentionBatch).toHaveBeenCalledWith(
+      "user-admin",
+      { action: "delete", thread_ids: ["thread-box-1", "thread-box-2"] },
+      expect.any(Object),
+    ),
+  );
+  expect(
+    await screen.findByText("Deleted 1 chat. 1 under an active legal hold was skipped."),
+  ).toBeInTheDocument();
 });
 
 test("admin documentation lists narrated walkthroughs for every console tab", async () => {
@@ -1189,10 +1528,11 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Policies and memory governance",
     "Tenant audit",
     "Alerts and delivery",
+    "Data retention and tagging",
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/Remotion video$/)).toHaveLength(9);
+  expect(screen.getAllByText(/Remotion video$/)).toHaveLength(10);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "docs/aperture-admin-guide.pdf");
@@ -1659,4 +1999,73 @@ test("token allocations panel manages per-user and per-group daily caps", async 
   } finally {
     fetchMock.mockReset();
   }
+});
+
+test("prompt phrase search filters exchanges and finds chats by matter number", async () => {
+  const promptRecords = [
+    {
+      id: "message-jane-matter",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      user_email: "jane@example.test",
+      thread_id: "thread-matter-1",
+      thread_title: "Acme merger diligence",
+      model_id: "model-synthetic",
+      content: "Summarize the escrow terms.",
+      created_at: "Jul 6, 2026, 5:00 PM UTC",
+      created_at_iso: "2026-07-06T23:00:00Z",
+      alert_count: 0,
+    },
+    {
+      id: "message-casey-billing",
+      user_id: "user-casey",
+      user_name: "Casey Doe",
+      user_email: "casey@example.test",
+      thread_id: "thread-billing-1",
+      thread_title: "Billing question",
+      model_id: "model-synthetic",
+      content: "Casey asks about billing.",
+      created_at: "Jul 6, 2026, 6:00 PM UTC",
+      created_at_iso: "2026-07-07T00:00:00Z",
+      alert_count: 0,
+    },
+  ];
+  const listPromptActivity = vi.fn(async () => promptRecords);
+  const listRetentionThreads = vi.fn(async () => [
+    {
+      thread_id: "thread-matter-1",
+      title: "Acme merger diligence",
+      owner_user_id: "user-jane",
+      matter_id: "matter-acme-001",
+      matter_label: "Acme Corp — 12345.001 Merger",
+      tags: [],
+    },
+  ]);
+
+  renderAdmin({ listPromptActivity, listRetentionThreads });
+  selectTab("Audit");
+  expandPanel("User Prompt Activity");
+  expect(await screen.findByText("Acme merger diligence")).toBeInTheDocument();
+
+  const search = screen.getByRole("searchbox", { name: "Search prompt activity" });
+  // Phrase search over prompt text.
+  fireEvent.change(search, { target: { value: "billing" } });
+  expect(screen.getByText("Billing question")).toBeInTheDocument();
+  expect(screen.queryByText("Acme merger diligence")).not.toBeInTheDocument();
+  // Client/matter number search rides the retention matter labels.
+  fireEvent.change(search, { target: { value: "12345.001" } });
+  expect(screen.getByText("Acme merger diligence")).toBeInTheDocument();
+  expect(screen.queryByText("Billing question")).not.toBeInTheDocument();
+  expect(screen.getByText("1 of 2 prompts")).toBeInTheDocument();
+  // A miss says so instead of showing an empty void.
+  fireEvent.change(search, { target: { value: "no-such-phrase" } });
+  expect(screen.getByText("No prompts match this search.")).toBeInTheDocument();
+
+  // The Tags side shows and searches the same matter label.
+  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  expect(await screen.findByText("matter: Acme Corp — 12345.001 Merger")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search chats and tags" }), {
+    target: { value: "acme" },
+  });
+  expect(screen.getByText("Acme merger diligence")).toBeInTheDocument();
 });

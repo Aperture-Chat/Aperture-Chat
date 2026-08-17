@@ -114,7 +114,7 @@ def test_a5_fresh_upgrade_has_expected_authority_tables_and_indexes(tmp_path: Pa
         upgrade_database(engine)
         inspector = inspect(engine)
         tables = set(inspector.get_table_names())
-        assert current_schema_revision(engine) == HEAD_REVISION == "20260807_0015"
+        assert current_schema_revision(engine) == HEAD_REVISION == "20260816_0016"
         assert CHAT_STATE_IMPORT_REVISION == "20260720_0004"
         assert APPLICATION_STATE_IMPORT_REVISION == "20260720_0003"
         assert {
@@ -142,6 +142,10 @@ def test_a5_fresh_upgrade_has_expected_authority_tables_and_indexes(tmp_path: Pa
             "matter_id",
             "used_agent",
             "updated_at",
+            "created_at",
+            "last_activity_at",
+            "disposition_state",
+            "disposition_pending_since",
             "messages",
         }
         assert {index["name"] for index in inspector.get_indexes("user_api_keys")} >= {

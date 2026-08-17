@@ -51,7 +51,11 @@ from app.db.orm import (
     ChatFolderRow,
     ChatStateImportRow,
     ChatThreadRow,
+    ChatThreadTagRow,
+    MatterRow,
     MfaPreauthChallengeRow,
+    RetentionHoldRow,
+    RetentionHoldThreadRow,
     RevokedSessionRow,
     RuntimeStateImportRow,
     SessionFamilyRow,
@@ -70,6 +74,8 @@ from app.models.schemas import (
     ChatFolder,
     ChatSession,
     ChatThread,
+    ChatThreadTag,
+    RetentionHold,
     UsageRecord,
     UserApiKeyRecord,
 )
@@ -1253,14 +1259,55 @@ class ApplicationStateRepository:
             # but it must neither assign one nor resurrect a stale cached link
             # after the matter repository cleared it.
             matter_id = existing.matter_id if existing is not None else None
+            # Retention clocks and disposition state are server-owned. The
+            # client-authored payload can neither set nor clear them across
+            # this delete-and-reinsert, and every save bumps the activity
+            # clock that retention sweeps order by.
+            created_at = existing.created_at if existing is not None else None
+            disposition_state = existing.disposition_state if existing is not None else None
+            disposition_pending_since = (
+                existing.disposition_pending_since if existing is not None else None
+            )
             session.execute(delete(ChatThreadRow).where(ChatThreadRow.id == copied.id))
             row = ChatThreadRow.from_model(copied)
             row.matter_id = matter_id
+            now = datetime.now(UTC)
+            row.created_at = created_at or now
+            row.last_activity_at = now
+            row.disposition_state = disposition_state
+            row.disposition_pending_since = disposition_pending_since
             session.add(row)
             session.flush()
+            self._link_thread_attachments(session, row.id, row.messages)
             return _freeze_chat_thread(row.to_model())
 
         return self.run_transaction(operation)
+
+    @staticmethod
+    def _link_thread_attachments(
+        session: Session,
+        thread_id: str,
+        messages: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Point referenced attachment rows at their thread.
+
+        The upload endpoint cannot know the thread yet, so the link is
+        derived here from the canonical messages document on every save.
+        """
+
+        attachment_ids = {
+            attachment["id"]
+            for message in messages
+            for attachment in message.get("attachments") or []
+            if isinstance(attachment, Mapping) and attachment.get("id")
+        }
+        if not attachment_ids:
+            return
+        session.execute(
+            update(ChatAttachmentRow)
+            .where(ChatAttachmentRow.id.in_(attachment_ids))
+            .values(thread_id=thread_id)
+        )
 
     def get_chat_thread(self, thread_id: str) -> ChatThread | None:
         def operation(session: Session) -> ChatThread | None:
@@ -1354,20 +1401,82 @@ class ApplicationStateRepository:
         return self.run_transaction(operation)
 
     def delete_chat_thread(self, thread_id: str) -> ChatThread | None:
+        # Preview files are the only stored copy of uploaded images; collect
+        # the doomed IDs inside the transaction and unlink after it commits.
+        doomed_attachment_ids: list[str] = []
+
         def operation(session: Session) -> ChatThread | None:
             row = self._chat_thread_row(session, thread_id)
             if row is None:
                 return None
             thread = _freeze_chat_thread(row.to_model())
+            doomed_attachment_ids.extend(
+                session.execute(
+                    select(ChatAttachmentRow.id).where(
+                        ChatAttachmentRow.thread_id == thread_id
+                    )
+                ).scalars()
+            )
+            session.execute(
+                delete(ChatAttachmentRow).where(ChatAttachmentRow.thread_id == thread_id)
+            )
+            session.execute(
+                delete(ChatThreadTagRow).where(ChatThreadTagRow.thread_id == thread_id)
+            )
+            session.execute(
+                delete(RetentionHoldThreadRow).where(
+                    RetentionHoldThreadRow.thread_id == thread_id
+                )
+            )
             session.delete(row)
             return thread
 
-        return self.run_transaction(operation)
+        thread = self.run_transaction(operation)
+        for attachment_id in doomed_attachment_ids:
+            delete_attachment_preview(attachment_id)
+        return thread
 
     def count_chat_threads(self) -> int:
         return self.run_transaction(
             lambda session: session.scalar(select(func.count()).select_from(ChatThreadRow)) or 0
         )
+
+    def set_chat_threads_archived(
+        self,
+        thread_ids: Sequence[str],
+        *,
+        tenant_id: str,
+        archived: bool = True,
+    ) -> int:
+        """Archive/unarchive threads in place.
+
+        A direct UPDATE, never the delete-and-reinsert upsert: archiving must
+        not bump the retention activity clock, move the thread to the newest
+        sequence position, or touch server-owned disposition state.
+        Archiving also unpins, matching the client's own archive behavior.
+        """
+
+        ids = list(dict.fromkeys(thread_ids))
+        if not ids:
+            return 0
+        values: dict[str, Any] = {"archived": archived}
+        if archived:
+            values["pinned"] = False
+
+        def operation(session: Session) -> int:
+            return (
+                session.execute(
+                    update(ChatThreadRow)
+                    .where(
+                        ChatThreadRow.id.in_(ids),
+                        ChatThreadRow.tenant_id == tenant_id,
+                    )
+                    .values(**values)
+                ).rowcount
+                or 0
+            )
+
+        return self.run_transaction(operation)
 
     @staticmethod
     def _chat_folder_row(session: Session, folder_id: str) -> ChatFolderRow | None:
@@ -1502,6 +1611,9 @@ class ApplicationStateRepository:
             row = ChatAttachmentRow.from_model(copied)
             existing = session.get(ChatAttachmentRow, row.id)
             if existing is not None:
+                # The thread link is server-derived; a re-upload of the same
+                # attachment must not orphan it.
+                row.thread_id = existing.thread_id
                 session.delete(existing)
                 session.flush()
             session.add(row)
@@ -1575,6 +1687,214 @@ class ApplicationStateRepository:
         return self.run_transaction(
             lambda session: session.scalar(select(func.count()).select_from(ChatAttachmentRow)) or 0
         )
+
+    # Chat thread retention tags ----------------------------------------
+
+    def apply_chat_thread_tag(self, tag: ChatThreadTag) -> ChatThreadTag:
+        """Idempotently apply a tag; (thread, namespace, key) is the identity."""
+
+        copied = tag.model_copy(deep=True)
+
+        def operation(session: Session) -> ChatThreadTag:
+            existing = session.scalar(
+                select(ChatThreadTagRow).where(
+                    ChatThreadTagRow.thread_id == copied.thread_id,
+                    ChatThreadTagRow.namespace == copied.namespace,
+                    ChatThreadTagRow.key == copied.key,
+                )
+            )
+            if existing is not None:
+                existing.value = copied.value
+                existing.source = copied.source
+                existing.applied_at = copied.applied_at
+                existing.applied_by = copied.applied_by
+                session.flush()
+                return existing.to_model()
+            row = ChatThreadTagRow.from_model(copied)
+            session.add(row)
+            session.flush()
+            return row.to_model()
+
+        return self.run_transaction(operation)
+
+    def list_chat_thread_tags(
+        self,
+        *,
+        tenant_id: str | None = None,
+        thread_id: str | None = None,
+        namespace: str | None = None,
+        key: str | None = None,
+    ) -> list[ChatThreadTag]:
+        filters: list[Any] = []
+        if tenant_id is not None:
+            filters.append(ChatThreadTagRow.tenant_id == tenant_id)
+        if thread_id is not None:
+            filters.append(ChatThreadTagRow.thread_id == thread_id)
+        if namespace is not None:
+            filters.append(ChatThreadTagRow.namespace == namespace)
+        if key is not None:
+            filters.append(ChatThreadTagRow.key == key)
+
+        def operation(session: Session) -> list[ChatThreadTag]:
+            rows = session.scalars(
+                select(ChatThreadTagRow)
+                .where(*filters)
+                .order_by(
+                    ChatThreadTagRow.thread_id,
+                    ChatThreadTagRow.namespace,
+                    ChatThreadTagRow.key,
+                )
+            )
+            return [row.to_model() for row in rows]
+
+        return self.run_transaction(operation)
+
+    def remove_chat_thread_tag(
+        self,
+        thread_id: str,
+        namespace: str,
+        key: str,
+    ) -> ChatThreadTag | None:
+        def operation(session: Session) -> ChatThreadTag | None:
+            row = session.scalar(
+                select(ChatThreadTagRow).where(
+                    ChatThreadTagRow.thread_id == thread_id,
+                    ChatThreadTagRow.namespace == namespace,
+                    ChatThreadTagRow.key == key,
+                )
+            )
+            if row is None:
+                return None
+            tag = row.to_model()
+            session.delete(row)
+            return tag
+
+        return self.run_transaction(operation)
+
+    # Retention holds ---------------------------------------------------
+
+    def create_retention_hold(
+        self,
+        hold: RetentionHold,
+        thread_ids: Sequence[str],
+    ) -> tuple[RetentionHold, list[str]]:
+        """Create a hold covering the given threads.
+
+        Membership is materialized at creation and silently drops thread ids
+        that do not exist inside the hold's tenant, so a hold can never pin
+        another tenant's data. Returns the hold and the ids actually held.
+        """
+
+        copied = hold.model_copy(deep=True)
+        requested = list(dict.fromkeys(thread_ids))
+
+        def operation(session: Session) -> tuple[RetentionHold, list[str]]:
+            held_ids: list[str] = []
+            if requested:
+                held_ids = list(
+                    session.execute(
+                        select(ChatThreadRow.id).where(
+                            ChatThreadRow.id.in_(requested),
+                            ChatThreadRow.tenant_id == copied.tenant_id,
+                        )
+                    ).scalars()
+                )
+            row = RetentionHoldRow.from_model(copied)
+            session.add(row)
+            session.flush()
+            for held_id in held_ids:
+                session.add(RetentionHoldThreadRow(hold_id=row.id, thread_id=held_id))
+            session.flush()
+            return row.to_model(), held_ids
+
+        return self.run_transaction(operation)
+
+    def release_retention_hold(
+        self,
+        hold_id: str,
+        *,
+        released_at: datetime,
+        released_by: str,
+    ) -> RetentionHold | None:
+        def operation(session: Session) -> RetentionHold | None:
+            row = session.get(RetentionHoldRow, hold_id)
+            if row is None or row.released_at is not None:
+                return None
+            row.released_at = released_at
+            row.released_by = released_by
+            session.flush()
+            return row.to_model()
+
+        return self.run_transaction(operation)
+
+    def list_retention_holds(
+        self,
+        *,
+        tenant_id: str | None = None,
+        active_only: bool = False,
+    ) -> list[RetentionHold]:
+        filters: list[Any] = []
+        if tenant_id is not None:
+            filters.append(RetentionHoldRow.tenant_id == tenant_id)
+        if active_only:
+            filters.append(RetentionHoldRow.released_at.is_(None))
+
+        def operation(session: Session) -> list[RetentionHold]:
+            rows = session.scalars(
+                select(RetentionHoldRow).where(*filters).order_by(RetentionHoldRow.created_at)
+            )
+            return [row.to_model() for row in rows]
+
+        return self.run_transaction(operation)
+
+    def retention_hold_thread_ids(self, hold_id: str) -> list[str]:
+        def operation(session: Session) -> list[str]:
+            return list(
+                session.execute(
+                    select(RetentionHoldThreadRow.thread_id)
+                    .where(RetentionHoldThreadRow.hold_id == hold_id)
+                    .order_by(RetentionHoldThreadRow.thread_id)
+                ).scalars()
+            )
+
+        return self.run_transaction(operation)
+
+    def matter_labels_for_tenant(self, tenant_id: str) -> dict[str, str]:
+        """Matter id -> display name, for governance labels only.
+
+        Deliberately not membership-gated: retention and audit surfaces label
+        a chat's matter so client/matter numbers are searchable there, while
+        matter content and membership stay behind the matter repository's
+        explicit-membership gate.
+        """
+
+        def operation(session: Session) -> dict[str, str]:
+            rows = session.execute(
+                select(MatterRow.id, MatterRow.name).where(MatterRow.tenant_id == tenant_id)
+            )
+            return {matter_id: name for matter_id, name in rows}
+
+        return self.run_transaction(operation)
+
+    def thread_ids_under_active_hold(self, tenant_id: str) -> set[str]:
+        """Thread ids the retention sweep must never dispose of."""
+
+        def operation(session: Session) -> set[str]:
+            return set(
+                session.execute(
+                    select(RetentionHoldThreadRow.thread_id)
+                    .join(
+                        RetentionHoldRow,
+                        RetentionHoldRow.id == RetentionHoldThreadRow.hold_id,
+                    )
+                    .where(
+                        RetentionHoldRow.tenant_id == tenant_id,
+                        RetentionHoldRow.released_at.is_(None),
+                    )
+                ).scalars()
+            )
+
+        return self.run_transaction(operation)
 
     # Personal API keys -------------------------------------------------
 
@@ -3383,6 +3703,22 @@ class ApplicationStateRepository:
         doomed_attachment_ids: list[str] = []
 
         def operation(session: Session) -> dict[str, int]:
+            doomed_thread_ids = list(
+                session.execute(
+                    select(ChatThreadRow.id).where(ChatThreadRow.owner_user_id == user_id)
+                ).scalars()
+            )
+            if doomed_thread_ids:
+                session.execute(
+                    delete(ChatThreadTagRow).where(
+                        ChatThreadTagRow.thread_id.in_(doomed_thread_ids)
+                    )
+                )
+                session.execute(
+                    delete(RetentionHoldThreadRow).where(
+                        RetentionHoldThreadRow.thread_id.in_(doomed_thread_ids)
+                    )
+                )
             removed_threads = (
                 session.execute(
                     delete(ChatThreadRow).where(ChatThreadRow.owner_user_id == user_id)
@@ -3491,6 +3827,41 @@ class ApplicationStateRepository:
             return tenant_column == tenant_id
 
         def operation(session: Session) -> dict[str, int]:
+            doomed_thread_ids = list(
+                session.execute(
+                    select(ChatThreadRow.id).where(
+                        owned_or_tenant(ChatThreadRow.tenant_id, ChatThreadRow.owner_user_id)
+                    )
+                ).scalars()
+            )
+            if doomed_thread_ids:
+                session.execute(
+                    delete(ChatThreadTagRow).where(
+                        ChatThreadTagRow.thread_id.in_(doomed_thread_ids)
+                    )
+                )
+                session.execute(
+                    delete(RetentionHoldThreadRow).where(
+                        RetentionHoldThreadRow.thread_id.in_(doomed_thread_ids)
+                    )
+                )
+            session.execute(
+                delete(ChatThreadTagRow).where(ChatThreadTagRow.tenant_id == tenant_id)
+            )
+            doomed_hold_ids = list(
+                session.execute(
+                    select(RetentionHoldRow.id).where(RetentionHoldRow.tenant_id == tenant_id)
+                ).scalars()
+            )
+            if doomed_hold_ids:
+                session.execute(
+                    delete(RetentionHoldThreadRow).where(
+                        RetentionHoldThreadRow.hold_id.in_(doomed_hold_ids)
+                    )
+                )
+                session.execute(
+                    delete(RetentionHoldRow).where(RetentionHoldRow.id.in_(doomed_hold_ids))
+                )
             removed_threads = (
                 session.execute(
                     delete(ChatThreadRow).where(

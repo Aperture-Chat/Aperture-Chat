@@ -32,6 +32,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.core import clock, hermes
+from app.core.retention import (
+    SUBJECT_TAG_NAMESPACE,
+    apply_attachment_runtime_tags,
+    apply_mcp_runtime_tags,
+    classify_thread_subject,
+)
 from app.core.attachment_previews import (
     attachment_preview_data_url,
     attachment_preview_file,
@@ -142,6 +148,7 @@ from app.models.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCitation,
+    ChatThreadTag,
     ChatMessage,
     ChatSession,
     ChatThread,
@@ -1077,6 +1084,7 @@ def complete(
         tenant_slug=tenant_slug,
     )
     _schedule_memory_followup(background_tasks, store, actor, request, route, runtime_context)
+    _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
     if request.stream:
         return _streaming_response(
             request,
@@ -1177,6 +1185,7 @@ def openai_chat_completions(
         tenant_slug=tenant_slug,
     )
     _schedule_memory_followup(background_tasks, store, actor, request, route, runtime_context)
+    _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
     if request.stream:
         return _openai_streaming_response(
             request,
@@ -1239,6 +1248,7 @@ def openai_responses(
         tenant_slug=tenant_slug,
     )
     _schedule_memory_followup(background_tasks, store, actor, request, route, runtime_context)
+    _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
     text = (
         _generate_completion(
             request,
@@ -4261,6 +4271,120 @@ def _run_memory_followup(
         )
     except Exception:  # pragma: no cover - defensive; background work is best effort
         logger.warning("Deferred memory capture failed", exc_info=True)
+
+
+def _schedule_retention_tagging(
+    background_tasks: BackgroundTasks,
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    route: ModelGatewayRoute,
+    runtime_context: dict[str, object],
+) -> None:
+    """Queue retention tagging to run once the reply has been delivered.
+
+    Tagging is metadata-only bookkeeping and must never cost the user
+    latency. Always scheduled: subject tagging applies to every chat, and the
+    background task exits immediately when no tagging capability is on.
+    """
+    background_tasks.add_task(
+        _run_retention_tagging, store, actor, request, route, runtime_context
+    )
+
+
+def _run_retention_tagging(
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    route: ModelGatewayRoute,
+    runtime_context: dict[str, object],
+) -> None:
+    try:
+        thread_id = (request.thread_id or "").strip()
+        if not thread_id:
+            return
+        tenant_id = _retention_tag_tenant_id(store, actor, thread_id)
+        if tenant_id is None:
+            return
+        policy = store.tenant_retention_policy(tenant_id)
+        applied: list[Any] = []
+        namespaces: list[str] = []
+        if policy.mcp_tagging_enabled:
+            results = runtime_context.get("mcp_tool_results")
+            mcp_applied = apply_mcp_runtime_tags(
+                store,
+                tenant_id=tenant_id,
+                thread_id=thread_id,
+                actor_id=actor.id,
+                mcp_tool_results=results if isinstance(results, list) else [],
+            )
+            if mcp_applied:
+                applied.extend(mcp_applied)
+                namespaces.append("mcp")
+        if policy.attachment_tagging_enabled:
+            attachments = runtime_context.get("attachments")
+            attachment_applied = apply_attachment_runtime_tags(
+                store,
+                tenant_id=tenant_id,
+                thread_id=thread_id,
+                actor_id=actor.id,
+                attachments=attachments if isinstance(attachments, list) else [],
+            )
+            if attachment_applied:
+                applied.extend(attachment_applied)
+                namespaces.append("attachments")
+        if policy.subject_tagging_enabled and not store.list_chat_thread_tags(
+            thread_id=thread_id, namespace=SUBJECT_TAG_NAMESPACE
+        ):
+            # One classification per conversation: the first exchange sets the
+            # subject and later turns never re-bill it.
+            label = classify_thread_subject(
+                get_model_gateway_client(), route, request.messages
+            )
+            if label is not None:
+                primary, subtype = label
+                applied.append(
+                    store.apply_chat_thread_tag(
+                        ChatThreadTag(
+                            id=f"tag-{uuid4()}",
+                            tenant_id=tenant_id,
+                            thread_id=thread_id,
+                            namespace=SUBJECT_TAG_NAMESPACE,
+                            key=primary,
+                            value=subtype,
+                            source="auto",
+                            applied_at=clock.now(),
+                            applied_by=actor.id,
+                        )
+                    )
+                )
+                namespaces.append(SUBJECT_TAG_NAMESPACE)
+        if applied:
+            store.record_audit(
+                actor,
+                "chat.retention_tag_applied",
+                thread_id,
+                {"tags_applied": len(applied), "namespaces": namespaces},
+                runtime_state_changed=False,
+            )
+    except Exception:  # pragma: no cover - defensive; background work is best effort
+        logger.warning("Deferred retention tagging failed", exc_info=True)
+
+
+def _retention_tag_tenant_id(store: SeedStore, actor: User, thread_id: str) -> str | None:
+    """Resolve the tenant a tag row belongs to.
+
+    The client persists the thread after the completion returns, so a
+    brand-new chat has no SQL row yet; fall back to the actor's tenant, and
+    for a tenant-unbound platform owner to the primary tenant (matching how
+    owner chats are scoped elsewhere).
+    """
+    thread = store.chat_threads.get(thread_id)
+    if thread is not None:
+        return thread.tenant_id
+    if actor.tenant_id:
+        return actor.tenant_id
+    return next(iter(store.tenants), None)
 
 
 def _memory_capture_allowed(request: ChatCompletionRequest) -> bool:

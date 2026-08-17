@@ -45,6 +45,8 @@ from app.models.schemas import (
     ChatFolder,
     ChatMessage,
     ChatThread,
+    ChatThreadTag,
+    RetentionHold,
     TenantDailyUsage,
     TenantUsageBudget,
     TenantUsageCompletionEvent,
@@ -1009,6 +1011,11 @@ class ChatThreadRow(Base):
             "owner_user_id",
             "sequence",
         ),
+        Index(
+            "ix_chat_threads_tenant_last_activity",
+            "tenant_id",
+            "last_activity_at",
+        ),
         {"sqlite_autoincrement": True},
     )
 
@@ -1040,6 +1047,19 @@ class ChatThreadRow(Base):
     # an authoritative clock. Message ISO clock fields remain inside the
     # strictly validated messages document.
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+    # Authoritative retention clocks and disposition state. Server-owned:
+    # ``upsert_chat_thread`` preserves and stamps them, and they never appear
+    # in the client-authored thread payload. Nullable only for rows written
+    # before migration 0016; the migration backfills from message ISO clocks.
+    created_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # NULL = live; "pending" = marked by the retention sweep and inside the
+    # grace window before archive/purge.
+    disposition_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    disposition_pending_since: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(),
+        nullable=True,
+    )
     messages: Mapped[list[dict[str, Any]]] = mapped_column(
         StrictChatMessagesJSON(none_as_null=True),
         nullable=False,
@@ -1164,11 +1184,17 @@ class ChatAttachmentRow(Base):
             "id",
         ),
         Index("ix_chat_attachments_source_type", "source_type"),
+        Index("ix_chat_attachments_thread_id", "thread_id"),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Server-derived link to the owning thread, maintained when a thread save
+    # references the attachment from a message. Deliberately not a foreign
+    # key: the workspace upsert re-inserts thread rows in place, and a
+    # cascading constraint would sever links on every save.
+    thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     size: Mapped[str] = mapped_column(String(100), nullable=False)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -1216,6 +1242,132 @@ class ChatAttachmentRow(Base):
             uploaded_at=self.uploaded_at,
             text_preview=self.text_preview,
         )
+
+
+class ChatThreadTagRow(Base):
+    """Retention/classification tag on a chat thread.
+
+    Tags are server-owned rows outside the client-authored thread payload.
+    ``thread_id`` is deliberately not a foreign key: the workspace upsert
+    re-inserts thread rows in place, and a cascading constraint would silently
+    drop every tag on every save. Delete paths clean tags up explicitly.
+    """
+
+    __tablename__ = "chat_thread_tags"
+    __table_args__ = (
+        UniqueConstraint(
+            "thread_id",
+            "namespace",
+            "key",
+            name="uq_chat_thread_tags_thread_namespace_key",
+        ),
+        Index("ix_chat_thread_tags_tenant_namespace_key", "tenant_id", "namespace", "key"),
+        Index("ix_chat_thread_tags_thread", "thread_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    namespace: Mapped[str] = mapped_column(String(100), nullable=False)
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(100), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    applied_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    @classmethod
+    def from_model(cls, tag: ChatThreadTag) -> ChatThreadTagRow:
+        return cls(
+            id=tag.id,
+            tenant_id=tag.tenant_id,
+            thread_id=tag.thread_id,
+            namespace=tag.namespace,
+            key=tag.key,
+            value=tag.value,
+            source=tag.source,
+            applied_at=tag.applied_at,
+            applied_by=tag.applied_by,
+        )
+
+    def to_model(self) -> ChatThreadTag:
+        return ChatThreadTag(
+            id=self.id,
+            tenant_id=self.tenant_id,
+            thread_id=self.thread_id,
+            namespace=self.namespace,
+            key=self.key,
+            value=self.value,
+            source=self.source,
+            applied_at=self.applied_at,
+            applied_by=self.applied_by,
+        )
+
+
+class RetentionHoldRow(Base):
+    """Legal hold header; membership rows pin the exact threads it covers."""
+
+    __tablename__ = "retention_holds"
+    __table_args__ = (Index("ix_retention_holds_tenant", "tenant_id"),)
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    released_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    @classmethod
+    def from_model(cls, hold: RetentionHold) -> RetentionHoldRow:
+        return cls(
+            id=hold.id,
+            tenant_id=hold.tenant_id,
+            name=hold.name,
+            reason=hold.reason,
+            created_by=hold.created_by,
+            created_at=hold.created_at,
+            released_at=hold.released_at,
+            released_by=hold.released_by,
+        )
+
+    def to_model(self) -> RetentionHold:
+        return RetentionHold(
+            id=self.id,
+            tenant_id=self.tenant_id,
+            name=self.name,
+            reason=self.reason,
+            created_by=self.created_by,
+            created_at=self.created_at,
+            released_at=self.released_at,
+            released_by=self.released_by,
+        )
+
+
+class RetentionHoldThreadRow(Base):
+    """Membership is materialized at hold creation so it stays stable.
+
+    ``thread_id`` is not a foreign key for the same re-insert reason as
+    ``chat_thread_tags``.
+    """
+
+    __tablename__ = "retention_hold_threads"
+    __table_args__ = (Index("ix_retention_hold_threads_thread", "thread_id"),)
+
+    hold_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("retention_holds.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    thread_id: Mapped[str] = mapped_column(String(255), primary_key=True)
 
 
 class UserApiKeyRow(Base):
@@ -2379,6 +2531,25 @@ class TenantMemoryPolicyRow(Base):
         CheckConstraint("ordinal >= 0", name="ordinal_nonnegative"),
         UniqueConstraint("ordinal", name="uq_tenant_memory_policies_ordinal"),
         UniqueConstraint("tenant_id", name="uq_tenant_memory_policies_tenant"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON(none_as_null=True), nullable=False)
+
+
+class TenantRetentionPolicyRow(Base):
+    __tablename__ = "tenant_retention_policies"
+    __table_args__ = (
+        CheckConstraint("ordinal >= 0", name="ordinal_nonnegative"),
+        UniqueConstraint("ordinal", name="uq_tenant_retention_policies_ordinal"),
+        UniqueConstraint("tenant_id", name="uq_tenant_retention_policies_tenant"),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)

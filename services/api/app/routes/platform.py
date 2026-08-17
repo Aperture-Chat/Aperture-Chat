@@ -1330,6 +1330,7 @@ def test_platform_email_settings(
 @router.get("/prompt-activity")
 def prompt_activity(
     user_id: str | None = Query(default=None),
+    thread_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
@@ -1341,7 +1342,11 @@ def prompt_activity(
     visible_user_ids = set(store.users)
     if user_id is not None and user_id not in visible_user_ids:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user.")
-    records = store.user_prompt_records(None, user_id=user_id, limit=None)
+    # thread_id narrows to one conversation so the audit preview can show
+    # every exchange in the clicked thread.
+    records = store.user_prompt_records(
+        None, user_id=user_id, thread_id=thread_id, limit=None
+    )
     return [record for record in records if record.user_id in visible_user_ids][:limit]
 
 
