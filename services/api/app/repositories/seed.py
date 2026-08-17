@@ -19,6 +19,7 @@ import threading
 import time
 import weakref
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -113,6 +114,7 @@ from app.models.schemas import (
     ChatFolder,
     ChatMessage,
     ChatThread,
+    ChatThreadTag,
     Connector,
     ConnectorConfig,
     ContentFilter,
@@ -137,6 +139,7 @@ from app.models.schemas import (
     TenantBrandingUpdateRequest,
     TenantCreate,
     TenantMemoryPolicy,
+    TenantRetentionPolicy,
     TenantSummary,
     TenantUpdate,
     ToolConfig,
@@ -1545,6 +1548,7 @@ class SeedStore:
         # vector index so it can never surface through knowledge retrieval.
         self.user_memories: dict[str, UserMemory] = {}
         self.tenant_memory_policies: dict[str, TenantMemoryPolicy] = {}
+        self.tenant_retention_policies: dict[str, TenantRetentionPolicy] = {}
         self.user_memory_settings: dict[str, UserMemorySettings] = {}
         self.platform_settings = PlatformSettings()
         self.audit_events = self.application_state_repository.audit_events
@@ -1819,6 +1823,7 @@ class SeedStore:
                 self.content_filters,
                 self.user_memories,
                 self.tenant_memory_policies,
+                self.tenant_retention_policies,
                 self.alert_rules,
                 self.alert_notifications,
             ):
@@ -2262,6 +2267,7 @@ class SeedStore:
         self.content_filters.clear()
         self.user_memories.clear()
         self.tenant_memory_policies.clear()
+        self.tenant_retention_policies.clear()
         self.user_memory_settings.clear()
         self.password_credentials.clear()
         self.temporary_password_user_ids.clear()
@@ -3308,6 +3314,7 @@ class SeedStore:
             if actor.role == Role.TENANT_ADMIN:
                 if target.tenant_id != actor.tenant_id or target.role not in {
                     Role.USER,
+                    Role.TEMP_USER,
                     Role.POWER_USER,
                     Role.AUDITOR,
                     Role.AGENT_APPROVER,
@@ -3933,6 +3940,7 @@ class SeedStore:
             "content_filters": self._dump_model_collection(self.content_filters),
             "user_memories": self._dump_model_collection(self.user_memories),
             "tenant_memory_policies": self._dump_model_collection(self.tenant_memory_policies),
+            "tenant_retention_policies": self._dump_model_collection(self.tenant_retention_policies),
             "user_memory_settings": self._dump_model_collection(self.user_memory_settings),
             "platform_settings": self.platform_settings.model_dump(mode="json"),
             "password_credentials": self.password_credentials,
@@ -4268,6 +4276,10 @@ class SeedStore:
             record.tenant_id: record.model_copy(deep=True)
             for record in collections["tenant_memory_policies"]
         }
+        self.tenant_retention_policies = {
+            record.tenant_id: record.model_copy(deep=True)
+            for record in collections["tenant_retention_policies"]
+        }
         self.user_memory_settings = {
             record.user_id: record.model_copy(deep=True)
             for record in collections["user_memory_settings"]
@@ -4451,6 +4463,12 @@ class SeedStore:
         )
         if loaded_memory_policies is not None:
             self.tenant_memory_policies = loaded_memory_policies
+
+        loaded_retention_policies = self._load_keyed_model_collection(
+            payload, "tenant_retention_policies", TenantRetentionPolicy, "tenant_id"
+        )
+        if loaded_retention_policies is not None:
+            self.tenant_retention_policies = loaded_retention_policies
 
         loaded_memory_settings = self._load_keyed_model_collection(
             payload, "user_memory_settings", UserMemorySettings, "user_id"
@@ -4973,6 +4991,46 @@ class SeedStore:
         with self._store_lock:
             return self.application_state_repository.upsert_chat_attachment(attachment)
 
+    def apply_chat_thread_tag(self, tag: ChatThreadTag) -> ChatThreadTag:
+        with self._store_lock:
+            return self.application_state_repository.apply_chat_thread_tag(tag)
+
+    def list_chat_thread_tags(
+        self,
+        *,
+        tenant_id: str | None = None,
+        thread_id: str | None = None,
+        namespace: str | None = None,
+        key: str | None = None,
+    ) -> list[ChatThreadTag]:
+        with self._store_lock:
+            return self.application_state_repository.list_chat_thread_tags(
+                tenant_id=tenant_id,
+                thread_id=thread_id,
+                namespace=namespace,
+                key=key,
+            )
+
+    def remove_chat_thread_tag(
+        self, thread_id: str, namespace: str, key: str
+    ) -> ChatThreadTag | None:
+        with self._store_lock:
+            return self.application_state_repository.remove_chat_thread_tag(
+                thread_id, namespace, key
+            )
+
+    def set_chat_threads_archived(
+        self, thread_ids: Sequence[str], *, tenant_id: str, archived: bool = True
+    ) -> int:
+        with self._store_lock:
+            return self.application_state_repository.set_chat_threads_archived(
+                thread_ids, tenant_id=tenant_id, archived=archived
+            )
+
+    def thread_ids_under_active_hold(self, tenant_id: str) -> set[str]:
+        with self._store_lock:
+            return self.application_state_repository.thread_ids_under_active_hold(tenant_id)
+
     def chat_attachment_for(self, actor: User, attachment_id: str) -> ChatAttachment | None:
         with self._store_lock:
             return self.application_state_repository.get_chat_attachment_for_owner(
@@ -5095,6 +5153,21 @@ class SeedStore:
         self.save_runtime_state()
         return deepcopy(policy)
 
+    def tenant_retention_policy(self, tenant_id: str | None) -> TenantRetentionPolicy:
+        if tenant_id is None:
+            return TenantRetentionPolicy(tenant_id="")
+        policy = self.tenant_retention_policies.get(tenant_id)
+        if policy is None:
+            return TenantRetentionPolicy(tenant_id=tenant_id)
+        return deepcopy(policy)
+
+    def save_tenant_retention_policy(
+        self, policy: TenantRetentionPolicy
+    ) -> TenantRetentionPolicy:
+        self.tenant_retention_policies[policy.tenant_id] = policy
+        self.save_runtime_state()
+        return deepcopy(policy)
+
     def user_memory_settings_for(self, user_id: str) -> UserMemorySettings:
         settings = self.user_memory_settings.get(user_id)
         if settings is None:
@@ -5205,6 +5278,7 @@ class SeedStore:
         tenant_id: str | None,
         *,
         user_id: str | None = None,
+        thread_id: str | None = None,
         limit: int | None = None,
     ) -> list[UserPromptRecord]:
         active_alert_counts = Counter(
@@ -5220,6 +5294,11 @@ class SeedStore:
             if tenant_id is not None and thread.tenant_id != tenant_id:
                 continue
             if user_id is not None and thread.owner_user_id != user_id:
+                continue
+            # Audit drilldown: the console fetches one thread's full
+            # conversation so the preview can show every exchange, not just
+            # the record that fell inside the newest-first list window.
+            if thread_id is not None and thread.id != thread_id:
                 continue
             owner = self.users.get(thread.owner_user_id)
             for index, message in enumerate(thread.messages):

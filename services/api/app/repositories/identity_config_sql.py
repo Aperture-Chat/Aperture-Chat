@@ -85,6 +85,7 @@ from app.db.orm import (
     SkillFileRow,
     SsoConfigRow,
     TenantMemoryPolicyRow,
+    TenantRetentionPolicyRow,
     TenantRow,
     ToolConfigRow,
     UserMemoryRow,
@@ -95,7 +96,9 @@ from app.models.schemas import (
     EmailSettings,
     Group,
     PlatformSettings,
+    TenantRetentionPolicy,
     ToolConfig,
+    User,
 )
 from app.repositories.identity_config import (
     AmbiguousProviderCredentialBinding,
@@ -224,6 +227,7 @@ _COLLECTION_ROW_TYPES: dict[str, type[Any]] = {
     "content_filters": ContentFilterRow,
     "user_memories": UserMemoryRow,
     "tenant_memory_policies": TenantMemoryPolicyRow,
+    "tenant_retention_policies": TenantRetentionPolicyRow,
     "user_memory_settings": UserMemorySettingsRow,
     "scim_tokens": ScimTokenRow,
     "alert_rules": AlertRuleConfigRow,
@@ -250,6 +254,7 @@ _UPSERT_COLLECTION_NAMES: tuple[str, ...] = (
     "content_filters",
     "user_memories",
     "tenant_memory_policies",
+    "tenant_retention_policies",
     "user_memory_settings",
     "scim_tokens",
     "alert_rules",
@@ -1843,6 +1848,14 @@ def _row_from_model(name: str, record: BaseModel, ordinal: int) -> Any:
             enabled=record.enabled,
             payload=payload,
         )
+    if name == "tenant_retention_policies":
+        return TenantRetentionPolicyRow(
+            id=record.id,
+            ordinal=ordinal,
+            tenant_id=record.tenant_id,
+            enabled=record.enabled,
+            payload=payload,
+        )
     if name == "user_memory_settings":
         return UserMemorySettingsRow(
             id=record.id,
@@ -1986,6 +1999,13 @@ def _model_from_payload(
         # authority. Accept only this exact legacy omission; the feature
         # defaults off, so the backfill cannot widen a deployment's surface.
         canonical_payload["memory_enabled"] = False
+    if model_type is TenantRetentionPolicy:
+        # Tagging capabilities ship incrementally, after the first retention
+        # policies were saved. Accept only these exact legacy omissions; every
+        # capability defaults off, so the backfills cannot widen a
+        # deployment's surface.
+        for tagging_field in ("attachment_tagging_enabled", "subject_tagging_enabled"):
+            canonical_payload.setdefault(tagging_field, False)
     if model_type is ToolConfig and "owner_user_id" not in canonical_payload:
         # User-authored tool ownership shipped after the identity/config SQL
         # authority. Rows written before the field existed are admin-created
@@ -1993,6 +2013,20 @@ def _model_from_payload(
         # omission; unowned tools keep their existing tenant-wide semantics,
         # so the backfill cannot widen access.
         canonical_payload["owner_user_id"] = None
+    if model_type is User:
+        # Access requests shipped after SQL identity authority. Existing user
+        # rows legitimately omit these fields; backfill only their inert
+        # defaults so old accounts remain loadable without inventing a request
+        # or changing authentication state. Unknown or malformed fields still
+        # fail the canonical comparison below.
+        for field_name in (
+            "first_name",
+            "last_name",
+            "access_request_status",
+            "access_requested_at",
+            "access_reviewed_at",
+        ):
+            canonical_payload.setdefault(field_name, None)
     try:
         model = model_type.model_validate(canonical_payload)
     except ValidationError as exc:
@@ -2081,6 +2115,8 @@ def _assert_row_projection(name: str, row: Any, model: BaseModel) -> None:
             "active": model.active,
         }
     elif name == "tenant_memory_policies":
+        expected = {"id": model.id, "tenant_id": model.tenant_id, "enabled": model.enabled}
+    elif name == "tenant_retention_policies":
         expected = {"id": model.id, "tenant_id": model.tenant_id, "enabled": model.enabled}
     elif name == "user_memory_settings":
         expected = {"id": model.id, "user_id": model.user_id, "enabled": model.enabled}

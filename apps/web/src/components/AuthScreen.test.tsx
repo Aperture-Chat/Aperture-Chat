@@ -115,6 +115,36 @@ function localStorageDump(): string {
   return JSON.stringify(entries);
 }
 
+test("sign-in card submits a first-name, last-name, and email access request then shows pending state", async () => {
+  const fetchMock = stubFetchRoutes([
+    ["/api/auth/access-requests", () => jsonResponse({ status: "pending", message: "Your access request is pending review." }, 202)],
+  ]);
+  render(
+    <AuthScreen
+      authOptions={{ local_auth_enabled: true, password_auth_enabled: true, providers: [] }}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /Request access/i }));
+  expect(screen.getByRole("heading", { name: "Ask to join" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Jamie" } });
+  fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Rivera" } });
+  fireEvent.change(screen.getByLabelText("Work email"), { target: { value: "jamie@example.com" } });
+  fireEvent.click(screen.getByRole("button", { name: /Submit access request/i }));
+
+  expect(await screen.findByRole("heading", { name: "Request received" })).toBeInTheDocument();
+  expect(screen.getByText("Pending administrator review")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/auth/access-requests"),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ first_name: "Jamie", last_name: "Rivera", email: "jamie@example.com" }),
+      cache: "no-store",
+    }),
+  );
+  expect(localStorageDump()).not.toContain("jamie@example.com");
+});
+
 test("HTTP 202 login renders the challenge view with server methods and attempts", async () => {
   stubFetchRoutes([["/api/auth/login", () => jsonResponse(mfaChallengeBody(), 202)]]);
   renderChallengeCapableAuthScreen();

@@ -66,6 +66,11 @@ import type {
   EmailSettings,
   EmailSettingsUpdateRequest,
   EmailTestResult,
+  RetentionBatchRequest,
+  RetentionBatchResult,
+  RetentionTaggedThread,
+  TenantRetentionPolicy,
+  TenantRetentionPolicyUpdateRequest,
   UsageRecord,
   UsageSummary,
   UserPromptRecord,
@@ -104,6 +109,7 @@ const OwnerDocumentationModal = lazyWithReload("owner-documentation", () =>
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { PromptActivityList } from "./PromptActivityList";
+import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
 
 type ActionStatus = {
@@ -590,6 +596,16 @@ export type PlatformConsoleActions = {
   resetUserPassword?: (userId: string, payload: { password: string; temporary: boolean }) => Promise<void> | void;
   listAuditEvents?: () => Promise<AuditEvent[] | void> | AuditEvent[] | void;
   listPromptActivity?: (userId?: string) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+  /** Loads every saved exchange of one chat thread so the audit preview can
+   * show the full conversation, not just the clicked record. */
+  listThreadPromptActivity?: (threadId: string) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+  // Data retention governance for the sole tenant. Metadata only.
+  getRetentionPolicy?: () => Promise<TenantRetentionPolicy | void>;
+  updateRetentionPolicy?: (
+    patch: TenantRetentionPolicyUpdateRequest,
+  ) => Promise<TenantRetentionPolicy | void>;
+  listRetentionThreads?: () => Promise<RetentionTaggedThread[] | void>;
+  runRetentionBatch?: (payload: RetentionBatchRequest) => Promise<RetentionBatchResult | void>;
   listSecurityAlerts?: (userId?: string) => Promise<SecurityAlert[] | void> | SecurityAlert[] | void;
   acknowledgeSecurityAlert?: (
     alertId: string,
@@ -758,6 +774,24 @@ export function PlatformConsole({
   const [auditTrail, setAuditTrail] = useState<AuditEvent[] | null>(null);
   const [auditTrailError, setAuditTrailError] = useState<string | null>(null);
   const [auditTrailRefreshToken, setAuditTrailRefreshToken] = useState(0);
+  const [retentionPolicy, setRetentionPolicy] = useState<TenantRetentionPolicy | null>(null);
+  const [retentionTagged, setRetentionTagged] = useState<RetentionTaggedThread[] | null>(null);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const [retentionRefreshToken, setRetentionRefreshToken] = useState(0);
+  const [promptPanelView, setPromptPanelView] = useState<"prompts" | "tags">("prompts");
+  // Matter labels and retention tags per thread, folded into the prompt
+  // phrase search so client/matter numbers find their conversations.
+  const promptSearchExtras = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const row of retentionTagged ?? []) {
+      map[row.thread_id] = [
+        row.matter_label ?? "",
+        row.matter_id ?? "",
+        ...row.tags.map((tag) => `${tag.namespace} ${tag.key} ${tag.value ?? ""}`),
+      ].join(" ");
+    }
+    return map;
+  }, [retentionTagged]);
   // Every analytics and audit section carries its own user + date scope, so
   // filtering one panel never silently narrows a different panel or export.
   const [runtimeScope, setRuntimeScope] = useState<SectionScope>(EMPTY_SECTION_SCOPE);
@@ -960,6 +994,7 @@ export function PlatformConsole({
   }, [listAuditEvents, auditTrailRefreshToken]);
 
   const listPromptActivity = platformActions?.listPromptActivity;
+  const listThreadPromptActivity = platformActions?.listThreadPromptActivity;
   useEffect(() => {
     if (!listPromptActivity) return;
     let active = true;
@@ -979,6 +1014,95 @@ export function PlatformConsole({
       active = false;
     };
   }, [listPromptActivity, auditTrailRefreshToken]);
+
+  const getRetentionPolicy = platformActions?.getRetentionPolicy;
+  const listRetentionThreads = platformActions?.listRetentionThreads;
+  useEffect(() => {
+    if (!getRetentionPolicy && !listRetentionThreads) return;
+    let active = true;
+    Promise.all([
+      getRetentionPolicy ? getRetentionPolicy() : Promise.resolve(undefined),
+      listRetentionThreads ? listRetentionThreads() : Promise.resolve(undefined),
+    ])
+      .then(([policy, tagged]) => {
+        if (!active) return;
+        if (policy) setRetentionPolicy(policy);
+        if (tagged) setRetentionTagged(tagged);
+        setRetentionError(null);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setRetentionError(formatActionError(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [getRetentionPolicy, listRetentionThreads, retentionRefreshToken]);
+
+  async function saveRetentionPolicy(patch: TenantRetentionPolicyUpdateRequest) {
+    const updateRetentionPolicy = platformActions?.updateRetentionPolicy;
+    if (!updateRetentionPolicy) {
+      setActionStatus({
+        tone: "warning",
+        message: "Retention policy was not saved; the retention API is not connected.",
+      });
+      return;
+    }
+    const previous = retentionPolicy;
+    setRetentionPolicy((current) => (current ? { ...current, ...patch } : current));
+    setPendingAction("retention-policy");
+    try {
+      const saved = await updateRetentionPolicy(patch);
+      if (saved) setRetentionPolicy(saved);
+      setActionStatus({ tone: "success", message: "Retention policy saved." });
+      setRetentionError(null);
+    } catch (error) {
+      setRetentionPolicy(previous);
+      setActionStatus({
+        tone: "warning",
+        message: `Retention policy was not saved. ${formatActionError(error)}`,
+      });
+    } finally {
+      setPendingAction((current) => (current === "retention-policy" ? null : current));
+    }
+  }
+
+  async function runRetentionBatchAction(
+    action: "delete" | "archive",
+    threadIds: string[],
+  ): Promise<boolean> {
+    const runRetentionBatch = platformActions?.runRetentionBatch;
+    if (!runRetentionBatch) {
+      setActionStatus({
+        tone: "warning",
+        message: "Nothing was changed; the retention API is not connected.",
+      });
+      return false;
+    }
+    setPendingAction("retention-batch");
+    try {
+      const result = await runRetentionBatch({ action, thread_ids: threadIds });
+      const disposed = result?.disposed ?? 0;
+      const held = result?.skipped_held ?? 0;
+      setActionStatus({
+        tone: "success",
+        message:
+          action === "delete"
+            ? `Deleted ${disposed} chat${disposed === 1 ? "" : "s"}.${held > 0 ? ` ${held} under an active legal hold ${held === 1 ? "was" : "were"} skipped.` : ""}`
+            : `Archived ${disposed} chat${disposed === 1 ? "" : "s"}.`,
+      });
+      setRetentionRefreshToken((token) => token + 1);
+      return true;
+    } catch (error) {
+      setActionStatus({
+        tone: "warning",
+        message: `The batch ${action} failed. ${formatActionError(error)}`,
+      });
+      return false;
+    } finally {
+      setPendingAction((current) => (current === "retention-batch" ? null : current));
+    }
+  }
 
   const listSecurityAlerts = platformActions?.listSecurityAlerts;
   useEffect(() => {
@@ -3321,6 +3445,12 @@ export function PlatformConsole({
               ))}
             </Panel>
             <ElasticPanel elasticStatus={elasticStatus} />
+            <RetentionPanel
+              policy={retentionPolicy}
+              error={retentionError}
+              busy={pendingAction === "retention-policy"}
+              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
+            />
           </div>
         </Tabs.Content>
 
@@ -3952,6 +4082,26 @@ export function PlatformConsole({
                 </>
               }
             >
+              <div className="prompt-panel-view-switch" role="group" aria-label="Prompt panel view">
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  aria-pressed={promptPanelView === "prompts"}
+                  onClick={() => setPromptPanelView("prompts")}
+                >
+                  Prompts
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  aria-pressed={promptPanelView === "tags"}
+                  onClick={() => setPromptPanelView("tags")}
+                >
+                  Tags
+                </button>
+              </div>
+              {promptPanelView === "prompts" ? (
+                <>
               <SectionScopeFilter
                 label="Prompt activity filter"
                 scope={promptScope}
@@ -4005,6 +4155,27 @@ export function PlatformConsole({
                   records={auditPromptActivityRows}
                   ariaLabel="User prompt activity"
                   formatTimestamp={formatPromptRecordTimestamp}
+                  extraThreadSearchText={promptSearchExtras}
+                  loadThreadRecords={listThreadPromptActivity}
+                />
+              )}
+                </>
+              ) : (
+                <RetentionTagsView
+                  tagged={retentionTagged}
+                  error={retentionError}
+                  busy={pendingAction === "retention-batch"}
+                  onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
+                  loadThreadRecords={
+                    listThreadPromptActivity
+                      ? (threadId) => Promise.resolve(listThreadPromptActivity(threadId))
+                      : undefined
+                  }
+                  onBatchAction={
+                    platformActions?.runRetentionBatch
+                      ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
+                      : undefined
+                  }
                 />
               )}
             </Panel>

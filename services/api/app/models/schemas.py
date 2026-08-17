@@ -21,6 +21,7 @@ def now_utc() -> datetime:
 class Role(StrEnum):
     PLATFORM_OWNER = "PLATFORM_OWNER"
     TENANT_ADMIN = "TENANT_ADMIN"
+    TEMP_USER = "TEMP_USER"
     POWER_USER = "POWER_USER"
     AUDITOR = "AUDITOR"
     AGENT_APPROVER = "AGENT_APPROVER"
@@ -28,11 +29,15 @@ class Role(StrEnum):
 
 
 TENANT_ADMIN_ASSIGNABLE_ROLES = {
+    Role.TEMP_USER,
     Role.USER,
     Role.POWER_USER,
     Role.AUDITOR,
     Role.AGENT_APPROVER,
 }
+
+
+TEMP_USER_TOKEN_LIMIT = 30_000
 
 
 DEFAULT_GROUP_PERMISSIONS = {
@@ -261,6 +266,34 @@ class User(BaseModel):
     last_active: str = "Never"
     auth_method: str = "sso"
     first_run_guide_seen_at: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    access_request_status: Literal["pending", "approved"] | None = None
+    access_requested_at: str | None = None
+    access_reviewed_at: str | None = None
+
+
+class AccessRequestCreateRequest(BaseModel):
+    first_name: str = Field(min_length=1, max_length=80)
+    last_name: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=320)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def normalize_access_request_name(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized or any(ord(character) < 32 for character in normalized):
+            raise ValueError("Name is invalid.")
+        return normalized
+
+
+class AccessRequestCreateResponse(BaseModel):
+    status: Literal["pending"] = "pending"
+    message: str = "Your access request is pending review."
+
+
+class AccessRequestReviewRequest(BaseModel):
+    role: Role
 
 
 class UserCreateRequest(BaseModel):
@@ -1439,7 +1472,7 @@ class MyUsageBudgetCap(BaseModel):
 
     scope: Literal["user", "group"]
     label: str
-    budget_period: Literal["day", "week", "month"] = "day"
+    budget_period: Literal["day", "week", "month", "lifetime"] = "day"
     daily_token_limit: int = Field(strict=True, ge=0)
     reported_tokens: int = Field(default=0, strict=True, ge=0)
     period_start: date
@@ -1732,6 +1765,126 @@ class TenantMemoryPolicyUpdateRequest(BaseModel):
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     max_memories_per_user: int | None = Field(default=None, ge=1, le=2000)
     excluded_kinds: list[MemoryKind] | None = None
+
+
+class RetentionRule(BaseModel):
+    """Per-tag retention override; the longest applicable retention wins."""
+
+    id: str
+    tag_namespace: str
+    # None applies the rule to every tag in the namespace.
+    tag_key: str | None = None
+    retention_days: int = Field(strict=True, ge=1, le=36_500)
+    action: Literal["purge", "archive_then_purge"] = "purge"
+    note: str = ""
+
+
+class TenantRetentionPolicy(BaseModel):
+    # One policy per tenant; the id mirrors tenant_id so the record can ride
+    # the generic identity/config snapshot machinery, which keys rows by id.
+    id: str = ""
+    tenant_id: str
+    enabled: bool = False
+    # Zero keeps the tenant-wide default disabled; per-tag rules may still
+    # govern individual threads. A thread matching nothing is never disposed.
+    chat_retention_days: int = Field(default=0, strict=True, ge=0, le=36_500)
+    retention_basis: Literal["last_activity", "created"] = "last_activity"
+    action: Literal["purge", "archive_then_purge"] = "purge"
+    grace_days: int = Field(default=0, strict=True, ge=0, le=365)
+    notify_admins: bool = False
+    mcp_tagging_enabled: bool = False
+    # Tags chats whose completions carried uploaded files, so document-bearing
+    # conversations stay identifiable even when no MCP connection was used.
+    attachment_tagging_enabled: bool = False
+    # Classifies each chat once into the curated subject taxonomy using the
+    # chat's own model (one small background completion per conversation).
+    subject_tagging_enabled: bool = False
+    external_tags_enabled: bool = False
+    rules: list[RetentionRule] = Field(default_factory=list)
+    last_swept_at: str | None = None
+    updated_at: str = ""
+    updated_by: str | None = None
+
+    @model_validator(mode="after")
+    def _default_id(self) -> "TenantRetentionPolicy":
+        if not self.id:
+            object.__setattr__(self, "id", self.tenant_id)
+        return self
+
+
+class TenantRetentionPolicyUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    chat_retention_days: int | None = Field(default=None, ge=0, le=36_500)
+    retention_basis: Literal["last_activity", "created"] | None = None
+    action: Literal["purge", "archive_then_purge"] | None = None
+    grace_days: int | None = Field(default=None, ge=0, le=365)
+    notify_admins: bool | None = None
+    mcp_tagging_enabled: bool | None = None
+    attachment_tagging_enabled: bool | None = None
+    subject_tagging_enabled: bool | None = None
+    external_tags_enabled: bool | None = None
+    rules: list[RetentionRule] | None = None
+
+
+class ChatThreadTag(BaseModel):
+    """A retention/classification tag on a chat thread.
+
+    Tags live in their own SQL table, never inside the client-authored thread
+    payload, so a workspace save can neither create nor clear them.
+    """
+
+    id: str
+    tenant_id: str
+    thread_id: str
+    namespace: str
+    key: str
+    value: str | None = None
+    source: Literal["auto", "manual", "external"] = "auto"
+    applied_at: datetime
+    applied_by: str | None = None
+
+
+class RetentionHold(BaseModel):
+    """A legal hold. Threads under an active hold are never disposed."""
+
+    id: str
+    tenant_id: str
+    name: str
+    reason: str = ""
+    created_by: str
+    created_at: datetime
+    released_at: datetime | None = None
+    released_by: str | None = None
+
+
+class RetentionTaggedThread(BaseModel):
+    """Admin drilldown row: a tagged thread's metadata, never its content."""
+
+    thread_id: str
+    # None when the thread has since been deleted (or is outside the caller's
+    # tenant); its tags remain listed so cleanup stays visible.
+    title: str | None = None
+    owner_user_id: str | None = None
+    archived: bool = False
+    # Matter linkage, label only: lets legal teams search by client/matter
+    # number without opening the membership-gated matter itself.
+    matter_id: str | None = None
+    matter_label: str | None = None
+    tags: list[ChatThreadTag] = Field(default_factory=list)
+
+
+class RetentionBatchRequest(BaseModel):
+    action: Literal["delete", "archive"]
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class RetentionBatchResult(BaseModel):
+    action: str
+    requested: int
+    disposed: int
+    # Active legal holds always win: held threads are reported, never deleted.
+    skipped_held: int = 0
+    skipped_missing: int = 0
 
 
 class UserMemorySettings(BaseModel):

@@ -2,13 +2,16 @@ import { SelectControl } from "./SelectControl";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowRight,
+  CheckCircle2,
   Building2,
+  Clock3,
   KeyRound,
   Loader2,
   LockKeyhole,
   Mail,
   ShieldCheck,
   UserRound,
+  UserPlus,
 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
@@ -17,6 +20,7 @@ import {
   confirmMfaEnrollment,
   fetchMfaPreauthStatus,
   registerMfaChallengeUiHandler,
+  requestWorkspaceAccess,
   ssoAuthorizeUrl,
   startMfaEnrollmentWithChallenge,
   verifyMfaChallenge,
@@ -144,6 +148,9 @@ export function AuthScreen({
   const errorId = useId();
   const mfaCodeId = useId();
   const mfaErrorId = useId();
+  const accessFirstNameId = useId();
+  const accessLastNameId = useId();
+  const accessEmailId = useId();
   const resolvedOptions = authOptions ?? options;
   const providers = resolvedOptions?.providers ?? [];
   const bootstrapRequired = Boolean(resolvedOptions?.bootstrap_required);
@@ -155,6 +162,11 @@ export function AuthScreen({
   const [selectedProviderId, setSelectedProviderId] = useState(providers[0]?.id ?? "");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [mfa, setMfa] = useState<MfaFlowUiState | null>(null);
+  const [accessMode, setAccessMode] = useState(false);
+  const [accessDraft, setAccessDraft] = useState({ firstName: "", lastName: "", email: initialEmail });
+  const [accessPending, setAccessPending] = useState(false);
+  const [accessComplete, setAccessComplete] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const mfaSessionRef = useRef<PendingMfaSession | null>(null);
 
   /* A pending 202 login (or restored #sso_mfa challenge) is delivered here.
@@ -520,6 +532,35 @@ export function AuthScreen({
     submitSso();
   };
 
+  const submitAccessRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const firstName = accessDraft.firstName.trim();
+    const lastName = accessDraft.lastName.trim();
+    const requestEmail = accessDraft.email.trim();
+    if (!firstName || !lastName) {
+      setAccessError("Enter your first and last name.");
+      return;
+    }
+    if (!isEmailLike(requestEmail)) {
+      setAccessError("Enter a valid email address.");
+      return;
+    }
+    setAccessPending(true);
+    setAccessError(null);
+    try {
+      await requestWorkspaceAccess({
+        first_name: firstName,
+        last_name: lastName,
+        email: requestEmail,
+      });
+      setAccessComplete(true);
+    } catch (requestError) {
+      setAccessError(requestError instanceof Error ? requestError.message : "The access request could not be submitted.");
+    } finally {
+      setAccessPending(false);
+    }
+  };
+
   const renderMfaStatusAlert = (state: MfaFlowUiState) => {
     const retryLocked = state.retryAfterSeconds !== null && state.retryAfterSeconds > 0;
     if (!state.error && !retryLocked) return null;
@@ -850,12 +891,117 @@ export function AuthScreen({
             )}
             <div>
               <span>{brandName}</span>
-              <strong>{mfa ? "Two-step verification" : "Account sign-in"}</strong>
+              <strong>{mfa ? "Two-step verification" : accessMode ? "Access request" : "Account sign-in"}</strong>
             </div>
           </div>
 
           {mfa ? (
             renderMfaPanel(mfa)
+          ) : accessMode ? (
+            <>
+              <div className="auth-heading auth-access-heading">
+                <span className="auth-eyebrow">Workspace access</span>
+                <h1 id="auth-title">{accessComplete ? "Request received" : "Ask to join"}</h1>
+                <p>
+                  {accessComplete
+                    ? "Your request is pending. A workspace administrator will review the account and choose the right access level."
+                    : `Tell the ${brandName} administrators who you are. Submitting this form does not create a sign-in session.`}
+                </p>
+              </div>
+              {accessComplete ? (
+                <div className="auth-access-success" role="status">
+                  <span className="auth-access-success-mark"><CheckCircle2 size={22} /></span>
+                  <div>
+                    <strong>Pending administrator review</strong>
+                    <span>You can return here to sign in after your request is approved.</span>
+                  </div>
+                  <button
+                    className="secondary-button auth-local-button"
+                    type="button"
+                    onClick={() => setAccessMode(false)}
+                  >
+                    Back to sign in
+                  </button>
+                </div>
+              ) : (
+                <form className="auth-form auth-access-form" onSubmit={(event) => void submitAccessRequest(event)} noValidate>
+                  <div className="auth-name-grid">
+                    <label className="auth-field" htmlFor={accessFirstNameId}>
+                      <span>First name</span>
+                      <span className="auth-input-wrap">
+                        <UserRound size={17} />
+                        <input
+                          id={accessFirstNameId}
+                          autoComplete="given-name"
+                          value={accessDraft.firstName}
+                          onChange={(event) => setAccessDraft((current) => ({ ...current, firstName: event.target.value }))}
+                          placeholder="Jane"
+                          maxLength={80}
+                          required
+                        />
+                      </span>
+                    </label>
+                    <label className="auth-field" htmlFor={accessLastNameId}>
+                      <span>Last name</span>
+                      <span className="auth-input-wrap">
+                        <UserRound size={17} />
+                        <input
+                          id={accessLastNameId}
+                          autoComplete="family-name"
+                          value={accessDraft.lastName}
+                          onChange={(event) => setAccessDraft((current) => ({ ...current, lastName: event.target.value }))}
+                          placeholder="Smith"
+                          maxLength={80}
+                          required
+                        />
+                      </span>
+                    </label>
+                  </div>
+                  <label className="auth-field" htmlFor={accessEmailId}>
+                    <span>Work email</span>
+                    <span className="auth-input-wrap">
+                      <Mail size={17} />
+                      <input
+                        id={accessEmailId}
+                        type="email"
+                        inputMode="email"
+                        autoComplete="email"
+                        value={accessDraft.email}
+                        onChange={(event) => setAccessDraft((current) => ({ ...current, email: event.target.value }))}
+                        placeholder="you@company.com"
+                        maxLength={320}
+                        aria-describedby={accessError ? errorId : undefined}
+                        required
+                      />
+                    </span>
+                  </label>
+                  {accessError && (
+                    <div className="auth-error" id={errorId} role="alert">
+                      <LockKeyhole size={16} />
+                      <span>{accessError}</span>
+                    </div>
+                  )}
+                  <div className="auth-actions">
+                    <button className="primary-button auth-submit-button" type="submit" disabled={accessPending}>
+                      {accessPending ? <Loader2 className="auth-spinner" size={17} /> : <UserPlus size={17} />}
+                      <span>{accessPending ? "Submitting…" : "Submit access request"}</span>
+                      {!accessPending && <ArrowRight size={16} />}
+                    </button>
+                    <button
+                      className="secondary-button auth-local-button"
+                      type="button"
+                      disabled={accessPending}
+                      onClick={() => {
+                        setAccessMode(false);
+                        setAccessError(null);
+                      }}
+                    >
+                      Back to sign in
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
           ) : (
             <>
           <div className="auth-heading">
@@ -1017,6 +1163,22 @@ export function AuthScreen({
                 </button>
               )}
             </div>
+            {!bootstrapRequired && (
+              <div className="auth-request-entry">
+                <span><Clock3 size={15} /> Need an account?</span>
+                <button
+                  className="link-button auth-request-button"
+                  type="button"
+                  onClick={() => {
+                    setAccessDraft((current) => ({ ...current, email: current.email || email }));
+                    setAccessMode(true);
+                    setAccessError(null);
+                  }}
+                >
+                  Request access <ArrowRight size={14} />
+                </button>
+              </div>
+            )}
           </form>
             </>
           )}
@@ -1036,6 +1198,21 @@ export function AuthScreen({
               <div className="auth-context-item">
                 <Building2 size={18} />
                 <span>Your organization&apos;s tenant policy controls when verification is required.</span>
+              </div>
+            </>
+          ) : accessMode ? (
+            <>
+              <div className="auth-context-item">
+                <Clock3 size={18} />
+                <span>Every request stays pending until an administrator reviews it.</span>
+              </div>
+              <div className="auth-context-item">
+                <ShieldCheck size={18} />
+                <span>Submitting this form never grants access or creates an authenticated session.</span>
+              </div>
+              <div className="auth-context-item">
+                <UserPlus size={18} />
+                <span>Approved accounts receive the role and model access selected by the administrator.</span>
               </div>
             </>
           ) : (

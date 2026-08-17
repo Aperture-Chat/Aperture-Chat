@@ -17,6 +17,7 @@ from app.core.alerting import (
 )
 from app.core.audit_severity import decorate_audit_events
 from app.core.mailer import email_configured
+from app.core.retention import batch_dispose_threads
 from app.core.usage_analytics import build_usage_summary
 from app.core.usage_budget import UsageBudgetError, UsageBudgetUnavailable, utc_usage_date
 from app.core.usage_budget_runtime import (
@@ -50,6 +51,8 @@ from app.core.policy import (
     assert_tool_authoring,
     hermes_companion_allowed,
     is_platform_owner,
+    is_temp_user_model,
+    is_workspace_agent_profile,
     require_admin_or_owner,
     same_tenant,
 )
@@ -107,6 +110,12 @@ from app.models.schemas import (
     SsoConfigUpdateRequest,
     TenantMemoryPolicy,
     TenantMemoryPolicyUpdateRequest,
+    RetentionBatchRequest,
+    RetentionBatchResult,
+    RetentionRule,
+    RetentionTaggedThread,
+    TenantRetentionPolicy,
+    TenantRetentionPolicyUpdateRequest,
     ToolConfig,
     ToolConfigCreateRequest,
     ToolConfigUpdateRequest,
@@ -114,6 +123,7 @@ from app.models.schemas import (
     TenantMfaPolicyUpdateRequest,
     User,
     UserCreateRequest,
+    AccessRequestReviewRequest,
     UsageRecord,
     UserPromptRecord,
     UserUpdateRequest,
@@ -140,6 +150,107 @@ def users(
 ) -> list[User]:
     require_admin_or_owner(actor)
     return store.tenant_visible_users_for(actor)
+
+
+@router.post("/access-requests/{user_id}/approve")
+def approve_access_request(
+    user_id: str,
+    payload: AccessRequestReviewRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> User:
+    require_admin_or_owner(actor)
+    target = _get_user(user_id, store)
+    if target.access_request_status != "pending" or target.active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This access request is no longer pending.",
+        )
+    if payload.role not in {Role.USER, Role.TEMP_USER, Role.TENANT_ADMIN}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access requests can be approved as a user, temp user, or admin.",
+        )
+    assert_can_modify_user(
+        actor,
+        target,
+        tenant_admins_can_create_admins=store.platform_settings.tenant_admins_can_create_admins,
+    )
+    assert_can_create_role(
+        actor,
+        payload.role,
+        tenant_admins_can_create_admins=store.platform_settings.tenant_admins_can_create_admins,
+    )
+    if payload.role == Role.TEMP_USER and not any(
+        model.platform_enabled
+        and model.tenant_id in {None, target.tenant_id}
+        and not is_workspace_agent_profile(model)
+        and is_temp_user_model(model)
+        for model in store.models.values()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Enable a Luna model for this workspace before approving temporary access.",
+        )
+    group_ids: list[str] = []
+    if target.tenant_id and store.platform_settings.default_user_group_enabled:
+        store.ensure_default_user_group()
+        default_group = store.default_group_for_tenant(target.tenant_id)
+        if default_group is not None:
+            group_ids = [default_group.id]
+    with store._store_lock:
+        if store.users.get(target.id) is not target or target.access_request_status != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This access request changed while it was being reviewed.",
+            )
+        target.role = payload.role
+        target.group_ids = group_ids
+        target.active = True
+        target.access_request_status = "approved"
+        target.access_reviewed_at = now_utc().isoformat()
+        store.record_audit(
+            actor,
+            "admin.access_request_approved",
+            target.id,
+            {"approved_role": payload.role, "group_ids": group_ids},
+        )
+    return target
+
+
+@router.delete("/access-requests/{user_id}")
+def decline_access_request(
+    user_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, str]:
+    require_admin_or_owner(actor)
+    target = _get_user(user_id, store)
+    if target.access_request_status != "pending" or target.active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This access request is no longer pending.",
+        )
+    assert_can_modify_user(
+        actor,
+        target,
+        tenant_admins_can_create_admins=store.platform_settings.tenant_admins_can_create_admins,
+    )
+    store.delete_user_account(
+        target.id,
+        updated_by=actor.id,
+        expected_user=target,
+        expected_role=target.role,
+        expected_tenant_id=target.tenant_id,
+        expected_active=False,
+    )
+    store.record_audit(
+        actor,
+        "admin.access_request_declined",
+        target.id,
+        {"display_name": target.display_name},
+    )
+    return {"status": "declined", "user_id": target.id}
 
 
 @router.post("/users", status_code=201)
@@ -556,7 +667,7 @@ def delete_user(
 
 # Regular-user-tier roles a tenant admin may act on (reset passwords, delete):
 # never other admins or owners, regardless of the admin-delegation policy.
-USER_TIER_ROLES = {Role.USER, Role.POWER_USER, Role.AUDITOR, Role.AGENT_APPROVER}
+USER_TIER_ROLES = {Role.USER, Role.TEMP_USER, Role.POWER_USER, Role.AUDITOR, Role.AGENT_APPROVER}
 
 
 def _assert_user_delete_allowed(actor: User, target: User) -> None:
@@ -2419,6 +2530,135 @@ def memory_stats(
     return store.memory_counts_for_tenant(tenant_id)
 
 
+# --- data retention administration ------------------------------------------
+# Admins govern the retention policy; disposition itself runs in the
+# scheduler sweep. These endpoints carry policy only, never chat content.
+
+
+@router.get("/retention/policy")
+def retention_policy(
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> TenantRetentionPolicy:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    return store.tenant_retention_policy(tenant_id)
+
+
+@router.patch("/retention/policy")
+def update_retention_policy(
+    payload: TenantRetentionPolicyUpdateRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> TenantRetentionPolicy:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    updates = payload.model_dump(exclude_unset=True)
+    policy = store.tenant_retention_policy(tenant_id)
+    changed: list[str] = []
+    for field, value in updates.items():
+        if value is None:
+            continue
+        if field == "rules":
+            value = [RetentionRule.model_validate(item) for item in value]
+        setattr(policy, field, value)
+        changed.append(field)
+    policy.updated_at = clock.now_iso()
+    policy.updated_by = actor.id
+    saved = store.save_tenant_retention_policy(policy)
+    store.record_audit(
+        actor,
+        "retention.policy_updated",
+        tenant_id,
+        {"changed": changed, "enabled": saved.enabled},
+    )
+    return saved
+
+
+@router.get("/retention/tagged-threads")
+def retention_tagged_threads(
+    namespace: str | None = None,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> list[RetentionTaggedThread]:
+    """Tagged threads for the retention drilldown. Metadata only, no content."""
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    tags = store.list_chat_thread_tags(tenant_id=tenant_id, namespace=namespace)
+    grouped: dict[str, list] = {}
+    for tag in tags:
+        grouped.setdefault(tag.thread_id, []).append(tag)
+    rows: list[RetentionTaggedThread] = []
+    for thread_id, thread_tags in grouped.items():
+        thread = store.chat_threads.get(thread_id)
+        # The tags are tenant-scoped above; re-check the thread's tenant
+        # before exposing its title so a stale cross-tenant id leaks nothing.
+        in_tenant = thread is not None and thread.tenant_id == tenant_id
+        rows.append(
+            RetentionTaggedThread(
+                thread_id=thread_id,
+                title=thread.title if in_tenant else None,
+                owner_user_id=thread.owner_user_id if in_tenant else None,
+                tags=thread_tags,
+            )
+        )
+    rows.sort(key=lambda row: (row.title or "", row.thread_id))
+    return rows
+
+
+@router.get("/retention/threads")
+def retention_threads(
+    limit: int = Query(default=200, ge=1, le=500),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> list[RetentionTaggedThread]:
+    """Every chat in the tenant with its retention tags merged in.
+
+    Backs the batch delete/archive picker: not every chat that needs
+    disposition is tagged, so this lists them all (newest first, metadata
+    only, never message content).
+    """
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    tags_by_thread: dict[str, list] = {}
+    for tag in store.list_chat_thread_tags(tenant_id=tenant_id):
+        tags_by_thread.setdefault(tag.thread_id, []).append(tag)
+    matter_labels = store.application_state_repository.matter_labels_for_tenant(tenant_id)
+    threads = store.application_state_repository.list_chat_threads(
+        tenant_id=tenant_id, newest_first=True, limit=limit
+    )
+    rows = [
+        RetentionTaggedThread(
+            thread_id=thread.id,
+            title=thread.title,
+            owner_user_id=thread.owner_user_id,
+            archived=thread.archived,
+            matter_id=thread.matter_id,
+            matter_label=matter_labels.get(thread.matter_id) if thread.matter_id else None,
+            tags=tags_by_thread.pop(thread.id, []),
+        )
+        for thread in threads
+    ]
+    # Tags whose thread fell outside the page (or was deleted) stay visible
+    # so cleanup is never hidden by pagination.
+    for thread_id, thread_tags in tags_by_thread.items():
+        rows.append(RetentionTaggedThread(thread_id=thread_id, tags=thread_tags))
+    return rows
+
+
+@router.post("/retention/batch")
+def retention_batch(
+    payload: RetentionBatchRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> RetentionBatchResult:
+    """Batch delete or archive chats. Held threads are never deleted."""
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    return batch_dispose_threads(
+        store,
+        actor,
+        tenant_id=tenant_id,
+        thread_ids=payload.thread_ids,
+        action=payload.action,
+    )
+
+
 @router.post("/memory/users/{user_id}/purge")
 def purge_user_memory(
     user_id: str,
@@ -2955,6 +3195,7 @@ def tenant_alert_email_status(
 @router.get("/prompt-activity")
 def tenant_prompt_activity(
     user_id: str | None = Query(default=None),
+    thread_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
@@ -2964,7 +3205,12 @@ def tenant_prompt_activity(
     visible_user_ids = _admin_visible_user_ids(actor, store)
     if user_id is not None and user_id not in visible_user_ids:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user.")
-    records = store.user_prompt_records(tenant_id, user_id=user_id, limit=None)
+    # thread_id narrows to one conversation so the audit preview can show
+    # every exchange; tenant scope and the visible-user filter below still
+    # apply, so an out-of-tenant or owner-owned thread yields nothing.
+    records = store.user_prompt_records(
+        tenant_id, user_id=user_id, thread_id=thread_id, limit=None
+    )
     return [record for record in records if record.user_id in visible_user_ids][:limit]
 
 

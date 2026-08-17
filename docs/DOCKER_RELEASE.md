@@ -69,6 +69,21 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.4.2
+
+- Data retention program: chats gain authoritative retention clocks, and a
+  per-tenant policy can tag them by MCP connection, file uploads, and an
+  LLM-classified subject taxonomy (all off by default). Migration
+  20260816_0016 backfills thread clocks from message history on upgrade.
+- The audit User Prompt Activity panel adds a Prompts | Tags switcher with
+  phrase search, client/matter-number search, full-conversation previews,
+  and batch archive/delete that always skips chats under an active legal
+  hold. The prompt preview now shows a thread's complete history.
+- Temporary users: an access-request sign-up flow and lifetime token grants
+  with exact, fail-closed metering.
+- Training decks add narrated "Data retention and tagging" walkthroughs for
+  the admin and owner consoles.
+
 ## New Since v0.4.1
 
 - Chat replies stay resumable after a hard refresh: pending bubbles are kept,

@@ -81,6 +81,15 @@ class UsageBudgetExceeded(UsageBudgetError):
         super().__init__(f"{subject} {reason}; retry after {retry_after_seconds} seconds.")
 
 
+class TemporaryAccessGrantExhausted(UsageBudgetError):
+    """A temporary account has consumed its non-renewing token grant."""
+
+    def __init__(self, *, token_limit: int, reported_tokens: int) -> None:
+        self.token_limit = token_limit
+        self.reported_tokens = reported_tokens
+        super().__init__("The temporary access token grant has been exhausted.")
+
+
 @dataclass(frozen=True, slots=True)
 class ReportedUsage:
     """Normalized exact usage without synthesis from text or model metadata."""

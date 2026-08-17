@@ -334,3 +334,150 @@ def test_prompt_output_visibility_respects_owner_and_admin_boundaries() -> None:
         "user-drew",
         "user-jane",
     }
+
+
+def test_prompt_activity_thread_filter_returns_full_conversation() -> None:
+    """The audit preview drills into one thread: the thread_id filter returns
+    every exchange of that conversation and nothing else, and the visibility
+    boundaries still hold when a hidden thread is requested directly."""
+
+    saved = client.put(
+        "/api/chat/threads/thread-jane-multi",
+        headers=headers("user-jane"),
+        json={
+            "title": "Jane multi-turn matter review",
+            "model_id": "gpt-4o",
+            "group_id": "group-litigation",
+            "messages": [
+                {
+                    "id": "prompt-jane-multi-1",
+                    "role": "user",
+                    "content": "First question about the intake form.",
+                    "createdAt": "Jul 9, 2026, 8:00 PM UTC",
+                    "createdAtIso": "2026-07-10T02:00:00+00:00",
+                },
+                {
+                    "id": "response-jane-multi-1",
+                    "role": "assistant",
+                    "content": "First saved answer.",
+                    "createdAt": "Jul 9, 2026, 8:00 PM UTC",
+                    "createdAtIso": "2026-07-10T02:00:01+00:00",
+                },
+                {
+                    "id": "prompt-jane-multi-2",
+                    "role": "user",
+                    "content": "Second question about retention.",
+                    "createdAt": "Jul 9, 2026, 8:05 PM UTC",
+                    "createdAtIso": "2026-07-10T02:05:00+00:00",
+                },
+                {
+                    "id": "response-jane-multi-2",
+                    "role": "assistant",
+                    "content": "Second saved answer.",
+                    "createdAt": "Jul 9, 2026, 8:05 PM UTC",
+                    "createdAtIso": "2026-07-10T02:05:01+00:00",
+                },
+            ],
+        },
+    )
+    assert saved.status_code == 200
+    noise = client.put(
+        "/api/chat/threads/thread-jane-noise",
+        headers=headers("user-jane"),
+        json={
+            "title": "Jane unrelated thread",
+            "model_id": "gpt-4o",
+            "group_id": "group-litigation",
+            "messages": [
+                {
+                    "id": "prompt-jane-noise-1",
+                    "role": "user",
+                    "content": "Unrelated question.",
+                    "createdAt": "Jul 9, 2026, 9:00 PM UTC",
+                    "createdAtIso": "2026-07-10T03:00:00+00:00",
+                },
+            ],
+        },
+    )
+    assert noise.status_code == 200
+
+    owner_response = client.get(
+        "/api/platform/prompt-activity?thread_id=thread-jane-multi",
+        headers=headers("user-owner"),
+    )
+    assert owner_response.status_code == 200
+    owner_rows = owner_response.json()
+    assert [row["id"] for row in owner_rows] == [
+        "prompt-jane-multi-2",
+        "prompt-jane-multi-1",
+    ]
+    assert all(row["thread_id"] == "thread-jane-multi" for row in owner_rows)
+    assert owner_rows[0]["response_content"] == "Second saved answer."
+    assert owner_rows[1]["response_content"] == "First saved answer."
+
+    admin_response = client.get(
+        "/api/admin/prompt-activity?thread_id=thread-jane-multi",
+        headers=headers("user-admin"),
+    )
+    assert admin_response.status_code == 200
+    assert [row["id"] for row in admin_response.json()] == [
+        "prompt-jane-multi-2",
+        "prompt-jane-multi-1",
+    ]
+
+    # An owner-owned thread stays invisible to tenant admins even when
+    # requested directly by thread id.
+    owner_thread = client.put(
+        "/api/chat/threads/thread-owner-direct",
+        headers=headers("user-owner"),
+        json={
+            "tenant_id": "tenant-example",
+            "title": "Owner direct thread",
+            "model_id": "gpt-4o",
+            "group_id": "group-litigation",
+            "messages": [
+                {
+                    "id": "prompt-owner-direct-1",
+                    "role": "user",
+                    "content": "Owner-only question.",
+                    "createdAt": "Jul 9, 2026, 9:30 PM UTC",
+                    "createdAtIso": "2026-07-10T03:30:00+00:00",
+                },
+            ],
+        },
+    )
+    assert owner_thread.status_code == 200
+    hidden = client.get(
+        "/api/admin/prompt-activity?thread_id=thread-owner-direct",
+        headers=headers("user-admin"),
+    )
+    assert hidden.status_code == 200
+    assert hidden.json() == []
+
+    # Group-scoped admin visibility also applies to the thread drilldown:
+    # Drew cannot pull Alex's conversation by thread id.
+    admin_thread = client.put(
+        "/api/chat/threads/thread-admin-direct",
+        headers=headers("user-admin"),
+        json={
+            "title": "Alex admin direct thread",
+            "model_id": "gpt-4o",
+            "group_id": "group-litigation",
+            "messages": [
+                {
+                    "id": "prompt-admin-direct-1",
+                    "role": "user",
+                    "content": "Alex admin question.",
+                    "createdAt": "Jul 9, 2026, 9:45 PM UTC",
+                    "createdAtIso": "2026-07-10T03:45:00+00:00",
+                },
+            ],
+        },
+    )
+    assert admin_thread.status_code == 200
+    drew_hidden = client.get(
+        "/api/admin/prompt-activity?thread_id=thread-admin-direct",
+        headers=headers("user-drew"),
+    )
+    assert drew_hidden.status_code == 200
+    assert drew_hidden.json() == []

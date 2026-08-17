@@ -1,4 +1,4 @@
-export type Role = "PLATFORM_OWNER" | "TENANT_ADMIN" | "POWER_USER" | "AUDITOR" | "AGENT_APPROVER" | "USER";
+export type Role = "PLATFORM_OWNER" | "TENANT_ADMIN" | "TEMP_USER" | "POWER_USER" | "AUDITOR" | "AGENT_APPROVER" | "USER";
 
 export type User = {
   id: string;
@@ -17,6 +17,11 @@ export type User = {
   last_active: string;
   auth_method?: "local" | "sso" | "scim";
   first_run_guide_seen_at?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  access_request_status?: "pending" | "approved" | null;
+  access_requested_at?: string | null;
+  access_reviewed_at?: string | null;
 };
 
 export type Tenant = {
@@ -211,6 +216,84 @@ export type TenantMemoryPolicyUpdateRequest = {
   retention_days?: number;
   max_memories_per_user?: number;
   excluded_kinds?: MemoryKind[];
+};
+
+export type RetentionRule = {
+  id: string;
+  tag_namespace: string;
+  tag_key?: string | null;
+  retention_days: number;
+  action: "purge" | "archive_then_purge" | string;
+  note?: string;
+};
+
+export type TenantRetentionPolicy = {
+  tenant_id: string;
+  enabled: boolean;
+  chat_retention_days: number;
+  retention_basis: "last_activity" | "created" | string;
+  action: "purge" | "archive_then_purge" | string;
+  grace_days: number;
+  notify_admins: boolean;
+  mcp_tagging_enabled: boolean;
+  attachment_tagging_enabled: boolean;
+  subject_tagging_enabled: boolean;
+  external_tags_enabled: boolean;
+  rules: RetentionRule[];
+  last_swept_at?: string | null;
+  updated_at: string;
+  updated_by?: string | null;
+};
+
+export type TenantRetentionPolicyUpdateRequest = {
+  enabled?: boolean;
+  chat_retention_days?: number;
+  retention_basis?: "last_activity" | "created";
+  action?: "purge" | "archive_then_purge";
+  grace_days?: number;
+  notify_admins?: boolean;
+  mcp_tagging_enabled?: boolean;
+  attachment_tagging_enabled?: boolean;
+  subject_tagging_enabled?: boolean;
+  external_tags_enabled?: boolean;
+  rules?: RetentionRule[];
+};
+
+export type ChatThreadTag = {
+  id: string;
+  tenant_id: string;
+  thread_id: string;
+  namespace: string;
+  key: string;
+  value?: string | null;
+  source: "auto" | "manual" | "external" | string;
+  applied_at: string;
+  applied_by?: string | null;
+};
+
+/** Admin retention drilldown row. Carries thread metadata only, never content. */
+export type RetentionTaggedThread = {
+  thread_id: string;
+  title?: string | null;
+  owner_user_id?: string | null;
+  archived?: boolean;
+  /** Matter linkage, label only, so legal teams can search by client/matter number. */
+  matter_id?: string | null;
+  matter_label?: string | null;
+  tags: ChatThreadTag[];
+};
+
+export type RetentionBatchRequest = {
+  action: "delete" | "archive";
+  thread_ids: string[];
+};
+
+export type RetentionBatchResult = {
+  action: string;
+  requested: number;
+  disposed: number;
+  skipped_held: number;
+  skipped_missing: number;
 };
 
 /** Admin-facing memory reporting. Carries counts only, never memory content. */

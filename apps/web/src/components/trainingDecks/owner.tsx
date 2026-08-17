@@ -1,4 +1,4 @@
-import { BellRing, Clock3, Edit3, KeyRound, Lock, Mail, Palette, QrCode, ShieldAlert, UserPlus } from "lucide-react";
+import { BellRing, Clock3, DatabaseZap, Edit3, KeyRound, Lock, Mail, Palette, QrCode, ShieldAlert, UserPlus } from "lucide-react";
 import { TrainingDocumentationModal, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
@@ -51,29 +51,37 @@ export type OwnerFocus =
   | "alertSmtp"
   | "alertRules"
   | "alertTemplates"
-  | "alertDeliveries";
+  | "alertDeliveries"
+  | "retentionPanel"
+  | "retentionToggles"
+  | "retentionTagsSwitch"
+  | "retentionTagsExplorer"
+  | "retentionPreview"
+  | "retentionBatch";
 
 export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   addProvider: { frame: "training/owner/providers.png", rect: { x: 942, y: 170, w: 141, h: 42 } },
-  providerCard: { frame: "training/owner/providers.png", rect: { x: 295, y: 266, w: 396, h: 288 } },
-  providerStats: { frame: "training/owner/providers.png", rect: { x: 372, y: 311, w: 248, h: 89 } },
-  providerCardActions: { frame: "training/owner/providers.png", rect: { x: 372, y: 464, w: 299, h: 88 } },
-  vaultPanel: { frame: "training/owner/vault.png", rect: { x: 292, y: 406, w: 825, h: 140 } },
-  vaultKeyRow: { frame: "training/owner/vault.png", rect: { x: 295, y: 483, w: 820, h: 53 } },
-  vaultKeyActions: { frame: "training/owner/vault.png", rect: { x: 1009, y: 493, w: 98, h: 31 } },
+  providerCard: { frame: "training/owner/providers.png", rect: { x: 295, y: 266, w: 382, h: 226 } },
+  providerStats: { frame: "training/owner/providers.png", rect: { x: 368, y: 312, w: 268, h: 44 } },
+  providerCardActions: { frame: "training/owner/providers.png", rect: { x: 372, y: 398, w: 300, h: 91 } },
+  // vault/audit/alerts frames are local-stack re-captures with staged synthetic
+  // keys, events, rules, and deliveries; rects measured from the live DOM.
+  vaultPanel: { frame: "training/owner/vault.png", rect: { x: 300, y: 334, w: 811, h: 184 } },
+  vaultKeyRow: { frame: "training/owner/vault.png", rect: { x: 300, y: 427, w: 811, h: 44 } },
+  vaultKeyActions: { frame: "training/owner/vault.png", rect: { x: 1007, y: 428, w: 104, h: 43 } },
   modelsSearch: { frame: "training/owner/models.png", rect: { x: 590, y: 155, w: 500, h: 55 } },
   modelsColumnFilters: { frame: "training/owner/models.png", rect: { x: 279, y: 238, w: 851, h: 45 } },
   modelsToggle: { frame: "training/owner/models.png", rect: { x: 854, y: 292, w: 45, h: 29 } },
   rolesDisclosure: { frame: "training/owner/roles.png", rect: { x: 268, y: 1, w: 875, h: 64 } },
   rolesCreateForm: { frame: "training/owner/roles.png", rect: { x: 282, y: 80, w: 847, h: 135 } },
-  rolesSetPassword: { frame: "training/owner/roles.png", rect: { x: 1034, y: 248, w: 38, h: 38 } },
-  rolesUserRows: { frame: "training/owner/roles.png", rect: { x: 282, y: 238, w: 847, h: 388 } },
+  rolesSetPassword: { frame: "training/owner/roles.png", rect: { x: 1034, y: 235, w: 38, h: 38 } },
+  rolesUserRows: { frame: "training/owner/roles.png", rect: { x: 282, y: 222, w: 847, h: 395 } },
   ssoIntro: { frame: "training/owner/sso.png", rect: { x: 268, y: 0, w: 875, h: 52 } },
   ssoProtocol: { frame: "training/owner/sso.png", rect: { x: 712, y: 67, w: 418, h: 59 } },
   ssoFields: { frame: "training/owner/sso.png", rect: { x: 282, y: 67, w: 847, h: 270 } },
   ssoRedirect: { frame: "training/owner/sso.png", rect: { x: 282, y: 343, w: 847, h: 83 } },
-  ssoToggles: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 297, w: 847, h: 100 } },
-  ssoSaveTest: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 409, w: 847, h: 38 } },
+  ssoToggles: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 236, w: 847, h: 164 } },
+  ssoSaveTest: { frame: "training/owner/sso-actions.png", rect: { x: 278, y: 405, w: 276, h: 44 } },
   ssoEnforce: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 353, w: 847, h: 44 } },
   brandPreview: { frame: "training/owner/branding.png", rect: { x: 282, y: 67, w: 847, h: 80 } },
   brandFields: { frame: "training/owner/branding.png", rect: { x: 282, y: 168, w: 847, h: 180 } },
@@ -82,27 +90,38 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   // A 4:3 camera zoom removes the capture tool's unused right/bottom canvas
   // while preserving the native console text. Expanded sections use dedicated
   // scrolled frames, and rects are measured in the final zoomed composition.
-  policyCollapsed: { frame: "training/owner/policies-current-collapsed.png", rect: { x: 377, y: 138, w: 764, h: 588 }, zoom: 4 / 3 },
-  policyFloor: { frame: "training/owner/policies-current.png", rect: { x: 391, y: 486, w: 724, h: 44 }, zoom: 4 / 3 },
-  policyToggles: { frame: "training/owner/policies-toggles-current.png", rect: { x: 377, y: 199, w: 752, h: 448 }, zoom: 4 / 3 },
-  budgetControls: { frame: "training/owner/policies-budget-current.png", rect: { x: 392, y: 406, w: 723, h: 104 }, zoom: 4 / 3 },
-  policyCallout: { frame: "training/owner/policies-callout-current.png", rect: { x: 377, y: 659, w: 752, h: 49 }, zoom: 4 / 3 },
+  policyCollapsed: { frame: "training/owner/policies-current-collapsed.png", rect: { x: 377, y: 630, w: 764, h: 202 }, zoom: 4 / 3 },
+  // The enforced-floor row sits above the toggle stack in the toggles frame,
+  // inside the readable-viewport envelope pinned by trainingVideoKit.test.ts;
+  // sharing the frame with policyToggles glides the highlight down the stack.
+  policyFloor: { frame: "training/owner/policies-toggles-current.png", rect: { x: 377, y: 287, w: 770, h: 66 }, zoom: 4 / 3 },
+  policyToggles: { frame: "training/owner/policies-toggles-current.png", rect: { x: 377, y: 355, w: 770, h: 477 }, zoom: 4 / 3 },
+  budgetControls: { frame: "training/owner/policies-budget-current.png", rect: { x: 377, y: 568, w: 770, h: 132 }, zoom: 4 / 3 },
+  // No zoom here: the 4/3 crop pushed the lock callout below the canvas, so
+  // this scene shows the full capture where the callout is visible.
+  policyCallout: { frame: "training/owner/policies-callout-current.png", rect: { x: 277, y: 654, w: 855, h: 56 } },
   analyticsFilters: { frame: "training/owner/analytics.png", rect: { x: 282, y: 79, w: 847, h: 131 } },
   runtimeScorecards: { frame: "training/owner/analytics.png", rect: { x: 268, y: 210, w: 875, h: 137 } },
-  runtimeRows: { frame: "training/owner/analytics.png", rect: { x: 268, y: 361, w: 875, h: 490 } },
-  activityCharts: { frame: "training/owner/analytics-activity.png", rect: { x: 268, y: 197, w: 875, h: 519 } },
-  usageScorecards: { frame: "training/owner/analytics-usage.png", rect: { x: 268, y: 229, w: 875, h: 137 } },
-  usageCharts: { frame: "training/owner/analytics-usage.png", rect: { x: 268, y: 380, w: 875, h: 475 } },
-  usageByUser: { frame: "training/owner/analytics-usage-users.png", rect: { x: 268, y: 528, w: 875, h: 228 } },
-  auditCriticalTile: { frame: "training/owner/audit.png", rect: { x: 282, y: 223, w: 160, h: 109 } },
-  auditTileGrid: { frame: "training/owner/audit.png", rect: { x: 268, y: 209, w: 875, h: 379 } },
-  auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 268, y: 405, w: 875, h: 345 } },
+  runtimeRows: { frame: "training/owner/analytics.png", rect: { x: 278, y: 355, w: 850, h: 78 } },
+  activityCharts: { frame: "training/owner/analytics-activity.png", rect: { x: 268, y: 200, w: 875, h: 290 } },
+  usageScorecards: { frame: "training/owner/analytics-usage.png", rect: { x: 268, y: 500, w: 875, h: 95 } },
+  usageCharts: { frame: "training/owner/analytics-usage.png", rect: { x: 268, y: 595, w: 875, h: 215 } },
+  usageByUser: { frame: "training/owner/analytics-usage-users.png", rect: { x: 282, y: 598, w: 848, h: 158 } },
+  auditCriticalTile: { frame: "training/owner/audit.png", rect: { x: 282, y: 138, w: 160, h: 109 } },
+  auditTileGrid: { frame: "training/owner/audit.png", rect: { x: 268, y: 124, w: 875, h: 379 } },
+  auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 282, y: 470, w: 847, h: 131 } },
   trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 268, y: 211, w: 875, h: 66 } },
   trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 268, y: 289, w: 875, h: 520 } },
-  alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 278, y: 218, w: 855, h: 145 } },
-  alertRules: { frame: "training/owner/alerts.png", rect: { x: 269, y: 649, w: 849, h: 126 } },
-  alertTemplates: { frame: "training/owner/alerts.png", rect: { x: 728, y: 573, w: 356, h: 41 } },
-  alertDeliveries: { frame: "training/owner/alerts.png", rect: { x: 278, y: 813, w: 318, h: 42 } },
+  alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 268, y: 65, w: 875, h: 170 } },
+  alertRules: { frame: "training/owner/alerts-deliveries.png", rect: { x: 268, y: 71, w: 875, h: 166 } },
+  alertTemplates: { frame: "training/owner/alerts-deliveries.png", rect: { x: 732, y: 11, w: 397, h: 38 } },
+  alertDeliveries: { frame: "training/owner/alerts-deliveries.png", rect: { x: 268, y: 335, w: 875, h: 520 } },
+  retentionPanel: { frame: "training/owner/retention-policy.png", rect: { x: 267, y: 542, w: 877, h: 268 } },
+  retentionToggles: { frame: "training/owner/retention-policy.png", rect: { x: 268, y: 623, w: 875, h: 186 } },
+  retentionTagsSwitch: { frame: "training/owner/retention-tags.png", rect: { x: 268, y: 65, w: 875, h: 66 } },
+  retentionTagsExplorer: { frame: "training/owner/retention-tags.png", rect: { x: 268, y: 143, w: 875, h: 556 } },
+  retentionPreview: { frame: "training/owner/retention-preview.png", rect: { x: 183, y: 215, w: 820, h: 424 } },
+  retentionBatch: { frame: "training/owner/retention-batch.png", rect: { x: 268, y: 356, w: 875, h: 143 } },
 };
 
 type OwnerGuideIcon =
@@ -116,7 +135,8 @@ type OwnerGuideIcon =
   | "policy"
   | "clock"
   | "audit"
-  | "alerts";
+  | "alerts"
+  | "retention";
 
 export type OwnerTrainingVideo = TrainingVideoBase & { icon: OwnerGuideIcon };
 
@@ -613,6 +633,64 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
     ],
   },
+  {
+    id: "owner-retention",
+    audioSrc: "training/owner/owner-retention.mp3",
+    title: "Data retention and tagging",
+    description: "Enable chat tagging for the organization, review tagged chats, and govern them in bulk.",
+    icon: "retention",
+    outcomes: ["Tagging toggles understood", "Tagged chats reviewed", "Batch action executed safely"],
+    scenes: [
+      {
+        title: "The Data Retention panel",
+        caption: "Org Settings hosts the Data Retention panel: three tagging toggles, all off until you enable them.",
+        narration:
+          "The Org Settings tab hosts the Data Retention panel. Three toggles control how chats are tagged, and every one of them starts off — nothing is tagged until you or a tenant admin turns tagging on.",
+        durationSeconds: 14,
+        focus: "retentionPanel",
+      },
+      {
+        title: "Three sources of tags",
+        caption: "Tag chats that use MCP connections, chats with file uploads, and chats by subject.",
+        narration:
+          "Tag chats that use MCP connections marks any conversation that touched a connected tool, like Box. Tag chats with file uploads marks conversations carrying documents or images. And Tag chats by subject asks the chat's own model to classify each new conversation once, into a curated set of subjects like legal or financial.",
+        durationSeconds: 24,
+        focus: "retentionToggles",
+      },
+      {
+        title: "Prompts and Tags",
+        caption: "User Prompt Activity now has two views — switch to Tags to see every chat with its tags.",
+        narration:
+          "The Audit tab's User Prompt Activity panel now carries two views. Prompts is the activity list you know. Switch to Tags, and every chat in the organization appears — tagged or not.",
+        durationSeconds: 13,
+        focus: "retentionTagsSwitch",
+      },
+      {
+        title: "Read the tag chips",
+        caption: "Each row shows its tag chips — mcp, attachments, and subject — with search and a tag-type filter.",
+        narration:
+          "Each row carries its tag chips. An mcp chip names the connection the chat used, attachments distinguishes documents from images, and subject shows the model's classification. The search box and the tag-type filter narrow the list to exactly the cohort you need.",
+        durationSeconds: 19,
+        focus: "retentionTagsExplorer",
+      },
+      {
+        title: "Preview before you act",
+        caption: "Click a chat title to read the full conversation before deciding what happens to it.",
+        narration:
+          "Click any chat title to open the full conversation preview, so you can read exactly what a chat contains before acting on it.",
+        durationSeconds: 9,
+        focus: "retentionPreview",
+      },
+      {
+        title: "Archive or delete in bulk",
+        caption: "Select chats — or select all — then Archive or Delete with an inline confirm; legal holds are never deleted.",
+        narration:
+          "Select the chats that matter, or select them all, then choose Archive or Delete. A confirmation is always required before anything happens, and chats under an active legal hold are skipped and reported — a hold always wins.",
+        durationSeconds: 16,
+        focus: "retentionBatch",
+      },
+    ],
+  },
 ];
 
 const VIDEO_ICONS = {
@@ -627,6 +705,7 @@ const VIDEO_ICONS = {
   clock: Clock3,
   audit: ShieldAlert,
   alerts: BellRing,
+  retention: DatabaseZap,
 } satisfies Record<OwnerGuideIcon, typeof KeyRound>;
 
 const OWNER_DECK: TrainingDeck = {

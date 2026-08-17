@@ -78,7 +78,6 @@ describe("layoutForRect", () => {
       OWNER_FOCUS_REGIONS.policyFloor,
       OWNER_FOCUS_REGIONS.policyToggles,
       OWNER_FOCUS_REGIONS.budgetControls,
-      OWNER_FOCUS_REGIONS.policyCallout,
     ];
     const adminRegions = [
       ADMIN_FOCUS_REGIONS.policyCollapsed,
@@ -96,6 +95,16 @@ describe("layoutForRect", () => {
       expect(rect.w).toBeLessThanOrEqual(780);
       expect(rect.h).toBeLessThanOrEqual(600);
     }
+
+    /* policyCallout shows its frame without the 4:3 camera zoom (the zoom
+     * cropped the lock callout out of the canvas entirely), so the callout is
+     * a full-width bar judged by the unzoomed margins, not the close-up ones. */
+    const callout = OWNER_FOCUS_REGIONS.policyCallout;
+    expect(callout.zoom).toBeUndefined();
+    expect(callout.rect.x).toBeGreaterThanOrEqual(260);
+    expect(callout.rect.x + callout.rect.w + 8).toBeLessThanOrEqual(1155);
+    expect(callout.rect.y).toBeGreaterThanOrEqual(130);
+    expect(callout.rect.y + callout.rect.h + 8).toBeLessThanOrEqual(840);
 
     for (const { rect, zoom } of adminRegions) {
       expect(zoom).toBeUndefined();

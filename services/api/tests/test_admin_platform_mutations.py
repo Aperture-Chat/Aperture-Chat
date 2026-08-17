@@ -63,6 +63,84 @@ def seed_openrouter_key(secret: str = "sk-or-v1-test-openrouter") -> None:
     seed_provider_key("provider-openrouter", secret, "key-openrouter-primary", "OpenRouter Primary")
 
 
+def test_admin_approves_pending_temp_user_with_luna_only_model_access() -> None:
+    requested = client.post(
+        "/api/auth/access-requests",
+        json={"first_name": "Taylor", "last_name": "Ng", "email": "taylor.ng@example.com"},
+    )
+    assert requested.status_code == 202
+    store = get_store()
+    target = next(user for user in store.users.values() if user.email == "taylor.ng@example.com")
+    source_model = next(iter(store.models.values()))
+    store.models["openai-gpt-5-6-luna"] = source_model.model_copy(
+        deep=True,
+        update={
+            "id": "openai-gpt-5-6-luna",
+            "name": "OpenAI GPT 5.6 Luna",
+            "upstream_model_id": "gpt-5.6-luna",
+            "platform_enabled": True,
+            "tenant_id": "tenant-example",
+            "group_ids": [],
+        },
+    )
+
+    approved = client.post(
+        f"/api/admin/access-requests/{target.id}/approve",
+        headers=headers("user-admin"),
+        json={"role": "TEMP_USER"},
+    )
+
+    assert approved.status_code == 200
+    approved_user = approved.json()
+    assert approved_user["role"] == "TEMP_USER"
+    assert approved_user["active"] is True
+    assert approved_user["access_request_status"] == "approved"
+    assert approved_user["group_ids"] == [DEFAULT_USER_GROUP_ID]
+    bootstrap = client.get("/api/bootstrap", headers=headers(target.id))
+    assert bootstrap.status_code == 200
+    assert [model["id"] for model in bootstrap.json()["models"]] == ["openai-gpt-5-6-luna"]
+
+
+def test_admin_cannot_approve_request_as_admin_without_delegation_and_can_decline() -> None:
+    client.post(
+        "/api/auth/access-requests",
+        json={"first_name": "Morgan", "last_name": "Lee", "email": "morgan.lee@example.com"},
+    )
+    target = next(user for user in get_store().users.values() if user.email == "morgan.lee@example.com")
+
+    denied = client.post(
+        f"/api/admin/access-requests/{target.id}/approve",
+        headers=headers("user-admin"),
+        json={"role": "TENANT_ADMIN"},
+    )
+    assert denied.status_code == 403
+    declined = client.delete(
+        f"/api/admin/access-requests/{target.id}",
+        headers=headers("user-admin"),
+    )
+    assert declined.status_code == 200
+    assert target.id not in get_store().users
+
+
+def test_admin_cannot_approve_temp_access_without_an_enabled_luna_model() -> None:
+    client.post(
+        "/api/auth/access-requests",
+        json={"first_name": "Sam", "last_name": "Ortiz", "email": "sam.ortiz@example.com"},
+    )
+    target = next(user for user in get_store().users.values() if user.email == "sam.ortiz@example.com")
+
+    denied = client.post(
+        f"/api/admin/access-requests/{target.id}/approve",
+        headers=headers("user-admin"),
+        json={"role": "TEMP_USER"},
+    )
+
+    assert denied.status_code == 409
+    assert denied.json()["detail"] == "Enable a Luna model for this workspace before approving temporary access."
+    assert target.active is False
+    assert target.access_request_status == "pending"
+
+
 def seed_tenant(tenant_id: str) -> None:
     store = get_store()
     if tenant_id in store.tenants:

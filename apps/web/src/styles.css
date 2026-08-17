@@ -736,6 +736,88 @@ button:disabled {
   gap: 14px;
 }
 
+.auth-request-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 2px;
+  padding-top: 15px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.auth-request-entry > span,
+.auth-request-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-request-button {
+  color: var(--teal);
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.auth-eyebrow {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.auth-access-heading {
+  margin-bottom: 20px;
+}
+
+.auth-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.auth-access-success {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--teal) 36%, var(--border));
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--teal-soft) 64%, transparent), transparent 68%),
+    var(--surface);
+}
+
+.auth-access-success-mark {
+  width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal-soft) 84%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--border));
+}
+
+.auth-access-success > div {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-access-success strong {
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.auth-access-success div span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .auth-field {
   display: grid;
   gap: 7px;
@@ -7918,7 +8000,7 @@ button:disabled {
 }
 
 .md-code-toolbar-main {
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .md-code-toolbar-main strong {
@@ -8011,7 +8093,7 @@ button:disabled {
   min-width: 46px;
   padding: 0 11px;
   border-right: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  color: var(--text-muted);
+  color: var(--muted);
   text-align: right;
   user-select: none;
 }
@@ -8038,7 +8120,7 @@ button:disabled {
 .md-code-editor-gutter {
   padding: 10px 0;
   border-right: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  color: var(--text-muted);
+  color: var(--muted);
   text-align: right;
   user-select: none;
 }
@@ -12102,6 +12184,40 @@ dd {
   line-height: 1.5;
 }
 
+/* Count and load-state line for the full-conversation audit preview. */
+.prompt-output-thread-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* One prompt/response exchange inside the full-conversation preview. The
+   clicked exchange gets a teal outline so the auditor lands on the turn
+   they picked from the activity list. */
+.prompt-output-exchange {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.prompt-output-exchange.is-selected {
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--teal) 40%, transparent);
+}
+
+.prompt-output-exchange-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .audit-alert-summary {
   display: flex;
   flex-wrap: wrap;
@@ -14632,6 +14748,175 @@ button.owner-doc-card:hover {
   background: var(--surface-soft);
 }
 
+.prompt-activity-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+
+.retention-tag-chip.is-matter {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.retention-tags-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.retention-tag-search {
+  flex: 1;
+  min-width: 200px;
+  padding: 7px 11px;
+  border: 1.5px solid var(--accent);
+  border-radius: 9px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.retention-tag-search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.retention-namespace-select {
+  padding: 7px 9px;
+  border: 1.5px solid var(--accent);
+  border-radius: 9px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.retention-tags-count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.retention-filter-empty {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.prompt-panel-view-switch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.prompt-panel-view-switch .secondary-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.retention-tag-chip.is-archived {
+  background: var(--surface-soft);
+  font-style: italic;
+}
+
+.retention-batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+
+.retention-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.retention-batch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.retention-tagged-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.retention-tagged-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.retention-tagged-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+button.retention-tagged-title {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.retention-tagged-title:hover strong,
+button.retention-tagged-title:focus-visible strong {
+  text-decoration: underline;
+}
+
+.retention-tagged-title small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retention-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.retention-tag-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .memory-list {
   flex: 1;
   min-height: 0;
@@ -16083,6 +16368,132 @@ button.owner-doc-card:hover {
 
 .user-management-panel .panel-actions {
   flex-wrap: wrap;
+}
+
+.access-request-queue {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--orange) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--orange-soft) 42%, transparent), transparent 46%),
+    var(--surface-soft);
+}
+
+.access-request-queue-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.access-request-queue-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 10px;
+  color: var(--orange);
+  background: var(--orange-soft);
+  border: 1px solid var(--orange-border);
+}
+
+.access-request-queue-header > div,
+.access-request-person > div,
+.access-request-role {
+  display: grid;
+  gap: 3px;
+}
+
+.access-request-queue-header h3,
+.access-request-person strong {
+  color: var(--text-strong);
+}
+
+.access-request-queue-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.access-request-queue-header span,
+.access-request-person span,
+.access-request-person small,
+.access-request-role small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.access-request-list {
+  display: grid;
+  gap: 8px;
+}
+
+.access-request-card {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(245px, 1.25fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.access-request-person {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.access-request-person span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-request-role > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.access-request-role .select-control {
+  width: 100%;
+}
+
+.access-request-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+@media (max-width: 980px) {
+  .access-request-card {
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr);
+  }
+
+  .access-request-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 640px) {
+  .access-request-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .access-request-actions {
+    grid-column: auto;
+    justify-content: stretch;
+  }
+
+  .access-request-actions > button {
+    flex: 1;
+  }
 }
 
 .user-management-table {
@@ -18479,6 +18890,16 @@ button.owner-doc-card:hover {
     padding: 0 10px;
   }
 
+  .auth-name-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-request-entry {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .auth-input-wrap input,
   .auth-select-wrap select {
     min-height: 38px;
@@ -20050,7 +20471,7 @@ button.owner-doc-card:hover {
 .model-filter-loading {
   margin: 0;
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .model-filter-list {
@@ -20089,7 +20510,7 @@ button.owner-doc-card:hover {
 }
 
 .model-filter-row-main small {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -20139,7 +20560,7 @@ button.owner-doc-card:hover {
 }
 
 .model-filter-rules > small {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -20287,7 +20708,7 @@ button.owner-doc-card:hover {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-sunken, rgba(12, 26, 38, 0.04));
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11.75px;
   line-height: 1.38;
 }
@@ -20338,7 +20759,7 @@ button.owner-doc-card:hover {
 }
 
 .custom-tool-guide > summary small {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11.5px;
   line-height: 1.3;
 }
@@ -20393,11 +20814,11 @@ button.owner-doc-card:hover {
 }
 
 .custom-tool-guide-tip {
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .custom-tool-groups small {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 11.5px;
   line-height: 1.3;
 }
@@ -20435,7 +20856,7 @@ button.owner-doc-card:hover {
 
 .tool-run-empty {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 13px;
 }
 

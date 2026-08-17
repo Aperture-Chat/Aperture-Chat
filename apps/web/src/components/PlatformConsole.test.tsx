@@ -548,6 +548,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "Analytics: runtime, activity, and usage",
     "Owner audit signals",
     "Alerts and email delivery",
+    "Data retention and tagging",
   ];
   for (const title of videoTitles) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
@@ -744,7 +745,31 @@ test("audit tab drills into user prompts and acknowledges security alerts", asyn
       acknowledged_at: null,
     },
   ];
+  // The thread drilldown returns the whole conversation, including an
+  // earlier exchange that never appeared in the activity list window.
+  const fullThread: UserPromptRecord[] = [
+    promptRecords[0],
+    {
+      id: "message-jane-0",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      user_email: "jane@example.com",
+      user_role: "USER",
+      thread_id: "thread-jane-dlp",
+      thread_title: "Review DLP boundaries",
+      model_id: "gpt-4o",
+      content: "Earlier question about the same matter.",
+      created_at: "Jul 6, 2026, 4:00 PM UTC",
+      created_at_iso: "2026-07-06T22:00:00+00:00",
+      response_message_id: "message-jane-response-0",
+      response_content: "Earlier saved answer.",
+      response_status: "ok",
+      response_truncated: false,
+      alert_count: 0,
+    },
+  ];
   const listPromptActivity = vi.fn(async () => promptRecords);
+  const listThreadPromptActivity = vi.fn(async () => fullThread);
   const listSecurityAlerts = vi.fn(async () => alerts);
   const acknowledgeSecurityAlert = vi.fn(async (alertId: string, acknowledged: boolean) => ({
     ...alerts[0],
@@ -754,7 +779,12 @@ test("audit tab drills into user prompts and acknowledges security alerts", asyn
     acknowledged_at: "2026-07-06T23:05:00+00:00",
   }));
 
-  renderPlatform(data, { listPromptActivity, listSecurityAlerts, acknowledgeSecurityAlert });
+  renderPlatform(data, {
+    listPromptActivity,
+    listThreadPromptActivity,
+    listSecurityAlerts,
+    acknowledgeSecurityAlert,
+  });
   selectTab("Audit");
   await screen.findByRole("tabpanel", { name: "Audit" });
   expandPanel("User Prompt Activity");
@@ -774,6 +804,16 @@ test("audit tab drills into user prompts and acknowledges security alerts", asyn
   expect(within(promptList).getByText("1 active alert")).toBeInTheDocument();
   fireEvent.click(within(promptList).getByText("Review DLP boundaries"));
   const previewDialog = screen.getByRole("dialog", { name: "Prompt and model output" });
+  // The preview drills into the whole thread: the earlier exchange outside
+  // the list window loads in, oldest first, with the clicked turn marked.
+  await waitFor(() => expect(listThreadPromptActivity).toHaveBeenCalledWith("thread-jane-dlp"));
+  expect(
+    await within(previewDialog).findByText("Earlier question about the same matter."),
+  ).toBeInTheDocument();
+  expect(within(previewDialog).getByText("Earlier saved answer.")).toBeInTheDocument();
+  const clickedExchange = within(previewDialog).getByRole("article", { name: "Exchange 2 of 2" });
+  expect(clickedExchange.className).toContain("is-selected");
+  expect(within(clickedExchange).getByText(/redacted card value/)).toBeInTheDocument();
   expect(within(previewDialog).getByText(/redacted card value/)).toBeInTheDocument();
   // The audit view renders the output the way the user saw it: markdown
   // structure, not the raw source with its "##" and pipe characters.
@@ -2004,4 +2044,74 @@ test("every analytics and audit section carries its own user and date filter", a
   ).not.toBeNull();
   expect(screen.getByLabelText("Security alert filter user")).toBeInTheDocument();
   expect(screen.getByLabelText("Audit trail filter user")).toBeInTheDocument();
+});
+
+test("owner org settings includes the data retention panel with a working toggle", async () => {
+  const policy = {
+    tenant_id: "tenant-synthetic",
+    enabled: false,
+    chat_retention_days: 0,
+    retention_basis: "last_activity" as const,
+    action: "purge" as const,
+    grace_days: 0,
+    notify_admins: false,
+    mcp_tagging_enabled: false,
+    attachment_tagging_enabled: false,
+    subject_tagging_enabled: false,
+    external_tags_enabled: false,
+    rules: [],
+    updated_at: "",
+  };
+  const getRetentionPolicy = vi.fn(async () => policy);
+  const updateRetentionPolicy = vi.fn(
+    async (patch: { mcp_tagging_enabled?: boolean }) => ({ ...policy, ...patch }),
+  );
+  const listRetentionThreads = vi.fn(async () => []);
+
+  renderPlatform(platformOwnerData(), {
+    getRetentionPolicy,
+    updateRetentionPolicy,
+    listRetentionThreads,
+  });
+  selectTab("Org Settings");
+
+  expect(await screen.findByRole("heading", { name: "Data Retention" })).toBeInTheDocument();
+  expandPanel("Data Retention");
+  const toggle = await screen.findByRole("switch", { name: "Tag chats that use MCP connections" });
+  await waitFor(() => expect(toggle).not.toBeDisabled());
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(updateRetentionPolicy).toHaveBeenCalledWith({ mcp_tagging_enabled: true }),
+  );
+  expect(await screen.findByText("Retention policy saved.")).toBeInTheDocument();
+});
+
+test("owner audit prompt panel has a tags view with the chat list", async () => {
+  const listRetentionThreads = vi.fn(async () => [
+    {
+      thread_id: "thread-owner-tagged",
+      title: "Owner tagged chat",
+      owner_user_id: "user-jane",
+      tags: [
+        {
+          id: "tag-owner-1",
+          tenant_id: "tenant-synthetic",
+          thread_id: "thread-owner-tagged",
+          namespace: "subject",
+          key: "legal",
+          value: "litigation",
+          source: "auto" as const,
+          applied_at: "2026-08-16T00:00:00Z",
+        },
+      ],
+    },
+  ]);
+
+  renderPlatform(platformOwnerData(), { listRetentionThreads });
+  selectTab("Audit");
+  expandPanel("User Prompt Activity");
+  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+
+  expect(await screen.findByText("Owner tagged chat")).toBeInTheDocument();
+  expect(screen.getByText("subject: legal / litigation")).toBeInTheDocument();
 });

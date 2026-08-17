@@ -31,6 +31,8 @@ import {
   updateAdminModelContentFilters,
   previewAdminToolScript,
   createAdminUser,
+  approveAdminAccessRequest,
+  declineAdminAccessRequest,
   bootstrapPlatformOwner,
   deleteAdminGroup,
   createProviderKey,
@@ -74,8 +76,12 @@ import {
   updateAdminSecurityAlert,
   createMemory,
   deleteMemory,
+  getAdminRetentionPolicy,
   getMemoryPolicy,
   getMemoryStats,
+  listAdminRetentionThreads,
+  runAdminRetentionBatch,
+  updateAdminRetentionPolicy,
   listMemories,
   purgeMemories,
   purgeUserMemories,
@@ -714,6 +720,10 @@ export function App() {
     () => ({
       createUser: (actorUserId, payload) =>
         createAdminUser(actorUserId, payload),
+      approveAccessRequest: (actorUserId, userId, role) =>
+        approveAdminAccessRequest(actorUserId, userId, role),
+      declineAccessRequest: (actorUserId, userId) =>
+        declineAdminAccessRequest(actorUserId, userId),
       updateUser: (actorUserId, userId, patch) =>
         updateAdminUser(actorUserId, userId, patch),
       deactivateUser: async (actorUserId, userId) => {
@@ -857,6 +867,10 @@ export function App() {
       listAuditEvents: (actorUserId) => listAdminAuditEvents(actorUserId),
       listPromptActivity: (actorUserId, targetUserId) =>
         listAdminPromptActivity(actorUserId, { targetUserId, limit: 150 }),
+      // Fetches one thread's full conversation for the audit preview; 500 is
+      // the server-side maximum page size.
+      listThreadPromptActivity: (actorUserId, threadId) =>
+        listAdminPromptActivity(actorUserId, { threadId, limit: 500 }),
       listSecurityAlerts: (actorUserId, targetUserId) =>
         listAdminSecurityAlerts(actorUserId, {
           targetUserId,
@@ -882,6 +896,10 @@ export function App() {
       updateMemoryPolicy: (actorUserId, patch) => updateMemoryPolicy(actorUserId, patch),
       getMemoryStats: (actorUserId) => getMemoryStats(actorUserId),
       purgeUserMemories: (actorUserId, userId) => purgeUserMemories(actorUserId, userId),
+      getRetentionPolicy: (actorUserId) => getAdminRetentionPolicy(actorUserId),
+      updateRetentionPolicy: (actorUserId, patch) => updateAdminRetentionPolicy(actorUserId, patch),
+      listRetentionThreads: (actorUserId) => listAdminRetentionThreads(actorUserId, { limit: 500 }),
+      runRetentionBatch: (actorUserId, payload) => runAdminRetentionBatch(actorUserId, payload),
     }),
     [],
   );
@@ -948,6 +966,16 @@ export function App() {
       listAuditEvents: () => listPlatformAuditEvents(data.me.id),
       listPromptActivity: (targetUserId) =>
         listPlatformPromptActivity(data.me.id, { targetUserId, limit: 150 }),
+      // Fetches one thread's full conversation for the audit preview; 500 is
+      // the server-side maximum page size.
+      listThreadPromptActivity: (threadId) =>
+        listPlatformPromptActivity(data.me.id, { threadId, limit: 500 }),
+      // Retention governance rides the admin endpoints, which already admit
+      // platform owners and scope them to the deployment's sole tenant.
+      getRetentionPolicy: () => getAdminRetentionPolicy(data.me.id),
+      updateRetentionPolicy: (patch) => updateAdminRetentionPolicy(data.me.id, patch),
+      listRetentionThreads: () => listAdminRetentionThreads(data.me.id, { limit: 500 }),
+      runRetentionBatch: (payload) => runAdminRetentionBatch(data.me.id, payload),
       listSecurityAlerts: (targetUserId) =>
         listPlatformSecurityAlerts(data.me.id, {
           targetUserId,

@@ -46,6 +46,7 @@ const AdminDocumentationModal = lazyWithReload("admin-documentation", () =>
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { PromptActivityList } from "./PromptActivityList";
+import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
 import { ModelFilterDialog, type ModelFilterDialogApi } from "./ModelFilterDialog";
 import { CustomToolBuilder, type CustomToolBuilderApi } from "./CustomToolBuilder";
@@ -74,6 +75,11 @@ import type {
   SsoConfig,
   TenantMemoryPolicy,
   TenantMemoryPolicyUpdateRequest,
+  TenantRetentionPolicy,
+  TenantRetentionPolicyUpdateRequest,
+  RetentionBatchRequest,
+  RetentionBatchResult,
+  RetentionTaggedThread,
   ToolConfig,
   ToolConfigRecord,
   User,
@@ -114,11 +120,12 @@ import {
   type SectionScope,
 } from "./SectionScopeFilter";
 
-const ROLE_ORDER: Role[] = ["USER", "POWER_USER", "AUDITOR", "AGENT_APPROVER"];
+const ROLE_ORDER: Role[] = ["USER", "TEMP_USER", "POWER_USER", "AUDITOR", "AGENT_APPROVER"];
 const PLATFORM_OWNER_ASSIGNABLE_ROLES: Role[] = ["TENANT_ADMIN", ...ROLE_ORDER];
 const ROLE_LABELS: Record<Role, string> = {
   PLATFORM_OWNER: "Platform Owner",
   TENANT_ADMIN: "Admin",
+  TEMP_USER: "Temp User",
   POWER_USER: "Power User",
   AUDITOR: "Auditor",
   AGENT_APPROVER: "Agent Approver",
@@ -463,6 +470,13 @@ export type AdminConsoleApi = {
     targetUserId: string | undefined,
     context: AdminMutationContext,
   ) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+  /** Loads every saved exchange of one chat thread so the audit preview can
+   * show the full conversation, not just the clicked record. */
+  listThreadPromptActivity?: (
+    actorUserId: string,
+    threadId: string,
+    context: AdminMutationContext,
+  ) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
   listSecurityAlerts?: (
     actorUserId: string,
     targetUserId: string | undefined,
@@ -512,6 +526,13 @@ export type AdminConsoleApi = {
     context: AdminMutationContext,
   ) => Promise<AlertEmailStatus | void>;
   createUser?: (actorUserId: string, payload: AdminUserCreateInput, context: AdminMutationContext) => Promise<User | void>;
+  approveAccessRequest?: (
+    actorUserId: string,
+    userId: string,
+    role: "USER" | "TEMP_USER" | "TENANT_ADMIN",
+    context: AdminMutationContext,
+  ) => Promise<User | void>;
+  declineAccessRequest?: (actorUserId: string, userId: string, context: AdminMutationContext) => Promise<void>;
   updateUser?: (actorUserId: string, userId: string, patch: AdminUserUpdateInput, context: AdminMutationContext) => Promise<User | void>;
   deactivateUser?: (actorUserId: string, userId: string, context: AdminMutationContext) => Promise<User | void>;
   deleteUser?: (actorUserId: string, userId: string, context: AdminMutationContext) => Promise<void>;
@@ -640,6 +661,25 @@ export type AdminConsoleApi = {
     userId: string,
     context: AdminMutationContext,
   ) => Promise<{ removed: number } | void>;
+  // Data retention governance. Policy plus a content-free tagged-thread list.
+  getRetentionPolicy?: (
+    actorUserId: string,
+    context: AdminMutationContext,
+  ) => Promise<TenantRetentionPolicy | void>;
+  updateRetentionPolicy?: (
+    actorUserId: string,
+    patch: TenantRetentionPolicyUpdateRequest,
+    context: AdminMutationContext,
+  ) => Promise<TenantRetentionPolicy | void>;
+  listRetentionThreads?: (
+    actorUserId: string,
+    context: AdminMutationContext,
+  ) => Promise<RetentionTaggedThread[] | void>;
+  runRetentionBatch?: (
+    actorUserId: string,
+    payload: RetentionBatchRequest,
+    context: AdminMutationContext,
+  ) => Promise<RetentionBatchResult | void>;
 };
 
 type ConnectorFieldSpec = {
@@ -817,6 +857,7 @@ export function AdminConsole({
   const [showInvite, setShowInvite] = useState(false);
   const [showGroupCreate, setShowGroupCreate] = useState(false);
   const [invite, setInvite] = useState({ name: "", email: "", role: "USER" as Role });
+  const [accessReviewRoles, setAccessReviewRoles] = useState<Record<string, "USER" | "TEMP_USER" | "TENANT_ADMIN">>({});
   const [groupDraft, setGroupDraft] = useState(emptyGroupDraft(data.currentTenant.id));
   const [bulkUserText, setBulkUserText] = useState("");
   const [modelAccessSearch, setModelAccessSearch] = useState("");
@@ -866,6 +907,24 @@ export function AdminConsole({
   const [memoryStats, setMemoryStats] = useState<MemoryUserStat[] | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memoryRefreshToken, setMemoryRefreshToken] = useState(0);
+  const [retentionPolicy, setRetentionPolicy] = useState<TenantRetentionPolicy | null>(null);
+  const [retentionTagged, setRetentionTagged] = useState<RetentionTaggedThread[] | null>(null);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const [retentionRefreshToken, setRetentionRefreshToken] = useState(0);
+  const [promptPanelView, setPromptPanelView] = useState<"prompts" | "tags">("prompts");
+  // Matter labels and retention tags per thread, folded into the prompt
+  // phrase search so client/matter numbers find their conversations.
+  const promptSearchExtras = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const row of retentionTagged ?? []) {
+      map[row.thread_id] = [
+        row.matter_label ?? "",
+        row.matter_id ?? "",
+        ...row.tags.map((tag) => `${tag.namespace} ${tag.key} ${tag.value ?? ""}`),
+      ].join(" ");
+    }
+    return map;
+  }, [retentionTagged]);
   // The full governance panels stay hidden when service policy has not made
   // memory available, so admins are never offered a control that cannot act.
   const memoryTabVisible = Boolean(data.platformSettings?.memory_enabled);
@@ -934,13 +993,28 @@ export function AdminConsole({
     ? (data.models.find((model) => model.id === filterModelId) ?? null)
     : null;
   const listPromptActivity = adminApi?.listPromptActivity;
+  const listThreadPromptActivity = adminApi?.listThreadPromptActivity;
   const listSecurityAlerts = adminApi?.listSecurityAlerts;
   const loadedModelCatalogKey = useRef<string | null>(null);
   const selectedGroup = data.groups.find((group) => group.id === selectedGroupId) ?? defaultGroupFor(data) ?? data.groups[0];
   const defaultGroup = defaultGroupFor(data);
   const roleOptions = assignableRoles(data.me);
+  const pendingAccessRequests = useMemo(
+    () => data.visibleUsers.filter((user) => user.access_request_status === "pending" && !user.active),
+    [data.visibleUsers],
+  );
+  const accessApprovalRoles = useMemo<Array<"USER" | "TEMP_USER" | "TENANT_ADMIN">>(
+    () => [
+      "USER",
+      "TEMP_USER",
+      ...(data.me.role === "PLATFORM_OWNER" || data.platformSettings?.tenant_admins_can_create_admins
+        ? (["TENANT_ADMIN"] as const)
+        : []),
+    ],
+    [data.me.role, data.platformSettings?.tenant_admins_can_create_admins],
+  );
   const pendingUserCount = useMemo(
-    () => data.visibleUsers.filter((user) => isPendingPlatformUser(user)).length,
+    () => data.visibleUsers.filter((user) => user.access_request_status !== "pending" && isPendingPlatformUser(user)).length,
     [data.visibleUsers],
   );
   const adminVisibleModels = useMemo(() => data.models.filter((model) => model.platform_enabled), [data.models]);
@@ -1004,7 +1078,9 @@ export function AdminConsole({
   const displayedUsers = useMemo(() => {
     // Defense in depth: platform owners are filtered server-side, but never render
     // them in the tenant user list even if a stale payload includes one.
-    const tenantUsers = data.visibleUsers.filter((user) => user.role !== "PLATFORM_OWNER");
+    const tenantUsers = data.visibleUsers.filter(
+      (user) => user.role !== "PLATFORM_OWNER" && user.access_request_status !== "pending",
+    );
     return userGroupFilter === "all"
       ? tenantUsers
       : tenantUsers.filter((user) => user.group_ids.includes(userGroupFilter));
@@ -1344,6 +1420,38 @@ export function AdminConsole({
   ]);
 
   useEffect(() => {
+    const getRetentionPolicy = adminApi?.getRetentionPolicy;
+    const listRetentionThreads = adminApi?.listRetentionThreads;
+    if (!getRetentionPolicy && !listRetentionThreads) return;
+    let active = true;
+    Promise.all([
+      getRetentionPolicy ? getRetentionPolicy(data.me.id, mutationContext) : Promise.resolve(undefined),
+      listRetentionThreads
+        ? listRetentionThreads(data.me.id, mutationContext)
+        : Promise.resolve(undefined),
+    ])
+      .then(([policy, tagged]) => {
+        if (!active) return;
+        if (policy) setRetentionPolicy(policy);
+        if (tagged) setRetentionTagged(tagged);
+        setRetentionError(null);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setRetentionError(errorMessage(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    adminApi?.getRetentionPolicy,
+    adminApi?.listRetentionThreads,
+    data.me,
+    retentionRefreshToken,
+    mutationContext,
+  ]);
+
+  useEffect(() => {
     const listModelAccess = adminApi?.listModelAccess;
     const loadKey = `${data.me.id}:${data.currentTenant.id}`;
     if (!listModelAccess || loadedModelCatalogKey.current === loadKey) return;
@@ -1509,6 +1617,62 @@ export function AdminConsole({
         tone: "danger",
         message: `User was not created. ${errorMessage(error)}`,
       });
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function approveAccessRequest(target: User) {
+    const approve = adminApi?.approveAccessRequest;
+    if (!approve) {
+      setActionStatus({ tone: "danger", message: "Access requests cannot be approved because the admin API is not connected." });
+      return;
+    }
+    const role = accessReviewRoles[target.id] ?? "USER";
+    setPendingAction(`approve-access-${target.id}`);
+    setActionStatus({ tone: "info", message: `Approving ${target.display_name}'s access request...` });
+    try {
+      const approved = await approve(data.me.id, target.id, role, mutationContext);
+      if (!approved) throw new Error("The admin API did not return the approved account.");
+      onDataChange((current) => ({
+        ...current,
+        users: upsertUsers(current.users, approved),
+        visibleUsers: upsertUsers(current.visibleUsers, approved),
+        groups: current.groups.map((group) =>
+          approved.group_ids.includes(group.id) ? { ...group, user_count: group.user_count + 1 } : group,
+        ),
+      }));
+      setActionStatus({
+        tone: "success",
+        message:
+          role === "TEMP_USER"
+            ? `${approved.display_name} was approved as a Temp User with Luna-only access and a 30,000-token grant.`
+            : `${approved.display_name} was approved as ${ROLE_LABELS[role]}.`,
+      });
+    } catch (error) {
+      setActionStatus({ tone: "danger", message: `Access was not approved. ${errorMessage(error)}` });
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function declineAccessRequest(target: User) {
+    const decline = adminApi?.declineAccessRequest;
+    if (!decline) {
+      setActionStatus({ tone: "danger", message: "Access requests cannot be declined because the admin API is not connected." });
+      return;
+    }
+    setPendingAction(`decline-access-${target.id}`);
+    try {
+      await decline(data.me.id, target.id, mutationContext);
+      onDataChange((current) => ({
+        ...current,
+        users: current.users.filter((user) => user.id !== target.id),
+        visibleUsers: current.visibleUsers.filter((user) => user.id !== target.id),
+      }));
+      setActionStatus({ tone: "success", message: `${target.display_name}'s access request was declined.` });
+    } catch (error) {
+      setActionStatus({ tone: "danger", message: `The request was not declined. ${errorMessage(error)}` });
     } finally {
       setPendingAction(null);
     }
@@ -2358,6 +2522,75 @@ export function AdminConsole({
     }
   }
 
+  async function saveRetentionPolicy(patch: TenantRetentionPolicyUpdateRequest) {
+    const updateRetentionPolicy = adminApi?.updateRetentionPolicy;
+    if (!updateRetentionPolicy) {
+      setActionStatus({
+        tone: "warning",
+        message: "Retention policy was not saved; the admin retention API is not connected.",
+      });
+      return;
+    }
+    const previous = retentionPolicy;
+    setRetentionPolicy((current) => (current ? { ...current, ...patch } : current));
+    setPendingAction("retention-policy");
+    try {
+      const saved = await updateRetentionPolicy(data.me.id, patch, mutationContext);
+      if (saved) setRetentionPolicy(saved);
+      setActionStatus({ tone: "success", message: "Retention policy saved." });
+      setRetentionError(null);
+    } catch (error) {
+      setRetentionPolicy(previous);
+      setActionStatus({
+        tone: "danger",
+        message: `Retention policy was not saved. ${errorMessage(error)}`,
+      });
+    } finally {
+      setPendingAction((current) => (current === "retention-policy" ? null : current));
+    }
+  }
+
+  async function runRetentionBatchAction(
+    action: "delete" | "archive",
+    threadIds: string[],
+  ): Promise<boolean> {
+    const runRetentionBatch = adminApi?.runRetentionBatch;
+    if (!runRetentionBatch) {
+      setActionStatus({
+        tone: "warning",
+        message: "Nothing was changed; the admin retention API is not connected.",
+      });
+      return false;
+    }
+    setPendingAction("retention-batch");
+    try {
+      const result = await runRetentionBatch(
+        data.me.id,
+        { action, thread_ids: threadIds },
+        mutationContext,
+      );
+      const disposed = result?.disposed ?? 0;
+      const held = result?.skipped_held ?? 0;
+      setActionStatus({
+        tone: "success",
+        message:
+          action === "delete"
+            ? `Deleted ${disposed} chat${disposed === 1 ? "" : "s"}.${held > 0 ? ` ${held} under an active legal hold ${held === 1 ? "was" : "were"} skipped.` : ""}`
+            : `Archived ${disposed} chat${disposed === 1 ? "" : "s"}.`,
+      });
+      setRetentionRefreshToken((token) => token + 1);
+      return true;
+    } catch (error) {
+      setActionStatus({
+        tone: "danger",
+        message: `The batch ${action} failed. ${errorMessage(error)}`,
+      });
+      return false;
+    } finally {
+      setPendingAction((current) => (current === "retention-batch" ? null : current));
+    }
+  }
+
   async function purgeMemoriesForUser(stat: MemoryUserStat) {
     const purgeUserMemories = adminApi?.purgeUserMemories;
     if (!purgeUserMemories) {
@@ -2470,7 +2703,9 @@ export function AdminConsole({
             className="users-panel user-management-panel"
             title={`Users (${displayedUsers.length})`}
             subtitle={
-              pendingUserCount > 0
+              pendingAccessRequests.length > 0
+                ? `${pendingAccessRequests.length} access request${pendingAccessRequests.length === 1 ? "" : "s"} waiting for review.`
+                : pendingUserCount > 0
                 ? `${pendingUserCount} user${pendingUserCount === 1 ? "" : "s"} need a platform group before assigned resources unlock.`
                 : "Default Users is the protected baseline for new accounts."
             }
@@ -2514,6 +2749,82 @@ export function AdminConsole({
               </>
             }
           >
+            {pendingAccessRequests.length > 0 && (
+              <section className="access-request-queue" aria-labelledby="access-request-queue-title">
+                <header className="access-request-queue-header">
+                  <span className="access-request-queue-icon"><Clock3 size={18} /></span>
+                  <div>
+                    <h3 id="access-request-queue-title">Access requests</h3>
+                    <span>{pendingAccessRequests.length} waiting for review</span>
+                  </div>
+                </header>
+                <div className="access-request-list">
+                  {pendingAccessRequests.map((request) => {
+                    const reviewRole = accessReviewRoles[request.id] ?? "USER";
+                    const approving = pendingAction === `approve-access-${request.id}`;
+                    const declining = pendingAction === `decline-access-${request.id}`;
+                    return (
+                      <article className="access-request-card" key={request.id}>
+                        <div className="access-request-person">
+                          <UserAvatar user={request} className="mini-avatar" />
+                          <div>
+                            <strong>{request.display_name}</strong>
+                            <span>{request.email}</span>
+                            <small>{formatAccessRequestedAt(request.access_requested_at)}</small>
+                          </div>
+                        </div>
+                        <label className="access-request-role">
+                          <span>Approve as</span>
+                          <SelectControl
+                            aria-label={`Access level for ${request.display_name}`}
+                            value={reviewRole}
+                            disabled={approving || declining}
+                            onChange={(event) =>
+                              setAccessReviewRoles((current) => ({
+                                ...current,
+                                [request.id]: event.target.value as "USER" | "TEMP_USER" | "TENANT_ADMIN",
+                              }))
+                            }
+                          >
+                            {accessApprovalRoles.map((role) => (
+                              <option key={role} value={role}>
+                                {role === "TEMP_USER" ? "Temp User · Luna + 30K tokens" : ROLE_LABELS[role]}
+                              </option>
+                            ))}
+                          </SelectControl>
+                          <small>
+                            {reviewRole === "TEMP_USER"
+                              ? "Luna only; requests stop after 30,000 reported tokens."
+                              : reviewRole === "TENANT_ADMIN"
+                                ? "Can manage workspace users, access, and settings."
+                                : "Receives the workspace's standard group-based access."}
+                          </small>
+                        </label>
+                        <div className="access-request-actions">
+                          <button
+                            className="primary-button compact"
+                            type="button"
+                            disabled={approving || declining}
+                            onClick={() => void approveAccessRequest(request)}
+                          >
+                            {approving ? <RefreshCw className="spin" size={14} /> : <Check size={14} />}
+                            {approving ? "Approving…" : "Approve"}
+                          </button>
+                          <button
+                            className="secondary-button compact"
+                            type="button"
+                            disabled={approving || declining}
+                            onClick={() => void declineAccessRequest(request)}
+                          >
+                            <X size={14} /> {declining ? "Declining…" : "Decline"}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
             {showInvite && (
               <div className="inline-form user-create-form">
                 <label>
@@ -3907,6 +4218,12 @@ export function AdminConsole({
                 </div>
               </Panel>
             )}
+            <RetentionPanel
+              policy={retentionPolicy}
+              error={retentionError}
+              busy={pendingAction === "retention-policy"}
+              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
+            />
           </div>
         </Tabs.Content>
 
@@ -3997,6 +4314,26 @@ export function AdminConsole({
               }
               defaultCollapsed
             >
+              <div className="prompt-panel-view-switch" role="group" aria-label="Prompt panel view">
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  aria-pressed={promptPanelView === "prompts"}
+                  onClick={() => setPromptPanelView("prompts")}
+                >
+                  Prompts
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  aria-pressed={promptPanelView === "tags"}
+                  onClick={() => setPromptPanelView("tags")}
+                >
+                  Tags
+                </button>
+              </div>
+              {promptPanelView === "prompts" ? (
+                <>
               <SectionScopeFilter
                 label="Prompt activity filter"
                 scope={promptScope}
@@ -4051,6 +4388,38 @@ export function AdminConsole({
                   records={auditPromptActivityRows}
                   ariaLabel="Admin user prompt activity"
                   formatTimestamp={formatPromptRecordTimestamp}
+                  extraThreadSearchText={promptSearchExtras}
+                  loadThreadRecords={
+                    listThreadPromptActivity
+                      ? (threadId) => listThreadPromptActivity(data.me.id, threadId, mutationContext)
+                      : undefined
+                  }
+                />
+              )}
+                </>
+              ) : (
+                <RetentionTagsView
+                  tagged={retentionTagged}
+                  error={retentionError}
+                  busy={pendingAction === "retention-batch"}
+                  onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
+                  loadThreadRecords={
+                    adminApi?.listThreadPromptActivity
+                      ? (threadId) =>
+                          Promise.resolve(
+                            adminApi.listThreadPromptActivity!(
+                              data.me.id,
+                              threadId,
+                              mutationContext,
+                            ),
+                          )
+                      : undefined
+                  }
+                  onBatchAction={
+                    adminApi?.runRetentionBatch
+                      ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
+                      : undefined
+                  }
                 />
               )}
             </Panel>
@@ -5268,6 +5637,18 @@ function formatAdminAuditTimestamp(value: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
+}
+
+function formatAccessRequestedAt(value?: string | null) {
+  if (!value) return "Requested recently";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Requested recently";
+  return `Requested ${new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date)}`;
 }
 
 function formatAdminAuditRole(role: string) {

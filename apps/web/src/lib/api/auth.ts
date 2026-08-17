@@ -76,6 +76,42 @@ export type NormalizedLoginResponse = Omit<AuthLoginResponse, "bootstrap"> & {
   bootstrap: BootstrapData;
 };
 
+export type AccessRequestCreate = {
+  first_name: string;
+  last_name: string;
+  email: string;
+};
+
+export type AccessRequestResult = {
+  status: "pending";
+  message: string;
+};
+
+/** Public, pre-session access request. The API always returns the same pending
+ * shape for an existing email so this cannot enumerate workspace accounts. */
+export async function requestWorkspaceAccess(
+  payload: AccessRequestCreate,
+  options: ApiMutationOptions = {},
+): Promise<AccessRequestResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}/api/auth/access-requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ChatRequestError("Could not reach the access request service.");
+  }
+  if (!response.ok) {
+    throw new ChatRequestError(await readApiError(response), response.status);
+  }
+  return (await response.json()) as AccessRequestResult;
+}
+
 /** POST /api/auth/mfa/enroll/confirm, split so the show-once recovery codes
  * cannot be forwarded accidentally alongside the session response. */
 export type MfaEnrollmentConfirmation = {
@@ -468,7 +504,7 @@ export function revokeAccountApiKey(
 export type MyUsageBudgetCap = {
   scope: "user" | "group";
   label: string;
-  budget_period: "day" | "week" | "month";
+  budget_period: "day" | "week" | "month" | "lifetime";
   daily_token_limit: number;
   reported_tokens: number;
   period_start: string;

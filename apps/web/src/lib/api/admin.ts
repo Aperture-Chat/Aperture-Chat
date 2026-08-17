@@ -42,7 +42,12 @@ import type {
   AlertRule,
   AlertRuleCreateRequest,
   AlertRuleUpdateRequest,
+  RetentionBatchRequest,
+  RetentionBatchResult,
+  RetentionTaggedThread,
   SecurityAlert,
+  TenantRetentionPolicy,
+  TenantRetentionPolicyUpdateRequest,
   UsageRecord,
   UsageSummary,
   SkillFile,
@@ -68,6 +73,30 @@ export function listAdminUsers(userId: string, options: ApiMutationOptions = {})
   return apiRequest<User[]>(userId, "/api/admin/users", {
     signal: options.signal,
   });
+}
+
+export function approveAdminAccessRequest(
+  userId: string,
+  targetUserId: string,
+  role: "USER" | "TEMP_USER" | "TENANT_ADMIN",
+  options: ApiMutationOptions = {},
+): Promise<User> {
+  return apiRequest<User>(userId, `/api/admin/access-requests/${pathId(targetUserId)}/approve`, {
+    method: "POST",
+    body: { role },
+    signal: options.signal,
+  });
+}
+
+export function declineAdminAccessRequest(
+  userId: string,
+  targetUserId: string,
+  options: ApiMutationOptions = {},
+): Promise<void> {
+  return apiRequest(userId, `/api/admin/access-requests/${pathId(targetUserId)}`, {
+    method: "DELETE",
+    signal: options.signal,
+  }).then(() => undefined);
 }
 
 export function updateAdminUser(
@@ -302,10 +331,11 @@ export function listAdminAuditEvents(
 
 export function listAdminPromptActivity(
   userId: string,
-  options: ApiMutationOptions & { targetUserId?: string; limit?: number } = {},
+  options: ApiMutationOptions & { targetUserId?: string; threadId?: string; limit?: number } = {},
 ): Promise<UserPromptRecord[]> {
   const params = new URLSearchParams();
   if (options.targetUserId) params.set("user_id", options.targetUserId);
+  if (options.threadId) params.set("thread_id", options.threadId);
   if (options.limit) params.set("limit", String(options.limit));
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiRequest<UserPromptRecord[]>(userId, `/api/admin/prompt-activity${query}`, {
@@ -833,4 +863,61 @@ export function deleteAdminUsageAllocation(
     `/api/admin/usage-allocations/${principalType}/${encodeURIComponent(principalId)}`,
     { method: "DELETE", signal: options.signal },
   );
+}
+
+// --- data retention: policy and content-free tagged-thread drilldown --------
+
+export function getAdminRetentionPolicy(
+  userId: string,
+  options: ApiMutationOptions = {},
+): Promise<TenantRetentionPolicy> {
+  return apiRequest<TenantRetentionPolicy>(userId, "/api/admin/retention/policy", {
+    signal: options.signal,
+  });
+}
+
+export function updateAdminRetentionPolicy(
+  userId: string,
+  payload: TenantRetentionPolicyUpdateRequest,
+  options: ApiMutationOptions = {},
+): Promise<TenantRetentionPolicy> {
+  return apiRequest<TenantRetentionPolicy>(userId, "/api/admin/retention/policy", {
+    method: "PATCH",
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function listAdminRetentionTaggedThreads(
+  userId: string,
+  options: ApiMutationOptions & { namespace?: string } = {},
+): Promise<RetentionTaggedThread[]> {
+  const query = options.namespace ? `?namespace=${encodeURIComponent(options.namespace)}` : "";
+  return apiRequest<RetentionTaggedThread[]>(
+    userId,
+    `/api/admin/retention/tagged-threads${query}`,
+    { signal: options.signal },
+  );
+}
+
+export function listAdminRetentionThreads(
+  userId: string,
+  options: ApiMutationOptions & { limit?: number } = {},
+): Promise<RetentionTaggedThread[]> {
+  const query = options.limit ? `?limit=${options.limit}` : "";
+  return apiRequest<RetentionTaggedThread[]>(userId, `/api/admin/retention/threads${query}`, {
+    signal: options.signal,
+  });
+}
+
+export function runAdminRetentionBatch(
+  userId: string,
+  payload: RetentionBatchRequest,
+  options: ApiMutationOptions = {},
+): Promise<RetentionBatchResult> {
+  return apiRequest<RetentionBatchResult>(userId, "/api/admin/retention/batch", {
+    method: "POST",
+    body: payload,
+    signal: options.signal,
+  });
 }
