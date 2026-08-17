@@ -1,4 +1,4 @@
-import { BarChart3, BellRing, Mail, ShieldCheck, SlidersHorizontal, UserPlus, Users, Wrench } from "lucide-react";
+import { BarChart3, BellRing, DatabaseZap, Mail, ShieldCheck, SlidersHorizontal, UserPlus, Users, Wrench } from "lucide-react";
 import { TrainingDocumentationModal, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
@@ -40,20 +40,26 @@ export type AdminFocus =
   | "alEmail"
   | "alRules"
   | "alRuleForm"
-  | "alDeliveries";
+  | "alDeliveries"
+  | "retentionPanel"
+  | "retentionToggles"
+  | "retentionTagsSwitch"
+  | "retentionTagsExplorer"
+  | "retentionPreview"
+  | "retentionBatch";
 
 export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   usersTabs: { frame: "training/admin/users.png", rect: { x: 266, y: 88, w: 606, h: 42 } },
   usersAdd: { frame: "training/admin/users.png", rect: { x: 840, y: 156, w: 116, h: 39 } },
   usersTable: { frame: "training/admin/users.png", rect: { x: 279, y: 219, w: 854, h: 324 } },
   usersActions: { frame: "training/admin/users.png", rect: { x: 1041, y: 265, w: 100, h: 276 } },
-  groupsCards: { frame: "training/admin/groups.png", rect: { x: 279, y: 235, w: 850, h: 361 } },
-  groupsEditor: { frame: "training/admin/groups.png", rect: { x: 294, y: 611, w: 824, h: 244 } },
+  groupsCards: { frame: "training/admin/groups.png", rect: { x: 279, y: 235, w: 851, h: 347 } },
+  groupsEditor: { frame: "training/admin/groups.png", rect: { x: 280, y: 587, w: 850, h: 268 } },
   groupsPermGrid: { frame: "training/admin/groups-permissions.png", rect: { x: 306, y: 299, w: 799, h: 477 } },
-  groupsAgentAuthoring: { frame: "training/admin/groups-permissions.png", rect: { x: 308, y: 698, w: 791, h: 78 } },
+  groupsAgentAuthoring: { frame: "training/admin/groups-permissions.png", rect: { x: 306, y: 696, w: 798, h: 74 } },
   maSync: { frame: "training/admin/model-access.png", rect: { x: 676, y: 158, w: 408, h: 48 } },
   maColumns: { frame: "training/admin/model-access.png", rect: { x: 282, y: 419, w: 861, h: 39 } },
-  maToggleScope: { frame: "training/admin/model-access.png", rect: { x: 565, y: 460, w: 570, h: 55 } },
+  maToggleScope: { frame: "training/admin/model-access.png", rect: { x: 672, y: 460, w: 308, h: 46 } },
   connConnectors: { frame: "training/admin/connections.png", rect: { x: 279, y: 223, w: 848, h: 364 } },
   connConfigure: { frame: "training/admin/connections.png", rect: { x: 955, y: 225, w: 117, h: 39 } },
   connResponseActions: { frame: "training/admin/response-actions.png", rect: { x: 266, y: 388, w: 876, h: 423 } },
@@ -61,27 +67,35 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   ssoFields: { frame: "training/admin/sso-form.png", rect: { x: 279, y: 330, w: 853, h: 218 } },
   ssoCreate: { frame: "training/admin/sso-form.png", rect: { x: 279, y: 556, w: 853, h: 130 } },
   ssoPanel: { frame: "training/admin/sso-form.png", rect: { x: 264, y: 220, w: 882, h: 478 } },
-  anFilters: { frame: "training/admin/analytics.png", rect: { x: 282, y: 95, w: 847, h: 131 } },
-  anRuntime: { frame: "training/admin/analytics.png", rect: { x: 268, y: 226, w: 875, h: 122 } },
-  anUsage: { frame: "training/admin/analytics-activity.png", rect: { x: 268, y: 0, w: 875, h: 560 } },
+  anFilters: { frame: "training/admin/analytics.png", rect: { x: 278, y: 76, w: 856, h: 134 } },
+  anRuntime: { frame: "training/admin/analytics.png", rect: { x: 276, y: 225, w: 856, h: 95 } },
+  anUsage: { frame: "training/admin/analytics-activity.png", rect: { x: 268, y: 0, w: 875, h: 585 } },
   anBudget: { frame: "training/admin/analytics-usage-budget.png", rect: { x: 267, y: 280, w: 877, h: 530 } },
   // These frames are captured at the native 1185 x 855 composition size, so
   // text stays legible and measured focus borders map one-to-one to the UI.
   policyCollapsed: { frame: "training/admin/policies-collapsed.png", rect: { x: 267, y: 144, w: 877, h: 227 } },
-  policyServiceAvailability: { frame: "training/admin/policies-controls.png", rect: { x: 268, y: 221, w: 875, h: 300 } },
-  policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 268, y: 533, w: 875, h: 247 } },
+  policyServiceAvailability: { frame: "training/admin/policies-controls.png", rect: { x: 276, y: 218, w: 858, h: 291 } },
+  policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 276, y: 530, w: 858, h: 240 } },
   policyMemory: { frame: "training/admin/policies-memory.png", rect: { x: 267, y: 225, w: 877, h: 362 } },
   policyCounts: { frame: "training/admin/policies-counts.png", rect: { x: 267, y: 306, w: 877, h: 133 } },
-  auCards: { frame: "training/admin/audit.png", rect: { x: 268, y: 209, w: 875, h: 258 } },
+  auCards: { frame: "training/admin/audit.png", rect: { x: 276, y: 218, w: 856, h: 238 } },
   auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 282, y: 154, w: 847, h: 131 } },
-  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 268, y: 213, w: 875, h: 66 } },
+  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 268, y: 518, w: 875, h: 222 } },
   alEmail: { frame: "training/admin/alerts.png", rect: { x: 264, y: 141, w: 882, h: 152 } },
   alRules: { frame: "training/admin/alerts.png", rect: { x: 264, y: 302, w: 882, h: 174 } },
   alRuleForm: { frame: "training/admin/alerts-rule-form.png", rect: { x: 266, y: 380, w: 876, h: 433 } },
-  alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 264, y: 490, w: 882, h: 86 } },
+  alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 264, y: 486, w: 882, h: 126 } },
+  // Retention frames are local-stack captures with synthetic chats and tags;
+  // rects were measured from the live DOM at capture time.
+  retentionPanel: { frame: "training/admin/retention-policy.png", rect: { x: 267, y: 306, w: 877, h: 268 } },
+  retentionToggles: { frame: "training/admin/retention-policy.png", rect: { x: 268, y: 387, w: 875, h: 186 } },
+  retentionTagsSwitch: { frame: "training/admin/retention-tags.png", rect: { x: 268, y: 81, w: 875, h: 66 } },
+  retentionTagsExplorer: { frame: "training/admin/retention-tags.png", rect: { x: 268, y: 159, w: 875, h: 556 } },
+  retentionPreview: { frame: "training/admin/retention-preview.png", rect: { x: 183, y: 215, w: 820, h: 424 } },
+  retentionBatch: { frame: "training/admin/retention-batch.png", rect: { x: 268, y: 356, w: 875, h: 143 } },
 };
 
-type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analytics" | "policies" | "audit" | "alerts";
+type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analytics" | "policies" | "audit" | "alerts" | "retention";
 
 export type AdminTrainingVideo = TrainingVideoBase & { icon: AdminGuideIcon };
 
@@ -462,6 +476,64 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
     ],
   },
+  {
+    id: "admin-retention",
+    audioSrc: "training/admin/admin-retention.mp3",
+    title: "Data retention and tagging",
+    description: "Turn on chat tagging, find tagged conversations, and archive or delete them in bulk.",
+    icon: "retention",
+    outcomes: ["Tagging toggles understood", "Tagged chats found", "Batch action executed safely"],
+    scenes: [
+      {
+        title: "The Data Retention panel",
+        caption: "Policies hosts the Data Retention panel: three tagging toggles, all off until you enable them.",
+        narration:
+          "The Policies tab hosts the Data Retention panel. Three toggles control how chats are tagged, and every one of them starts off — nothing is tagged until an administrator turns tagging on.",
+        durationSeconds: 13,
+        focus: "retentionPanel",
+      },
+      {
+        title: "Three sources of tags",
+        caption: "Tag chats that use MCP connections, chats with file uploads, and chats by subject.",
+        narration:
+          "Tag chats that use MCP connections marks any conversation that touched a connected tool, like Box. Tag chats with file uploads marks conversations carrying documents or images. And Tag chats by subject asks the chat's own model to classify each new conversation once, into a curated set of subjects like legal or financial.",
+        durationSeconds: 24,
+        focus: "retentionToggles",
+      },
+      {
+        title: "Prompts and Tags",
+        caption: "User Prompt Activity now has two views — switch to Tags to see every chat with its tags.",
+        narration:
+          "The Audit tab's User Prompt Activity panel now carries two views. Prompts is the activity list you know. Switch to Tags, and every chat in the organization appears — tagged or not.",
+        durationSeconds: 13,
+        focus: "retentionTagsSwitch",
+      },
+      {
+        title: "Read the tag chips",
+        caption: "Each row shows its tag chips — mcp, attachments, and subject — with search and a tag-type filter.",
+        narration:
+          "Each row carries its tag chips. An mcp chip names the connection the chat used, attachments distinguishes documents from images, and subject shows the model's classification. The search box and the tag-type filter narrow the list to exactly the cohort you need.",
+        durationSeconds: 19,
+        focus: "retentionTagsExplorer",
+      },
+      {
+        title: "Preview before you act",
+        caption: "Click a chat title to read the full conversation before deciding what happens to it.",
+        narration:
+          "Click any chat title to open the full conversation preview, so you can read exactly what a chat contains before acting on it.",
+        durationSeconds: 9,
+        focus: "retentionPreview",
+      },
+      {
+        title: "Archive or delete in bulk",
+        caption: "Select chats — or select all — then Archive or Delete with an inline confirm; legal holds are never deleted.",
+        narration:
+          "Select the chats that matter, or select them all, then choose Archive or Delete. A confirmation is always required before anything happens, and chats under an active legal hold are skipped and reported — a hold always wins.",
+        durationSeconds: 16,
+        focus: "retentionBatch",
+      },
+    ],
+  },
 ];
 
 const VIDEO_ICONS = {
@@ -474,6 +546,7 @@ const VIDEO_ICONS = {
   policies: SlidersHorizontal,
   audit: ShieldCheck,
   alerts: BellRing,
+  retention: DatabaseZap,
 } satisfies Record<AdminGuideIcon, typeof UserPlus>;
 
 const ADMIN_DECK: TrainingDeck = {
