@@ -115,6 +115,49 @@ def test_auth_options_include_updated_public_tenant_branding() -> None:
     assert branding["icon_url"] == "https://assets.example.com/icon.png"
 
 
+def test_access_request_creates_an_inactive_pending_identity_without_enumerating_duplicates() -> None:
+    payload = {
+        "first_name": "  Jamie  ",
+        "last_name": "  Rivera ",
+        "email": "Jamie.Rivera@example.com",
+    }
+
+    created = client.post("/api/auth/access-requests", json=payload)
+    duplicate = client.post("/api/auth/access-requests", json=payload)
+
+    assert created.status_code == duplicate.status_code == 202
+    assert created.json() == duplicate.json() == {
+        "status": "pending",
+        "message": "Your access request is pending review.",
+    }
+    matches = [
+        user
+        for user in get_store().users.values()
+        if user.email == "jamie.rivera@example.com"
+    ]
+    assert len(matches) == 1
+    requested = matches[0]
+    assert requested.display_name == "Jamie Rivera"
+    assert requested.first_name == "Jamie"
+    assert requested.last_name == "Rivera"
+    assert requested.tenant_id == "tenant-example"
+    assert requested.role == Role.USER
+    assert requested.active is False
+    assert requested.group_ids == []
+    assert requested.access_request_status == "pending"
+    assert requested.access_requested_at is not None
+
+
+def test_access_request_rejects_invalid_email_without_persisting_identity() -> None:
+    before = set(get_store().users)
+    response = client.post(
+        "/api/auth/access-requests",
+        json={"first_name": "Jamie", "last_name": "Rivera", "email": "not-an-email"},
+    )
+    assert response.status_code == 400
+    assert set(get_store().users) == before
+
+
 def test_typed_email_sso_login_is_rejected_in_favor_of_redirect_flow() -> None:
     # The old theater path (type an email, get logged in "via SSO") must stay dead.
     response = client.post(

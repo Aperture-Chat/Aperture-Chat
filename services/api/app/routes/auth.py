@@ -24,6 +24,8 @@ from app.core.sessions import (
 )
 from app.models.schemas import (
     AuthBootstrapOwnerRequest,
+    AccessRequestCreateRequest,
+    AccessRequestCreateResponse,
     AuthMfaChallengeRequest,
     AuthMfaEnrollRequest,
     AuthMfaEnrollmentConfirmRequest,
@@ -43,6 +45,7 @@ from app.models.schemas import (
     AuthProviderOption,
     AuthSession,
     Role,
+    TEMP_USER_TOKEN_LIMIT,
     SsoConfig,
     Tenant,
     User,
@@ -82,6 +85,10 @@ logger = logging.getLogger("aperture.auth")
 # attempts spend a token, so a user who genuinely signs in repeatedly is never
 # throttled, while repeated guesses against one email are.
 _LOGIN_FAILURE_BUCKETS = ProcessLocalTokenBucket(
+    max_entries=get_settings().rate_limit_max_buckets,
+    idle_ttl_seconds=get_settings().rate_limit_idle_ttl_seconds,
+)
+_ACCESS_REQUEST_BUCKETS = ProcessLocalTokenBucket(
     max_entries=get_settings().rate_limit_max_buckets,
     idle_ttl_seconds=get_settings().rate_limit_idle_ttl_seconds,
 )
@@ -136,6 +143,68 @@ def auth_options(
         supported_sso_protocols=["OIDC"],
         deferred_sso_protocols=["SAML"],
     )
+
+
+@router.post(
+    "/access-requests",
+    response_model=AccessRequestCreateResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_access_request(
+    payload: AccessRequestCreateRequest,
+    tenant: Tenant = Depends(require_request_tenant),
+    store: SeedStore = Depends(get_store),
+) -> AccessRequestCreateResponse:
+    """Create one inactive, non-authenticating identity for admin review.
+
+    The response is intentionally identical when the email already exists so
+    the public sign-in surface cannot be used to enumerate workspace accounts.
+    """
+
+    email = _normalize_email(payload.email)
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter a valid email address.",
+        )
+    bucket_key = hashlib.sha256(f"{tenant.id}:{email}".encode()).hexdigest()
+    allowed, retry_after = _ACCESS_REQUEST_BUCKETS.consume(bucket_key, 3)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many access requests for this email. Try again shortly.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    with store._store_lock:
+        existing = _find_user_by_email(email, store, tenant_id=tenant.id)
+        if existing is not None:
+            return AccessRequestCreateResponse()
+        requested_at = now_utc().isoformat()
+        user = User(
+            id=f"user-request-{uuid4()}",
+            tenant_id=tenant.id,
+            email=email,
+            display_name=f"{payload.first_name} {payload.last_name}",
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            role=Role.USER,
+            group_ids=[],
+            active=False,
+            auth_method="sso",
+            access_request_status="pending",
+            access_requested_at=requested_at,
+        )
+        store.users[user.id] = user
+        store.save_runtime_state(urgent=True)
+        store.record_audit(
+            user,
+            "auth.access_requested",
+            user.id,
+            {"tenant_id": tenant.id},
+            runtime_state_changed=False,
+        )
+    return AccessRequestCreateResponse()
 
 
 @router.post("/login", response_model=AuthLoginResponse | AuthMfaPreauthResponse)
@@ -1723,11 +1792,27 @@ def my_usage_budget(
         ("user", actor.id),
         *(("group", group_id) for group_id in actor.group_ids),
     ]
+    caps: list[MyUsageBudgetCap] = []
+    if actor.role == Role.TEMP_USER:
+        reported_tokens, _, period_start, period_end, _ = repository.get_principal_lifetime_usage(
+            tenant_id,
+            principal_type="user",
+            principal_id=actor.id,
+            through_date=usage_date,
+        )
+        caps.append(
+            MyUsageBudgetCap(
+                scope="user",
+                label="Temporary access grant",
+                budget_period="lifetime",
+                daily_token_limit=TEMP_USER_TOKEN_LIMIT,
+                reported_tokens=reported_tokens,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        )
     budgets = repository.get_principal_budgets(tenant_id, principals)
     finite = [budget for budget in budgets if budget.daily_token_limit > 0]
-    if not finite:
-        return MyUsageBudgetResponse(caps=[], usage_date=usage_date)
-    caps = []
     for budget in finite:
         reported_tokens, _, period_start, period_end, _ = (
             repository.get_principal_period_usage(

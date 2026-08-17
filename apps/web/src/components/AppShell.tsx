@@ -113,6 +113,7 @@ const MAX_RAIL_WIDTH = 340;
 const ROLE_LABELS: Record<Role, string> = {
   PLATFORM_OWNER: "Platform Owner",
   TENANT_ADMIN: "Admin",
+  TEMP_USER: "Temp User",
   POWER_USER: "Power User",
   AUDITOR: "Auditor",
   AGENT_APPROVER: "Agent Approver",
@@ -2283,7 +2284,9 @@ function UtilityDrawer({
                   <span key={`${cap.scope}:${cap.label}`}>
                     <b>
                       {cap.scope === "user"
-                        ? `${cap.budget_period === "day" ? "Daily" : cap.budget_period === "week" ? "Weekly" : "Monthly"} tokens`
+                        ? cap.budget_period === "lifetime"
+                          ? "Temporary token grant"
+                          : `${cap.budget_period === "day" ? "Daily" : cap.budget_period === "week" ? "Weekly" : "Monthly"} tokens`
                         : `${cap.label} · ${cap.budget_period}`}
                     </b>
                     {cap.reported_tokens.toLocaleString()} / {cap.daily_token_limit.toLocaleString()}{" "}

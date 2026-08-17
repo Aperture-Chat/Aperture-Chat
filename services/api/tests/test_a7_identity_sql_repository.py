@@ -30,7 +30,7 @@ from app.db.knowledge_import_state import (
     SPARSE_VECTOR_FORMAT,
     KnowledgeStateImportReceipt,
 )
-from app.db.orm import ChatStateImportRow, RuntimeStateImportRow
+from app.db.orm import ChatStateImportRow, IdentityUserRow, RuntimeStateImportRow
 from app.models.schemas import Connector, ConnectorConfig, Provider, Tenant, User
 from app.repositories.identity_config import ProviderCredentialBinding, ProviderCredentialBundle
 from app.repositories.identity_config_sql import (
@@ -222,6 +222,34 @@ def _active_digest(repository: IdentityConfigSqlRepository) -> str:
     snapshot = repository.load_active_snapshot()
     assert snapshot is not None
     return snapshot.relational_digest
+
+
+def test_active_snapshot_accepts_pre_access_request_user_payload(engine: Engine) -> None:
+    repository, _, _ = _stage_and_activate(engine)
+    access_request_fields = {
+        "first_name",
+        "last_name",
+        "access_request_status",
+        "access_requested_at",
+        "access_reviewed_at",
+    }
+    with Session(engine) as session, session.begin():
+        row = session.get(IdentityUserRow, "user-a")
+        assert row is not None
+        row.payload = {
+            key: value
+            for key, value in row.payload.items()
+            if key not in access_request_fields
+        }
+
+    snapshot = repository.load_active_snapshot()
+
+    assert snapshot is not None
+    loaded = snapshot.collections["users"][0]
+    assert isinstance(loaded, User)
+    assert loaded.id == "user-a"
+    assert loaded.access_request_status is None
+    assert loaded.access_requested_at is None
 
 
 def _payload_from_state(state: ValidatedIdentityConfigState) -> dict[str, Any]:

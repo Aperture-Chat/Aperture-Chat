@@ -16,13 +16,15 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from app.core.usage_budget import (
+    TemporaryAccessGrantExhausted,
     UsageBudgetError,
     UsageBudgetExceeded,
     UsageBudgetUnavailable,
     UsageMeteringInvalid,
     UsagePermitConflict,
+    normalize_reported_usage,
 )
-from app.models.schemas import Role, TenantUsagePermit, UsageRecord, User
+from app.models.schemas import Role, TEMP_USER_TOKEN_LIMIT, TenantUsagePermit, UsageRecord, User
 
 if TYPE_CHECKING:
     from app.repositories.usage_budgets import CompletionSettlement, PermitAcquireResult
@@ -41,6 +43,7 @@ class UsageBudgetRepositoryPort(Protocol):
         tenant_id: str,
         request_id: str | None = None,
         principals: Sequence[tuple[str, str]] | None = None,
+        hard_token_limits: Mapping[tuple[str, str], int] | None = None,
         now: datetime | None = None,
     ) -> PermitAcquireResult: ...
 
@@ -220,6 +223,21 @@ def require_provider_execution(result: PermitAcquireResult) -> TenantUsagePermit
 def map_usage_budget_error(error: UsageBudgetError) -> UsageBudgetHttpFailure:
     """Map accounting failures without leaking internal database/provider detail."""
 
+    if isinstance(error, TemporaryAccessGrantExhausted):
+        return UsageBudgetHttpFailure(
+            status_code=int(HTTPStatus.TOO_MANY_REQUESTS),
+            code="temporary_access_exhausted",
+            detail=(
+                "Your 30,000-token temporary access grant has been used. "
+                "Ask a workspace administrator to convert your account for continued access."
+            ),
+            daily_token_limit=error.token_limit,
+            reported_tokens=error.reported_tokens,
+            budget_unit="tokens",
+            budget_period="lifetime",
+            limit_value=error.token_limit,
+            reported_value=error.reported_tokens,
+        )
     if isinstance(error, UsageBudgetExceeded):
         period_label = {
             "day": "daily",
@@ -321,6 +339,7 @@ class UsageBudgetRequestContext:
         self._user_id = actor.id
         self._user_name = actor.display_name
         self._user_role = actor.role.value
+        self._requires_exact_metering = actor.role == Role.TEMP_USER
         self._principals: tuple[tuple[str, str], ...] = tuple(
             principals
             if principals is not None
@@ -356,6 +375,10 @@ class UsageBudgetRequestContext:
         """Persist one successful child call before any downstream continuation."""
 
         self._require_active()
+        if self._requires_exact_metering and not normalize_reported_usage(usage).is_metered:
+            raise UsageMeteringInvalid(
+                "Temporary access requires exact provider-reported token usage."
+            )
         template = UsageRecord(
             id=f"pending:{completion_id}",
             tenant_id=self._tenant_id,
@@ -452,10 +475,16 @@ class TenantUsageBudgetOrchestrator:
             ("user", actor.id),
             *(("group", group_id) for group_id in actor.group_ids),
         )
+        hard_token_limits = (
+            {("user", actor.id): TEMP_USER_TOKEN_LIMIT}
+            if actor.role == Role.TEMP_USER
+            else None
+        )
         result = self._repository.acquire_permit(
             tenant_id=tenant_id,
             request_id=request_id,
             principals=principals,
+            hard_token_limits=hard_token_limits,
             now=now,
         )
         return UsageBudgetRequestContext(

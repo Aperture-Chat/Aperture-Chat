@@ -38,6 +38,7 @@ from app.models.schemas import (
     SsoConfig,
     Tenant,
     TenantMemoryPolicy,
+    TenantRetentionPolicy,
     ToolConfig,
     User,
     UserMemory,
@@ -91,6 +92,7 @@ MODEL_COLLECTIONS: dict[str, type[BaseModel]] = {
     # the read paths, never by hiding the rows from persistence.
     "user_memories": UserMemory,
     "tenant_memory_policies": TenantMemoryPolicy,
+    "tenant_retention_policies": TenantRetentionPolicy,
     "user_memory_settings": UserMemorySettings,
     "scim_tokens": ScimTokenRecord,
     "alert_rules": AlertRule,
@@ -750,6 +752,7 @@ def _validate_relational_column_bounds(
         "content_filters": (("tenant_id", 255),),
         "user_memories": (("tenant_id", 255), ("owner_user_id", 255)),
         "tenant_memory_policies": (("tenant_id", 255),),
+        "tenant_retention_policies": (("tenant_id", 255),),
         "user_memory_settings": (("user_id", 255),),
         "scim_tokens": (("tenant_id", 255), ("token_hash", 64)),
         "alert_rules": (("scope", 20), ("tenant_id", 255)),
@@ -1044,6 +1047,13 @@ def _validate_relationships(
         if policy.id != policy.tenant_id:
             raise IdentityConfigImportError(
                 f"Tenant memory policy {policy.id!r} must be keyed by its tenant."
+            )
+
+    for policy in indexed["tenant_retention_policies"].values():
+        _require_tenant(policy.id, policy.tenant_id, tenants, "Tenant retention policy")
+        if policy.id != policy.tenant_id:
+            raise IdentityConfigImportError(
+                f"Tenant retention policy {policy.id!r} must be keyed by its tenant."
             )
 
     for settings in indexed["user_memory_settings"].values():
