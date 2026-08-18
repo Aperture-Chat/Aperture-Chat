@@ -23114,3 +23114,113 @@ span.mini-avatar {
   justify-items: start;
   margin: 16px;
 }
+
+.feedback-note-composer {
+  /* Claims a full row of the .message-actions flex wrap, so the field always
+     lands on its own line directly beneath the thumbs instead of floating
+     beside them like a popup. */
+  flex-basis: 100%;
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+  background: var(--surface);
+  animation: feedback-note-in 160ms ease-out;
+}
+
+@keyframes feedback-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.feedback-note-composer:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* The frame is the field: the inner textarea stays chromeless so the whole
+   element reads as one native chat control, not a nested box. */
+.feedback-note-composer textarea {
+  resize: vertical;
+  min-height: 40px;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.feedback-note-composer textarea:focus-visible {
+  outline: none;
+}
+
+.feedback-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.feedback-comment {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--accent);
+}
+
+button.feedback-event-row {
+  background: var(--surface);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+button.feedback-event-row.is-clickable:hover,
+button.feedback-event-row.is-clickable:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.feedback-note-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 20px 14px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.feedback-note-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.feedback-note-banner p {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.feedback-row-side {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.document-model-menu .select-button {
+  min-height: 42px;
+}

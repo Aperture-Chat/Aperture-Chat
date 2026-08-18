@@ -1873,6 +1873,42 @@ class RetentionTaggedThread(BaseModel):
     tags: list[ChatThreadTag] = Field(default_factory=list)
 
 
+class ChatFeedbackRecord(BaseModel):
+    """A user's sentiment on one assistant response, with an optional note.
+
+    One record per (user, message): a later thumb click updates the rating
+    and a later note updates the comment, so the console always reads the
+    person's current opinion.
+    """
+
+    id: str
+    tenant_id: str
+    user_id: str
+    user_name: str = ""
+    thread_id: str
+    thread_title: str = ""
+    message_id: str
+    rating: Literal["positive", "negative"]
+    comment: str = ""
+    message_preview: str = ""
+    model_id: str = ""
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatFeedbackSubmitRequest(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=255)
+    message_id: str = Field(min_length=1, max_length=255)
+    rating: Literal["positive", "negative"]
+    # None leaves any existing note unchanged; a value (possibly "") sets it.
+    comment: str | None = Field(default=None, max_length=2000)
+    # Fallback context, used only when the thread has not been saved
+    # server-side yet; the server text wins whenever the message exists.
+    message_preview: str = Field(default="", max_length=300)
+    thread_title: str = Field(default="", max_length=200)
+    model_id: str = Field(default="", max_length=200)
+
+
 class RetentionBatchRequest(BaseModel):
     action: Literal["delete", "archive"]
     thread_ids: list[str] = Field(min_length=1, max_length=500)

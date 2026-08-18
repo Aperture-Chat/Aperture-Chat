@@ -42,6 +42,7 @@ from app.models.schemas import (
     ChatAttachment,
     ChatActivityTraceStep,
     ChatCitation,
+    ChatFeedbackRecord,
     ChatFolder,
     ChatMessage,
     ChatThread,
@@ -1304,6 +1305,71 @@ class ChatThreadTagRow(Base):
             source=self.source,
             applied_at=self.applied_at,
             applied_by=self.applied_by,
+        )
+
+
+class ChatFeedbackRow(Base):
+    """Server-side response sentiment; one row per (user, message).
+
+    No foreign keys: threads are client-authored and may not be saved yet
+    when the thumb is clicked, and the workspace upsert re-inserts thread
+    rows in place. Delete paths clean feedback up explicitly.
+    """
+
+    __tablename__ = "chat_feedback"
+    __table_args__ = (
+        CheckConstraint("rating IN ('positive', 'negative')", name="rating_known"),
+        UniqueConstraint("user_id", "message_id", name="uq_chat_feedback_user_message"),
+        Index("ix_chat_feedback_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_name: Mapped[str] = mapped_column(Text, nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    thread_title: Mapped[str] = mapped_column(Text, nullable=False)
+    message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment: Mapped[str] = mapped_column(Text, nullable=False)
+    message_preview: Mapped[str] = mapped_column(Text, nullable=False)
+    model_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    @classmethod
+    def from_model(cls, record: ChatFeedbackRecord) -> ChatFeedbackRow:
+        return cls(
+            id=record.id,
+            tenant_id=record.tenant_id,
+            user_id=record.user_id,
+            user_name=record.user_name,
+            thread_id=record.thread_id,
+            thread_title=record.thread_title,
+            message_id=record.message_id,
+            rating=record.rating,
+            comment=record.comment,
+            message_preview=record.message_preview,
+            model_id=record.model_id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+
+    def to_model(self) -> ChatFeedbackRecord:
+        return ChatFeedbackRecord(
+            id=self.id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            user_name=self.user_name,
+            thread_id=self.thread_id,
+            thread_title=self.thread_title,
+            message_id=self.message_id,
+            rating=self.rating,
+            comment=self.comment,
+            message_preview=self.message_preview,
+            model_id=self.model_id,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
         )
 
 

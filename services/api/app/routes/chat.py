@@ -148,6 +148,8 @@ from app.models.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCitation,
+    ChatFeedbackRecord,
+    ChatFeedbackSubmitRequest,
     ChatThreadTag,
     ChatMessage,
     ChatSession,
@@ -1020,6 +1022,101 @@ def delete_thread(
         runtime_state_changed=False,
     )
     return {"status": "deleted", "id": thread_id}
+
+
+def _feedback_preview(text: str, limit: int = 280) -> str:
+    """A plain-text slice for console lists: markdown decoration is stripped
+    so previews read as prose; the preview dialog still renders the full
+    formatted message."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.M)
+    text = re.sub(r"^\s{0,3}>\s?", "", text, flags=re.M)
+    text = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", text)
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.M)
+    text = text.replace("|", " ")
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3].rstrip()}..."
+
+
+@router.post("/api/chat/feedback")
+def submit_chat_feedback(
+    payload: ChatFeedbackSubmitRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> ChatFeedbackRecord:
+    """Record a thumbs rating and optional note on an assistant response.
+
+    Lenient about persistence timing: the client saves threads after the
+    completion returns, so the thread (or the rated message) may not exist
+    server-side yet. When it does, the server's own copy of the response text
+    becomes the preview; client-supplied context is only a fallback.
+    """
+    thread = store.chat_threads.get(payload.thread_id)
+    if (
+        thread is not None
+        and thread.owner_user_id != actor.id
+        and actor.role != Role.PLATFORM_OWNER
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Feedback can only be left on your own chats.",
+        )
+    tenant_id = (
+        thread.tenant_id
+        if thread is not None
+        else actor.tenant_id or next(iter(store.tenants), None)
+    )
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No organization exists to record feedback in.",
+        )
+    preview = _feedback_preview(payload.message_preview)
+    thread_title = payload.thread_title
+    model_id = payload.model_id
+    if thread is not None:
+        thread_title = thread.title
+        model_id = thread.model_id
+        message = next(
+            (item for item in thread.messages if item.id == payload.message_id), None
+        )
+        if message is not None:
+            preview = _feedback_preview(message.content)
+    now = clock.now()
+    record = store.upsert_chat_feedback(
+        ChatFeedbackRecord(
+            id=f"feedback-{uuid4()}",
+            tenant_id=tenant_id,
+            user_id=actor.id,
+            user_name=actor.display_name,
+            thread_id=payload.thread_id,
+            thread_title=thread_title,
+            message_id=payload.message_id,
+            rating=payload.rating,
+            comment=(payload.comment or "").strip(),
+            message_preview=preview,
+            model_id=model_id,
+            created_at=now,
+            updated_at=now,
+        ),
+        update_comment=payload.comment is not None,
+    )
+    store.record_audit(
+        actor,
+        "chat.feedback_submitted",
+        payload.message_id,
+        {
+            "rating": payload.rating,
+            "has_comment": bool((payload.comment or "").strip()),
+        },
+        runtime_state_changed=False,
+    )
+    return record
 
 
 @router.post("/api/chat/complete", response_model=ChatCompletionResponse)

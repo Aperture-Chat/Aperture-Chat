@@ -42,6 +42,7 @@ import type {
   AlertRule,
   AlertRuleCreateRequest,
   AlertRuleUpdateRequest,
+  ChatFeedbackRecord,
   RetentionBatchRequest,
   RetentionBatchResult,
   RetentionTaggedThread,
@@ -863,6 +864,16 @@ export function deleteAdminUsageAllocation(
     `/api/admin/usage-allocations/${principalType}/${encodeURIComponent(principalId)}`,
     { method: "DELETE", signal: options.signal },
   );
+}
+
+export function listAdminChatFeedback(
+  userId: string,
+  options: ApiMutationOptions & { limit?: number } = {},
+): Promise<ChatFeedbackRecord[]> {
+  const query = options.limit ? `?limit=${options.limit}` : "";
+  return apiRequest<ChatFeedbackRecord[]>(userId, `/api/admin/chat-feedback${query}`, {
+    signal: options.signal,
+  });
 }
 
 // --- data retention: policy and content-free tagged-thread drilldown --------

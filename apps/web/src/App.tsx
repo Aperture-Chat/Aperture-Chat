@@ -77,6 +77,7 @@ import {
   createMemory,
   deleteMemory,
   getAdminRetentionPolicy,
+  listAdminChatFeedback,
   getMemoryPolicy,
   getMemoryStats,
   listAdminRetentionThreads,
@@ -896,6 +897,7 @@ export function App() {
       updateMemoryPolicy: (actorUserId, patch) => updateMemoryPolicy(actorUserId, patch),
       getMemoryStats: (actorUserId) => getMemoryStats(actorUserId),
       purgeUserMemories: (actorUserId, userId) => purgeUserMemories(actorUserId, userId),
+      listChatFeedback: (actorUserId) => listAdminChatFeedback(actorUserId, { limit: 500 }),
       getRetentionPolicy: (actorUserId) => getAdminRetentionPolicy(actorUserId),
       updateRetentionPolicy: (actorUserId, patch) => updateAdminRetentionPolicy(actorUserId, patch),
       listRetentionThreads: (actorUserId) => listAdminRetentionThreads(actorUserId, { limit: 500 }),
@@ -972,6 +974,7 @@ export function App() {
         listPlatformPromptActivity(data.me.id, { threadId, limit: 500 }),
       // Retention governance rides the admin endpoints, which already admit
       // platform owners and scope them to the deployment's sole tenant.
+      listChatFeedback: () => listAdminChatFeedback(data.me.id, { limit: 500 }),
       getRetentionPolicy: () => getAdminRetentionPolicy(data.me.id),
       updateRetentionPolicy: (patch) => updateAdminRetentionPolicy(data.me.id, patch),
       listRetentionThreads: () => listAdminRetentionThreads(data.me.id, { limit: 500 }),
