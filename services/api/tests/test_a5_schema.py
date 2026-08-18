@@ -114,7 +114,7 @@ def test_a5_fresh_upgrade_has_expected_authority_tables_and_indexes(tmp_path: Pa
         upgrade_database(engine)
         inspector = inspect(engine)
         tables = set(inspector.get_table_names())
-        assert current_schema_revision(engine) == HEAD_REVISION == "20260816_0016"
+        assert current_schema_revision(engine) == HEAD_REVISION == "20260817_0017"
         assert CHAT_STATE_IMPORT_REVISION == "20260720_0004"
         assert APPLICATION_STATE_IMPORT_REVISION == "20260720_0003"
         assert {

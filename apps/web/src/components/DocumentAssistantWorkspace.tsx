@@ -11,6 +11,7 @@ import {
   BarChart3,
   Bold,
   BookOpen,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -59,6 +60,7 @@ import {
   Upload,
   X,
   type LucideIcon,
+  Star,
 } from "lucide-react";
 import {
   BoxIcon,
@@ -1085,6 +1087,12 @@ export function DocumentAssistantWorkspace({
   const [selectedAgentId, setSelectedAgentId] = useState(() =>
     loadDraftModelSelection(draftAgents),
   );
+  const [defaultAgentId, setDefaultAgentId] = useState<string | null>(() =>
+    loadStoredDraftModelId(),
+  );
+  // Once the user picks a model this session, the starred default stops
+  // auto-applying so their explicit choice is respected.
+  const userPickedAgentRef = useRef(false);
   const selectedAgent =
     draftAgents.find((agent) => agent.id === selectedAgentId) ?? draftAgents[0];
   const webSearchAvailable = supportsDraftWebSearch(data, selectedAgent.id);
@@ -1767,10 +1775,22 @@ export function DocumentAssistantWorkspace({
   }, [railIsDrawer, railOpen]);
 
   useEffect(() => {
+    // The starred default wins whenever its model is usable and the user has
+    // not picked a model this session. The agent list is transient (the
+    // workspace can mount before bootstrap data arrives, and role previews
+    // filter it), so a temporarily missing id only means "not applicable
+    // right now" — the starred default is never overwritten.
+    const storedAgentId = loadStoredDraftModelId();
+    const storedUsable = Boolean(
+      storedAgentId && draftAgents.some((agent) => agent.id === storedAgentId),
+    );
+    if (storedUsable && !userPickedAgentRef.current && selectedAgentId !== storedAgentId) {
+      setSelectedAgentId(storedAgentId as string);
+      return;
+    }
     if (draftAgents.some((agent) => agent.id === selectedAgentId)) return;
-    const fallbackAgentId = draftAgents[0].id;
-    setSelectedAgentId(fallbackAgentId);
-    saveDraftModelSelection(fallbackAgentId);
+    // Display fallback only; deliberately not saved, so the star survives.
+    setSelectedAgentId(storedUsable ? (storedAgentId as string) : draftAgents[0].id);
   }, [draftAgents, selectedAgentId]);
 
   useEffect(() => {
@@ -1851,9 +1871,19 @@ export function DocumentAssistantWorkspace({
   function selectDraftingModel(agentId: string) {
     const nextAgent = draftAgents.find((agent) => agent.id === agentId);
     if (!nextAgent) return;
+    userPickedAgentRef.current = true;
     setSelectedAgentId(nextAgent.id);
-    saveDraftModelSelection(nextAgent.id);
     setStatus(`${nextAgent.name} selected for drafting.`);
+  }
+
+  function setDefaultDraftingModel(agentId: string) {
+    const nextAgent = draftAgents.find((agent) => agent.id === agentId);
+    if (!nextAgent) return;
+    userPickedAgentRef.current = true;
+    saveDraftModelSelection(nextAgent.id);
+    setDefaultAgentId(nextAgent.id);
+    setSelectedAgentId(nextAgent.id);
+    setStatus(`${nextAgent.name} is now your default drafting model.`);
   }
 
   function toggleWebSearch() {
@@ -7214,20 +7244,13 @@ export function DocumentAssistantWorkspace({
               {hasUnsavedEdits ? " + unsaved edits" : ""}
             </span>
             <div className="document-top-actions">
-              <label className="document-model-selector">
-                <span>Model</span>
-                <SelectControl
-                  aria-label="Document drafting model"
-                  value={selectedAgent.id}
-                  onChange={(event) => selectDraftingModel(event.target.value)}
-                >
-                  {draftAgents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name} · {agent.providerName}
-                    </option>
-                  ))}
-                </SelectControl>
-              </label>
+              <DraftModelMenu
+                agents={draftAgents}
+                selectedAgent={selectedAgent}
+                defaultAgentId={defaultAgentId}
+                onSelect={selectDraftingModel}
+                onSetDefault={setDefaultDraftingModel}
+              />
               {serverSaveState.kind !== "idle" && (
                 <span
                   className={`document-server-save-state is-${serverSaveState.kind}`}
@@ -11185,17 +11208,125 @@ function DraftEventRow({ event }: { event: AssistantEvent }) {
   );
 }
 
-function loadDraftModelSelection(agents: DraftAgentOption[]) {
-  if (typeof window === "undefined") return agents[0].id;
+/** The raw saved favorite, unvalidated: a saved id whose model is not usable
+ * right now is kept, never deleted, exactly like chat's default model. */
+function loadStoredDraftModelId(): string | null {
+  if (typeof window === "undefined") return null;
   try {
-    const storedAgentId = window.localStorage.getItem(DRAFT_MODEL_STORAGE_KEY);
-    if (storedAgentId && agents.some((agent) => agent.id === storedAgentId)) {
-      return storedAgentId;
-    }
+    return window.localStorage.getItem(DRAFT_MODEL_STORAGE_KEY);
   } catch {
-    // Keep the default model when localStorage is unavailable.
+    return null;
+  }
+}
+
+function loadDraftModelSelection(agents: DraftAgentOption[]) {
+  const storedAgentId = loadStoredDraftModelId();
+  if (storedAgentId && agents.some((agent) => agent.id === storedAgentId)) {
+    return storedAgentId;
   }
   return agents[0].id;
+}
+
+/** The chat model picker, carried over to Drafts: one fully clickable
+ * trigger (label text, name, and chevron all open it) and a star on every
+ * row that pins the default drafting model across sessions. */
+function DraftModelMenu({
+  agents,
+  selectedAgent,
+  defaultAgentId,
+  onSelect,
+  onSetDefault,
+}: {
+  agents: DraftAgentOption[];
+  selectedAgent: DraftAgentOption;
+  defaultAgentId: string | null;
+  onSelect: (agentId: string) => void;
+  onSetDefault: (agentId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="model-select document-model-menu" ref={rootRef}>
+      <button
+        className="select-button"
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Document drafting model"
+        data-tooltip="Choose which AI model drafts and revises this document"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="model-select-label">
+          Model: <strong>{selectedAgent.name}</strong>
+        </span>
+        {selectedAgent.id === defaultAgentId && (
+          <Star size={13} fill="currentColor" aria-hidden="true" />
+        )}
+        <ChevronDown size={16} />
+      </button>
+      {open && (
+        <div className="model-menu" role="listbox" aria-label="Select drafting model">
+          {agents.map((agent) => (
+            <div className="model-option-row" key={agent.id}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={agent.id === selectedAgent.id}
+                className={`model-option ${agent.id === selectedAgent.id ? "is-selected" : ""}`}
+                data-tooltip={`Draft and revise this document with ${agent.name}`}
+                onClick={() => {
+                  onSelect(agent.id);
+                  setOpen(false);
+                }}
+              >
+                <span>
+                  <strong>{agent.name}</strong>
+                  <small>{agent.providerName}</small>
+                </span>
+                {agent.id === selectedAgent.id && <Check size={16} />}
+              </button>
+              <button
+                type="button"
+                className={`model-default-button ${agent.id === defaultAgentId ? "is-default" : ""}`}
+                aria-label={`Set ${agent.name} as default drafting model`}
+                aria-pressed={agent.id === defaultAgentId}
+                data-tooltip={
+                  agent.id === defaultAgentId
+                    ? `${agent.name} is your default drafting model`
+                    : `Make ${agent.name} your default drafting model`
+                }
+                onClick={() => {
+                  onSetDefault(agent.id);
+                  setOpen(false);
+                }}
+              >
+                <Star size={15} fill={agent.id === defaultAgentId ? "currentColor" : "none"} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function saveDraftModelSelection(agentId: string) {

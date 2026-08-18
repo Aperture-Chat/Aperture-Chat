@@ -1060,7 +1060,7 @@ test("analytics and audit exports download date-range CSV files and keep long lo
 
     selectTab("Analytics");
     await screen.findByRole("tabpanel", { name: "Analytics" });
-    expandPanel("Chat Feedback (this browser)");
+    expandPanel("Chat Feedback");
     const feedbackList = await screen.findByLabelText("Chat feedback events");
     expect(feedbackList).toHaveClass("scrollable-log-list");
     fireEvent.click(screen.getByRole("button", { name: "Export chat feedback analytics CSV" }));
@@ -2021,7 +2021,7 @@ test("every analytics and audit section carries its own user and date filter", a
   renderPlatform(platformOwnerData(), {});
   selectTab("Analytics");
   expandPanel("Runtime Clock Metadata");
-  expandPanel("Chat Feedback (this browser)");
+  expandPanel("Chat Feedback");
   expandPanel("Model Activity");
   expandPanel("User Usage");
   const runtimeFilter = await screen.findByLabelText("Runtime events filter user");
@@ -2114,4 +2114,91 @@ test("owner audit prompt panel has a tags view with the chat list", async () => 
 
   expect(await screen.findByText("Owner tagged chat")).toBeInTheDocument();
   expect(screen.getByText("subject: legal / litigation")).toBeInTheDocument();
+});
+
+test("clicking a feedback entry previews the note and the full rendered conversation", async () => {
+  const listChatFeedback = vi.fn(async () => [
+    {
+      id: "feedback-1",
+      tenant_id: "tenant-synthetic",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      thread_id: "thread-fb-1",
+      thread_title: "Escrow question",
+      message_id: "msg-reply-2",
+      rating: "negative" as const,
+      comment: "It cited the wrong clause.",
+      message_preview: "**The** escrow terms are...",
+      model_id: "model-synthetic",
+      created_at: "2026-08-17T12:00:00Z",
+      updated_at: "2026-08-17T12:00:00Z",
+    },
+  ]);
+  const listThreadPromptActivity = vi.fn(async () => [
+    {
+      id: "prompt-2",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      user_email: "jane@example.test",
+      thread_id: "thread-fb-1",
+      thread_title: "Escrow question",
+      model_id: "model-synthetic",
+      content: "Second question about escrow",
+      created_at: "12:05 PM",
+      created_at_iso: "2026-08-17T12:05:00Z",
+      alert_count: 0,
+      response_message_id: "msg-reply-2",
+      response_content: "**Rated** answer about escrow",
+    },
+    {
+      id: "prompt-1",
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      user_email: "jane@example.test",
+      thread_id: "thread-fb-1",
+      thread_title: "Escrow question",
+      model_id: "model-synthetic",
+      content: "First question about escrow",
+      created_at: "12:00 PM",
+      created_at_iso: "2026-08-17T12:00:00Z",
+      alert_count: 0,
+      response_message_id: "msg-reply-1",
+      response_content: "Earlier answer",
+    },
+  ]);
+
+  renderPlatform(platformOwnerData(), { listChatFeedback, listThreadPromptActivity });
+  const analyticsTab = await screen.findByRole("tab", { name: "Analytics" });
+  fireEvent.mouseDown(analyticsTab, { button: 0, ctrlKey: false });
+  fireEvent.click(analyticsTab);
+  expandPanel("Chat Feedback");
+
+  // The list preview reads as plain prose (markdown stripped) and carries a
+  // visible Preview affordance so the row is clearly clickable.
+  expect(await screen.findByText("The escrow terms are...")).toBeInTheDocument();
+  expect(screen.queryByText("**The** escrow terms are...")).not.toBeInTheDocument();
+  const feedbackRow = screen.getByRole("button", {
+    name: "Preview feedback and conversation: Escrow question",
+  });
+  expect(within(feedbackRow).getByText("Preview")).toBeInTheDocument();
+
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Preview feedback and conversation: Escrow question",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Feedback and conversation" });
+  // The written note is front and center.
+  expect(within(dialog).getByText("“It cited the wrong clause.”")).toBeInTheDocument();
+  // The whole conversation renders, oldest first, as real formatted text —
+  // the markdown emphasis becomes a <strong>, not literal asterisks.
+  expect(await within(dialog).findByText("First question about escrow")).toBeInTheDocument();
+  expect(within(dialog).getByText("Second question about escrow")).toBeInTheDocument();
+  expect(within(dialog).getByText("Rated")).toBeInTheDocument();
+  expect(within(dialog).queryByText("**Rated** answer about escrow")).not.toBeInTheDocument();
+  expect(within(dialog).getByText("Rated exchange")).toBeInTheDocument();
+  expect(within(dialog).getByText(/2 exchanges in this conversation/)).toBeInTheDocument();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close feedback preview" }));
+  expect(screen.queryByRole("dialog", { name: "Feedback and conversation" })).not.toBeInTheDocument();
 });

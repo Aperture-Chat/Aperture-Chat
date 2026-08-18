@@ -11,6 +11,8 @@ import {
 import type {
   ChatAttachment,
   ChatCitation,
+  ChatFeedbackRecord,
+  ChatFeedbackSubmitRequest,
   ChatRole,
   ChatThread,
   ChatTokenUsage,
@@ -728,6 +730,18 @@ export function importCloudAttachments(
   options: ApiMutationOptions = {},
 ): Promise<ChatAttachment[]> {
   return apiRequest<ChatAttachment[]>(userId, `/api/chat/cloud-attachments/${pathId(connectorId)}/attachments`, {
+    method: "POST",
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function submitChatFeedback(
+  userId: string,
+  payload: ChatFeedbackSubmitRequest,
+  options: ApiMutationOptions = {},
+): Promise<ChatFeedbackRecord> {
+  return apiRequest<ChatFeedbackRecord>(userId, "/api/chat/feedback", {
     method: "POST",
     body: payload,
     signal: options.signal,

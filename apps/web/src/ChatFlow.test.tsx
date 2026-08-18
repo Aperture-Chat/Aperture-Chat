@@ -16,6 +16,7 @@ let uploadRequests: Array<{
 }> = [];
 let cloudListRequests: string[];
 let cloudImportRequests: Array<Record<string, unknown>>;
+let feedbackRequests: Array<Record<string, unknown>>;
 let previewRequests: string[];
 let assistantReply = CANNED;
 let chatCompletionGate: Promise<void> | null = null;
@@ -30,6 +31,7 @@ beforeEach(() => {
   uploadRequests = [];
   cloudListRequests = [];
   cloudImportRequests = [];
+  feedbackRequests = [];
   previewRequests = [];
   assistantReply = CANNED;
   chatCompletionGate = null;
@@ -54,6 +56,28 @@ beforeEach(() => {
             iso: "2026-07-03T02:30:00+00:00",
             unix: 1783045800,
             timezone: "UTC",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.includes("/api/chat/feedback")) {
+        const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+        feedbackRequests.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "feedback-server-1",
+            tenant_id: "tenant-example",
+            user_id: "user-admin",
+            user_name: "Admin",
+            thread_id: body.thread_id,
+            thread_title: body.thread_title ?? "",
+            message_id: body.message_id,
+            rating: body.rating,
+            comment: body.comment ?? "",
+            message_preview: body.message_preview ?? "",
+            model_id: body.model_id ?? "",
+            created_at: "2026-07-03T02:30:00Z",
+            updated_at: "2026-07-03T02:30:00Z",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -1188,6 +1212,28 @@ test("assistant response feedback persists into platform owner analytics", async
   await waitFor(() => {
     expect(window.localStorage.getItem("aperture-chat-feedback-v1")).toContain('"rating":"negative"');
   });
+  // The rating reaches the server immediately, before any note is written.
+  await waitFor(() => {
+    expect(feedbackRequests).toHaveLength(1);
+  });
+  expect(feedbackRequests[0]).toMatchObject({ rating: "negative" });
+  expect(feedbackRequests[0]).not.toHaveProperty("comment");
+
+  // Every thumb click offers an optional written note.
+  const noteField = within(conversation).getByPlaceholderText("What went wrong? Add a note (optional)");
+  fireEvent.change(noteField, { target: { value: "It cited the wrong clause." } });
+  fireEvent.click(within(conversation).getByRole("button", { name: "Send note" }));
+  await waitFor(() => {
+    expect(feedbackRequests).toHaveLength(2);
+  });
+  expect(feedbackRequests[1]).toMatchObject({
+    rating: "negative",
+    comment: "It cited the wrong clause.",
+  });
+  // Sending the note closes the composer.
+  expect(
+    within(conversation).queryByPlaceholderText("What went wrong? Add a note (optional)"),
+  ).not.toBeInTheDocument();
 
   appView.unmount();
   const owner = sampleData.users.find((user) => user.role === "PLATFORM_OWNER") ?? sampleData.me;
@@ -1203,8 +1249,8 @@ test("assistant response feedback persists into platform owner analytics", async
   fireEvent.mouseDown(analyticsTab, { button: 0, ctrlKey: false });
   fireEvent.click(analyticsTab);
 
-  expect(await screen.findByText("Chat Feedback (this browser)")).toBeInTheDocument();
-  const feedbackPanel = screen.getByRole("heading", { name: "Chat Feedback (this browser)" }).closest(".panel") as HTMLElement;
+  expect(await screen.findByText("Chat Feedback")).toBeInTheDocument();
+  const feedbackPanel = screen.getByRole("heading", { name: "Chat Feedback" }).closest(".panel") as HTMLElement;
   const expandButton = within(feedbackPanel).queryByRole("button", { name: "Expand panel" });
   if (expandButton) fireEvent.click(expandButton);
   expect(screen.getByText("Negative sentiment")).toBeInTheDocument();

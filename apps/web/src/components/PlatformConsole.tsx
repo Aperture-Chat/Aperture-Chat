@@ -65,6 +65,7 @@ import type {
   AlertRuleUpdateRequest,
   EmailSettings,
   EmailSettingsUpdateRequest,
+  ChatFeedbackRecord,
   EmailTestResult,
   RetentionBatchRequest,
   RetentionBatchResult,
@@ -108,7 +109,8 @@ const OwnerDocumentationModal = lazyWithReload("owner-documentation", () =>
   import("./OwnerTrainingVideos").then((module) => ({ default: module.OwnerDocumentationModal })),
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
-import { PromptActivityList } from "./PromptActivityList";
+import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { markdownToPlainText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
 
@@ -191,10 +193,13 @@ const RUNTIME_ANALYTICS_CSV_COLUMNS: Array<CsvColumn<RuntimeAuditRow>> = [
   { header: "executed_at", value: (item) => item.executedAt },
 ];
 
-const CHAT_FEEDBACK_CSV_COLUMNS: Array<CsvColumn<ChatFeedbackEvent>> = [
+type FeedbackDisplayItem = ChatFeedbackEvent & { comment?: string };
+
+const CHAT_FEEDBACK_CSV_COLUMNS: Array<CsvColumn<FeedbackDisplayItem>> = [
   { header: "id", value: (item) => item.id },
   { header: "created_at", value: (item) => item.created_at },
   { header: "rating", value: (item) => item.rating },
+  { header: "comment", value: (item) => item.comment ?? "" },
   { header: "thread_id", value: (item) => item.thread_id },
   { header: "thread_title", value: (item) => item.thread_title },
   { header: "message_id", value: (item) => item.message_id },
@@ -605,6 +610,8 @@ export type PlatformConsoleActions = {
     patch: TenantRetentionPolicyUpdateRequest,
   ) => Promise<TenantRetentionPolicy | void>;
   listRetentionThreads?: () => Promise<RetentionTaggedThread[] | void>;
+  /** Server-side response sentiment with user notes. */
+  listChatFeedback?: () => Promise<ChatFeedbackRecord[] | void>;
   runRetentionBatch?: (payload: RetentionBatchRequest) => Promise<RetentionBatchResult | void>;
   listSecurityAlerts?: (userId?: string) => Promise<SecurityAlert[] | void> | SecurityAlert[] | void;
   acknowledgeSecurityAlert?: (
@@ -741,6 +748,9 @@ export function PlatformConsole({
   const [providerEditDrafts, setProviderEditDrafts] = useState<Record<string, ProviderConnectionDraftState>>({});
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [chatFeedback, setChatFeedback] = useState<ChatFeedbackEvent[]>(() => loadChatFeedback());
+  const [serverFeedback, setServerFeedback] = useState<ChatFeedbackRecord[] | null>(null);
+  const [feedbackRefreshTick, setFeedbackRefreshTick] = useState(0);
+  const [feedbackPreview, setFeedbackPreview] = useState<FeedbackDisplayItem | null>(null);
   const [modelSearch, setModelSearch] = useState("");
   const [modelStatusFilter, setModelStatusFilter] = useState<ModelStatusFilter>("all");
   // Column facets for the model list: empty selections mean "no filter".
@@ -816,9 +826,12 @@ export function PlatformConsole({
     () => runtimeAuditRows.filter((item) => sectionScopeMatch(runtimeScope, item.executedAt, item.actorId)),
     [runtimeScope, runtimeAuditRows],
   );
+  // Server records (every user and device) win; the browser-local trail is
+  // a fallback when the endpoint is not connected.
+  const feedbackSource: FeedbackDisplayItem[] = serverFeedback ?? chatFeedback;
   const filteredChatFeedback = useMemo(
-    () => chatFeedback.filter((item) => sectionScopeMatch(feedbackScope, item.created_at, item.user_id)),
-    [feedbackScope, chatFeedback],
+    () => feedbackSource.filter((item) => sectionScopeMatch(feedbackScope, item.created_at, item.user_id)),
+    [feedbackScope, feedbackSource],
   );
   const positiveFeedback = filteredChatFeedback.filter((item) => item.rating === "positive");
   const negativeFeedback = filteredChatFeedback.filter((item) => item.rating === "negative");
@@ -969,10 +982,27 @@ export function PlatformConsole({
   useEffect(() => {
     function refreshFeedback() {
       setChatFeedback(loadChatFeedback());
+      setFeedbackRefreshTick((tick) => tick + 1);
     }
     window.addEventListener(CHAT_FEEDBACK_UPDATED_EVENT, refreshFeedback);
     return () => window.removeEventListener(CHAT_FEEDBACK_UPDATED_EVENT, refreshFeedback);
   }, []);
+
+  const listChatFeedback = platformActions?.listChatFeedback;
+  useEffect(() => {
+    if (!listChatFeedback) return;
+    let active = true;
+    Promise.resolve(listChatFeedback())
+      .then((records) => {
+        if (active && records) setServerFeedback(records);
+      })
+      .catch(() => {
+        // Server sentiment is additive; the browser-local view still renders.
+      });
+    return () => {
+      active = false;
+    };
+  }, [listChatFeedback, auditTrailRefreshToken, feedbackRefreshTick]);
 
   const listAuditEvents = platformActions?.listAuditEvents;
   useEffect(() => {
@@ -3544,10 +3574,14 @@ export function PlatformConsole({
               className="chat-feedback-panel"
               title={
                 <>
-                  <MessageSquareText size={18} /> Chat Feedback (this browser)
+                  <MessageSquareText size={18} /> Chat Feedback
                 </>
               }
-              subtitle="Thumbs up and down you recorded in this browser. Feedback is not yet sent to the server, so it is not shared between users or devices."
+              subtitle={
+                serverFeedback !== null
+                  ? "Thumbs ratings and optional written notes from every user, recorded on the server."
+                  : "Thumbs ratings recorded in this browser. Server-side feedback loads when the platform API is connected."
+              }
               actions={
                   <CsvExportControl
                     label="chat feedback analytics"
@@ -3565,7 +3599,7 @@ export function PlatformConsole({
                 onChange={setFeedbackScope}
                 users={auditUserOptions}
                 selectedCount={filteredChatFeedback.length}
-                totalCount={chatFeedback.length}
+                totalCount={feedbackSource.length}
               />
               <div className="feedback-summary-grid">
                 <div className="feedback-summary-card">
@@ -3590,17 +3624,31 @@ export function PlatformConsole({
                   {filteredChatFeedback.map((item) => {
                     const isPositive = item.rating === "positive";
                     return (
-                      <div className="feedback-event-row" key={item.id}>
+                      <button
+                        className="feedback-event-row is-clickable"
+                        type="button"
+                        key={item.id}
+                        aria-label={`Preview feedback and conversation: ${item.thread_title}`}
+                        onClick={() => setFeedbackPreview(item)}
+                      >
                         <span className={isPositive ? "feedback-icon is-positive" : "feedback-icon is-negative"}>
                           {isPositive ? <ThumbsUp size={15} /> : <ThumbsDown size={15} />}
                         </span>
                         <span>
                           <strong>{isPositive ? "Positive sentiment" : "Negative sentiment"}</strong>
-                          <small>{item.thread_title} · {item.model_id}</small>
-                          <p>{item.message_preview}</p>
+                          <small>{item.thread_title} · {item.model_id} · {item.user_name}</small>
+                          <p>{markdownToPlainText(item.message_preview)}</p>
+                          {item.comment ? (
+                            <p className="feedback-comment">“{item.comment}”</p>
+                          ) : null}
                         </span>
-                        <time>{formatFeedbackTimestamp(item.created_at)}</time>
-                      </div>
+                        <span className="feedback-row-side">
+                          <time>{formatFeedbackTimestamp(item.created_at)}</time>
+                          <span className="prompt-activity-preview-label" aria-hidden="true">
+                            <Eye size={14} /> Preview
+                          </span>
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
@@ -3615,6 +3663,18 @@ export function PlatformConsole({
               )}
             </Panel>
 
+            {feedbackPreview && (
+              <FeedbackConversationPreview
+                item={feedbackPreview}
+                sentLabel={formatFeedbackTimestamp(feedbackPreview.created_at)}
+                loadThreadRecords={
+                  listThreadPromptActivity
+                    ? (threadId) => Promise.resolve(listThreadPromptActivity(threadId))
+                    : undefined
+                }
+                onClose={() => setFeedbackPreview(null)}
+              />
+            )}
             <Panel
               className="model-activity-panel"
               title={

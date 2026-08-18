@@ -283,6 +283,35 @@ export type RetentionTaggedThread = {
   tags: ChatThreadTag[];
 };
 
+/** Server-side response sentiment; one record per (user, message). */
+export type ChatFeedbackRecord = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  user_name: string;
+  thread_id: string;
+  thread_title: string;
+  message_id: string;
+  // The database check constraint pins exactly these two values.
+  rating: "positive" | "negative";
+  comment: string;
+  message_preview: string;
+  model_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatFeedbackSubmitRequest = {
+  thread_id: string;
+  message_id: string;
+  rating: "positive" | "negative";
+  /** Omitted = leave any existing note unchanged. */
+  comment?: string;
+  message_preview?: string;
+  thread_title?: string;
+  model_id?: string;
+};
+
 export type RetentionBatchRequest = {
   action: "delete" | "archive";
   thread_ids: string[];
