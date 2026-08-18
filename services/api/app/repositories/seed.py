@@ -111,6 +111,7 @@ from app.models.schemas import (
     AuditEvent,
     EmailSettings,
     ChatAttachment,
+    ChatFeedbackRecord,
     ChatFolder,
     ChatMessage,
     ChatThread,
@@ -4990,6 +4991,22 @@ class SeedStore:
     def save_chat_attachment(self, attachment: ChatAttachment) -> ChatAttachment:
         with self._store_lock:
             return self.application_state_repository.upsert_chat_attachment(attachment)
+
+    def upsert_chat_feedback(
+        self, record: ChatFeedbackRecord, *, update_comment: bool
+    ) -> ChatFeedbackRecord:
+        with self._store_lock:
+            return self.application_state_repository.upsert_chat_feedback(
+                record, update_comment=update_comment
+            )
+
+    def list_chat_feedback(
+        self, *, tenant_id: str | None = None, limit: int | None = 200
+    ) -> list[ChatFeedbackRecord]:
+        with self._store_lock:
+            return self.application_state_repository.list_chat_feedback(
+                tenant_id=tenant_id, limit=limit
+            )
 
     def apply_chat_thread_tag(self, tag: ChatThreadTag) -> ChatThreadTag:
         with self._store_lock:

@@ -69,6 +69,16 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.4.3
+
+- Response sentiment goes server-side: thumbs ratings and an optional
+  written note (inline, dismissible composer under every reply) persist per
+  user and message, and the console Chat Feedback panels show every user's
+  feedback with a click-through preview of the full rendered conversation,
+  the note, and the rated exchange highlighted. Migration 20260817_0017.
+- Drafts gains the chat-style model menu: a fully clickable trigger and a
+  star that pins a persistent default drafting model.
+
 ## New Since v0.4.2
 
 - Data retention program: chats gain authoritative retention clocks, and a

@@ -110,6 +110,7 @@ from app.models.schemas import (
     SsoConfigUpdateRequest,
     TenantMemoryPolicy,
     TenantMemoryPolicyUpdateRequest,
+    ChatFeedbackRecord,
     RetentionBatchRequest,
     RetentionBatchResult,
     RetentionRule,
@@ -2640,6 +2641,25 @@ def retention_threads(
     for thread_id, thread_tags in tags_by_thread.items():
         rows.append(RetentionTaggedThread(thread_id=thread_id, tags=thread_tags))
     return rows
+
+
+@router.get("/chat-feedback")
+def chat_feedback(
+    limit: int = Query(default=200, ge=1, le=1000),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> list[ChatFeedbackRecord]:
+    """Response sentiment with user notes, newest first.
+
+    Tenant admins see the users they can already audit; owners see everyone,
+    matching the prompt-activity visibility rules.
+    """
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    records = store.list_chat_feedback(tenant_id=tenant_id, limit=limit)
+    if actor.role == Role.PLATFORM_OWNER:
+        return records
+    visible_user_ids = _admin_visible_user_ids(actor, store)
+    return [record for record in records if record.user_id in visible_user_ids]
 
 
 @router.post("/retention/batch")

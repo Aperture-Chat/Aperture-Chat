@@ -12,6 +12,7 @@ import {
   Clock3,
   DatabaseZap,
   Download,
+  Eye,
   Filter,
   FolderPlus,
   KeyRound,
@@ -45,7 +46,8 @@ const AdminDocumentationModal = lazyWithReload("admin-documentation", () =>
   import("./AdminTrainingVideos").then((module) => ({ default: module.AdminDocumentationModal })),
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
-import { PromptActivityList } from "./PromptActivityList";
+import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { markdownToPlainText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
 import { ModelFilterDialog, type ModelFilterDialogApi } from "./ModelFilterDialog";
@@ -77,6 +79,7 @@ import type {
   TenantMemoryPolicyUpdateRequest,
   TenantRetentionPolicy,
   TenantRetentionPolicyUpdateRequest,
+  ChatFeedbackRecord,
   RetentionBatchRequest,
   RetentionBatchResult,
   RetentionTaggedThread,
@@ -325,10 +328,13 @@ const RUNTIME_ANALYTICS_CSV_COLUMNS: Array<CsvColumn<RuntimeAuditRow>> = [
   { header: "executed_at", value: (item) => item.executedAt },
 ];
 
-const CHAT_FEEDBACK_CSV_COLUMNS: Array<CsvColumn<ChatFeedbackEvent>> = [
+type FeedbackDisplayItem = ChatFeedbackEvent & { comment?: string };
+
+const CHAT_FEEDBACK_CSV_COLUMNS: Array<CsvColumn<FeedbackDisplayItem>> = [
   { header: "id", value: (item) => item.id },
   { header: "created_at", value: (item) => item.created_at },
   { header: "rating", value: (item) => item.rating },
+  { header: "comment", value: (item) => item.comment ?? "" },
   { header: "thread_id", value: (item) => item.thread_id },
   { header: "thread_title", value: (item) => item.thread_title },
   { header: "message_id", value: (item) => item.message_id },
@@ -680,6 +686,11 @@ export type AdminConsoleApi = {
     payload: RetentionBatchRequest,
     context: AdminMutationContext,
   ) => Promise<RetentionBatchResult | void>;
+  /** Server-side response sentiment with user notes. */
+  listChatFeedback?: (
+    actorUserId: string,
+    context: AdminMutationContext,
+  ) => Promise<ChatFeedbackRecord[] | void>;
 };
 
 type ConnectorFieldSpec = {
@@ -902,6 +913,9 @@ export function AdminConsole({
   const [usageError, setUsageError] = useState<string | null>(null);
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [chatFeedback, setChatFeedback] = useState<ChatFeedbackEvent[]>(() => loadChatFeedback());
+  const [serverFeedback, setServerFeedback] = useState<ChatFeedbackRecord[] | null>(null);
+  const [feedbackRefreshTick, setFeedbackRefreshTick] = useState(0);
+  const [feedbackPreview, setFeedbackPreview] = useState<FeedbackDisplayItem | null>(null);
 
   const [memoryPolicy, setMemoryPolicy] = useState<TenantMemoryPolicy | null>(data.memoryPolicy ?? null);
   const [memoryStats, setMemoryStats] = useState<MemoryUserStat[] | null>(null);
@@ -1134,9 +1148,12 @@ export function AdminConsole({
     () => runtimeAuditRows.filter((item) => sectionScopeMatch(runtimeScope, item.executedAt, item.actorId)),
     [runtimeScope, runtimeAuditRows],
   );
+  // Server records (every user and device) win; the browser-local trail is
+  // a fallback when the endpoint is not connected.
+  const feedbackSource: FeedbackDisplayItem[] = serverFeedback ?? chatFeedback;
   const scopedChatFeedback = useMemo(
-    () => chatFeedback.filter((item) => adminVisibleUserIds.has(item.user_id)),
-    [adminVisibleUserIds, chatFeedback],
+    () => feedbackSource.filter((item) => adminVisibleUserIds.has(item.user_id)),
+    [adminVisibleUserIds, feedbackSource],
   );
   const filteredChatFeedback = useMemo(
     () => scopedChatFeedback.filter((item) => sectionScopeMatch(feedbackScope, item.created_at, item.user_id)),
@@ -1271,10 +1288,27 @@ export function AdminConsole({
   useEffect(() => {
     function refreshFeedback() {
       setChatFeedback(loadChatFeedback());
+      setFeedbackRefreshTick((tick) => tick + 1);
     }
     window.addEventListener(CHAT_FEEDBACK_UPDATED_EVENT, refreshFeedback);
     return () => window.removeEventListener(CHAT_FEEDBACK_UPDATED_EVENT, refreshFeedback);
   }, []);
+
+  useEffect(() => {
+    const listChatFeedback = adminApi?.listChatFeedback;
+    if (!listChatFeedback) return;
+    let active = true;
+    Promise.resolve(listChatFeedback(data.me.id, mutationContext))
+      .then((records) => {
+        if (active && records) setServerFeedback(records);
+      })
+      .catch(() => {
+        // Server sentiment is additive; the browser-local view still renders.
+      });
+    return () => {
+      active = false;
+    };
+  }, [adminApi?.listChatFeedback, auditTrailRefreshToken, data.me, feedbackRefreshTick, mutationContext]);
 
   useEffect(() => {
     const listAuditEvents = adminApi?.listAuditEvents;
@@ -3706,10 +3740,14 @@ export function AdminConsole({
               className="chat-feedback-panel"
               title={
                 <>
-                  <MessageSquareText size={18} /> Chat Feedback (this browser)
+                  <MessageSquareText size={18} /> Chat Feedback
                 </>
               }
-              subtitle="Thumbs up and down you recorded in this browser. Feedback is not yet sent to the server, so it does not include other users or your other devices."
+              subtitle={
+                serverFeedback !== null
+                  ? "Thumbs ratings and optional written notes from every user, recorded on the server."
+                  : "Thumbs ratings recorded in this browser. Server-side feedback loads when the admin API is connected."
+              }
               actions={
                 <CsvExportControl
                   label="admin chat feedback analytics"
@@ -3753,19 +3791,33 @@ export function AdminConsole({
                   {filteredChatFeedback.map((item) => {
                     const isPositive = item.rating === "positive";
                     return (
-                      <div className="feedback-event-row" key={item.id}>
+                      <button
+                        className="feedback-event-row is-clickable"
+                        type="button"
+                        key={item.id}
+                        aria-label={`Preview feedback and conversation: ${item.thread_title}`}
+                        onClick={() => setFeedbackPreview(item)}
+                      >
                         <span className={isPositive ? "feedback-icon is-positive" : "feedback-icon is-negative"}>
                           {isPositive ? <ThumbsUp size={15} /> : <ThumbsDown size={15} />}
                         </span>
                         <span>
                           <strong>{isPositive ? "Positive sentiment" : "Negative sentiment"}</strong>
                           <small>
-                            {item.thread_title} · {item.model_id}
+                            {item.thread_title} · {item.model_id} · {item.user_name}
                           </small>
-                          <p>{item.message_preview}</p>
+                          <p>{markdownToPlainText(item.message_preview)}</p>
+                          {item.comment ? (
+                            <p className="feedback-comment">“{item.comment}”</p>
+                          ) : null}
                         </span>
-                        <time>{formatFeedbackTimestamp(item.created_at)}</time>
-                      </div>
+                        <span className="feedback-row-side">
+                          <time>{formatFeedbackTimestamp(item.created_at)}</time>
+                          <span className="prompt-activity-preview-label" aria-hidden="true">
+                            <Eye size={14} /> Preview
+                          </span>
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
@@ -3780,6 +3832,21 @@ export function AdminConsole({
               )}
             </Panel>
 
+            {feedbackPreview && (
+              <FeedbackConversationPreview
+                item={feedbackPreview}
+                sentLabel={formatFeedbackTimestamp(feedbackPreview.created_at)}
+                loadThreadRecords={
+                  adminApi?.listThreadPromptActivity
+                    ? (threadId) =>
+                        Promise.resolve(
+                          adminApi.listThreadPromptActivity!(data.me.id, threadId, mutationContext),
+                        )
+                    : undefined
+                }
+                onClose={() => setFeedbackPreview(null)}
+              />
+            )}
             <Panel
               className="model-activity-panel"
               title={

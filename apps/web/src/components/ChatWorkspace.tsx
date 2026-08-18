@@ -96,6 +96,7 @@ import {
   loadChatAttachmentPreview,
   runCustomScriptTool,
   sendChat,
+  submitChatFeedback,
   uploadChatAttachment,
   type ChatRuntimeOptions,
 } from "../lib/api";
@@ -2771,15 +2772,33 @@ export function ChatWorkspace({
 
   const disclaimer = <p className="disclaimer">Responses may contain mistakes. Verify important information.</p>;
 
-  function submitResponseFeedback(message: ChatMessage, rating: ChatFeedbackRating) {
+  function submitResponseFeedback(
+    message: ChatMessage,
+    rating: ChatFeedbackRating,
+    comment?: string,
+  ) {
     const thread = activeThread;
     if (!thread) return null;
+    const preview = truncatePreview(messagePlainText(message));
+    // The server record is what admins read; the local copy only keeps the
+    // pressed state instant on this device. Never block the chat on it.
+    void submitChatFeedback(data.me.id, {
+      thread_id: thread.id,
+      message_id: message.id,
+      rating: rating === "positive" ? "positive" : "negative",
+      ...(comment !== undefined ? { comment } : {}),
+      message_preview: preview,
+      thread_title: thread.title,
+      model_id: thread.model_id,
+    }).catch(() => {
+      // Feedback capture must never interrupt chat usage.
+    });
     return recordChatFeedback({
       thread_id: thread.id,
       thread_title: thread.title,
       message_id: message.id,
       rating,
-      message_preview: truncatePreview(messagePlainText(message)),
+      message_preview: preview,
       model_id: thread.model_id,
       user_id: data.me.id,
       user_name: data.me.display_name,
@@ -3580,7 +3599,7 @@ function MessageBubble({
   onSubmitEditPrompt?: (message: ChatMessage, text: string) => boolean;
   citationDetailsExpanded?: boolean;
   onToggleCitations?: (message: ChatMessage) => void;
-  onSubmitFeedback?: (message: ChatMessage, rating: ChatFeedbackRating) => void;
+  onSubmitFeedback?: (message: ChatMessage, rating: ChatFeedbackRating, comment?: string) => void;
   customTools?: ToolConfig[];
   onRunCustomTool?: (tool: ToolConfig, message: ChatMessage) => void;
   streamPreviewEnabled?: boolean;
@@ -3614,6 +3633,8 @@ function MessageBubble({
   const [feedbackRating, setFeedbackRating] = useState<ChatFeedbackRating | null>(() =>
     feedbackRatingForMessage(message.id),
   );
+  const [feedbackNoteOpen, setFeedbackNoteOpen] = useState(false);
+  const [feedbackNoteDraft, setFeedbackNoteDraft] = useState("");
   const [editDraft, setEditDraft] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const responseContentRef = useRef<HTMLDivElement | null>(null);
@@ -3681,7 +3702,24 @@ function MessageBubble({
   function submitFeedback(rating: ChatFeedbackRating) {
     onSubmitFeedback?.(displayMessage, rating);
     setFeedbackRating(rating);
+    // Every thumb click offers a "why" note; the rating itself has already
+    // been recorded, so closing the composer loses nothing.
+    setFeedbackNoteOpen(true);
     flashActionStatus(`${feedbackLabel(rating)} feedback sent`);
+  }
+
+  function sendFeedbackNote() {
+    const note = feedbackNoteDraft.trim();
+    if (!feedbackRating || !note) return;
+    onSubmitFeedback?.(displayMessage, feedbackRating, note);
+    setFeedbackNoteDraft("");
+    setFeedbackNoteOpen(false);
+    flashActionStatus("Note sent");
+  }
+
+  function closeFeedbackNote() {
+    setFeedbackNoteOpen(false);
+    setFeedbackNoteDraft("");
   }
 
   return (
@@ -3997,6 +4035,47 @@ function MessageBubble({
                 </span>
               )}
             </div>
+            {feedbackNoteOpen && feedbackRating && (
+              <div className="feedback-note-composer" role="group" aria-label="Feedback note">
+                <textarea
+                  rows={2}
+                  placeholder={
+                    feedbackRating === "positive"
+                      ? "What worked well? Add a note (optional)"
+                      : "What went wrong? Add a note (optional)"
+                  }
+                  aria-label="Feedback note (optional)"
+                  value={feedbackNoteDraft}
+                  onChange={(event) => setFeedbackNoteDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeFeedbackNote();
+                    }
+                  }}
+                  maxLength={2000}
+                />
+                <div className="feedback-note-actions">
+                  <button
+                    className="secondary-button compact"
+                    type="button"
+                    disabled={!feedbackNoteDraft.trim()}
+                    onClick={sendFeedbackNote}
+                  >
+                    Send note
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="Close feedback note"
+                    data-tooltip="Close without adding a note"
+                    onClick={closeFeedbackNote}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
             {onTransferToDraft && (
               <button
                 className="transfer-draft-button"

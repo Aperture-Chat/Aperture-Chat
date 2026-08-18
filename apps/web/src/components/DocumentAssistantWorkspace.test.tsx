@@ -1343,21 +1343,32 @@ test("persists document history across workspace reloads", async () => {
   ).toBeInTheDocument();
 });
 
-test("persists the document drafting model selected from the editor topbar", () => {
+test("starring a drafting model in the topbar menu makes it the persistent default", () => {
   const data = dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini");
   const view = render(
     <DocumentAssistantWorkspace data={data} brandName="Aperture Chat" />,
   );
 
-  const topbarModelSelector = screen.getByLabelText("Document drafting model");
-  expect(topbarModelSelector).toHaveValue("agent-client-update");
+  const trigger = screen.getByRole("button", { name: "Document drafting model" });
+  expect(trigger).toHaveTextContent("Client Update Agent");
 
-  fireEvent.change(topbarModelSelector, {
-    target: { value: "openrouter-openai-gpt-4o-mini" },
-  });
-
+  // The whole trigger opens the menu; picking a row is session-only.
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("option", { name: /OpenRouter: openai\/gpt-4o-mini/ }));
   expect(
     screen.getByText(/OpenRouter: openai\/gpt-4o-mini selected for drafting/),
+  ).toBeInTheDocument();
+  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBeNull();
+
+  // The star pins it as the default across sessions, chat-style.
+  fireEvent.click(trigger);
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Set OpenRouter: openai/gpt-4o-mini as default drafting model",
+    }),
+  );
+  expect(
+    screen.getByText(/OpenRouter: openai\/gpt-4o-mini is now your default drafting model/),
   ).toBeInTheDocument();
   expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBe(
     "openrouter-openai-gpt-4o-mini",
@@ -1373,14 +1384,9 @@ test("persists the document drafting model selected from the editor topbar", () 
     <DocumentAssistantWorkspace data={data} brandName="Aperture Chat" />,
   );
 
-  expect(screen.getByLabelText("Document drafting model")).toHaveValue(
-    "openrouter-openai-gpt-4o-mini",
-  );
   expect(
-    within(screen.getByLabelText("Document drafting model")).getByRole("option", {
-      selected: true,
-    }),
-  ).toHaveTextContent(/OpenRouter: openai\/gpt-4o-mini/);
+    screen.getByRole("button", { name: "Document drafting model" }),
+  ).toHaveTextContent("OpenRouter: openai/gpt-4o-mini");
 });
 
 test("document drafting model selector includes connected platform-owner models", () => {
@@ -1389,13 +1395,12 @@ test("document drafting model selector includes connected platform-owner models"
     <DocumentAssistantWorkspace data={data} brandName="Aperture Chat" />,
   );
 
-  const options = Array.from(
-    screen.getByLabelText("Document drafting model").querySelectorAll("option"),
-  ).map((option) => option.textContent ?? "");
+  fireEvent.click(screen.getByRole("button", { name: "Document drafting model" }));
+  const options = screen.getAllByRole("option").map((option) => option.textContent ?? "");
 
-  expect(options).toContain("Client Update Agent · OpenRouter");
-  expect(options).toContain("OpenRouter: openai/gpt-4o-mini · OpenRouter");
-  expect(options).toContain("OpenAI: GPT-5.5 · OpenRouter");
+  expect(options.some((text) => text.includes("Client Update Agent"))).toBe(true);
+  expect(options.some((text) => text.includes("OpenRouter: openai/gpt-4o-mini"))).toBe(true);
+  expect(options.some((text) => text.includes("OpenAI: GPT-5.5"))).toBe(true);
 });
 
 test("infers a finance template from a draft request", async () => {
@@ -3719,4 +3724,34 @@ test("highlighting slide text floats the Ask AI pill that opens the inline edito
     screen.queryByRole("dialog", { name: "Edit selection with AI" }),
   ).not.toBeInTheDocument();
   expect(bullets.textContent).toContain("Quarterly revenue targets");
+});
+
+test("a starred drafting model survives mounts where it is temporarily unavailable", async () => {
+  window.localStorage.setItem("aperture-document-draft-model-v1", "openrouter-openai-gpt-4o-mini");
+
+  // Mount without the starred model in the usable list (bootstrap data not
+  // loaded yet, or approvals filtered): the trigger falls back for display.
+  const view = render(
+    <DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Document drafting model" }),
+  ).not.toHaveTextContent("gpt-4o-mini");
+  // The starred default is never overwritten by the display fallback.
+  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBe(
+    "openrouter-openai-gpt-4o-mini",
+  );
+
+  // When the real agent list arrives on the same mount, the star wins again.
+  view.rerender(
+    <DocumentAssistantWorkspace
+      data={dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini")}
+      brandName="Aperture Chat"
+    />,
+  );
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: "Document drafting model" }),
+    ).toHaveTextContent("OpenRouter: openai/gpt-4o-mini");
+  });
 });

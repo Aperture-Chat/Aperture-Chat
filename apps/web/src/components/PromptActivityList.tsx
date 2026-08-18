@@ -1,7 +1,7 @@
-import { Bot, Eye, MessageSquareText, UserRound, X } from "lucide-react";
+import { Bot, Eye, MessageSquareText, ThumbsDown, ThumbsUp, UserRound, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import type { Role, UserPromptRecord } from "../lib/types";
+import type { ChatFeedbackRating, Role, UserPromptRecord } from "../lib/types";
 import { Markdown } from "./Markdown";
 import { Pill } from "./Primitives";
 
@@ -364,5 +364,247 @@ export function PromptActivityList({
           document.body,
         )}
     </>
+  );
+}
+
+export type FeedbackPreviewItem = {
+  thread_id: string;
+  thread_title: string;
+  message_id: string;
+  rating: ChatFeedbackRating;
+  comment?: string;
+  user_name: string;
+  model_id: string;
+  message_preview?: string;
+};
+
+/** Full-conversation preview for one feedback entry: the same rendered-chat
+ * dialog auditors get from prompt activity, plus the person's written note.
+ * The rated exchange is highlighted and scrolled into view; markdown, tables,
+ * diagrams, and saved generated images render exactly as the user saw them. */
+export function FeedbackConversationPreview({
+  item,
+  sentLabel,
+  loadThreadRecords,
+  onClose,
+}: {
+  item: FeedbackPreviewItem;
+  /** Display-formatted timestamp of the rating. */
+  sentLabel: string;
+  loadThreadRecords?: (
+    threadId: string,
+  ) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+  onClose: () => void;
+}) {
+  const [records, setRecords] = useState<UserPromptRecord[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const titleId = useId();
+  const ratedExchangeRef = useRef<HTMLElement | null>(null);
+  // The loader identity can change every render (inline console closures);
+  // reading it through a ref keeps the fetch keyed on the previewed item.
+  const loaderRef = useRef(loadThreadRecords);
+  loaderRef.current = loadThreadRecords;
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  useEffect(() => {
+    const loader = loaderRef.current;
+    if (!loader) {
+      setLoadFailed(true);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => loader(item.thread_id))
+      .then((full) => {
+        if (!cancelled && Array.isArray(full)) setRecords(full);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.thread_id]);
+
+  const conversation = useMemo(() => {
+    if (!records) return [];
+    // The API returns newest-first; flip to read the chat top-down, then a
+    // stable timestamp sort guards against any out-of-order rows.
+    return [...records].reverse().sort((a, b) => recordSortValue(a) - recordSortValue(b));
+  }, [records]);
+
+  // Feedback targets an assistant message; its exchange is the prompt whose
+  // saved response carries that id.
+  const isRatedExchange = (record: UserPromptRecord) =>
+    record.response_message_id === item.message_id || record.id === item.message_id;
+
+  useEffect(() => {
+    ratedExchangeRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [conversation]);
+
+  const isPositive = item.rating === "positive";
+
+  return createPortal(
+    <div className="modal-backdrop prompt-output-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal prompt-output-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <span className="modal-icon">
+            {isPositive ? <ThumbsUp size={20} /> : <ThumbsDown size={20} />}
+          </span>
+          <div>
+            <h2 id={titleId}>Feedback and conversation</h2>
+            <p>{item.thread_title}</p>
+          </div>
+          <button
+            autoFocus
+            className="icon-button"
+            type="button"
+            aria-label="Close feedback preview"
+            data-tooltip="Close preview"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="prompt-output-meta" aria-label="Feedback metadata">
+          <span><strong>User</strong>{item.user_name}</span>
+          <span><strong>Sentiment</strong>{isPositive ? "Positive" : "Negative"}</span>
+          <span><strong>Model</strong>{item.model_id}</span>
+          <span><strong>Sent</strong>{sentLabel}</span>
+        </div>
+
+        {item.comment ? (
+          <div className="feedback-note-banner" role="note" aria-label="User feedback note">
+            {isPositive ? <ThumbsUp size={15} /> : <ThumbsDown size={15} />}
+            <p>“{item.comment}”</p>
+          </div>
+        ) : (
+          <p className="prompt-output-thread-note">No written note was added to this rating.</p>
+        )}
+
+        <p className="prompt-output-thread-note">
+          {records === null && !loadFailed && "Loading the conversation…"}
+          {loadFailed &&
+            "The conversation could not be loaded; showing the rated response preview only."}
+          {records !== null &&
+            (conversation.length === 0
+              ? "No saved exchanges were found for this chat."
+              : conversation.length === 1
+                ? "1 exchange in this conversation."
+                : `${conversation.length} exchanges in this conversation, oldest first.`)}
+        </p>
+
+        <div className="prompt-output-dialog-body">
+          {loadFailed && (
+            <article className="prompt-output-exchange is-selected" aria-label="Rated output preview">
+              <section className="prompt-output-message is-response" aria-label="Saved model output">
+                <header>
+                  <span><Bot size={15} /> Rated output (saved preview)</span>
+                </header>
+                <div className="prompt-output-rendered">
+                  <Markdown content={item.message_preview ?? ""} />
+                </div>
+              </section>
+            </article>
+          )}
+          {conversation.map((record, index) => {
+            const rated = isRatedExchange(record);
+            return (
+              <article
+                key={`${record.thread_id}:${record.id}`}
+                className={`prompt-output-exchange${rated ? " is-selected" : ""}`}
+                aria-label={`Exchange ${index + 1} of ${conversation.length}`}
+                ref={
+                  rated
+                    ? (node) => {
+                        ratedExchangeRef.current = node;
+                      }
+                    : undefined
+                }
+              >
+                <section className="prompt-output-message is-prompt" aria-label="User prompt">
+                  <header>
+                    <span><UserRound size={15} /> User prompt</span>
+                    <span className="prompt-output-exchange-meta">
+                      {rated && (
+                        <Pill tone={isPositive ? "success" : "warning"}>Rated exchange</Pill>
+                      )}
+                      <small>{record.created_at}</small>
+                    </span>
+                  </header>
+                  <div className="prompt-output-rendered">
+                    <Markdown content={record.content} />
+                  </div>
+                </section>
+
+                <section className="prompt-output-message is-response" aria-label="Saved model output">
+                  <header>
+                    <span><Bot size={15} /> Model output</span>
+                    {record.response_status && (
+                      <Pill tone={record.response_status === "ok" ? "success" : "warning"}>
+                        {record.response_status}
+                      </Pill>
+                    )}
+                  </header>
+                  {record.response_message_id || record.response_content != null ? (
+                    <>
+                      <div className="prompt-output-rendered">
+                        {record.response_content ? (
+                          <Markdown content={record.response_content} />
+                        ) : (
+                          <p className="prompt-output-plain">The saved model output was empty.</p>
+                        )}
+                      </div>
+                      {(record.response_images?.length ?? 0) > 0 && (
+                        <div
+                          className="prompt-output-images"
+                          role="group"
+                          aria-label="Generated images saved with this output"
+                        >
+                          {record.response_images!.map((url) => (
+                            <AuditGeneratedImage url={url} key={url} />
+                          ))}
+                        </div>
+                      )}
+                      {record.response_truncated && (
+                        <small className="prompt-output-truncated">
+                          Preview limited to the first 12,000 saved characters.
+                        </small>
+                      )}
+                    </>
+                  ) : (
+                    <div className="prompt-output-empty">
+                      No saved model output is attached to this prompt.
+                    </div>
+                  )}
+                </section>
+              </article>
+            );
+          })}
+        </div>
+
+        <footer className="modal-foot">
+          <Eye size={14} /> This preview shows persisted text and saved generated images; it does
+          not run the model again.
+        </footer>
+      </section>
+    </div>,
+    document.body,
   );
 }

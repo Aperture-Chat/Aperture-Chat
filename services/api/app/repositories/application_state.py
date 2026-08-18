@@ -48,6 +48,7 @@ from app.db.orm import (
     AuditEventRow,
     AuditOutboxRow,
     ChatAttachmentRow,
+    ChatFeedbackRow,
     ChatFolderRow,
     ChatStateImportRow,
     ChatThreadRow,
@@ -71,6 +72,7 @@ from app.models.schemas import (
     AlertNotification,
     AuditEvent,
     ChatAttachment,
+    ChatFeedbackRecord,
     ChatFolder,
     ChatSession,
     ChatThread,
@@ -1687,6 +1689,71 @@ class ApplicationStateRepository:
         return self.run_transaction(
             lambda session: session.scalar(select(func.count()).select_from(ChatAttachmentRow)) or 0
         )
+
+    # Chat response feedback --------------------------------------------
+
+    def upsert_chat_feedback(
+        self,
+        record: ChatFeedbackRecord,
+        *,
+        update_comment: bool,
+    ) -> ChatFeedbackRecord:
+        """One row per (user, message); a repeat click updates it in place.
+
+        ``update_comment=False`` preserves an existing note when only the
+        rating changed, so re-clicking a thumb never erases what the person
+        wrote.
+        """
+
+        copied = record.model_copy(deep=True)
+
+        def operation(session: Session) -> ChatFeedbackRecord:
+            existing = session.scalar(
+                select(ChatFeedbackRow).where(
+                    ChatFeedbackRow.user_id == copied.user_id,
+                    ChatFeedbackRow.message_id == copied.message_id,
+                )
+            )
+            if existing is not None:
+                existing.rating = copied.rating
+                existing.updated_at = copied.updated_at
+                if update_comment:
+                    existing.comment = copied.comment
+                if copied.message_preview:
+                    existing.message_preview = copied.message_preview
+                if copied.thread_title:
+                    existing.thread_title = copied.thread_title
+                session.flush()
+                return existing.to_model()
+            row = ChatFeedbackRow.from_model(copied)
+            session.add(row)
+            session.flush()
+            return row.to_model()
+
+        return self.run_transaction(operation)
+
+    def list_chat_feedback(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int | None = 200,
+    ) -> list[ChatFeedbackRecord]:
+        _validate_limit(limit)
+        filters: list[Any] = []
+        if tenant_id is not None:
+            filters.append(ChatFeedbackRow.tenant_id == tenant_id)
+
+        def operation(session: Session) -> list[ChatFeedbackRecord]:
+            statement = (
+                select(ChatFeedbackRow)
+                .where(*filters)
+                .order_by(ChatFeedbackRow.updated_at.desc(), ChatFeedbackRow.id)
+            )
+            if limit is not None:
+                statement = statement.limit(limit)
+            return [row.to_model() for row in session.scalars(statement)]
+
+        return self.run_transaction(operation)
 
     # Chat thread retention tags ----------------------------------------
 
@@ -3719,6 +3786,9 @@ class ApplicationStateRepository:
                         RetentionHoldThreadRow.thread_id.in_(doomed_thread_ids)
                     )
                 )
+            session.execute(
+                delete(ChatFeedbackRow).where(ChatFeedbackRow.user_id == user_id)
+            )
             removed_threads = (
                 session.execute(
                     delete(ChatThreadRow).where(ChatThreadRow.owner_user_id == user_id)
@@ -3847,6 +3917,11 @@ class ApplicationStateRepository:
                 )
             session.execute(
                 delete(ChatThreadTagRow).where(ChatThreadTagRow.tenant_id == tenant_id)
+            )
+            session.execute(
+                delete(ChatFeedbackRow).where(
+                    owned_or_tenant(ChatFeedbackRow.tenant_id, ChatFeedbackRow.user_id)
+                )
             )
             doomed_hold_ids = list(
                 session.execute(
