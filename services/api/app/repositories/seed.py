@@ -116,6 +116,7 @@ from app.models.schemas import (
     ChatMessage,
     ChatThread,
     ChatThreadTag,
+    IssueReportRecord,
     Connector,
     ConnectorConfig,
     ContentFilter,
@@ -5005,6 +5006,22 @@ class SeedStore:
     ) -> list[ChatFeedbackRecord]:
         with self._store_lock:
             return self.application_state_repository.list_chat_feedback(
+                tenant_id=tenant_id, limit=limit
+            )
+
+    def save_issue_report(self, report: IssueReportRecord) -> IssueReportRecord:
+        with self._store_lock:
+            return self.application_state_repository.save_issue_report(report)
+
+    def get_issue_report(self, report_id: str) -> IssueReportRecord | None:
+        with self._store_lock:
+            return self.application_state_repository.get_issue_report(report_id)
+
+    def list_issue_reports(
+        self, *, tenant_id: str | None = None, limit: int | None = 200
+    ) -> list[IssueReportRecord]:
+        with self._store_lock:
+            return self.application_state_repository.list_issue_reports(
                 tenant_id=tenant_id, limit=limit
             )
 

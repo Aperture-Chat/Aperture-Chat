@@ -312,6 +312,19 @@ export type ChatFeedbackSubmitRequest = {
   model_id?: string;
 };
 
+export type IssueReportRecord = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  user_name: string;
+  subject: string;
+  body: string;
+  screenshot_filename?: string | null;
+  screenshot_mime_type?: string | null;
+  screenshot_size_bytes?: number | null;
+  created_at: string;
+};
+
 export type RetentionBatchRequest = {
   action: "delete" | "archive";
   thread_ids: string[];

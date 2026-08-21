@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   Bot,
+  Bug,
   ChevronDown,
   Clock3,
   Copy,
@@ -21,6 +22,7 @@ import {
   Mail,
   MessageSquareText,
   Palette,
+  Paperclip,
   Plus,
   QrCode,
   RotateCcw,
@@ -66,6 +68,7 @@ import type {
   EmailSettings,
   EmailSettingsUpdateRequest,
   ChatFeedbackRecord,
+  IssueReportRecord,
   EmailTestResult,
   RetentionBatchRequest,
   RetentionBatchResult,
@@ -110,6 +113,7 @@ const OwnerDocumentationModal = lazyWithReload("owner-documentation", () =>
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPlainText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
@@ -612,6 +616,8 @@ export type PlatformConsoleActions = {
   listRetentionThreads?: () => Promise<RetentionTaggedThread[] | void>;
   /** Server-side response sentiment with user notes. */
   listChatFeedback?: () => Promise<ChatFeedbackRecord[] | void>;
+  listIssueReports?: () => Promise<IssueReportRecord[] | void>;
+  loadIssueReportScreenshot?: (reportId: string) => Promise<Blob>;
   runRetentionBatch?: (payload: RetentionBatchRequest) => Promise<RetentionBatchResult | void>;
   listSecurityAlerts?: (userId?: string) => Promise<SecurityAlert[] | void> | SecurityAlert[] | void;
   acknowledgeSecurityAlert?: (
@@ -751,6 +757,8 @@ export function PlatformConsole({
   const [serverFeedback, setServerFeedback] = useState<ChatFeedbackRecord[] | null>(null);
   const [feedbackRefreshTick, setFeedbackRefreshTick] = useState(0);
   const [feedbackPreview, setFeedbackPreview] = useState<FeedbackDisplayItem | null>(null);
+  const [issueReports, setIssueReports] = useState<IssueReportRecord[]>([]);
+  const [issueReportPreview, setIssueReportPreview] = useState<IssueReportRecord | null>(null);
   const [modelSearch, setModelSearch] = useState("");
   const [modelStatusFilter, setModelStatusFilter] = useState<ModelStatusFilter>("all");
   // Column facets for the model list: empty selections mean "no filter".
@@ -835,6 +843,10 @@ export function PlatformConsole({
   );
   const positiveFeedback = filteredChatFeedback.filter((item) => item.rating === "positive");
   const negativeFeedback = filteredChatFeedback.filter((item) => item.rating === "negative");
+  const filteredIssueReports = useMemo(
+    () => issueReports.filter((item) => sectionScopeMatch(feedbackScope, item.created_at, item.user_id)),
+    [feedbackScope, issueReports],
+  );
   const chatRuntimeRows = filteredRuntimeAuditRows.filter((item) => item.surface === "chat");
   const draftRuntimeRows = filteredRuntimeAuditRows.filter((item) => item.surface === "draft");
   // Every user is auditable here, peer platform owners included: owners hold
@@ -1003,6 +1015,22 @@ export function PlatformConsole({
       active = false;
     };
   }, [listChatFeedback, auditTrailRefreshToken, feedbackRefreshTick]);
+
+  const listIssueReports = platformActions?.listIssueReports;
+  useEffect(() => {
+    if (!listIssueReports) return;
+    let active = true;
+    Promise.resolve(listIssueReports())
+      .then((records) => {
+        if (active && records) setIssueReports(records);
+      })
+      .catch(() => {
+        // Issue reporting is additive to analytics; other panels stay usable.
+      });
+    return () => {
+      active = false;
+    };
+  }, [listIssueReports, auditTrailRefreshToken]);
 
   const listAuditEvents = platformActions?.listAuditEvents;
   useEffect(() => {
@@ -3579,8 +3607,8 @@ export function PlatformConsole({
               }
               subtitle={
                 serverFeedback !== null
-                  ? "Thumbs ratings and optional written notes from every user, recorded on the server."
-                  : "Thumbs ratings recorded in this browser. Server-side feedback loads when the platform API is connected."
+                  ? "Thumbs ratings, written notes, and platform issue reports from every user."
+                  : "Thumbs ratings recorded in this browser. Server-side feedback and issue reports load when the platform API is connected."
               }
               actions={
                   <CsvExportControl
@@ -3598,8 +3626,8 @@ export function PlatformConsole({
                 scope={feedbackScope}
                 onChange={setFeedbackScope}
                 users={auditUserOptions}
-                selectedCount={filteredChatFeedback.length}
-                totalCount={feedbackSource.length}
+                selectedCount={filteredChatFeedback.length + filteredIssueReports.length}
+                totalCount={feedbackSource.length + issueReports.length}
               />
               <div className="feedback-summary-grid">
                 <div className="feedback-summary-card">
@@ -3617,9 +3645,14 @@ export function PlatformConsole({
                   <strong>{negativeFeedback.length}</strong>
                   <small>Thumbs down responses for review.</small>
                 </div>
+                <div className="feedback-summary-card">
+                  <span>Issue reports</span>
+                  <strong>{filteredIssueReports.length}</strong>
+                  <small>Platform problems submitted through Help.</small>
+                </div>
               </div>
 
-              {filteredChatFeedback.length > 0 ? (
+              {filteredChatFeedback.length > 0 && (
                 <div className="feedback-event-list scrollable-log-list" aria-label="Chat feedback events">
                   {filteredChatFeedback.map((item) => {
                     const isPositive = item.rating === "positive";
@@ -3652,12 +3685,49 @@ export function PlatformConsole({
                     );
                   })}
                 </div>
-              ) : (
+              )}
+
+              {filteredIssueReports.length > 0 && (
+                <>
+                  <h3 className="feedback-subsection-title">Reported platform issues</h3>
+                  <div className="feedback-event-list scrollable-log-list" aria-label="Platform issue reports">
+                    {filteredIssueReports.map((item) => (
+                      <button
+                        className="feedback-event-row is-clickable"
+                        type="button"
+                        key={item.id}
+                        aria-label={`Preview issue report: ${item.subject}`}
+                        onClick={() => setIssueReportPreview(item)}
+                      >
+                        <span className="feedback-icon is-issue-report"><Bug size={15} /></span>
+                        <span>
+                          <strong>{item.subject}</strong>
+                          <small>{item.user_name}</small>
+                          <p>{item.body}</p>
+                          {item.screenshot_filename && (
+                            <p className="issue-report-attachment-label">
+                              <Paperclip size={13} /> {item.screenshot_filename}
+                            </p>
+                          )}
+                        </span>
+                        <span className="feedback-row-side">
+                          <time>{formatFeedbackTimestamp(item.created_at)}</time>
+                          <span className="prompt-activity-preview-label" aria-hidden="true">
+                            <Eye size={14} /> Preview
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {filteredChatFeedback.length === 0 && filteredIssueReports.length === 0 && (
                 <div className="audit-empty-state">
                   <MessageSquareText size={20} />
                   <span>
-                    <strong>No chat feedback submitted yet</strong>
-                    <small>Thumbs up and thumbs down actions from assistant messages will appear here.</small>
+                    <strong>No feedback or issue reports submitted yet</strong>
+                    <small>Response ratings and platform reports will appear here.</small>
                   </span>
                 </div>
               )}
@@ -3673,6 +3743,14 @@ export function PlatformConsole({
                     : undefined
                 }
                 onClose={() => setFeedbackPreview(null)}
+              />
+            )}
+            {issueReportPreview && (
+              <IssueReportPreview
+                item={issueReportPreview}
+                sentLabel={formatFeedbackTimestamp(issueReportPreview.created_at)}
+                loadScreenshot={platformActions?.loadIssueReportScreenshot}
+                onClose={() => setIssueReportPreview(null)}
               />
             )}
             <Panel

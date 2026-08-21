@@ -159,6 +159,7 @@ def test_empty_database_migrates_to_head_with_sqlite_safety_settings(tmp_path: P
             "identity_config_imports",
             "identity_groups",
             "identity_users",
+            "issue_reports",
             "knowledge_configs",
             "matter_deletion_jobs",
             "matter_memberships",

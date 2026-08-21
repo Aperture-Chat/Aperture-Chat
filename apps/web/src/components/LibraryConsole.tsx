@@ -368,6 +368,7 @@ export function LibraryConsole({
       connectors: data.connectors,
       connectorConfigs: data.connectorConfigs,
       groups: data.groups,
+      users: data.visibleUsers ?? data.users,
     });
     setKnowledgeDocuments((current) => ({
       ...current,
@@ -496,6 +497,7 @@ export function LibraryConsole({
         connectors: data.connectors,
         connectorConfigs: data.connectorConfigs,
         groups: data.groups,
+        users: data.visibleUsers ?? data.users,
       });
       onDataChange((current) => ({
         ...current,
@@ -687,6 +689,7 @@ export function LibraryConsole({
       const saved = mapKnowledgeConfigRecordToKnowledgeBase(record, {
         connectors: data.connectors,
         groups: data.groups,
+        users: data.visibleUsers ?? data.users,
       });
       onDataChange((current) => replaceKnowledgeBase(current, item.id, saved));
       setActionStatus({
@@ -763,6 +766,7 @@ export function LibraryConsole({
       const saved = mapKnowledgeConfigRecordToKnowledgeBase(result.config, {
         connectors: data.connectors,
         groups: data.groups,
+        users: data.visibleUsers ?? data.users,
       });
       setKnowledgeDocuments((current) => ({
         ...current,

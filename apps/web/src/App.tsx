@@ -78,6 +78,8 @@ import {
   deleteMemory,
   getAdminRetentionPolicy,
   listAdminChatFeedback,
+  listAdminIssueReports,
+  getAdminIssueReportScreenshot,
   getMemoryPolicy,
   getMemoryStats,
   listAdminRetentionThreads,
@@ -127,6 +129,7 @@ import {
   loadAccountApiKey,
   createAccountApiKey,
   revokeAccountApiKey,
+  submitIssueReport,
 } from "./lib/api";
 import { useChatStore } from "./lib/chatStore";
 import { markdownToPlainText } from "./lib/markdown";
@@ -898,6 +901,9 @@ export function App() {
       getMemoryStats: (actorUserId) => getMemoryStats(actorUserId),
       purgeUserMemories: (actorUserId, userId) => purgeUserMemories(actorUserId, userId),
       listChatFeedback: (actorUserId) => listAdminChatFeedback(actorUserId, { limit: 500 }),
+      listIssueReports: (actorUserId) => listAdminIssueReports(actorUserId, { limit: 500 }),
+      loadIssueReportScreenshot: (actorUserId, reportId) =>
+        getAdminIssueReportScreenshot(actorUserId, reportId),
       getRetentionPolicy: (actorUserId) => getAdminRetentionPolicy(actorUserId),
       updateRetentionPolicy: (actorUserId, patch) => updateAdminRetentionPolicy(actorUserId, patch),
       listRetentionThreads: (actorUserId) => listAdminRetentionThreads(actorUserId, { limit: 500 }),
@@ -975,6 +981,9 @@ export function App() {
       // Retention governance rides the admin endpoints, which already admit
       // platform owners and scope them to the deployment's sole tenant.
       listChatFeedback: () => listAdminChatFeedback(data.me.id, { limit: 500 }),
+      listIssueReports: () => listAdminIssueReports(data.me.id, { limit: 500 }),
+      loadIssueReportScreenshot: (reportId) =>
+        getAdminIssueReportScreenshot(data.me.id, reportId),
       getRetentionPolicy: () => getAdminRetentionPolicy(data.me.id),
       updateRetentionPolicy: (patch) => updateAdminRetentionPolicy(data.me.id, patch),
       listRetentionThreads: () => listAdminRetentionThreads(data.me.id, { limit: 500 }),
@@ -1275,6 +1284,9 @@ export function App() {
       onApiKeyLoad={handleAccountApiKeyLoad}
       onApiKeyCreate={handleAccountApiKeyCreate}
       onApiKeyRevoke={handleAccountApiKeyRevoke}
+      onSubmitIssueReport={async (payload) => {
+        await submitIssueReport(data.me.id, payload);
+      }}
       memoryApi={memoryApi}
     >
       {loading && (

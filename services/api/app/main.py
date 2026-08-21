@@ -27,6 +27,7 @@ from app.routes import (
     connector_oauth,
     deck_templates,
     health,
+    issue_reports,
     knowledge,
     matters,
     memory,
@@ -123,7 +124,7 @@ app = FastAPI(
         "Secure enterprise AI chat: auth and SSO, platform-owner controls, tenant "
         "admin, SCIM, chat, knowledge, tools, agents, and scheduled automations."
     ),
-    version="0.4.4",
+    version="0.4.5",
     lifespan=lifespan,
 )
 
@@ -227,6 +228,7 @@ app.include_router(bootstrap.router)
 app.include_router(platform.router)
 app.include_router(admin.router)
 app.include_router(chat.router)
+app.include_router(issue_reports.router)
 app.include_router(memory.router)
 app.include_router(knowledge.router)
 app.include_router(connector_oauth.router)
