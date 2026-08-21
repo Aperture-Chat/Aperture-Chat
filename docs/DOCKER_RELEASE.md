@@ -69,6 +69,20 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.4.4
+
+- Users can report platform issues from Help with a subject, detailed message,
+  and optional screenshot. Tenant admins and platform owners can review the
+  reports alongside response-feedback analytics. Migration 20260820_0018.
+- Prompt editors now expand into focused writing surfaces and share the chat
+  prompt improver, progress rail, and one-click restore behavior across chat,
+  agent system/meta prompts, and reusable prompt templates.
+- Knowledge-base visibility now enforces user-only access strictly and labels
+  group-shared collections with the assigned group instead of a single user.
+- Mermaid plus structured JSON and real YAML diagrams remain visual when a
+  response is transferred into Drafts. Mixed responses hydrate every diagram,
+  and one malformed figure no longer blocks the rest.
+
 ## New Since v0.4.3
 
 - Response sentiment goes server-side: thumbs ratings and an optional

@@ -802,6 +802,36 @@ test("admin analytics and audit monitors hide platform owner prompt records", as
   expect(within(previewDialog).getByText(/restricted-data workflow/)).toBeInTheDocument();
 });
 
+test("admin analytics shows user-submitted platform issue reports", async () => {
+  const listIssueReports = vi.fn(async () => [
+    {
+      id: "issue-admin-visible",
+      tenant_id: sampleData.currentTenant.id,
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      subject: "Knowledge access label is wrong",
+      body: "The row shows a person after sharing with Default Users.",
+      screenshot_filename: null,
+      screenshot_mime_type: null,
+      screenshot_size_bytes: null,
+      created_at: "2026-08-20T18:00:00Z",
+    },
+  ]);
+  renderAdmin({ listIssueReports });
+
+  selectTab("Analytics");
+  expandPanel("Chat Feedback");
+
+  expect(await screen.findByText("Knowledge access label is wrong")).toBeInTheDocument();
+  expect(screen.getByText("Issue reports").closest(".feedback-summary-card")).toHaveTextContent("1");
+  fireEvent.click(screen.getByRole("button", {
+    name: "Preview issue report: Knowledge access label is wrong",
+  }));
+  expect(screen.getByRole("dialog", { name: "Platform issue report" })).toHaveTextContent(
+    "The row shows a person after sharing with Default Users.",
+  );
+});
+
 test("audit and analytics user filters narrow records and exports to one user", async () => {
   const promptRecords: PromptActivityRecord[] = [
     {

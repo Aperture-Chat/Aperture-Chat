@@ -12,6 +12,7 @@ import type {
   Connector,
   ConnectorConfigRecord,
   Group,
+  User,
   KnowledgeBase,
   KnowledgeConfigRecord,
   ModelConfig,
@@ -184,6 +185,7 @@ export type KnowledgeConfigMappingContext = {
   connectorConfigs?: ConnectorConfigRecord[];
   connectors?: Connector[];
   groups?: Group[];
+  users?: User[];
 };
 
 export function mapKnowledgeConfigRecordToKnowledgeBase(
@@ -196,6 +198,7 @@ export function mapKnowledgeConfigRecordToKnowledgeBase(
   const groups = record.acl_group_ids
     .map((groupId) => context.groups?.find((group) => group.id === groupId)?.name ?? groupId)
     .filter(Boolean);
+  const ownerName = context.users?.find((user) => user.id === record.owner_user_id)?.display_name;
 
   return {
     id: record.id,
@@ -215,7 +218,10 @@ export function mapKnowledgeConfigRecordToKnowledgeBase(
     last_sync: stringSetting(record.settings, "last_sync") ?? (record.enabled ? "Loaded from API" : "Not synced"),
     provider_status: stringSetting(record.settings, "provider_status"),
     provider_message: stringSetting(record.settings, "provider_message"),
-    acl: stringSetting(record.settings, "acl") ?? (groups.length ? `Groups: ${groups.join(", ")}` : "Only creator"),
+    // Sharing labels come from the authoritative ACL fields, never the
+    // historical free-text settings value that can become stale after an
+    // administrator changes a private base to group access (or vice versa).
+    acl: groups.length ? `Groups: ${groups.join(", ")}` : ownerName ? `Only ${ownerName}` : "Only creator",
     owner_group_id: record.acl_group_ids[0] ?? "",
     owner_user_id: record.owner_user_id,
     enabled: record.enabled,
@@ -290,6 +296,8 @@ export function mapModelConfigRecordToDisplay(record: ModelConfig): ModelConfig 
 
 export function normalizeBootstrap(data: BootstrapWireData): BootstrapData {
   const groups = data.groups ?? sampleData.groups;
+  const users = data.users ?? sampleData.users;
+  const visibleUsers = data.visibleUsers ?? users ?? sampleData.visibleUsers;
   const connectorConfigs = Array.isArray(data.connectorConfigs) ? data.connectorConfigs : [];
   const connectors =
     data.connectorConfigs !== undefined
@@ -302,8 +310,8 @@ export function normalizeBootstrap(data: BootstrapWireData): BootstrapData {
     providers: data.providers ?? sampleData.providers,
     models: (data.models ?? sampleData.models).map(mapModelConfigRecordToDisplay),
     groups,
-    users: data.users ?? sampleData.users,
-    visibleUsers: data.visibleUsers ?? data.users ?? sampleData.visibleUsers,
+    users,
+    visibleUsers,
     providerKeys: data.providerKeys ?? [],
     connectors,
     connectorConfigs,
@@ -314,6 +322,7 @@ export function normalizeBootstrap(data: BootstrapWireData): BootstrapData {
             connectorConfigs,
             connectors,
             groups,
+            users: visibleUsers,
           }),
         )
       : (data.knowledgeBases ?? sampleData.knowledgeBases),

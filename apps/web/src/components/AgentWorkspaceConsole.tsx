@@ -40,6 +40,7 @@ import type {
   ProviderKey,
 } from "../lib/types";
 import { Panel, Pill, StableLabel, Toggle } from "./Primitives";
+import { PromptEditorField } from "./PromptEditorField";
 
 const AGENT_TAB_TOOLTIPS: Record<string, string> = {
   basics: "Set this agent's name, base model, visibility, and prompts",
@@ -765,24 +766,24 @@ export function AgentWorkspaceConsole({
                     </SelectControl>
                   )}
                 </label>
-                <label className="wide-field">
-                  System prompt
-                  <textarea
-                    value={draft.system_prompt}
-                    onChange={(event) =>
-                      updateDraft({ system_prompt: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="wide-field">
-                  Meta prompt
-                  <textarea
-                    value={draft.meta_prompt}
-                    onChange={(event) =>
-                      updateDraft({ meta_prompt: event.target.value })
-                    }
-                  />
-                </label>
+                <PromptEditorField
+                  className="wide-field"
+                  label="System prompt"
+                  kind="system"
+                  userId={data.me.id}
+                  modelId={draft.base_model_id}
+                  value={draft.system_prompt}
+                  onChange={(system_prompt) => updateDraft({ system_prompt })}
+                />
+                <PromptEditorField
+                  className="wide-field"
+                  label="Meta prompt"
+                  kind="meta"
+                  userId={data.me.id}
+                  modelId={draft.base_model_id}
+                  value={draft.meta_prompt}
+                  onChange={(meta_prompt) => updateDraft({ meta_prompt })}
+                />
               </div>
             </Tabs.Content>
 

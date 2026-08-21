@@ -107,6 +107,10 @@ test("tool library creates template variables and deletes library items through 
   expect(
     screen.getByRole("dialog", { name: "New Prompt Template" }),
   ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Improve content" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Expand content" }));
+  expect(screen.getByRole("dialog", { name: "Content" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Collapse content" }));
   fireEvent.click(screen.getByRole("button", { name: "Save Prompt" }));
 
   await waitFor(() =>

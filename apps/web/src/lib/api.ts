@@ -10,6 +10,7 @@ export * from "./api/bootstrap";
 export * from "./api/admin";
 export * from "./api/platform";
 export * from "./api/knowledge";
+export * from "./api/issueReports";
 export * from "./api/memory";
 export * from "./api/tools";
 export * from "./api/agents";

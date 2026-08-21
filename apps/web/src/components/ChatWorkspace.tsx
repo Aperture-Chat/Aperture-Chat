@@ -22,6 +22,8 @@ import {
   Link2,
   Loader2,
   Lock,
+  Maximize2,
+  Minimize2,
   Paperclip,
   Pencil,
   Play,
@@ -37,6 +39,7 @@ import {
   TerminalSquare,
   ThumbsDown,
   ThumbsUp,
+  Undo2,
   Upload,
   Wrench,
   X,
@@ -113,6 +116,8 @@ import { isMediaUploadFile } from "../lib/mediaUploads";
 import { Markdown } from "./Markdown";
 import { ApertureMark, Pill } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
+import { PromptImproveIcon, PromptImproveRail } from "./PromptEditorField";
+import { cleanImprovedPrompt, promptImproverSystemPrompt } from "../lib/promptImprover";
 
 /* Composer menus open upward; when the composer sits mid-screen (empty-chat
    layout on short or zoomed viewports) the menu's top rows can land above the
@@ -761,28 +766,6 @@ function messageTimestamp(message: ChatMessage) {
   };
 }
 
-/** System instruction for the composer's prompt improver. The improver must
- * only sharpen the user's ask — answering it or inventing facts would put
- * words in the user's mouth. */
-const PROMPT_IMPROVER_SYSTEM_PROMPT =
-  "You are a prompt-improvement assistant inside an enterprise AI workspace. " +
-  "Rewrite the user's draft prompt so it is clearer, more specific, and more effective while keeping the author's intent, language, and voice. " +
-  "Add concrete details, constraints, or structure only when they are grounded in the draft itself or the workspace context provided — never invent facts, names, or requirements. " +
-  "Do not answer the prompt. Return only the rewritten prompt as plain text, with no preamble, labels, quotes, or markdown fences.";
-
-/** Normalizes a model rewrite into paste-ready composer text: code fences,
- * wrapping quotes, and "Improved prompt:" style labels stripped. */
-function cleanImprovedPrompt(raw: string): string {
-  let text = raw.trim();
-  const fenced = text.match(/^```[a-z]*\n([\s\S]*?)\n?```$/i);
-  if (fenced) text = fenced[1].trim();
-  text = text.replace(/^(?:improved|rewritten|revised)\s+prompt\s*:\s*/i, "");
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("“") && text.endsWith("”"))) {
-    text = text.slice(1, -1).trim();
-  }
-  return text.trim();
-}
-
 function runtimeOptionsFromState(
   data: BootstrapData,
   composerTools: ComposerTools,
@@ -1046,6 +1029,8 @@ export function ChatWorkspace({
   const [improveRail, setImproveRail] = useState<"off" | "run" | "done">("off");
   const [improveProgress, setImproveProgress] = useState(0);
   const [improveError, setImproveError] = useState<string | null>(null);
+  const [originalDraft, setOriginalDraft] = useState<string | null>(null);
+  const [isComposerExpanded, setIsComposerExpanded] = useState(false);
   const [pendingToolApproval, setPendingToolApproval] = useState<PendingToolApproval | null>(null);
   const [toolApprovalNotice, setToolApprovalNotice] = useState<string | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -1096,6 +1081,20 @@ export function ChatWorkspace({
       window.clearTimeout(reset);
     };
   }, [isImproving, improveRail]);
+
+  useEffect(() => {
+    if (!isComposerExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isImproving) setIsComposerExpanded(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isComposerExpanded, isImproving]);
   const width = useViewportWidth();
   const inspectorOverlay = width <= BREAKPOINTS.inspectorOverlay;
 
@@ -1110,6 +1109,8 @@ export function ChatWorkspace({
     setThreadTitleSaving(false);
     setThreadTitleError(null);
     setEditingPromptId(null);
+    setOriginalDraft(null);
+    setIsComposerExpanded(false);
   }, [activeThread?.id]);
 
   async function runCustomToolOnMessage(tool: ToolConfig, message: ChatMessage) {
@@ -1591,6 +1592,7 @@ export function ChatWorkspace({
       (!text && attachments.length === 0 && queuedAutomations.length === 0) ||
       isSending ||
       isImproving ||
+      isComposerExpanded ||
       isUploadingAttachments
     ) {
       return;
@@ -1608,6 +1610,7 @@ export function ChatWorkspace({
         await chat.runAutomationNow(automation, text || undefined);
       }
       setDraft("");
+      setOriginalDraft(null);
       return;
     }
     setUploadError(null);
@@ -1683,6 +1686,7 @@ export function ChatWorkspace({
       ).filter((token): token is string => Boolean(token));
       chat.sendMessage(text, uploadedAttachments, runtime);
       setDraft("");
+      setOriginalDraft(null);
       setAttachments([]);
       setSelectedToolIds([]);
       setCommandToken(null);
@@ -1740,7 +1744,7 @@ export function ChatWorkspace({
       const reply = await sendChat(data.me.id, {
         model: chat.model,
         messages: [
-          { role: "system", content: PROMPT_IMPROVER_SYSTEM_PROMPT },
+          { role: "system", content: promptImproverSystemPrompt("chat") },
           {
             role: "user",
             content:
@@ -1762,6 +1766,7 @@ export function ChatWorkspace({
       if (!improved) {
         throw new ChatRequestError("The model did not return a usable rewrite.");
       }
+      setOriginalDraft((current) => current ?? draft);
       setDraft(improved);
       textareaRef.current?.focus();
     } catch (error) {
@@ -1773,6 +1778,14 @@ export function ChatWorkspace({
     } finally {
       setIsImproving(false);
     }
+  }
+
+  function restoreOriginalDraft() {
+    if (originalDraft === null || isImproving || isSending) return;
+    setDraft(originalDraft);
+    setOriginalDraft(null);
+    setImproveError(null);
+    textareaRef.current?.focus();
   }
 
   function approvePendingToolRun() {
@@ -2069,8 +2082,10 @@ export function ChatWorkspace({
     (draft.trim().length > 0 || attachments.length > 0 || pendingAutomations.length > 0) &&
     !isSending &&
     !isImproving &&
+    !isComposerExpanded &&
     !isUploadingAttachments;
-  const canOpenSendOptions = chat.enabledModels.length > 0 && !isSending && !isUploadingAttachments;
+  const canOpenSendOptions =
+    chat.enabledModels.length > 0 && !isSending && !isUploadingAttachments && !isComposerExpanded;
   const hasDraftText = draft.trim().length > 0;
 
   function toggleComposerTool(tool: keyof ComposerTools) {
@@ -2099,29 +2114,40 @@ export function ChatWorkspace({
 
   const composerForm = (
     <form
-      className={`composer ${hasMessages ? "" : "composer-empty"}${isImproving ? " is-improving" : ""}`}
+      className={`composer ${hasMessages ? "" : "composer-empty"}${isImproving ? " is-improving" : ""}${isComposerExpanded ? " is-expanded" : ""}`}
       aria-busy={isImproving}
+      role={isComposerExpanded ? "dialog" : undefined}
+      aria-modal={isComposerExpanded ? "true" : undefined}
+      aria-label={isComposerExpanded ? "Expanded prompt editor" : undefined}
       onSubmit={(event) => {
         event.preventDefault();
         void submitDraft();
       }}
     >
-      <div
-        className={`composer-improve-rail${improveRail !== "off" ? " is-visible" : ""}${improveRail === "run" ? " is-running" : ""}${improveRail === "done" ? " is-done" : ""}`}
-        role={improveRail === "run" ? "progressbar" : undefined}
-        aria-label={improveRail === "run" ? "Improving prompt" : undefined}
-        aria-valuemin={improveRail === "run" ? 0 : undefined}
-        aria-valuemax={improveRail === "run" ? 100 : undefined}
-        aria-valuenow={improveRail === "run" ? Math.round(improveProgress) : undefined}
-        aria-hidden={improveRail === "off"}
-      >
-        <span className="composer-improve-rail-track" />
-        <span className="composer-improve-rail-fill" style={{ width: `${improveProgress}%` }} />
-      </div>
+      <PromptImproveRail state={improveRail} progress={improveProgress} />
       {isImproving && (
         <span className="sr-only" role="status">
           Improving prompt
         </span>
+      )}
+      {isComposerExpanded && (
+        <header className="composer-expanded-head">
+          <span>
+            <strong>Expanded prompt</strong>
+            <small>Collapse this editor before sending your message.</small>
+          </span>
+          <button
+            type="button"
+            className="composer-collapse-button"
+            aria-label="Collapse prompt editor"
+            data-tooltip="Return to the standard composer so this message can be sent"
+            disabled={isImproving}
+            onClick={() => setIsComposerExpanded(false)}
+          >
+            <Minimize2 size={17} />
+            <span>Collapse to send</span>
+          </button>
+        </header>
       )}
       <input
         ref={fileInputRef}
@@ -2389,7 +2415,7 @@ export function ChatWorkspace({
         onBlur={() => setCommandToken(null)}
         onKeyDown={(event) => {
           if (handleCommandMenuKey(event)) return;
-          if (event.key === "Enter" && !event.shiftKey) {
+          if (event.key === "Enter" && !event.shiftKey && !isComposerExpanded) {
             event.preventDefault();
             void submitDraft();
           }
@@ -2549,6 +2575,30 @@ export function ChatWorkspace({
                 textareaRef.current?.focus();
               }}
             />
+            {hasDraftText && !isComposerExpanded && (
+              <button
+                type="button"
+                className="composer-expand-button"
+                aria-label="Expand prompt editor"
+                data-tooltip="Open this draft in a larger editor for review"
+                disabled={isSending || isImproving}
+                onClick={() => setIsComposerExpanded(true)}
+              >
+                <Maximize2 size={16} />
+              </button>
+            )}
+            {originalDraft !== null && (
+              <button
+                type="button"
+                className="prompt-restore-button"
+                aria-label="Restore original prompt"
+                data-tooltip="Restore the draft from before the last AI improvement"
+                disabled={isSending || isImproving}
+                onClick={restoreOriginalDraft}
+              >
+                <Undo2 size={16} />
+              </button>
+            )}
             <button
               type="button"
               className={`prompt-improve-button${isImproving ? " is-improving" : ""}`}
@@ -2563,10 +2613,7 @@ export function ChatWorkspace({
               disabled={!hasDraftText || isImproving || isSending || chat.enabledModels.length === 0}
               onClick={() => void improveDraftPrompt()}
             >
-              <span className="prompt-improve-icon" aria-hidden="true">
-                <Pencil size={15} />
-                <Sparkles size={12} />
-              </span>
+              <PromptImproveIcon />
             </button>
           </div>
           {chat.enabledModels.length > 0 && (
@@ -2576,7 +2623,11 @@ export function ChatWorkspace({
             className="send-button"
             type="submit"
             aria-label="Send message"
-            data-tooltip="Send your message to the selected model"
+            data-tooltip={
+              isComposerExpanded
+                ? "Collapse the prompt editor before sending"
+                : "Send your message to the selected model"
+            }
             disabled={!canSend}
           >
             <Send size={18} />
@@ -3014,6 +3065,11 @@ export function ChatWorkspace({
             </div>
           )}
 
+          {isComposerExpanded &&
+            createPortal(
+              <div className="composer-expanded-backdrop" aria-hidden="true" />,
+              document.body,
+            )}
           {hasMessages ? (
             <div className="composer-dock">
               {composerForm}

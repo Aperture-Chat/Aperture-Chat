@@ -382,9 +382,7 @@ test("steward-diagram fences render the structure chart with a card editor", asy
   expect(JSON.parse(nextSource).rows[1][0].title).toBe("Alden Revocable Trust (2017)");
 });
 
-test("a diagram a model labelled yaml or json still renders as a diagram", async () => {
-  // JSON is valid YAML, so models routinely tag structure-diagram data as
-  // ```yaml. The intent is a diagram either way.
+test("JSON or real YAML diagram data renders as a diagram under generic fences", async () => {
   const body = JSON.stringify({
     title: "Deal Structure",
     rows: [[{ id: "holdco", title: "HoldCo", bullets: ["Delaware"] }]],
@@ -394,6 +392,18 @@ test("a diagram a model labelled yaml or json still renders as a diagram", async
     expect(screen.getByRole("img", { name: "Deal Structure" })).toBeInTheDocument();
     unmount();
   }
+
+  const yaml = `title: YAML Deal Structure
+rows:
+  - cards:
+      - id: holdco
+        title: HoldCo
+        bullets:
+          - Delaware`;
+  const { unmount } = render(<Markdown content={`\`\`\`yaml\n${yaml}\n\`\`\``} />);
+  expect(screen.getByRole("img", { name: "YAML Deal Structure" })).toBeInTheDocument();
+  expect(document.querySelector(".md-code-panel")).toBeNull();
+  unmount();
 
   // Same for a Mermaid diagram under a yaml fence.
   render(<Markdown content={"```yaml\nflowchart LR\n  A --> B\n```"} />);

@@ -93,6 +93,63 @@ test("persists dark mode preference across app reloads", async () => {
   expect(document.documentElement).toHaveClass("theme-dark");
 });
 
+test("Help lets a user submit a platform issue with an optional screenshot", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/api/issue-reports")) {
+      return new Response(
+        JSON.stringify({
+          id: "issue-test",
+          tenant_id: sampleData.currentTenant.id,
+          user_id: sampleData.me.id,
+          user_name: sampleData.me.display_name,
+          subject: "Knowledge row is mislabeled",
+          body: "The group share still shows one user.",
+          screenshot_filename: "knowledge.png",
+          screenshot_mime_type: "image/png",
+          screenshot_size_bytes: 3,
+          created_at: "2026-08-20T18:00:00Z",
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify({ error: "offline" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Help" }));
+  expect(await screen.findByRole("dialog", { name: "Help" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Report a problem/i }));
+
+  const reportDialog = await screen.findByRole("dialog", { name: "Report a problem" });
+  expect(reportDialog).toBeInTheDocument();
+  fireEvent.change(within(reportDialog).getByLabelText("Subject"), {
+    target: { value: "Knowledge row is mislabeled" },
+  });
+  fireEvent.change(within(reportDialog).getByLabelText("Message"), {
+    target: { value: "The group share still shows one user." },
+  });
+  fireEvent.change(within(reportDialog).getByLabelText(/Screenshot \(optional\)/i), {
+    target: { files: fileListForInput([new File(["png"], "knowledge.png", { type: "image/png" })]) },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Send report" }));
+
+  expect(await screen.findByText("Report sent")).toBeInTheDocument();
+  const request = fetchMock.mock.calls.find(([input]) =>
+    String(input).includes("/api/issue-reports"),
+  );
+  expect(request).toBeDefined();
+  expect(request?.[1]?.method).toBe("POST");
+  const form = request?.[1]?.body as FormData;
+  expect(form.get("subject")).toBe("Knowledge row is mislabeled");
+  expect(form.get("body")).toBe("The group share still shows one user.");
+  expect((form.get("screenshot") as File).name).toBe("knowledge.png");
+});
+
 test("connector config mapping does not mark metadata-only connectors as configured", () => {
   const record: ConnectorConfigRecord = {
     id: "conncfg-test",
