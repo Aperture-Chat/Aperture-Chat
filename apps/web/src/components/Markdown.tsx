@@ -45,7 +45,10 @@ function previewBlockWeight(block: MarkdownBlock) {
     case "image":
       return 720;
     case "code":
-      return isVisualDiagramBlock(block.language, block.text) ? 760 : Math.min(block.text.length, 900);
+      return isStewardDiagramBlock(block.language, block.text) ||
+        isVisualDiagramBlock(block.language, block.text)
+        ? 760
+        : Math.min(block.text.length, 900);
     case "table":
       return 520 + block.headers.join(" ").length + block.rows.flat().join(" ").length;
     case "heading":

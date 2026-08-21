@@ -1103,6 +1103,34 @@ test("analytics and audit exports download date-range CSV files and keep long lo
   }
 });
 
+test("platform analytics shows submitted issue reports beside sentiment", async () => {
+  const listIssueReports = vi.fn(async () => [
+    {
+      id: "issue-owner-visible",
+      tenant_id: sampleData.currentTenant.id,
+      user_id: "user-jane",
+      user_name: "Jane Smith",
+      subject: "Export remains stuck",
+      body: "PDF export remains on Preparing after two minutes.",
+      screenshot_filename: null,
+      screenshot_mime_type: null,
+      screenshot_size_bytes: null,
+      created_at: "2026-08-20T18:00:00Z",
+    },
+  ]);
+  renderPlatform(platformOwnerData(), { listIssueReports });
+
+  selectTab("Analytics");
+  expandPanel("Chat Feedback");
+
+  expect(await screen.findByText("Export remains stuck")).toBeInTheDocument();
+  expect(screen.getByText("Issue reports").closest(".feedback-summary-card")).toHaveTextContent("1");
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue report: Export remains stuck" }));
+  expect(screen.getByRole("dialog", { name: "Platform issue report" })).toHaveTextContent(
+    "PDF export remains on Preparing after two minutes.",
+  );
+});
+
 test("model edit details persists owner naming, route, and notes", async () => {
   const data = platformOwnerData();
   const updateModel = vi.fn(async (modelId: string, patch: Partial<ModelConfig>) => {

@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   isMermaidBlock,
+  isStewardDiagramBlock,
   isVisualDiagramBlock,
   markdownToDocumentHtml,
   markdownToPlainText,
@@ -183,4 +184,27 @@ test("steward-diagram fences become structure diagram figures in documents", () 
   expect(html).toContain("document-diagram-pending");
   expect(html).not.toContain("document-diagram-source");
   expect(markdownToDocumentHtml("```json\n{}\n```")).not.toContain("data-diagram-kind");
+});
+
+test("real YAML diagram specs become structure figures while ordinary YAML stays code", () => {
+  const body = `title: YAML Organization
+rows:
+  - cards:
+      - id: owner
+        title: Platform Owner
+  - cards:
+      - id: admin
+        title: Tenant Admin
+edges:
+  - from: owner
+    to: admin`;
+  expect(isStewardDiagramBlock("yaml", body)).toBe(true);
+  const html = markdownToDocumentHtml(`\`\`\`yaml\n${body}\n\`\`\``);
+  expect(html).toContain('data-diagram-kind="structure"');
+  expect(html).toContain(`data-diagram-source="${encodeURIComponent(body)}"`);
+  expect(html).not.toContain("Platform Owner");
+
+  const ordinary = markdownToDocumentHtml("```yaml\nservice: aperture\nreplicas: 2\n```");
+  expect(ordinary).toContain("service: aperture");
+  expect(ordinary).not.toContain("data-diagram-kind");
 });

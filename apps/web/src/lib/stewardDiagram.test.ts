@@ -62,10 +62,43 @@ test("parseStewardDiagram validates cards and drops edges to unknown ids", () =>
   expect(model!.legend?.length).toBe(2);
 });
 
-test("parseStewardDiagram rejects invalid or incomplete JSON", () => {
+test("parseStewardDiagram accepts real YAML diagram source", () => {
+  const yaml = `title: YAML Deal Structure
+rows:
+  - cards:
+      - id: buyer
+        title: Buyer LLC
+        bullets:
+          - Signs the purchase agreement
+        connects:
+          - to: target
+            kind: primary
+  - cards:
+      - id: target
+        title: Target Inc.
+        footer:
+          text: Closing required
+          tone: warning
+legend:
+  - kind: primary
+    label: Transaction path`;
+
+  expect(isStewardDiagramBlock("yaml", yaml)).toBe(true);
+  const model = parseStewardDiagram(yaml);
+  expect(model?.title).toBe("YAML Deal Structure");
+  expect(model?.rows.flat().map((card) => card.id)).toEqual(["buyer", "target"]);
+  expect(model?.edges).toEqual([
+    { from: "buyer", to: "target", kind: "primary", label: undefined },
+  ]);
+  expect(model?.rows[1][0].footer).toEqual({ text: "Closing required", tone: "warning" });
+  expect(renderStewardDiagramSvg(model!, false)).toContain("YAML Deal Structure");
+});
+
+test("parseStewardDiagram rejects invalid or incomplete structured input", () => {
   expect(parseStewardDiagram('{"title": "half a str')).toBeNull();
   expect(parseStewardDiagram('{"rows": []}')).toBeNull();
   expect(parseStewardDiagram('"just a string"')).toBeNull();
+  expect(parseStewardDiagram("service: steward\nreplicas: 2")).toBeNull();
 });
 
 test("renderStewardDiagramSvg draws cards, bands, notes, legend, and edges", () => {

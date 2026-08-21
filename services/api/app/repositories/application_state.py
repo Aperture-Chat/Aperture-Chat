@@ -53,6 +53,7 @@ from app.db.orm import (
     ChatStateImportRow,
     ChatThreadRow,
     ChatThreadTagRow,
+    IssueReportRow,
     MatterRow,
     MfaPreauthChallengeRow,
     RetentionHoldRow,
@@ -77,6 +78,7 @@ from app.models.schemas import (
     ChatSession,
     ChatThread,
     ChatThreadTag,
+    IssueReportRecord,
     RetentionHold,
     UsageRecord,
     UserApiKeyRecord,
@@ -1748,6 +1750,49 @@ class ApplicationStateRepository:
                 select(ChatFeedbackRow)
                 .where(*filters)
                 .order_by(ChatFeedbackRow.updated_at.desc(), ChatFeedbackRow.id)
+            )
+            if limit is not None:
+                statement = statement.limit(limit)
+            return [row.to_model() for row in session.scalars(statement)]
+
+        return self.run_transaction(operation)
+
+    # User-submitted platform issue reports -----------------------------
+
+    def save_issue_report(self, report: IssueReportRecord) -> IssueReportRecord:
+        copied = report.model_copy(deep=True)
+
+        def operation(session: Session) -> IssueReportRecord:
+            row = IssueReportRow.from_model(copied)
+            session.add(row)
+            session.flush()
+            return row.to_model()
+
+        return self.run_transaction(operation)
+
+    def get_issue_report(self, report_id: str) -> IssueReportRecord | None:
+        def operation(session: Session) -> IssueReportRecord | None:
+            row = session.get(IssueReportRow, report_id)
+            return row.to_model() if row is not None else None
+
+        return self.run_transaction(operation)
+
+    def list_issue_reports(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int | None = 200,
+    ) -> list[IssueReportRecord]:
+        _validate_limit(limit)
+        filters: list[Any] = []
+        if tenant_id is not None:
+            filters.append(IssueReportRow.tenant_id == tenant_id)
+
+        def operation(session: Session) -> list[IssueReportRecord]:
+            statement = (
+                select(IssueReportRow)
+                .where(*filters)
+                .order_by(IssueReportRow.created_at.desc(), IssueReportRow.id)
             )
             if limit is not None:
                 statement = statement.limit(limit)
@@ -3890,6 +3935,7 @@ class ApplicationStateRepository:
         timestamp = updated_at or datetime.now(UTC)
         user_ids = list(cutoffs)
         doomed_attachment_ids: list[str] = []
+        doomed_issue_report_ids: list[str] = []
 
         def owned_or_tenant(tenant_column: Any, owner_column: Any) -> Any:
             if user_ids:
@@ -3922,6 +3968,17 @@ class ApplicationStateRepository:
                 delete(ChatFeedbackRow).where(
                     owned_or_tenant(ChatFeedbackRow.tenant_id, ChatFeedbackRow.user_id)
                 )
+            )
+            doomed_issue_report_ids.extend(
+                session.execute(
+                    select(IssueReportRow.id).where(IssueReportRow.tenant_id == tenant_id)
+                ).scalars()
+            )
+            removed_issue_reports = (
+                session.execute(
+                    delete(IssueReportRow).where(IssueReportRow.tenant_id == tenant_id)
+                ).rowcount
+                or 0
             )
             doomed_hold_ids = list(
                 session.execute(
@@ -4031,6 +4088,7 @@ class ApplicationStateRepository:
                 "removed_folders": removed_folders,
                 "removed_sessions": removed_threads,
                 "removed_attachments": removed_attachments,
+                "removed_issue_reports": removed_issue_reports,
                 "removed_api_keys": removed_api_keys,
                 "removed_mfa_challenges": removed_mfa_challenges,
                 "removed_mfa_enrollments": removed_mfa_enrollments,
@@ -4043,6 +4101,8 @@ class ApplicationStateRepository:
         result = self.run_transaction(operation)
         for attachment_id in doomed_attachment_ids:
             delete_attachment_preview(attachment_id)
+        for report_id in doomed_issue_report_ids:
+            delete_attachment_preview(report_id)
         return result
 
     # Revoked sessions ---------------------------------------------------

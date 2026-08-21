@@ -8,8 +8,10 @@ import {
   updateAdminPromptTemplate,
   updateAdminSkillFile,
 } from "../lib/api";
+import { preferredModel, usableModels } from "../lib/modelAccess";
 import type { BootstrapData, PromptTemplate, SkillFile } from "../lib/types";
 import { Pill, StableLabel } from "./Primitives";
+import { PromptEditorField } from "./PromptEditorField";
 
 type LibraryDraft = {
   name: string;
@@ -41,6 +43,7 @@ export function ToolLibraryManager({
     message: string;
   } | null>(null);
   const [editor, setEditor] = useState<LibraryEditorState | null>(null);
+  const improvementModelId = preferredModel(usableModels(data))?.id ?? null;
 
   function openNew(mode: LibraryMode) {
     setEditor({ mode, itemId: null, draft: defaultDraft(mode) });
@@ -309,6 +312,8 @@ export function ToolLibraryManager({
             pendingAction ===
             `${editor.mode}:${editor.itemId ? "update" : "create"}`
           }
+          userId={data.me.id}
+          modelId={improvementModelId}
           onDraftChange={updateEditorDraft}
           onSave={() => void saveEditor()}
           onClose={() => setEditor(null)}
@@ -401,12 +406,16 @@ function LibraryCatalog({
 function LibraryEditorModal({
   editor,
   pending,
+  userId,
+  modelId,
   onDraftChange,
   onSave,
   onClose,
 }: {
   editor: LibraryEditorState;
   pending: boolean;
+  userId: string;
+  modelId: string | null;
   onDraftChange: (patch: Partial<LibraryDraft>) => void;
   onSave: () => void;
   onClose: () => void;
@@ -490,15 +499,27 @@ function LibraryEditorModal({
                 }
               />
             </label>
-            <label className="tool-library-content-field">
-              Content
-              <textarea
+            {editor.mode === "template" ? (
+              <PromptEditorField
+                className="tool-library-content-field"
+                label="Content"
+                kind="template"
+                userId={userId}
+                modelId={modelId}
                 value={editor.draft.content}
-                onChange={(event) =>
-                  onDraftChange({ content: event.target.value })
-                }
+                onChange={(content) => onDraftChange({ content })}
               />
-            </label>
+            ) : (
+              <label className="tool-library-content-field">
+                Content
+                <textarea
+                  value={editor.draft.content}
+                  onChange={(event) =>
+                    onDraftChange({ content: event.target.value })
+                  }
+                />
+              </label>
+            )}
           </div>
           {editor.mode === "template" && (
             <div

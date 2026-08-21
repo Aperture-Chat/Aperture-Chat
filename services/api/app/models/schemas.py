@@ -1909,6 +1909,21 @@ class ChatFeedbackSubmitRequest(BaseModel):
     model_id: str = Field(default="", max_length=200)
 
 
+class IssueReportRecord(BaseModel):
+    """A user-submitted platform problem visible to tenant administrators."""
+
+    id: str
+    tenant_id: str
+    user_id: str
+    user_name: str = ""
+    subject: str
+    body: str
+    screenshot_filename: str | None = None
+    screenshot_mime_type: str | None = None
+    screenshot_size_bytes: int | None = Field(default=None, ge=0)
+    created_at: datetime
+
+
 class RetentionBatchRequest(BaseModel):
     action: Literal["delete", "archive"]
     thread_ids: list[str] = Field(min_length=1, max_length=500)

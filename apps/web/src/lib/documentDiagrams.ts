@@ -10,7 +10,9 @@ import { diagramTypeLabel, renderMermaidPngDataUrl } from "./mermaidRender";
 import { renderStewardDiagramPngDataUrl } from "./stewardDiagram";
 
 export function hasUnrenderedDocumentDiagram(html: string) {
-  return /<figure[^>]*data-diagram-source(?![^>]*data-diagram-rendered)/.test(html);
+  return /<figure\b(?=[^>]*\bdata-diagram-source(?:=|\s|>))(?![^>]*\bdata-diagram-rendered(?:=|\s|>))[^>]*>/i.test(
+    html,
+  );
 }
 
 /** Off-DOM transform: renders every pending diagram figure to a light-theme
@@ -36,11 +38,19 @@ export async function hydrateDocumentDiagramFigures(
       source = "";
     }
     const isStructure = figure.getAttribute("data-diagram-kind") === "structure";
-    const dataUrl = !source.trim()
-      ? null
-      : isStructure
-        ? await renderStewardDiagramPngDataUrl(source)
-        : await renderMermaidPngDataUrl(source);
+    let dataUrl: string | null = null;
+    if (source.trim()) {
+      try {
+        dataUrl = isStructure
+          ? await renderStewardDiagramPngDataUrl(source)
+          : await renderMermaidPngDataUrl(source);
+      } catch {
+        // One malformed or unrasterizable figure must not strand every later
+        // diagram in the transferred document. Mark this one honestly below
+        // and continue hydrating the rest.
+        dataUrl = null;
+      }
+    }
     if (!dataUrl) {
       const notice = document.createElement("p");
       notice.className = "document-diagram-error";

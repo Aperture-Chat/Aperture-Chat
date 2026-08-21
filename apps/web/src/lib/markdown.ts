@@ -1,3 +1,5 @@
+import { looksLikeStructuredDiagramSource } from "./structuredDiagramSource";
+
 export type MarkdownColumnAlign = "left" | "center" | "right" | null;
 
 export type MarkdownBlock =
@@ -264,26 +266,10 @@ export function isStewardDiagramBlock(language: string, text?: string): boolean 
   return looksLikeStewardDiagramSource(text);
 }
 
-/** Cheap structural check for a diagram spec: the same precondition the real
- * parser starts from (JSON holding a `rows` array of cards). Kept here rather
- * than importing the parser so the markdown layer stays free of the diagram
- * renderer's dependencies. */
+/** Structural check shared with the JSON/YAML diagram parser. Ordinary data
+ * stays code; only a usable `rows` collection of cards becomes a diagram. */
 export function looksLikeStewardDiagramSource(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{")) return false;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(trimmed);
-  } catch {
-    return false;
-  }
-  if (!raw || typeof raw !== "object") return false;
-  const rows = (raw as Record<string, unknown>).rows;
-  if (!Array.isArray(rows)) return false;
-  return rows.some((row) => {
-    const cards = Array.isArray(row) ? row : (row as Record<string, unknown>)?.cards;
-    return Array.isArray(cards) && cards.length > 0;
-  });
+  return looksLikeStructuredDiagramSource(text);
 }
 
 /** Replaces the body of the fenced diagram block (Mermaid or steward-diagram)

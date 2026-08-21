@@ -1921,6 +1921,64 @@ The crew portrait should sit near the crew section of the paper.`;
   expect(editor).toHaveTextContent("Artemis II crew portrait; source: NASA via Wikimedia Commons");
 });
 
+test("mixed Mermaid, JSON, and real YAML diagrams all transfer into Drafts as figures", async () => {
+  const json = JSON.stringify({
+    title: "JSON Structure",
+    rows: [[{ id: "json", title: "JSON card" }]],
+  });
+  const yaml = `title: YAML Structure
+rows:
+  - cards:
+      - id: yaml
+        title: YAML card`;
+  assistantReply = [
+    "## Architecture diagrams",
+    "",
+    "```mermaid",
+    "flowchart LR",
+    "  Input --> Review",
+    "```",
+    "",
+    "```json",
+    json,
+    "```",
+    "",
+    "```yaml",
+    yaml,
+    "```",
+    "",
+    "All three diagrams belong in the draft.",
+  ].join("\n");
+
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "Create mixed diagrams" } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+
+  await waitFor(() =>
+    expect(document.querySelectorAll(".message-list .md-diagram-panel")).toHaveLength(3),
+  );
+  const conversation = document.querySelector(".message-list") as HTMLElement;
+  expect(conversation.querySelector(".md-code-panel")).toBeNull();
+
+  fireEvent.click(
+    within(conversation).getByRole("button", {
+      name: "Transfer response to Drafts",
+    }),
+  );
+
+  expect(await screen.findByRole("heading", { name: "Document Assistant" })).toBeInTheDocument();
+  const editor = screen.getByRole("textbox", { name: "Document body" });
+  expect(editor.querySelectorAll(".document-diagram-figure")).toHaveLength(3);
+  expect(editor.querySelectorAll(".document-diagram-pending")).toHaveLength(3);
+  expect(editor.querySelector(".document-code-block")).toBeNull();
+  expect(editor).not.toHaveTextContent("flowchart LR");
+  expect(editor).not.toHaveTextContent("JSON card");
+  expect(editor).not.toHaveTextContent("YAML card");
+  expect(editor).toHaveTextContent("All three diagrams belong in the draft.");
+});
+
 test("backend chat threads hydrate into Recent and persist pin and model selection", async () => {
   const savedThreads: Array<Record<string, unknown>> = [];
   vi.stubGlobal(
@@ -2494,6 +2552,15 @@ test("prompt improver stays hidden until there is a draft, then rewrites in plac
   expect(screen.queryByRole("button", { name: "Improve prompt" })).not.toBeInTheDocument();
 
   fireEvent.change(textarea, { target: { value: "check policy ok?" } });
+  const expandButton = screen.getByRole("button", { name: "Expand prompt editor" });
+  fireEvent.click(expandButton);
+  expect(screen.getByText("Expanded prompt")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  expect(chatRequests).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse prompt editor" }));
+  expect(screen.queryByText("Expanded prompt")).not.toBeInTheDocument();
+
   const improveButton = screen.getByRole("button", { name: "Improve prompt" });
   expect(improveButton).toBeEnabled();
   fireEvent.click(improveButton);
@@ -2518,6 +2585,10 @@ test("prompt improver stays hidden until there is a draft, then rewrites in plac
   });
   expect(document.querySelector(".composer.is-improving")).toBeNull();
   expect(document.querySelector(".message-list")).toBeNull();
+  const restoreButton = screen.getByRole("button", { name: "Restore original prompt" });
+  fireEvent.click(restoreButton);
+  expect(textarea.value).toBe("check policy ok?");
+  expect(screen.queryByRole("button", { name: "Restore original prompt" })).not.toBeInTheDocument();
 
   // The improver call is a real completion with the improver contract: the
   // system instruction rides along and the draft is quoted for rewriting only.
