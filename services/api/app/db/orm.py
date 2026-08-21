@@ -47,6 +47,7 @@ from app.models.schemas import (
     ChatMessage,
     ChatThread,
     ChatThreadTag,
+    IssueReportRecord,
     RetentionHold,
     TenantDailyUsage,
     TenantUsageBudget,
@@ -1370,6 +1371,42 @@ class ChatFeedbackRow(Base):
             model_id=self.model_id,
             created_at=self.created_at,
             updated_at=self.updated_at,
+        )
+
+
+class IssueReportRow(Base):
+    """Server-side issue report with an optional separately stored image preview."""
+
+    __tablename__ = "issue_reports"
+    __table_args__ = (Index("ix_issue_reports_tenant_created", "tenant_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_name: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    screenshot_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screenshot_mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    screenshot_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    @classmethod
+    def from_model(cls, report: IssueReportRecord) -> IssueReportRow:
+        return cls(**report.model_dump())
+
+    def to_model(self) -> IssueReportRecord:
+        return IssueReportRecord(
+            id=self.id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            user_name=self.user_name,
+            subject=self.subject,
+            body=self.body,
+            screenshot_filename=self.screenshot_filename,
+            screenshot_mime_type=self.screenshot_mime_type,
+            screenshot_size_bytes=self.screenshot_size_bytes,
+            created_at=self.created_at,
         )
 
 

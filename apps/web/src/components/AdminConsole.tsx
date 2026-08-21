@@ -6,6 +6,7 @@ import {
   BookOpen,
   Bot,
   Brain,
+  Bug,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -21,6 +22,7 @@ import {
   Lock,
   MessageSquareText,
   MessageSquare,
+  Paperclip,
   Pencil,
   Plus,
   RefreshCw,
@@ -47,6 +49,7 @@ const AdminDocumentationModal = lazyWithReload("admin-documentation", () =>
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPlainText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
@@ -80,6 +83,7 @@ import type {
   TenantRetentionPolicy,
   TenantRetentionPolicyUpdateRequest,
   ChatFeedbackRecord,
+  IssueReportRecord,
   RetentionBatchRequest,
   RetentionBatchResult,
   RetentionTaggedThread,
@@ -691,6 +695,14 @@ export type AdminConsoleApi = {
     actorUserId: string,
     context: AdminMutationContext,
   ) => Promise<ChatFeedbackRecord[] | void>;
+  listIssueReports?: (
+    actorUserId: string,
+    context: AdminMutationContext,
+  ) => Promise<IssueReportRecord[] | void>;
+  loadIssueReportScreenshot?: (
+    actorUserId: string,
+    reportId: string,
+  ) => Promise<Blob>;
 };
 
 type ConnectorFieldSpec = {
@@ -916,6 +928,8 @@ export function AdminConsole({
   const [serverFeedback, setServerFeedback] = useState<ChatFeedbackRecord[] | null>(null);
   const [feedbackRefreshTick, setFeedbackRefreshTick] = useState(0);
   const [feedbackPreview, setFeedbackPreview] = useState<FeedbackDisplayItem | null>(null);
+  const [issueReports, setIssueReports] = useState<IssueReportRecord[]>([]);
+  const [issueReportPreview, setIssueReportPreview] = useState<IssueReportRecord | null>(null);
 
   const [memoryPolicy, setMemoryPolicy] = useState<TenantMemoryPolicy | null>(data.memoryPolicy ?? null);
   const [memoryStats, setMemoryStats] = useState<MemoryUserStat[] | null>(null);
@@ -1161,6 +1175,14 @@ export function AdminConsole({
   );
   const positiveFeedback = filteredChatFeedback.filter((item) => item.rating === "positive");
   const negativeFeedback = filteredChatFeedback.filter((item) => item.rating === "negative");
+  const scopedIssueReports = useMemo(
+    () => issueReports.filter((item) => adminVisibleUserIds.has(item.user_id)),
+    [adminVisibleUserIds, issueReports],
+  );
+  const filteredIssueReports = useMemo(
+    () => scopedIssueReports.filter((item) => sectionScopeMatch(feedbackScope, item.created_at, item.user_id)),
+    [feedbackScope, scopedIssueReports],
+  );
   const chatRuntimeRows = filteredRuntimeAuditRows.filter((item) => item.surface === "chat");
   const draftRuntimeRows = filteredRuntimeAuditRows.filter((item) => item.surface === "draft");
   const promptActivityRows = useMemo(
@@ -1309,6 +1331,22 @@ export function AdminConsole({
       active = false;
     };
   }, [adminApi?.listChatFeedback, auditTrailRefreshToken, data.me, feedbackRefreshTick, mutationContext]);
+
+  useEffect(() => {
+    const listIssueReports = adminApi?.listIssueReports;
+    if (!listIssueReports) return;
+    let active = true;
+    Promise.resolve(listIssueReports(data.me.id, mutationContext))
+      .then((records) => {
+        if (active && records) setIssueReports(records);
+      })
+      .catch(() => {
+        // Issue reporting is additive to analytics; other panels stay usable.
+      });
+    return () => {
+      active = false;
+    };
+  }, [adminApi?.listIssueReports, auditTrailRefreshToken, data.me, mutationContext]);
 
   useEffect(() => {
     const listAuditEvents = adminApi?.listAuditEvents;
@@ -3745,8 +3783,8 @@ export function AdminConsole({
               }
               subtitle={
                 serverFeedback !== null
-                  ? "Thumbs ratings and optional written notes from every user, recorded on the server."
-                  : "Thumbs ratings recorded in this browser. Server-side feedback loads when the admin API is connected."
+                  ? "Thumbs ratings, written notes, and platform issue reports from tenant users."
+                  : "Thumbs ratings recorded in this browser. Server-side feedback and issue reports load when the admin API is connected."
               }
               actions={
                 <CsvExportControl
@@ -3765,8 +3803,8 @@ export function AdminConsole({
                 onChange={setFeedbackScope}
                 users={adminAuditUserOptions}
                 allUsersLabel="All admins and users"
-                selectedCount={filteredChatFeedback.length}
-                totalCount={scopedChatFeedback.length}
+                selectedCount={filteredChatFeedback.length + filteredIssueReports.length}
+                totalCount={scopedChatFeedback.length + scopedIssueReports.length}
               />
               <div className="feedback-summary-grid">
                 <div className="feedback-summary-card">
@@ -3784,9 +3822,14 @@ export function AdminConsole({
                   <strong>{negativeFeedback.length}</strong>
                   <small>Thumbs down responses for review.</small>
                 </div>
+                <div className="feedback-summary-card">
+                  <span>Issue reports</span>
+                  <strong>{filteredIssueReports.length}</strong>
+                  <small>Platform problems submitted through Help.</small>
+                </div>
               </div>
 
-              {filteredChatFeedback.length > 0 ? (
+              {filteredChatFeedback.length > 0 && (
                 <div className="feedback-event-list scrollable-log-list" aria-label="Admin chat feedback events">
                   {filteredChatFeedback.map((item) => {
                     const isPositive = item.rating === "positive";
@@ -3821,12 +3864,49 @@ export function AdminConsole({
                     );
                   })}
                 </div>
-              ) : (
+              )}
+
+              {filteredIssueReports.length > 0 && (
+                <>
+                  <h3 className="feedback-subsection-title">Reported platform issues</h3>
+                  <div className="feedback-event-list scrollable-log-list" aria-label="Admin platform issue reports">
+                    {filteredIssueReports.map((item) => (
+                      <button
+                        className="feedback-event-row is-clickable"
+                        type="button"
+                        key={item.id}
+                        aria-label={`Preview issue report: ${item.subject}`}
+                        onClick={() => setIssueReportPreview(item)}
+                      >
+                        <span className="feedback-icon is-issue-report"><Bug size={15} /></span>
+                        <span>
+                          <strong>{item.subject}</strong>
+                          <small>{item.user_name}</small>
+                          <p>{item.body}</p>
+                          {item.screenshot_filename && (
+                            <p className="issue-report-attachment-label">
+                              <Paperclip size={13} /> {item.screenshot_filename}
+                            </p>
+                          )}
+                        </span>
+                        <span className="feedback-row-side">
+                          <time>{formatFeedbackTimestamp(item.created_at)}</time>
+                          <span className="prompt-activity-preview-label" aria-hidden="true">
+                            <Eye size={14} /> Preview
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {filteredChatFeedback.length === 0 && filteredIssueReports.length === 0 && (
                 <div className="audit-empty-state">
                   <MessageSquareText size={20} />
                   <span>
-                    <strong>No chat feedback submitted yet</strong>
-                    <small>Thumbs up and thumbs down actions from assistant messages will appear here.</small>
+                    <strong>No feedback or issue reports submitted yet</strong>
+                    <small>Response ratings and platform reports will appear here.</small>
                   </span>
                 </div>
               )}
@@ -3845,6 +3925,18 @@ export function AdminConsole({
                     : undefined
                 }
                 onClose={() => setFeedbackPreview(null)}
+              />
+            )}
+            {issueReportPreview && (
+              <IssueReportPreview
+                item={issueReportPreview}
+                sentLabel={formatFeedbackTimestamp(issueReportPreview.created_at)}
+                loadScreenshot={
+                  adminApi?.loadIssueReportScreenshot
+                    ? (reportId) => adminApi.loadIssueReportScreenshot!(data.me.id, reportId)
+                    : undefined
+                }
+                onClose={() => setIssueReportPreview(null)}
               />
             )}
             <Panel

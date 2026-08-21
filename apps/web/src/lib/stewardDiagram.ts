@@ -11,6 +11,7 @@
  */
 
 import { MERMAID_FONT_FAMILY, rasterizeSvgToPngDataUrl } from "./mermaidRender";
+import { parseStructuredDiagramSource } from "./structuredDiagramSource";
 
 export type StewardDiagramTone = "neutral" | "positive" | "warning";
 export type StewardDiagramEdgeKind = "primary" | "contingent" | "inactive";
@@ -79,16 +80,11 @@ function parseCard(value: unknown): StewardDiagramCard | null {
   };
 }
 
-/** Parses fenced steward-diagram JSON into a validated model, or null when
- * the text is not yet valid (mid-stream) or structurally unusable. Unknown
- * fields are dropped; edges pointing at unknown cards are dropped. */
+/** Parses fenced steward-diagram JSON or YAML into a validated model, or null
+ * when the text is not yet valid (mid-stream) or structurally unusable.
+ * Unknown fields are dropped; edges pointing at unknown cards are dropped. */
 export function parseStewardDiagram(text: string): StewardDiagramModel | null {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return null;
-  }
+  const raw = parseStructuredDiagramSource(text);
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Record<string, unknown>;
   if (!Array.isArray(data.rows)) return null;

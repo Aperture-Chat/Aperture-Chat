@@ -167,6 +167,12 @@ test("agent workspace hides profile editing until Edit is clicked", async () => 
   expect(
     screen.getByRole("tab", { name: "Prompts & Skills" }),
   ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Improve system prompt" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Improve meta prompt" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Expand system prompt" }));
+  expect(screen.getByRole("dialog", { name: "System prompt" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Collapse system prompt" }));
+  expect(screen.queryByRole("dialog", { name: "System prompt" })).not.toBeInTheDocument();
 
   selectTab("Knowledge");
   expect(

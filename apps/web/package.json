@@ -2,7 +2,7 @@
   "name": "@aperture/web",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE.md",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -23,7 +23,8 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "remotion": "4.0.484"
+    "remotion": "4.0.484",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",

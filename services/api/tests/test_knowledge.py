@@ -109,6 +109,38 @@ def test_private_knowledge_base_is_visible_only_to_creator_and_admins() -> None:
     assert admin_documents.status_code == 200
 
 
+def test_group_shared_knowledge_ignores_owner_and_requires_group_membership() -> None:
+    store = get_store()
+    store.knowledge_configs["knowledge-default-users"] = KnowledgeConfig(
+        id="knowledge-default-users",
+        tenant_id="tenant-example",
+        name="Default group knowledge",
+        source_type="upload",
+        enabled=True,
+        owner_user_id="user-jane",
+        acl_group_ids=["group-default-users"],
+        settings={"acl": "Only Jane Smith"},
+    )
+    store.users["user-jane"].group_ids = ["group-default-users"]
+    store.users["user-casey"].group_ids = ["group-finance"]
+
+    member_bootstrap = client.get("/api/bootstrap", headers=headers("user-jane"))
+    nonmember_bootstrap = client.get("/api/bootstrap", headers=headers("user-casey"))
+
+    assert "knowledge-default-users" in {
+        item["id"] for item in member_bootstrap.json()["knowledgeConfigs"]
+    }
+    assert "knowledge-default-users" not in {
+        item["id"] for item in nonmember_bootstrap.json()["knowledgeConfigs"]
+    }
+
+    blocked = client.get(
+        "/api/knowledge/knowledge-default-users/documents",
+        headers=headers("user-casey"),
+    )
+    assert blocked.status_code == 403
+
+
 def test_tenant_admin_can_sync_knowledge_and_regular_user_cannot() -> None:
     blocked = client.post(
         "/api/knowledge/knowledge-box-matters/sync",
