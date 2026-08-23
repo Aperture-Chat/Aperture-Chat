@@ -2283,6 +2283,7 @@ def test_tenant_credential_health_is_scoped_while_platform_disable_is_preserved(
     assert tenant_route.credential_tenant_id == "tenant-example"
     assert platform_route.configured is False
     assert platform_route.credential_key_id is None
+    assert platform_route.secret_value is None
     assert platform_route.status_message == "Provider is disabled or not connected."
 
 
@@ -2453,6 +2454,9 @@ def test_tenant_auth_error_inactivates_only_exact_credential_scope(monkeypatch) 
     provider.connected = False
     disabled_fallback = resolve_model_route(store, model, tenant_id="tenant-other")
     assert disabled_fallback.configured is False
+    assert disabled_fallback.credential_key_id is None
+    assert disabled_fallback.credential_tenant_id is None
+    assert disabled_fallback.secret_value is None
     assert disabled_fallback.status_message == "Provider is disabled or not connected."
 
 
