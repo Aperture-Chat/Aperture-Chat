@@ -11708,16 +11708,29 @@ dd {
 }
 
 .audit-summary-card {
+  appearance: none;
   position: relative;
+  width: 100%;
   overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   transition:
+    transform var(--speed) var(--ease),
     border-color var(--speed) var(--ease),
     box-shadow var(--speed) var(--ease),
     background var(--speed) var(--ease);
 }
 
 .audit-summary-card[data-tooltip] {
-  cursor: help;
+  cursor: pointer;
+}
+
+.audit-summary-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--teal) 52%, var(--border));
+  background: color-mix(in srgb, var(--teal-soft) 38%, var(--surface-soft));
+  box-shadow: var(--shadow-sm);
 }
 
 .audit-summary-card:focus-visible {
@@ -11782,6 +11795,201 @@ dd {
   font-size: 22px;
   font-weight: 850;
   letter-spacing: -0.02em;
+}
+
+.audit-summary-card .audit-summary-card-action {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.audit-summary-card.is-issue .audit-summary-card-action {
+  color: var(--red);
+}
+
+.audit-summary-card.is-issue:hover {
+  border-color: color-mix(in srgb, var(--red) 72%, var(--border));
+  background:
+    linear-gradient(90deg, rgba(253, 238, 238, 1), rgba(245, 249, 250, 1) 68%),
+    var(--surface-soft);
+}
+
+.audit-investigation-modal {
+  width: min(720px, 100%);
+}
+
+.audit-investigation-icon.is-issue {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.audit-investigation-metric {
+  display: grid;
+  gap: 2px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--teal) 26%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--teal-soft) 45%, var(--surface));
+}
+
+.audit-investigation-metric.is-issue {
+  border-color: var(--red-border);
+  background: var(--red-soft);
+}
+
+.audit-investigation-metric span,
+.audit-investigation-metric small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.audit-investigation-metric strong {
+  color: var(--text-strong);
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.audit-investigation-description {
+  margin: 14px 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.audit-investigation-search {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.audit-investigation-search > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.audit-investigation-search input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.audit-investigation-search input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--teal) 70%, #ffffff);
+  outline-offset: 2px;
+}
+
+.audit-investigation-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.audit-investigation-section {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.audit-investigation-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.audit-investigation-section h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.audit-investigation-section > header > span {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.audit-investigation-section ul {
+  display: grid;
+  gap: 0;
+  max-height: min(300px, 38dvh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-investigation-section li {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-investigation-section li:last-child {
+  border-bottom: 0;
+}
+
+.audit-investigation-section li strong {
+  color: var(--text-strong);
+  font-size: 12.5px;
+}
+
+.audit-investigation-section li span,
+.audit-investigation-section > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.audit-investigation-section > p {
+  margin: 0;
+  padding: 12px;
+}
+
+.audit-investigation-footnote {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .audit-investigation-backdrop {
+    align-items: end;
+    padding: 10px;
+  }
+
+  .audit-investigation-modal {
+    max-height: calc(100dvh - 20px);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
 }
 
 .audit-monitor-toolbar {
@@ -14950,14 +15158,38 @@ button.owner-doc-card:hover {
 
 .retention-tags-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 4px;
 }
 
+.retention-search-control {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 4px;
+  min-width: 240px;
+}
+
+.retention-search-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.retention-search-hint {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
 .retention-tag-search {
   flex: 1;
+  width: 100%;
   min-width: 200px;
   padding: 7px 11px;
   border: 1.5px solid var(--accent);
@@ -23551,6 +23783,387 @@ button.retention-tagged-title:focus-visible strong {
   font: inherit;
   font-weight: 640;
   cursor: pointer;
+}
+
+/* ---------- Owner/Admin phone usability sweep ----------
+   Management consoles carry dense operational controls. At phone widths the
+   hierarchy becomes a three-column section menu, stacked filters, and labeled
+   record cards so no field or action depends on horizontal scrolling. */
+@media (max-width: 640px) {
+  .management-console-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    overflow: visible;
+    padding: 6px 6px 0;
+  }
+
+  .management-console-tabs .tab-trigger {
+    width: 100%;
+    min-height: 46px;
+    padding: 6px 4px;
+    white-space: normal;
+    line-height: 1.15;
+    text-wrap: balance;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .console-actions .secondary-button,
+  .console-actions .primary-button,
+  .panel-collapse-button,
+  .panel-actions button,
+  .date-range-filter-presets button,
+  .audit-summary-card,
+  .toggle {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .console-page :is(input, select, textarea) {
+    max-width: 100%;
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .compact-select-field,
+  .search-box {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .panel-header > div:first-child {
+    flex-basis: 100%;
+  }
+
+  .panel-actions {
+    justify-content: stretch;
+  }
+
+  .panel-actions > .csv-export-control,
+  .panel-actions > .csv-export-control > button {
+    width: 100%;
+  }
+
+  .panel-actions > .model-list-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .model-list-controls .status-filter {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .model-list-controls .status-filter-option {
+    min-width: 0;
+    min-height: 40px;
+    padding-inline: 4px;
+    white-space: normal;
+  }
+
+  .model-list-controls > .primary-button,
+  .model-list-controls > .secondary-button,
+  .model-list-controls > .search-box {
+    width: 100%;
+  }
+
+  .panel > .date-range-filter {
+    margin: 10px 10px 0;
+    padding: 12px;
+  }
+
+  .date-range-filter,
+  .date-range-filter.has-extra {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "summary"
+      "extra"
+      "from"
+      "through"
+      "presets";
+    gap: 12px;
+  }
+
+  .date-range-filter:not(.has-extra) {
+    grid-template-areas:
+      "summary"
+      "from"
+      "through"
+      "presets";
+  }
+
+  .date-range-filter label,
+  .date-range-filter-extra,
+  .date-range-filter-extra .compact-select-field,
+  .date-range-filter input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .date-range-filter input[type="date"] {
+    display: block;
+    min-height: 44px;
+    box-sizing: border-box;
+    -webkit-min-logical-width: 0;
+  }
+
+  .date-range-filter-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audit-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .audit-summary-card {
+    min-height: 118px;
+    padding: 15px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .audit-summary-card:active {
+    transform: scale(0.985);
+  }
+
+  .audit-summary-card .audit-summary-card-action {
+    margin-top: 12px;
+    font-size: 12px;
+  }
+
+  .audit-investigation-backdrop {
+    padding: 0;
+  }
+
+  .audit-investigation-modal {
+    width: 100%;
+    max-height: 92dvh;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+  }
+
+  /* Wide management tables become readable record cards. The data-label
+     attributes preserve each desktop column's meaning beside its value. */
+  .user-table-scroll,
+  .group-user-table-scroll,
+  .model-access-panel > .table-scroll,
+  .usage-allocations-panel .table-scroll {
+    overflow: visible;
+  }
+
+  .user-management-table,
+  .group-user-table,
+  .model-access-table,
+  .usage-allocations-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+  }
+
+  .user-management-table colgroup,
+  .user-management-table thead,
+  .group-user-table thead,
+  .model-access-table thead,
+  .usage-allocations-table thead {
+    display: none;
+  }
+
+  .user-management-table tbody,
+  .group-user-table tbody,
+  .model-access-table tbody,
+  .usage-allocations-table tbody {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .user-management-table tbody > tr,
+  .group-user-table tbody > tr,
+  .model-access-table tbody > tr:not(.model-group-editor-row),
+  .usage-allocations-table tbody > tr {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .user-management-table tbody > tr.locked-row {
+    background: var(--surface-soft);
+  }
+
+  .user-management-table td,
+  .group-user-table td,
+  .model-access-table tr:not(.model-group-editor-row) > td,
+  .usage-allocations-table td {
+    display: grid;
+    grid-template-columns: minmax(86px, 32%) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--border);
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  .user-management-table td:last-child,
+  .group-user-table td:last-child,
+  .model-access-table tr:not(.model-group-editor-row) > td:last-child,
+  .usage-allocations-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .user-management-table td::before,
+  .group-user-table td::before,
+  .model-access-table tr:not(.model-group-editor-row) > td::before,
+  .usage-allocations-table td::before {
+    content: attr(data-label);
+    color: var(--faint);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .user-management-table .person-cell,
+  .user-management-table .table-email,
+  .user-management-table .group-chip-list,
+  .group-user-table .compact-person-cell {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .group-user-table td[data-label="User"],
+  .model-access-table td[data-label="Model"] {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 6px;
+  }
+
+  .group-user-table td[data-label="User"] .compact-person-cell,
+  .model-access-table td[data-label="Model"] .table-subtext {
+    width: 100%;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .user-management-table .role-select,
+  .model-groups-button,
+  .model-filters-button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .user-row-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .user-row-actions .secondary-button.compact {
+    width: 100%;
+    min-height: 44px;
+    padding-inline: 10px;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .user-row-actions .icon-button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    width: 44px;
+    min-width: 44px;
+    height: 100%;
+    min-height: 44px;
+  }
+
+  .model-access-table .model-grant-cell,
+  .model-access-table .model-groups-cell {
+    min-width: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .model-access-table .model-group-editor-row {
+    display: block;
+    width: 100%;
+    margin-top: -12px;
+    border: 1px solid var(--teal-border);
+    border-top: 0;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: var(--surface);
+  }
+
+  .model-access-table .model-group-editor-row > td,
+  .model-access-table td[colspan],
+  .usage-allocations-table td[colspan] {
+    display: block;
+    width: 100%;
+    padding: 11px;
+    border-bottom: 0;
+  }
+
+  .model-access-table .model-group-editor-row > td::before,
+  .model-access-table td[colspan]::before,
+  .usage-allocations-table td[colspan]::before {
+    content: none;
+  }
+
+  .group-user-table .toggle,
+  .model-access-table .toggle {
+    justify-self: start;
+  }
+
+  .usage-allocations-table .allocation-meter {
+    width: min(90px, 46%);
+  }
+
+  .allocation-add-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .allocation-add-row > * {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .csv-export-popover {
+    position: fixed;
+    inset: auto 10px max(10px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: min(80dvh, 520px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 430px) {
+  .date-range-filter-presets {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .deck-present-topbar button:hover {

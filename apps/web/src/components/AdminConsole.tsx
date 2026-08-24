@@ -53,6 +53,7 @@ import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPlainText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
+import { AuditSummaryCard, type AuditSummaryItem } from "./AuditSummaryCard";
 import { ModelFilterDialog, type ModelFilterDialogApi } from "./ModelFilterDialog";
 import { CustomToolBuilder, type CustomToolBuilderApi } from "./CustomToolBuilder";
 
@@ -2757,7 +2758,7 @@ export function AdminConsole({
       )}
 
       <Tabs.Root defaultValue="users" className="tabs-root">
-        <Tabs.List className="tabs-list" aria-label="Admin sections">
+        <Tabs.List className="tabs-list management-console-tabs" aria-label="Admin sections">
           {adminTabs.map((tab) => (
             <Tabs.Trigger
               key={tab}
@@ -2987,7 +2988,7 @@ export function AdminConsole({
                     const hiddenGroupCount = Math.max(0, userGroupNames.length - visibleGroupNames.length);
                     return (
                       <tr key={user.id} className={!editable ? "locked-row" : ""}>
-                        <td>
+                        <td data-label="Select">
                           <input
                             type="checkbox"
                             aria-label={`Select ${user.display_name}`}
@@ -3000,7 +3001,7 @@ export function AdminConsole({
                             }
                           />
                         </td>
-                        <td>
+                        <td data-label="Name">
                           <span
                             className="person-cell user-identity-cell"
                             tabIndex={0}
@@ -3013,10 +3014,10 @@ export function AdminConsole({
                             </span>
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Email">
                           <span className="table-email">{user.email}</span>
                         </td>
-                        <td>
+                        <td data-label="Role">
                           <SelectControl
                             className="role-select"
                             value={user.role}
@@ -3031,7 +3032,7 @@ export function AdminConsole({
                             ))}
                           </SelectControl>
                         </td>
-                        <td>
+                        <td data-label="Groups">
                           <span className="group-chip-list" title={userGroupNames.join(", ") || "No groups"}>
                             {visibleGroupNames.length ? (
                               <>
@@ -3051,14 +3052,14 @@ export function AdminConsole({
                             )}
                           </span>
                         </td>
-                        <td>{user.auth_method ?? "sso"}</td>
-                        <td>
+                        <td data-label="Auth">{user.auth_method ?? "sso"}</td>
+                        <td data-label="Status">
                           <span className="status-enabled">
                             <span className={`dot ${accessStatus.dotClass}`} /> {accessStatus.label}
                           </span>
                         </td>
-                        <td>{user.last_active}</td>
-                        <td>
+                        <td data-label="Last Active">{user.last_active}</td>
+                        <td data-label="Actions">
                           <span className="user-row-actions">
                             <button
                               className="secondary-button compact"
@@ -3310,13 +3311,13 @@ export function AdminConsole({
                     return (
                       <Fragment key={model.id}>
                         <tr>
-                          <td>
+                          <td data-label="Model">
                             <strong>{model.name}</strong>
                             <small className="table-subtext">{model.upstream_model_id ?? model.visibility ?? "tenant"}</small>
                           </td>
-                          <td>{model.provider_name}</td>
-                          <td>{model.upstream_model_id ?? model.name}</td>
-                          <td>
+                          <td data-label="Provider">{model.provider_name}</td>
+                          <td data-label="Runtime Route">{model.upstream_model_id ?? model.name}</td>
+                          <td data-label="User Access">
                             <span className="model-grant-cell">
                               <Toggle
                                 checked={enabledForUsers}
@@ -3340,7 +3341,7 @@ export function AdminConsole({
                               </em>
                             </span>
                           </td>
-                          <td>
+                          <td data-label="Groups">
                             <span className="model-groups-cell">
                               <button
                                 className="secondary-button compact model-groups-button"
@@ -3370,7 +3371,7 @@ export function AdminConsole({
                               </button>
                             </span>
                           </td>
-                          <td>
+                          <td data-label="Filters">
                             <button
                               className="secondary-button compact model-filters-button"
                               type="button"
@@ -3389,8 +3390,8 @@ export function AdminConsole({
                                 : "Add filters"}
                             </button>
                           </td>
-                          <td>{model.knowledge_base_ids?.length ?? model.knowledge_config_ids?.length ?? 0} bases</td>
-                          <td>{model.tool_ids?.length ?? model.tool_config_ids?.length ?? 0} tools</td>
+                          <td data-label="Knowledge">{model.knowledge_base_ids?.length ?? model.knowledge_config_ids?.length ?? 0} bases</td>
+                          <td data-label="Tools">{model.tool_ids?.length ?? model.tool_config_ids?.length ?? 0} tools</td>
                         </tr>
                         {groupEditorOpen && (
                           <tr className="model-group-editor-row">
@@ -4394,18 +4395,7 @@ export function AdminConsole({
             >
               <div className="audit-summary-grid">
                 {adminAuditSummary.map((item) => (
-                  <div
-                    className={`audit-summary-card${item.issue ? " is-issue" : ""}`}
-                    key={item.label}
-                    tabIndex={0}
-                    aria-label={`${item.label}: ${item.value} ${item.detail}. ${item.tooltip}`}
-                    data-tooltip={item.tooltip}
-                    title={item.tooltip}
-                  >
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                    <small>{item.detail}</small>
-                  </div>
+                  <AuditSummaryCard item={item} key={item.label} />
                 ))}
               </div>
             </Panel>
@@ -5177,7 +5167,7 @@ function GroupUsersSection({
                 const pendingKey = `group-user-${group.id}-${user.id}`;
                 return (
                   <tr key={user.id}>
-                    <td>
+                    <td data-label="User">
                       <span
                         className="person-cell compact-person-cell user-identity-cell"
                         tabIndex={0}
@@ -5190,13 +5180,13 @@ function GroupUsersSection({
                         </span>
                       </span>
                     </td>
-                    <td>{ROLE_LABELS[user.role]}</td>
-                    <td>
+                    <td data-label="Role">{ROLE_LABELS[user.role]}</td>
+                    <td data-label="Status">
                       <Pill tone={isMember ? "success" : pending ? "warning" : "neutral"}>
                         {isMember ? "In group" : pending ? "Pending" : "Not in group"}
                       </Pill>
                     </td>
-                    <td>
+                    <td data-label="Member">
                       <Toggle
                         checked={isMember}
                         disabled={!editable || pendingAction === pendingKey}
@@ -5356,7 +5346,7 @@ function adminAuditSummaryCards(
   securityAlerts: SecurityAlert[],
   auditTrailRows: AuditEvent[],
   promptRows: UserPromptRecord[],
-) {
+): AuditSummaryItem[] {
   const activeVisibleUsers = data.visibleUsers.filter((user) => user.active && user.role !== "PLATFORM_OWNER");
   const adminUsers = activeVisibleUsers.filter((user) => user.role === "TENANT_ADMIN");
   const regularUsers = activeVisibleUsers.filter((user) => user.role !== "TENANT_ADMIN");
@@ -5371,88 +5361,138 @@ function adminAuditSummaryCards(
       value: String(auditTrailRows.length),
       detail: "tenant events in range",
       issue: false,
-      tooltip: "Audit events for this organization's admin and user activity.",
+      description: "Tenant-scoped audit events currently loaded for this organization's admin and user activity.",
+      sections: [
+        {
+          label: "Audit events",
+          emptyText: "No tenant audit events are present in the current range.",
+          items: auditTrailRows.map((event) => ({
+            label: event.action_type || event.action,
+            detail: `${event.actor_name || event.actor_id} · ${event.target_name || event.target || "No target"} · ${formatAdminAuditTimestamp(event.created_at)}${event.detail ? ` · ${event.detail}` : ""}`,
+          })),
+        },
+      ],
     },
     {
       label: "Critical events",
       value: String(criticalEvents.length),
       detail: "high-severity audit events",
       issue: criticalEvents.length > 0,
-      tooltip:
-        criticalEvents.length > 0
-          ? `Critical audit events in range: ${compactAuditList(
-              criticalEvents.map((event) => `${event.action_type || event.action} by ${event.actor_name || event.actor_id}`),
-            )}.`
-          : "No critical-severity audit events in the selected range.",
+      description: "Critical-severity tenant audit events in the currently loaded admin audit range.",
+      sections: [
+        {
+          label: "Critical audit events",
+          emptyText: "No critical-severity audit events are present in this snapshot.",
+          items: criticalEvents.map((event) => ({
+            label: event.action_type || event.action,
+            detail: `${event.actor_name || event.actor_id} · ${event.target_name || event.target || "No target"} · ${formatAdminAuditTimestamp(event.created_at)}${event.detail ? ` · ${event.detail}` : ""}`,
+          })),
+        },
+      ],
     },
     {
       label: "Prompt watchlist",
       value: String(activePromptAlerts.length),
       detail: "active DLP or misuse alerts",
       issue: activePromptAlerts.length > 0,
-      tooltip:
-        activePromptAlerts.length > 0
-          ? `Active prompt alerts: ${compactAuditList(
-              activePromptAlerts.map((alert) => `${alert.rule_label} for ${alert.user_name || alert.user_id}`),
-            )}.`
-          : "No unacknowledged DLP or misuse alerts are active for admin-visible users.",
+      description: "Unacknowledged DLP and behavior alerts raised for users visible to this tenant administrator.",
+      sections: [
+        {
+          label: "Active prompt alerts",
+          emptyText: "No unacknowledged DLP or misuse alerts are active for admin-visible users.",
+          items: activePromptAlerts.map((alert) => ({
+            label: alert.rule_label,
+            detail: `${alert.user_name || alert.user_id} · ${alert.model_id || "unknown model"} · ${alert.severity} ${alert.category} · ${alert.surface} · ${formatSecurityAlertTimestamp(alert.created_at)}${alert.snippet ? ` · ${alert.snippet}` : ""}`,
+          })),
+        },
+      ],
     },
     {
       label: "Prompt volume",
       value: String(promptRows.length),
       detail: "saved prompts in scope",
       issue: false,
-      tooltip: "Saved prompt records for this organization's admins and users.",
+      description: "Saved prompt records in the current admin-visible scope, including the user, thread, model, and alert count.",
+      sections: [
+        {
+          label: "Saved prompt records",
+          emptyText: "No saved prompts are present in the current scope.",
+          items: promptRows.map((record) => ({
+            label: record.thread_title,
+            detail: `${record.user_name || record.user_id} · ${record.model_id} · ${formatPromptRecordTimestamp(record)} · ${record.alert_count} alert${record.alert_count === 1 ? "" : "s"}`,
+          })),
+        },
+      ],
     },
     {
       label: "Active admins",
       value: String(adminUsers.length),
       detail: "tenant admin accounts",
       issue: adminUsers.length === 0,
-      tooltip:
-        adminUsers.length === 0
-          ? "No active tenant admin accounts were found."
-          : `Active tenant admins: ${compactAuditList(adminUsers.map((user) => user.display_name || user.email))}.`,
+      description: "Active tenant-administrator accounts visible inside this organization.",
+      sections: [
+        {
+          label: "Active tenant administrators",
+          emptyText: "No active tenant admin accounts were found.",
+          items: adminUsers.map((user) => ({
+            label: user.display_name || user.email,
+            detail: `${user.email} · ${user.auth_method || "authentication method not recorded"} · last active ${user.last_active}`,
+          })),
+        },
+      ],
     },
     {
       label: "Active users",
       value: String(regularUsers.length),
       detail: "non-owner user accounts",
       issue: false,
-      tooltip: `Active non-owner users visible to this admin: ${compactAuditList(
-        regularUsers.map((user) => user.display_name || user.email),
-      )}.`,
+      description: "Active non-owner user accounts visible to this tenant administrator.",
+      sections: [
+        {
+          label: "Active non-owner users",
+          emptyText: "No active non-owner users are visible to this administrator.",
+          items: regularUsers.map((user) => ({
+            label: user.display_name || user.email,
+            detail: `${user.email} · ${formatAdminAuditRole(user.role)} · ${user.group_ids.length} group${user.group_ids.length === 1 ? "" : "s"} · last active ${user.last_active}`,
+          })),
+        },
+      ],
     },
     {
       label: "Connector issues",
       value: String(connectorIssueRecords.length),
       detail: "tenant connectors in error",
       issue: connectorIssueRecords.length > 0,
-      tooltip:
-        connectorIssueRecords.length > 0
-          ? `Tenant connectors reporting authentication errors: ${compactAuditList(
-              connectorIssueRecords.map((connector) => connector.name),
-            )}.`
-          : "No tenant-enabled connectors are currently reporting authentication errors.",
+      description: "Tenant-enabled connectors whose current authentication state is reporting an error.",
+      sections: [
+        {
+          label: "Tenant connector authentication errors",
+          emptyText: "No tenant-enabled connectors are currently reporting authentication errors.",
+          items: connectorIssueRecords.map((connector) => ({
+            label: connector.name,
+            detail: `${connector.category} · ${connector.description || "Authentication error"} · last sync ${connector.last_sync || "not recorded"}`,
+          })),
+        },
+      ],
     },
     {
       label: "Ungrouped models",
       value: String(ungroupedModelRecords.length),
       detail: "enabled models without groups",
       issue: ungroupedModelRecords.length > 0,
-      tooltip:
-        ungroupedModelRecords.length > 0
-          ? `Enabled models without group grants: ${compactAuditList(ungroupedModelRecords.map((model) => model.name))}.`
-          : "Every enabled model has at least one tenant group grant, or no enabled models are present.",
+      description: "Enabled models without tenant group grants, which can make model access broader than intended.",
+      sections: [
+        {
+          label: "Models without tenant group grants",
+          emptyText: "Every enabled model has at least one tenant group grant, or no enabled models are present.",
+          items: ungroupedModelRecords.map((model) => ({
+            label: model.name,
+            detail: `${model.provider_name || model.provider_id} · enabled · 0 group grants`,
+          })),
+        },
+      ],
     },
   ];
-}
-
-function compactAuditList(values: string[], fallback = "none", limit = 3) {
-  const cleaned = values.map((value) => value.trim()).filter(Boolean);
-  if (cleaned.length === 0) return fallback;
-  if (cleaned.length <= limit) return cleaned.join(", ");
-  return `${cleaned.slice(0, limit).join(", ")} and ${cleaned.length - limit} more`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -7032,15 +7072,15 @@ function UsageAllocationsPanel({ data }: { data: BootstrapData }) {
                     : 0;
                   return (
                     <tr key={`${allocation.principal_type}:${allocation.principal_id}`}>
-                      <td>
+                      <td data-label="Who">
                         <strong>{allocation.display_name}</strong>{" "}
                         <small>{allocation.principal_type === "group" ? "group" : "user"}</small>
                       </td>
-                      <td>
+                      <td data-label="Token Cap">
                         {capped ? allocation.daily_token_limit.toLocaleString() : "No cap"}{" "}
                         <small>per {allocation.budget_period}</small>
                       </td>
-                      <td>
+                      <td data-label="Used">
                         <span className="allocation-meter" aria-hidden="true">
                           <span
                             className={`allocation-meter-fill ${ratio >= 1 ? "is-exhausted" : ""}`}
@@ -7053,7 +7093,7 @@ function UsageAllocationsPanel({ data }: { data: BootstrapData }) {
                           UTC {allocation.period_start} – {allocation.period_end}
                         </small>
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         <button
                           className="secondary-button compact"
                           type="button"

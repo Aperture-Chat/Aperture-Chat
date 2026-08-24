@@ -683,11 +683,60 @@ test("admin audit tab renders tenant audit events from the admin API", async () 
 
   expect(await screen.findByText("Admin Audit")).toBeInTheDocument();
   expect(await screen.findByText("Audit Trail")).toBeInTheDocument();
+  const auditEventsCard = await screen.findByRole("button", {
+    name: "Audit events: 1 tenant events in range. Open investigation.",
+  });
+  const adminSummaryCards = document.querySelectorAll(".audit-summary-card");
+  expect(adminSummaryCards).toHaveLength(8);
+  adminSummaryCards.forEach((card) => {
+    expect(card.tagName).toBe("BUTTON");
+    expect(card).toHaveAttribute("aria-haspopup", "dialog");
+    expect(card).toHaveAttribute("data-tooltip", expect.stringContaining("review every record"));
+  });
+  fireEvent.click(auditEventsCard);
+  const auditEventsDialog = screen.getByRole("dialog", { name: "Audit events" });
+  expect(within(auditEventsDialog).getByText("GROUP_UPDATED")).toBeInTheDocument();
+  expect(within(auditEventsDialog).getByText(/Alex Morgan.*Litigation.*Permissions synced/)).toBeInTheDocument();
+  fireEvent.click(within(auditEventsDialog).getByRole("button", { name: "Close Audit events investigation" }));
   expandPanel("Audit Trail");
   expect(await screen.findByText("GROUP_UPDATED")).toBeInTheDocument();
   expect(screen.getByText(/Alex Morgan \(Admin\) · Group: Litigation · Permissions synced/)).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: /Refresh/ }).at(-1)!);
   await waitFor(() => expect(listAuditEvents).toHaveBeenCalledTimes(2));
+});
+
+test("admin console exposes phone-ready section tabs and labeled record cards", async () => {
+  renderAdmin({});
+
+  expect(screen.getByRole("tablist", { name: "Admin sections" })).toHaveClass(
+    "management-console-tabs",
+  );
+
+  const userRow = screen.getByRole("row", { name: /Select Alex Morgan/ });
+  expect(within(userRow).getByText("alex.morgan@example.com").closest("td")).toHaveAttribute(
+    "data-label",
+    "Email",
+  );
+  expect(within(userRow).getByRole("combobox", { name: "Role for Alex Morgan" }).closest("td")).toHaveAttribute(
+    "data-label",
+    "Role",
+  );
+
+  selectTab("Model Access");
+  const modelRow = screen.getByRole("row", { name: /Enable gpt-4o for users/ });
+  expect(within(modelRow).getByText("Azure OpenAI").closest("td")).toHaveAttribute(
+    "data-label",
+    "Provider",
+  );
+  expect(within(modelRow).getByRole("button", { name: "Edit groups for gpt-4o" }).closest("td")).toHaveAttribute(
+    "data-label",
+    "Groups",
+  );
+
+  selectTab("Groups");
+  const groupUserRow = screen.getByRole("row", { name: /Alex Morgan.*Add Alex Morgan to Default Users/ });
+  expect(within(groupUserRow).getByText("Admin").closest("td")).toHaveAttribute("data-label", "Role");
+  expect(within(groupUserRow).getByRole("switch").closest("td")).toHaveAttribute("data-label", "Member");
 });
 
 test("admin analytics and audit monitors hide platform owner prompt records", async () => {
@@ -785,6 +834,17 @@ test("admin analytics and audit monitors hide platform owner prompt records", as
 
   selectTab("Audit");
   expect(await screen.findByText("User Prompt Activity")).toBeInTheDocument();
+  const promptWatchlistCard = await screen.findByRole("button", {
+    name: "Prompt watchlist: 1 active DLP or misuse alerts. Open investigation.",
+  });
+  fireEvent.click(promptWatchlistCard);
+  const promptWatchlistDialog = screen.getByRole("dialog", { name: "Prompt watchlist" });
+  expect(within(promptWatchlistDialog).getByText("Sensitive identifier")).toBeInTheDocument();
+  expect(within(promptWatchlistDialog).getByText(/Jane Smith.*gpt-4o.*high dlp/i)).toBeInTheDocument();
+  expect(within(promptWatchlistDialog).queryByText("Owner private alert")).not.toBeInTheDocument();
+  fireEvent.click(
+    within(promptWatchlistDialog).getByRole("button", { name: "Close Prompt watchlist investigation" }),
+  );
   expandPanel("User Prompt Activity");
   expandPanel("Security Alerts");
   expect(screen.getByText("Matter intake DLP check")).toBeInTheDocument();
@@ -1394,6 +1454,12 @@ test("retention tags live in the audit prompt panel and policies keep the toggle
   // Untagged chats list too — batch actions must cover every conversation.
   expect(screen.getByText("Untagged research chat")).toBeInTheDocument();
   expect(screen.getByText("archived")).toBeInTheDocument();
+  // The branded search description explains the field before the short placeholder.
+  expect(screen.getByText("Conversation finder")).toBeInTheDocument();
+  expect(
+    screen.getByText("Search chat titles, owners, tags, or client/matter numbers."),
+  ).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("Start typing to filter chats")).toBeInTheDocument();
   // The search box and namespace filter narrow the bounded list.
   fireEvent.change(screen.getByRole("searchbox", { name: "Search chats and tags" }), {
     target: { value: "box" },
