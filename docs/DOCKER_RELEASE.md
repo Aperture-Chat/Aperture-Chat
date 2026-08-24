@@ -69,6 +69,21 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.4.5
+
+- Model routing is hardened following a CRAP and mutation-testing audit of the
+  API, with expanded network-guard and OpenRouter chat coverage locking in the
+  provider-routing contract.
+- Every permanent branch (`dev`, `test`, `main`) now publishes and verifies
+  immutable multi-architecture container images on each commit, and the
+  test-to-main promotion gate confirms the inspected image pair exists before
+  merge.
+- Audit dashboard metrics become inspectable investigation cards: each opens
+  an accessible dialog listing every record behind the metric, with filtering
+  when a metric covers many records.
+- Admin and platform console tables are responsive, stacking into labeled
+  rows on narrow viewports, with matching retention panel styling.
+
 ## New Since v0.4.4
 
 - Users can report platform issues from Help with a subject, detailed message,
