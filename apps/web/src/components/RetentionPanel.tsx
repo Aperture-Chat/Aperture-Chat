@@ -4,6 +4,7 @@ import {
   Check,
   DatabaseZap,
   MessageSquareText,
+  Search,
   ShieldCheck,
   Trash2,
   UserRound,
@@ -145,6 +146,8 @@ export function RetentionTagsView({
   const [previewRecords, setPreviewRecords] = useState<UserPromptRecord[] | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const titleId = useId();
+  const searchId = useId();
+  const searchHintId = useId();
   const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const namespaces = useMemo(
@@ -271,14 +274,25 @@ export function RetentionTagsView({
   return (
     <>
       <div className="retention-tags-toolbar">
-        <input
-          type="search"
-          className="retention-tag-search"
-          placeholder="Search chats, owners, tags, or client/matter numbers"
-          aria-label="Search chats and tags"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <label className="retention-search-control" htmlFor={searchId}>
+          <span className="retention-search-title">
+            <Search size={14} aria-hidden="true" />
+            Conversation finder
+          </span>
+          <span className="retention-search-hint" id={searchHintId}>
+            Search chat titles, owners, tags, or client/matter numbers.
+          </span>
+          <input
+            id={searchId}
+            type="search"
+            className="retention-tag-search"
+            placeholder="Start typing to filter chats"
+            aria-label="Search chats and tags"
+            aria-describedby={searchHintId}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
         <select
           className="retention-namespace-select"
           aria-label="Filter by tag type"

@@ -117,6 +117,7 @@ import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPlainText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
+import { AuditSummaryCard, type AuditSummaryItem } from "./AuditSummaryCard";
 
 type ActionStatus = {
   tone: "success" | "warning" | "info";
@@ -2606,7 +2607,7 @@ export function PlatformConsole({
           if (value === "audit") setAuditTrailRefreshToken((token) => token + 1);
         }}
       >
-        <Tabs.List className="tabs-list" aria-label="Platform owner sections">
+        <Tabs.List className="tabs-list management-console-tabs" aria-label="Platform owner sections">
           {[
             ["Org Settings", "org-settings"],
             ["Models", "models"],
@@ -4163,18 +4164,7 @@ export function PlatformConsole({
             <Panel title="Owner Audit" subtitle="Security and governance signals for provider, model, key, prompt, connector, and agent activity.">
               <div className="audit-summary-grid">
                 {auditSummary.map((item) => (
-                  <div
-                    className={`audit-summary-card${item.issue ? " is-issue" : ""}`}
-                    key={item.label}
-                    tabIndex={0}
-                    aria-label={`${item.label}: ${item.value} ${item.detail}. ${item.tooltip}`}
-                    data-tooltip={item.tooltip}
-                    title={item.tooltip}
-                  >
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                    <small>{item.detail}</small>
-                  </div>
+                  <AuditSummaryCard item={item} key={item.label} />
                 ))}
               </div>
             </Panel>
@@ -5742,26 +5732,11 @@ function modelEditDraftFromModel(model: ModelConfig): ModelEditDraftState {
   };
 }
 
-const AUDIT_TOOLTIP_LIST_LIMIT = 4;
-
-function compactAuditList(items: string[], emptyText: string) {
-  const cleanItems = items.map((item) => item.trim()).filter(Boolean);
-  if (!cleanItems.length) return emptyText;
-  const visibleItems = cleanItems.slice(0, AUDIT_TOOLTIP_LIST_LIMIT);
-  const remaining = cleanItems.length - visibleItems.length;
-  return `${visibleItems.join(", ")}${remaining > 0 ? `, +${remaining} more` : ""}`;
-}
-
-function auditModelLabel(model: ModelConfig) {
-  return `${model.name}${model.provider_name ? ` (${model.provider_name})` : ""}`;
-}
-
-function auditProviderKeyLabel(key: ProviderKey) {
-  const expires = key.expires && !["never", "not set"].includes(key.expires.trim().toLowerCase()) ? `, expires ${key.expires}` : "";
-  return `${key.name} (${key.provider_name}${expires})`;
-}
-
-function platformAuditSummary(data: BootstrapData, securityAlerts: SecurityAlert[], auditTrailRows: AuditEvent[]) {
+function platformAuditSummary(
+  data: BootstrapData,
+  securityAlerts: SecurityAlert[],
+  auditTrailRows: AuditEvent[],
+): AuditSummaryItem[] {
   const criticalEventRecords = auditTrailRows.filter((event) => auditEventSeverity(event) === "critical");
   const enabledModelRecords = data.models.filter((model) => model.platform_enabled);
   const disabledModelRecords = data.models.filter((model) => !model.platform_enabled);
@@ -5772,7 +5747,7 @@ function platformAuditSummary(data: BootstrapData, securityAlerts: SecurityAlert
   const pendingApprovalRecords = data.agentRuns.flatMap((run) =>
     run.approvals
       .filter((approval) => approval.status === "Pending")
-      .map((approval) => `${run.name}: ${approval.title}`),
+      .map((approval) => ({ run, approval })),
   );
   const expiredKeyRecords = data.providerKeys.filter((key) => providerKeyEffectiveStatus(key) === "Expired");
   const connectorIssueRecords = data.connectors.filter((connector) => connector.auth_status === "error");
@@ -5798,122 +5773,236 @@ function platformAuditSummary(data: BootstrapData, securityAlerts: SecurityAlert
       value: String(criticalEventRecords.length),
       detail: "high-severity audit events",
       issue: criticalEventRecords.length > 0,
-      tooltip:
-        criticalEventRecords.length > 0
-          ? `Critical audit events in range: ${compactAuditList(
-              criticalEventRecords.map((event) => `${event.action_type || event.action} by ${event.actor_name || event.actor_id}`),
-              "none",
-            )}.`
-          : "No critical-severity audit events in the selected range.",
+      description: "Critical-severity audit events in the currently loaded owner audit range.",
+      sections: [
+        {
+          label: "Critical audit events",
+          emptyText: "No critical-severity audit events are present in this snapshot.",
+          items: criticalEventRecords.map((event) => ({
+            label: event.action_type || event.action,
+            detail: `${event.actor_name || event.actor_id} · ${event.target_name || event.target || "No target"} · ${formatAuditTimestamp(event.created_at)}${event.detail ? ` · ${event.detail}` : ""}`,
+          })),
+        },
+      ],
     },
     {
       label: "Provider posture",
       value: `${connectedProviders}/${data.providers.length}`,
       detail: "provider connections active",
       issue: data.providers.length > 0 && connectedProviders < data.providers.length,
-      tooltip:
-        data.providers.length === 0
-          ? "No providers are registered yet, so provider connection posture cannot be audited."
-          : disconnectedProviderRecords.length > 0
-            ? `Disconnected providers: ${compactAuditList(disconnectedProviderRecords.map((provider) => provider.name), "none")}. Connected providers: ${compactAuditList(connectedProviderRecords.map((provider) => provider.name), "none")}.`
-            : `All providers are connected: ${compactAuditList(connectedProviderRecords.map((provider) => provider.name), "none")}.`,
+      description: "Provider posture compares every registered provider with the connections currently available to the platform.",
+      sections: [
+        {
+          label: "Disconnected providers",
+          emptyText: "Every registered provider is connected.",
+          items: disconnectedProviderRecords.map((provider) => ({
+            label: provider.name,
+            detail: `${provider.kind} · ${provider.region} · ${provider.status_message || "Connection inactive"}`,
+          })),
+        },
+        {
+          label: "Connected providers",
+          emptyText: "No providers are currently connected.",
+          items: connectedProviderRecords.map((provider) => ({
+            label: provider.name,
+            detail: `${provider.kind} · ${provider.region} · last sync ${provider.last_sync}`,
+          })),
+        },
+      ],
     },
     {
       label: "Model ceiling",
       value: `${enabledModels}/${data.models.length}`,
       detail: "models enabled for tenant access",
       issue: data.models.length > 0 && enabledModels === 0,
-      tooltip:
-        enabledModels === 0
-          ? `No models are enabled for tenant access. Disabled models: ${compactAuditList(disabledModelRecords.map(auditModelLabel), "none")}.`
-          : `Enabled models: ${compactAuditList(enabledModelRecords.map(auditModelLabel), "none")}. Disabled models: ${compactAuditList(disabledModelRecords.map(auditModelLabel), "none")}.`,
+      description: "Model ceiling shows which synchronized models the platform currently permits tenants to use.",
+      sections: [
+        {
+          label: "Enabled models",
+          emptyText: "No models are enabled for tenant access.",
+          items: enabledModelRecords.map((model) => ({
+            label: model.name,
+            detail: `${model.provider_name || model.provider_id} · ${model.group_ids.length} group limit${model.group_ids.length === 1 ? "" : "s"}`,
+          })),
+        },
+        {
+          label: "Disabled models",
+          emptyText: "No synchronized models are disabled.",
+          items: disabledModelRecords.map((model) => ({
+            label: model.name,
+            detail: `${model.provider_name || model.provider_id} · unavailable to tenants`,
+          })),
+        },
+      ],
     },
     {
       label: "Vault metadata",
       value: String(data.providerKeys.length),
       detail: "masked provider keys tracked",
       issue: data.providers.some((provider) => provider.connected) && data.providerKeys.length === 0,
-      tooltip:
-        data.providerKeys.length === 0
-          ? `No masked provider keys are tracked${connectedProviderRecords.length ? ` for connected providers: ${compactAuditList(connectedProviderRecords.map((provider) => provider.name), "none")}` : ""}.`
-          : `Tracked keys: ${compactAuditList(data.providerKeys.map(auditProviderKeyLabel), "none")}. Missing active keys for connected providers: ${compactAuditList(providersMissingActiveKeys.map((provider) => provider.name), "none")}.`,
+      description: "Vault metadata audits masked key records only; secret values are never included in this investigation.",
+      sections: [
+        {
+          label: "Tracked key metadata",
+          emptyText: "No masked provider-key records are tracked.",
+          items: data.providerKeys.map((key) => ({
+            label: key.name,
+            detail: `${key.provider_name} · ${key.environment} · ${key.status} · ${key.masked_value} · expires ${key.expires}`,
+          })),
+        },
+        {
+          label: "Connected providers missing an active key",
+          emptyText: "Every connected provider has an active tracked key.",
+          items: providersMissingActiveKeys.map((provider) => ({
+            label: provider.name,
+            detail: "Connected provider with no active key metadata.",
+          })),
+        },
+      ],
     },
     {
       label: "Approvals",
       value: String(pendingApprovals),
       detail: "agent actions awaiting review",
       issue: pendingApprovals > 0,
-      tooltip:
-        pendingApprovals > 0
-          ? `Pending agent approvals: ${compactAuditList(pendingApprovalRecords, "none")}.`
-          : "No agent actions are currently waiting for owner approval.",
+      description: "Pending approval gates raised by agent runs before a protected action can continue.",
+      sections: [
+        {
+          label: "Pending approvals",
+          emptyText: "No agent actions are currently waiting for owner approval.",
+          items: pendingApprovalRecords.map(({ run, approval }) => ({
+            label: approval.title,
+            detail: `${run.name} · requested by ${approval.requested_by} · ${formatAuditTimestamp(approval.requested_at)}`,
+          })),
+        },
+      ],
     },
     {
       label: "Connectors",
       value: `${enabledConnectors}/${data.connectors.length}`,
       detail: "platform-enabled connectors",
       issue: false,
-      tooltip: `Platform-enabled connectors: ${compactAuditList(enabledConnectorRecords.map((connector) => connector.name), "none")}. Not platform-enabled: ${compactAuditList(disabledConnectorRecords.map((connector) => connector.name), "none")}.`,
+      description: "Connector posture shows which catalog connectors are available for tenant configuration at the platform layer.",
+      sections: [
+        {
+          label: "Platform-enabled connectors",
+          emptyText: "No connectors are enabled at the platform layer.",
+          items: enabledConnectorRecords.map((connector) => ({
+            label: connector.name,
+            detail: `${connector.category} · tenant ${connector.tenant_enabled ? "enabled" : "disabled"} · ${connector.auth_status || "status unavailable"}`,
+          })),
+        },
+        {
+          label: "Not platform-enabled",
+          emptyText: "Every catalog connector is platform-enabled.",
+          items: disabledConnectorRecords.map((connector) => ({
+            label: connector.name,
+            detail: `${connector.category} · unavailable for tenant configuration`,
+          })),
+        },
+      ],
     },
     {
       label: "Expired keys",
       value: String(expiredKeys),
       detail: "provider secrets needing replacement",
       issue: expiredKeys > 0,
-      tooltip:
-        expiredKeys > 0
-          ? `Expired provider keys: ${compactAuditList(expiredKeyRecords.map(auditProviderKeyLabel), "none")}.`
-          : "No tracked provider keys are expired.",
+      description: "Provider key metadata whose effective status indicates that the secret must be replaced. Secret values are never included.",
+      sections: [
+        {
+          label: "Expired key metadata",
+          emptyText: "No tracked provider keys are expired.",
+          items: expiredKeyRecords.map((key) => ({
+            label: key.name,
+            detail: `${key.provider_name} · ${key.environment} · expired ${key.expires} · ${key.masked_value}`,
+          })),
+        },
+      ],
     },
     {
       label: "Connector issues",
       value: String(connectorIssues),
       detail: "connectors reporting auth errors",
       issue: connectorIssues > 0,
-      tooltip:
-        connectorIssues > 0
-          ? `Connectors reporting authentication errors: ${compactAuditList(connectorIssueRecords.map((connector) => connector.name), "none")}.`
-          : "No platform connectors are currently reporting authentication errors.",
+      description: "Platform connectors whose current authentication state is reporting an error.",
+      sections: [
+        {
+          label: "Authentication errors",
+          emptyText: "No platform connectors are currently reporting authentication errors.",
+          items: connectorIssueRecords.map((connector) => ({
+            label: connector.name,
+            detail: `${connector.category} · ${connector.description || "Authentication error"} · last sync ${connector.last_sync || "not recorded"}`,
+          })),
+        },
+      ],
     },
     {
       label: "Unscoped models",
       value: String(unscopedModels),
       detail: "enabled models without group limits",
       issue: unscopedModels > 0,
-      tooltip:
-        unscopedModels > 0
-          ? `Enabled models without group limits: ${compactAuditList(unscopedModelRecords.map(auditModelLabel), "none")}. These can audit as out-of-scope because no group boundary is attached.`
-          : "Every enabled model has group limits, or no enabled models are present.",
+      description: "Enabled models with no group boundary attached; these models can be available more broadly than intended.",
+      sections: [
+        {
+          label: "Models without group limits",
+          emptyText: "Every enabled model has a group limit, or no enabled models are present.",
+          items: unscopedModelRecords.map((model) => ({
+            label: model.name,
+            detail: `${model.provider_name || model.provider_id} · enabled · 0 group limits`,
+          })),
+        },
+      ],
     },
     {
       label: "Privileged owners",
       value: String(privilegedOwners),
       detail: "active platform-owner accounts",
       issue: privilegedOwners === 0 || privilegedOwners > 2,
-      tooltip:
-        privilegedOwners === 0
-          ? "No active platform-owner accounts were found; at least one owner should remain active."
-          : `Active platform owners: ${compactAuditList(privilegedOwnerRecords.map((user) => user.display_name || user.email), "none")}${privilegedOwners > 2 ? ". Review whether all owners still need privileged access" : ""}.`,
+      description: "Active accounts holding the platform-owner role and its organization-wide privileges.",
+      sections: [
+        {
+          label: "Active platform owners",
+          emptyText: "No active platform-owner accounts were found; at least one owner should remain active.",
+          items: privilegedOwnerRecords.map((user) => ({
+            label: user.display_name || user.email,
+            detail: `${user.email} · ${user.auth_method || "authentication method not recorded"} · last active ${user.last_active}`,
+          })),
+        },
+      ],
     },
     {
       label: "Stale syncs",
       value: String(staleProviders),
       detail: "connected providers not synced yet",
       issue: staleProviders > 0,
-      tooltip:
-        staleProviders > 0
-          ? `Connected providers not synced yet: ${compactAuditList(staleProviderRecords.map((provider) => provider.name), "none")}.`
-          : "All connected providers have recorded sync metadata.",
+      description: "Connected providers that have not yet recorded a successful model or metadata synchronization.",
+      sections: [
+        {
+          label: "Providers awaiting first sync",
+          emptyText: "All connected providers have recorded sync metadata.",
+          items: staleProviderRecords.map((provider) => ({
+            label: provider.name,
+            detail: `${provider.kind} · ${provider.region} · ${provider.status_message || "No sync recorded"}`,
+          })),
+        },
+      ],
     },
     {
       label: "Prompt watchlist",
       value: String(promptWatchlist),
       detail: "active DLP or misuse alerts",
       issue: promptWatchlist > 0,
-      tooltip:
-        promptWatchlist > 0
-          ? `Active prompt alerts: ${compactAuditList(promptWatchlistRecords.map((alert) => `${alert.rule_label} for ${alert.user_name} on ${modelNamesById.get(alert.model_id) ?? alert.model_id}`), "none")}.`
-          : "No unacknowledged DLP or misuse alerts are active.",
+      description: "Unacknowledged DLP and behavior alerts raised from saved chat or drafting activity.",
+      sections: [
+        {
+          label: "Active prompt alerts",
+          emptyText: "No unacknowledged DLP or misuse alerts are active.",
+          items: promptWatchlistRecords.map((alert) => ({
+            label: alert.rule_label,
+            detail: `${alert.user_name || alert.user_id} · ${modelNamesById.get(alert.model_id) ?? alert.model_id} · ${alert.severity} ${alert.category} · ${alert.surface} · ${formatSecurityAlertTimestamp(alert.created_at)}${alert.snippet ? ` · ${alert.snippet}` : ""}`,
+          })),
+        },
+      ],
     },
   ];
 }
