@@ -79,6 +79,32 @@ def test_non_http_scheme_rejected() -> None:
         validate_public_url("gopher://example.com/")
 
 
+def test_https_public_host_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_production(monkeypatch)
+    monkeypatch.setattr(
+        "app.core.net_guard.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ],
+    )
+    url = "https://example.com/resource"
+    assert validate_public_url(url) == url
+
+
+def test_dns_hostname_resolving_to_metadata_is_always_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.core.net_guard.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+            (2, 1, 6, "", ("169.254.169.254", 0)),
+        ],
+    )
+    with pytest.raises(EgressBlocked, match="blocked address"):
+        validate_public_url("https://metadata-alias.example/")
+
+
 def test_missing_host_rejected() -> None:
     with pytest.raises(EgressBlocked):
         validate_public_url("http:///no-host")
@@ -102,6 +128,17 @@ def test_request_hook_blocks_metadata_hop() -> None:
     request = httpx.Request("GET", "http://169.254.169.254/latest/meta-data/")
     with pytest.raises(EgressBlocked):
         validate_request_hook(request)
+
+
+def test_request_hook_allows_a_public_https_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_production(monkeypatch)
+    monkeypatch.setattr(
+        "app.core.net_guard.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ],
+    )
+    validate_request_hook(httpx.Request("GET", "https://example.com/health"))
 
 
 def test_redirect_to_metadata_is_blocked_by_hook(monkeypatch: pytest.MonkeyPatch) -> None:

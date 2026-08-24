@@ -1246,6 +1246,12 @@ def resolve_model_route(
     # provider request. Invalid catalog aliases fail closed instead of silently
     # substituting a deployment-wide default model.
     secret = store.provider_key_secret_for_provider(provider.id, tenant_id=tenant_id)
+    # ``connected`` is the platform credential's authoritative enablement bit.
+    # Do not carry a disabled platform secret (including a platform fallback
+    # selected for another tenant) into an unconfigured route. Tenant-scoped
+    # credentials retain their independent health and remain routable.
+    if not provider.connected and (secret is None or secret.tenant_id is None):
+        secret = None
     # Known kinds get their vendor default endpoint so a provider registered
     # with just a kind and a key is immediately routable.
     base_url = (provider.base_url or "").strip() or default_provider_base_url(provider.kind)
