@@ -1,9 +1,11 @@
-name: Test Container Preview
+name: Branch Container Images
 
 on:
   push:
     branches:
+      - dev
       - test
+      - main
   workflow_dispatch:
 
 permissions:
@@ -11,16 +13,15 @@ permissions:
   packages: write
 
 concurrency:
-  group: test-container-preview-${{ github.ref }}
-  cancel-in-progress: false
+  group: branch-container-images-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
-  publish-preview:
-    name: Publish immutable test images
-    if: github.ref == 'refs/heads/test'
+  publish-images:
+    name: Publish branch images
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -33,7 +34,8 @@ jobs:
           {
             echo "API_IMAGE=ghcr.io/${owner_lc}/aperture-chat-api"
             echo "WEB_IMAGE=ghcr.io/${owner_lc}/aperture-chat-web"
-            echo "PREVIEW_TAG=test-${GITHUB_SHA}"
+            echo "BRANCH_TAG=${GITHUB_REF_NAME}"
+            echo "IMMUTABLE_TAG=${GITHUB_REF_NAME}-${GITHUB_SHA}"
           } >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
@@ -46,16 +48,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish API preview
+      - name: Build and publish API images
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: services/api/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.API_IMAGE }}:${{ env.PREVIEW_TAG }}
+          tags: |
+            ${{ env.API_IMAGE }}:${{ env.IMMUTABLE_TAG }}
+            ${{ env.API_IMAGE }}:${{ env.BRANCH_TAG }}
 
-      - name: Build and publish web preview
+      - name: Build and publish web images
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -63,18 +67,24 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: VITE_API_BASE_URL=
-          tags: ${{ env.WEB_IMAGE }}:${{ env.PREVIEW_TAG }}
+          tags: |
+            ${{ env.WEB_IMAGE }}:${{ env.IMMUTABLE_TAG }}
+            ${{ env.WEB_IMAGE }}:${{ env.BRANCH_TAG }}
 
       - name: Record inspection references
         shell: bash
         run: |
           {
-            echo "## Test container preview"
+            echo "## Branch container images"
             echo
             echo "Built from commit \`${GITHUB_SHA}\`:"
             echo
-            echo "- \`${API_IMAGE}:${PREVIEW_TAG}\`"
-            echo "- \`${WEB_IMAGE}:${PREVIEW_TAG}\`"
+            echo "- \`${API_IMAGE}:${IMMUTABLE_TAG}\`"
+            echo "- \`${API_IMAGE}:${BRANCH_TAG}\`"
+            echo "- \`${WEB_IMAGE}:${IMMUTABLE_TAG}\`"
+            echo "- \`${WEB_IMAGE}:${BRANCH_TAG}\`"
             echo
-            echo "Promotions to \`main\` must use this exact commit and image pair."
+            if [[ "${GITHUB_REF_NAME}" == "test" ]]; then
+              echo "Promotions to \`main\` must use the immutable \`test-${GITHUB_SHA}\` image pair."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -82,20 +82,29 @@ python -m pytest
 
 Also run `git diff --check` before requesting review.
 
-## Container inspection
+## Branch container inspection
 
-The `test` branch publishes these immutable multi-architecture images for every
-commit:
+Every permanent branch publishes multi-architecture API and web images for
+each commit. Moving branch tags point to the newest successfully built commit:
 
 ```text
-ghcr.io/aperture-chat/aperture-chat-api:test-<full-commit-sha>
-ghcr.io/aperture-chat/aperture-chat-web:test-<full-commit-sha>
+ghcr.io/aperture-chat/aperture-chat-api:<dev|test|main>
+ghcr.io/aperture-chat/aperture-chat-web:<dev|test|main>
 ```
 
-The promotion pull request from `test` to `main` verifies that both images
-exist. Reviewers can deploy the exact pair with `docker-compose.release.yml` by
-setting `APERTURE_IMAGE_TAG=test-<full-commit-sha>` in a disposable review
-environment. Never use a production data volume for contributor testing.
+Immutable tags retain the branch name and full commit SHA:
+
+```text
+ghcr.io/aperture-chat/aperture-chat-api:<branch>-<full-commit-sha>
+ghcr.io/aperture-chat/aperture-chat-web:<branch>-<full-commit-sha>
+```
+
+The promotion pull request from `test` to `main` continues to verify that both
+immutable `test-<full-commit-sha>` images exist. Reviewers can deploy the exact
+pair with `docker-compose.release.yml` by setting
+`APERTURE_IMAGE_TAG=test-<full-commit-sha>` in a disposable review environment.
+The release-only `latest` tag is unchanged and is updated only by the Docker
+release workflow. Never use a production data volume for contributor testing.
 
 ## Review and merge expectations
 
