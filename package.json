@@ -2,7 +2,7 @@
   "name": "aperture-chat",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Aperture Chat production v1 scaffold: secure enterprise AI chat, admin, model gateway, and Hermes jobs.",
   "workspaces": [
     "apps/web"
