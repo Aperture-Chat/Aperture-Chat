@@ -929,15 +929,28 @@ test("audit issue cards, prompt CSV export, and model activity charts follow pro
     const expiredKeysCard = screen.getByText("Expired keys").closest(".audit-summary-card");
     const promptWatchlistCard = screen.getByText("Prompt watchlist").closest(".audit-summary-card");
     const unscopedModelsCard = screen.getByText("Unscoped models").closest(".audit-summary-card");
+    const ownerSummaryCards = document.querySelectorAll(".audit-summary-card");
+    expect(ownerSummaryCards).toHaveLength(12);
+    ownerSummaryCards.forEach((card) => {
+      expect(card.tagName).toBe("BUTTON");
+      expect(card).toHaveAttribute("aria-haspopup", "dialog");
+      expect(card).toHaveAttribute("data-tooltip", expect.stringContaining("review every record"));
+    });
     expect(expiredKeysCard).toHaveClass("is-issue");
-    expect(expiredKeysCard).toHaveAttribute("data-tooltip", expect.stringContaining(data.providerKeys[0].name));
     expect(promptWatchlistCard).toHaveClass("is-issue");
-    expect(promptWatchlistCard).toHaveAttribute(
-      "data-tooltip",
-      expect.stringContaining("Social Security number for Jane Smith on"),
-    );
     expect(unscopedModelsCard).toHaveClass("is-issue");
-    expect(unscopedModelsCard).toHaveAttribute("data-tooltip", expect.stringContaining("Enabled models without group limits"));
+
+    fireEvent.click(expiredKeysCard!);
+    const expiredKeysDialog = screen.getByRole("dialog", { name: "Expired keys" });
+    expect(within(expiredKeysDialog).getByText(data.providerKeys[0].name)).toBeInTheDocument();
+    expect(within(expiredKeysDialog).getByText(/secret values are never included/i)).toBeInTheDocument();
+    fireEvent.click(within(expiredKeysDialog).getByRole("button", { name: "Close Expired keys investigation" }));
+
+    fireEvent.click(promptWatchlistCard!);
+    const watchlistDialog = screen.getByRole("dialog", { name: "Prompt watchlist" });
+    expect(within(watchlistDialog).getByText("Social Security number")).toBeInTheDocument();
+    expect(within(watchlistDialog).getByText(/Jane Smith.*gpt-4o.*high dlp/i)).toBeInTheDocument();
+    fireEvent.click(within(watchlistDialog).getByRole("button", { name: "Close Prompt watchlist investigation" }));
 
     fireEvent.change(screen.getByLabelText("Prompt activity filter user"), { target: { value: "user-jane" } });
     fireEvent.change(screen.getByLabelText("Prompt activity filter start date"), {
@@ -2047,6 +2060,9 @@ test("sso protocol picker labels SAML as deferred and not selectable", async () 
 
 test("every analytics and audit section carries its own user and date filter", async () => {
   renderPlatform(platformOwnerData(), {});
+  expect(screen.getByRole("tablist", { name: "Platform owner sections" })).toHaveClass(
+    "management-console-tabs",
+  );
   selectTab("Analytics");
   expandPanel("Runtime Clock Metadata");
   expandPanel("Chat Feedback");
@@ -2057,6 +2073,7 @@ test("every analytics and audit section carries its own user and date filter", a
   expect(
     document.querySelector('[aria-label="Runtime events filter"] [aria-label="Runtime events filter user"]'),
   ).not.toBeNull();
+  expect(runtimeFilter.closest(".date-range-filter")).toHaveClass("has-extra");
   expect(screen.getByLabelText("Chat feedback filter user")).toBeInTheDocument();
   expect(screen.getByLabelText("Model activity filter user")).toBeInTheDocument();
   expect(screen.getByLabelText("Usage filter user")).toBeInTheDocument();
