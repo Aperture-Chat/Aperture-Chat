@@ -2,7 +2,7 @@
   "name": "@aperture/web",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE.md",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
