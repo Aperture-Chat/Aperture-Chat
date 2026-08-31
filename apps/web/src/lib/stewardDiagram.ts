@@ -11,7 +11,11 @@
  */
 
 import { MERMAID_FONT_FAMILY, rasterizeSvgToPngDataUrl } from "./mermaidRender";
-import { parseStructuredDiagramSource } from "./structuredDiagramSource";
+import {
+  parseStructuredDiagramSource,
+  parseStructuredSummarySource,
+  type StructuredSummaryEntry,
+} from "./structuredDiagramSource";
 
 export type StewardDiagramTone = "neutral" | "positive" | "warning";
 export type StewardDiagramEdgeKind = "primary" | "contingent" | "inactive";
@@ -148,6 +152,79 @@ export function parseStewardDiagram(text: string): StewardDiagramModel | null {
     edges,
     legend: legend.length > 0 ? legend : undefined,
     footnote: asString(data.footnote),
+  };
+}
+
+function humanizeSummaryKey(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Summary";
+}
+
+function summaryCardId(key: string, index: number): string {
+  const slug = key
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 36);
+  return `${slug || "summary"}-${index + 1}`;
+}
+
+function summaryTone(value: string): StewardDiagramTone {
+  if (/\b(?:blocked|failed|false|inactive|missing|not\s+achieved|not\s+complete|unavailable|no)\b/i.test(value)) {
+    return "warning";
+  }
+  if (/\b(?:achieved|active|complete(?:d)?|ready|success|true|yes)\b/i.test(value)) {
+    return "positive";
+  }
+  return "neutral";
+}
+
+function summaryEntryCard(entry: StructuredSummaryEntry, index: number): StewardDiagramCard {
+  const values = entry.values.map(String);
+  if (entry.collection) {
+    return {
+      id: summaryCardId(entry.key, index),
+      title: humanizeSummaryKey(entry.key),
+      bullets: values,
+    };
+  }
+  const value = values[0] ?? "Not specified";
+  return {
+    id: summaryCardId(entry.key, index),
+    title: humanizeSummaryKey(entry.key),
+    footer: { text: value, tone: summaryTone(value) },
+  };
+}
+
+function rowsOf(cards: StewardDiagramCard[], size: number): StewardDiagramCard[][] {
+  const rows: StewardDiagramCard[][] = [];
+  for (let index = 0; index < cards.length; index += size) rows.push(cards.slice(index, index + size));
+  return rows;
+}
+
+/** Convert summary-shaped JSON/YAML into the same visual model as a native
+ * aperture-diagram. This makes already-saved model replies visual immediately
+ * while preserving the original source behind the Code action. */
+export function parseStructuredSummaryDiagram(text: string): StewardDiagramModel | null {
+  const summary = parseStructuredSummarySource(text);
+  if (!summary) return null;
+  const scalarCards: StewardDiagramCard[] = [];
+  const collectionCards: StewardDiagramCard[] = [];
+  summary.entries.forEach((entry, index) => {
+    const card = summaryEntryCard(entry, index);
+    (entry.collection ? collectionCards : scalarCards).push(card);
+  });
+  return {
+    title: summary.title,
+    subtitle: summary.subtitle ?? "Visualized from structured response data",
+    tag: "Visual summary",
+    rows: [...rowsOf(scalarCards, 3), ...rowsOf(collectionCards, 3)],
+    edges: [],
+    footnote: summary.footnote,
   };
 }
 
@@ -382,7 +459,12 @@ export function stewardTextBlockHeight(item: TextBlock): number {
 
 export const STEWARD_EDGE_COLORS = EDGE_STYLES;
 
-export function computeStewardDiagramLayout(model: StewardDiagramModel, dark: boolean): StewardDiagramLayout {
+export function computeStewardDiagramLayout(
+  model: StewardDiagramModel,
+  dark: boolean,
+  canvasWidth = CANVAS_W,
+): StewardDiagramLayout {
+  const width = Math.max(320, canvasWidth);
   const canvasText = dark ? "#e9f3f7" : "#12233a";
   const canvasMuted = dark ? "#9fb1bd" : MUTED_TEXT;
   const rects: StewardDiagramRectEl[] = [];
@@ -393,15 +475,15 @@ export function computeStewardDiagramLayout(model: StewardDiagramModel, dark: bo
 
   if (model.tag) {
     const tag = block(model.tag, 320, 9.5, 12.5, true);
-    texts.push({ x: CANVAS_W - MARGIN, y: 20, block: tag, color: "#a3273a", anchor: "end" });
+    texts.push({ x: width - MARGIN, y: 20, block: tag, color: "#a3273a", anchor: "end" });
   }
   if (model.title) {
-    const title = block(model.title, CANVAS_W - 2 * MARGIN - 330, 19, 24, true);
+    const title = block(model.title, Math.max(160, width - 2 * MARGIN - 330), 19, 24, true);
     texts.push({ x: MARGIN, y, block: title, color: canvasText, fieldRef: { scope: "chart", field: "title" } });
     y += blockHeight(title) + 6;
   }
   if (model.subtitle) {
-    const subtitle = block(model.subtitle, CANVAS_W - 2 * MARGIN, 10.5, 14, false);
+    const subtitle = block(model.subtitle, width - 2 * MARGIN, 10.5, 14, false);
     texts.push({ x: MARGIN, y, block: subtitle, color: canvasMuted, fieldRef: { scope: "chart", field: "subtitle" } });
     y += blockHeight(subtitle) + 4;
   }
@@ -412,7 +494,7 @@ export function computeStewardDiagramLayout(model: StewardDiagramModel, dark: bo
   const cards = new Map<string, CardLayout>();
   const rowBottoms: number[] = [];
   model.rows.forEach((row, rowIndex) => {
-    const cardW = (CANVAS_W - 2 * MARGIN - (row.length - 1) * GUTTER) / row.length;
+    const cardW = (width - 2 * MARGIN - (row.length - 1) * GUTTER) / row.length;
     const laidOut = row.map((card) => layoutCard(card, cardW));
     const rowH = Math.max(...laidOut.map((item) => item.minHeight));
     row.forEach((card, columnIndex) => {
@@ -594,7 +676,7 @@ export function computeStewardDiagramLayout(model: StewardDiagramModel, dark: bo
     footerLineY += 22;
   }
   if (model.footnote) {
-    const footnote = block(model.footnote, CANVAS_W - 2 * MARGIN, 9.3, 12.5, false);
+    const footnote = block(model.footnote, width - 2 * MARGIN, 9.3, 12.5, false);
     texts.push({
       x: MARGIN,
       y: footerLineY - 4,
@@ -606,7 +688,7 @@ export function computeStewardDiagramLayout(model: StewardDiagramModel, dark: bo
   }
 
   return {
-    width: CANVAS_W,
+    width,
     height: Math.ceil(Math.max(footerLineY + 6, y + 16)),
     rects,
     paths,
@@ -769,7 +851,10 @@ export function removeStewardCard(model: StewardDiagramModel, cardId: string): S
  * their salvageable portion — the transfer should carry whatever the reader
  * saw in chat. Returns null when nothing renders. */
 export async function renderStewardDiagramPngDataUrl(source: string): Promise<string | null> {
-  const model = parseStewardDiagram(source) ?? parseStewardDiagramTruncated(source);
+  const model =
+    parseStewardDiagram(source) ??
+    parseStructuredSummaryDiagram(source) ??
+    parseStewardDiagramTruncated(source);
   if (!model) return null;
   return rasterizeSvgToPngDataUrl(renderStewardDiagramSvg(model, false), "#ffffff");
 }

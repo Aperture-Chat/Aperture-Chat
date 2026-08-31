@@ -1043,8 +1043,9 @@ Crew details stay intact.
     assert body["usage"]["total_tokens"] == 1020
     assert len(captured) == 1
     system_prompt = str(captured[0]["messages"][0]["content"])
-    assert "Focused Drafts revision contract" in system_prompt
-    assert "make only the requested change" in system_prompt
+    assert "In-place Drafts transformation contract" in system_prompt
+    assert "apply the requested change across its intended scope" in system_prompt
+    assert "do not authorize a shorter substitute" in system_prompt
     assert "Preserve all 1 submitted Markdown image reference" in system_prompt
     assert "all 1 submitted hyperlink target" in system_prompt
     assert "15-page paper-style" in revised
@@ -1352,6 +1353,161 @@ def test_start_over_revision_supersedes_document_without_preservation_block(monk
     revised = response.json()["choices"][0]["message"]["content"]
     assert "Solar Microgrid Proposal" in revised
     assert "example.com/evidence.jpg" not in revised
+
+
+def test_mla_whole_document_transform_fails_closed_when_provider_returns_a_summary(
+    monkeypatch,
+) -> None:
+    """Whole-document scope is not permission to discard the current paper."""
+    _activate_provider("provider-openrouter")
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.read().decode()))
+        return httpx.Response(
+            200,
+            json={
+                "id": f"mla-short-{len(requests)}",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                "# Cloning Human Organs\n\nTaylor Example\nProfessor Rivera\n"
+                                "BIO 410\n29 August 2026\n\n## Works Cited"
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 80, "completion_tokens": 24, "total_tokens": 104},
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.routes.chat.get_model_gateway_client",
+        lambda: _gateway(transport=httpx.MockTransport(handler)),
+    )
+    current_document = "\n\n".join(
+        [
+            "# Cloning Human Organs: Current Science and Clinical Reality",
+            "Bioprinting organoids and xenotransplantation are related but distinct research programs that address different barriers to producing safe replacement organs for patients with end stage disease.",
+            "Patient derived organoids model tissue development and disease in controlled laboratory settings while supporting drug screening and mechanistic research without constituting complete transplantable organs.",
+            "Three dimensional bioprinting arranges cells and biomaterials into complex tissue structures, although vascular networks innervation mechanical durability and manufacturing consistency remain major translational barriers.",
+            "Gene edited pig organs have entered closely monitored clinical evaluation that tests immune compatibility and physiologic performance while long term survival infection risk rehabilitation and access remain unresolved.",
+            "Stem cell differentiation protocols generate specialized cardiac hepatic renal and retinal cell types, but maturation and integration still separate experimental grafts from complete replacement organs.",
+            "Registered trials and peer reviewed reports must be distinguished from institutional announcements so that dates patient context adverse events and uncertainty remain visible in the scientific record.",
+            "The evidence supports cautious optimism rather than claims that literal human organ cloning is complete, and continued progress depends on transparent reporting ethical oversight and durable outcomes.",
+        ]
+    )
+    revision_prompt = "\n\n".join(
+        [
+            "Document title: Cloning Human Organs Scientific Review",
+            "Revision request: Rewrite the entire paper in MLA format.",
+            "Drafting agent: Anthropic",
+            "Revise the current document as the deliverable.",
+            f"Current document:\n{current_document}",
+        ]
+    )
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-openai-gpt-5-5",
+            "messages": [{"role": "user", "content": revision_prompt}],
+            "surface": "draft",
+            "web_enabled": False,
+            "citations_enabled": False,
+        },
+        headers=headers("user-owner"),
+    )
+
+    assert response.status_code == 502
+    assert len(requests) == 3
+    assert "original document was left unchanged" in response.json()["detail"].lower()
+    correction_prompt = str(requests[1]["messages"][-1]["content"])
+    assert "retained only" in correction_prompt
+    assert "complete current document" in correction_prompt.lower()
+
+
+def test_mla_whole_document_transform_accepts_complete_preserved_paper(monkeypatch) -> None:
+    _activate_provider("provider-openrouter")
+    requests: list[dict[str, object]] = []
+    paragraphs = [
+        "Bioprinting organoids and xenotransplantation are related but distinct research programs that address different barriers to producing safe replacement organs for patients with end stage disease.",
+        "Patient derived organoids model tissue development and disease in controlled laboratory settings while supporting drug screening and mechanistic research without constituting complete transplantable organs.",
+        "Three dimensional bioprinting arranges cells and biomaterials into complex tissue structures, although vascular networks innervation mechanical durability and manufacturing consistency remain major translational barriers.",
+        "Gene edited pig organs have entered closely monitored clinical evaluation that tests immune compatibility and physiologic performance while long term survival infection risk rehabilitation and access remain unresolved.",
+        "Stem cell differentiation protocols generate specialized cardiac hepatic renal and retinal cell types, but maturation and integration still separate experimental grafts from complete replacement organs.",
+        "Registered trials and peer reviewed reports must be distinguished from institutional announcements so that dates patient context adverse events and uncertainty remain visible in the scientific record.",
+        "The evidence supports cautious optimism rather than claims that literal human organ cloning is complete, and continued progress depends on transparent reporting ethical oversight and durable outcomes.",
+    ]
+    current_document = "\n\n".join(
+        ["# Cloning Human Organs: Current Science and Clinical Reality", *paragraphs]
+    )
+    complete_mla_paper = "\n\n".join(
+        [
+            "Taylor Example",
+            "Professor Rivera",
+            "BIO 410",
+            "29 August 2026",
+            "# Cloning Human Organs: Current Science and Clinical Reality",
+            *paragraphs,
+            "## Works Cited",
+            "National Institutes of Health. Regenerative Medicine Research Resources.",
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.read().decode()))
+        return httpx.Response(
+            200,
+            json={
+                "id": "mla-complete",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": complete_mla_paper},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 80, "completion_tokens": 180, "total_tokens": 260},
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.routes.chat.get_model_gateway_client",
+        lambda: _gateway(transport=httpx.MockTransport(handler)),
+    )
+    revision_prompt = "\n\n".join(
+        [
+            "Document title: Cloning Human Organs Scientific Review",
+            "Revision request: Rewrite the entire paper in MLA format.",
+            "Drafting agent: Anthropic",
+            "Revise the current document as the deliverable.",
+            f"Current document:\n{current_document}",
+        ]
+    )
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-openai-gpt-5-5",
+            "messages": [{"role": "user", "content": revision_prompt}],
+            "surface": "draft",
+            "web_enabled": False,
+            "citations_enabled": False,
+        },
+        headers=headers("user-owner"),
+    )
+
+    assert response.status_code == 200
+    assert len(requests) == 1
+    revised = response.json()["choices"][0]["message"]["content"]
+    assert "Professor Rivera" in revised
+    assert "vascular networks" in revised
+    assert "Works Cited" in revised
 
 
 def test_narrow_draft_revision_fails_closed_instead_of_replacing_document(monkeypatch) -> None:

@@ -829,6 +829,30 @@ def test_a_drawn_diagram_satisfies_an_image_request() -> None:
     assert directive_issues(directives, answer) == []
 
 
+def test_visual_summary_json_satisfies_a_visual_request_but_ordinary_json_does_not() -> None:
+    directives = extract_directives("Show the research as a visual.")
+    summary = """```json
+{
+  "search_completed": "2026-08-29",
+  "outcome": "not achieved",
+  "established_research": ["organoids", "disease models", "small tissues"],
+  "clinical_evaluation": ["islets", "retinal sheets", "cardiac muscle"]
+}
+```"""
+
+    assert directive_issues(directives, summary) == []
+    assert directive_issues(directives, '```json\n{"replicas": 2}\n```')
+
+
+def test_malformed_named_diagram_does_not_pass_visual_validation() -> None:
+    directives = extract_directives("Include a diagram of the pipeline.")
+    malformed = '```aperture-diagram\n{"rows": "broken"}\n```'
+    valid = '```aperture-diagram\n{"rows": [[{"id": "start", "title": "Start"}]]}\n```'
+
+    assert directive_issues(directives, malformed)
+    assert directive_issues(directives, valid) == []
+
+
 def test_explicit_counts_and_formats_are_tracked() -> None:
     directives = extract_directives("Give me 5 examples as bullet points.")
     ids = {directive.id for directive in directives}

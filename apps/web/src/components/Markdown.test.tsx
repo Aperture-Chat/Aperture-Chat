@@ -410,6 +410,42 @@ rows:
   await waitFor(() => expect(screen.getByRole("button", { name: "PNG" })).toBeInTheDocument());
 });
 
+test("research-status JSON is always rendered as a visual summary, never a code panel", () => {
+  const body = JSON.stringify(
+    {
+      search_completed: "2026-08-29",
+      literal_complete_human_organ_cloning: "not achieved",
+      routine_complete_bioprinted_organ_transplantation: "not achieved",
+      established_research: [
+        "organoids",
+        "patient-derived disease models",
+        "stem-cell differentiation",
+        "small engineered tissues",
+        "preclinical bioprinting",
+      ],
+      human_clinical_evaluation: [
+        "stem-cell-derived islets",
+        "retinal sheets",
+        "engineered cardiac muscle",
+        "intestinal epithelial grafts",
+      ],
+      remaining_gap: ["whole-organ vascularization", "long-term transplant survival"],
+    },
+    null,
+    2,
+  );
+
+  render(<Markdown content={`\`\`\`json\n${body}\n\`\`\``} />);
+
+  expect(document.querySelector('[data-diagram-type="structured-summary"]')).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "Research status summary" })).toBeInTheDocument();
+  expect(screen.getByText("Human clinical evaluation")).toBeInTheDocument();
+  expect(screen.getByText("stem-cell-derived islets")).toBeInTheDocument();
+  expect(document.querySelector(".md-code-panel")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument();
+});
+
 test("ordinary yaml and json stay code blocks", () => {
   render(
     <Markdown
@@ -421,11 +457,14 @@ test("ordinary yaml and json stay code blocks", () => {
   expect(screen.queryByText("structure")).not.toBeInTheDocument();
 });
 
-test("an invalid steward-diagram fence falls back to an honest code block", async () => {
+test("an invalid dedicated diagram fence stays a visual repair card, never a code panel", async () => {
   render(<Markdown content={'```steward-diagram\n{"rows": "broken"\n```'} />);
   expect(screen.getByText("Rendering diagram…")).toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText("json")).toBeInTheDocument(), { timeout: 4000 });
-  expect(screen.queryByText("structure")).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("img", { name: "Diagram source needs repair" })).toBeInTheDocument(), {
+    timeout: 4000,
+  });
+  expect(document.querySelector(".md-code-panel")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
 });
 
 test("structure charts support PowerPoint-style inline text editing on the canvas", async () => {

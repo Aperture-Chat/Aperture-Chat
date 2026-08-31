@@ -274,11 +274,20 @@ export function ToolLibraryManager({
   return (
     <div className="tool-library-section" aria-label="Reusable tool library">
       {actionStatus && (
-        <div className="inline-warning" role="status">
+        <div className="inline-warning tool-library-action-status" role="status">
           <Pill tone={actionStatus.tone}>
             {actionStatus.tone === "success" ? "Saved" : "Action"}
           </Pill>
           <span>{actionStatus.message}</span>
+          <button
+            className="icon-button feature-action-toast-close"
+            type="button"
+            aria-label="Dismiss notification"
+            data-tooltip="Clear this status message from the screen"
+            onClick={() => setActionStatus(null)}
+          >
+            <X size={15} />
+          </button>
         </div>
       )}
       <LibraryCatalog
