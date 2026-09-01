@@ -5,6 +5,7 @@ import { svgToPngBlob } from "../lib/mermaidRender";
 import {
   parseStewardDiagram,
   parseStewardDiagramTruncated,
+  parseStructuredSummaryDiagram,
   renderStewardDiagramSvg,
   serializeStewardDiagram,
   type StewardDiagramModel,
@@ -24,12 +25,15 @@ function isDarkTheme() {
  * back to the plain code view so nothing pretends to work. */
 export function StewardDiagramFigure({
   fallback,
+  forceVisual = false,
   onUpdate,
   preview = false,
   source,
 }: {
   /** Rendered when the source never parses (honest code-block fallback). */
   fallback: React.ReactNode;
+  /** Dedicated diagram fences never demote to a Copy/Preview/Edit code panel. */
+  forceVisual?: boolean;
   onUpdate?: (previousSource: string, nextSource: string) => Promise<boolean> | boolean;
   preview?: boolean;
   source: string;
@@ -48,7 +52,12 @@ export function StewardDiagramFigure({
     return () => observer.disconnect();
   }, []);
 
-  const strictModel = useMemo(() => parseStewardDiagram(source), [source]);
+  const nativeModel = useMemo(() => parseStewardDiagram(source), [source]);
+  const summaryModel = useMemo(
+    () => (nativeModel ? null : parseStructuredSummaryDiagram(source)),
+    [nativeModel, source],
+  );
+  const strictModel = nativeModel ?? summaryModel;
   // A reply cut off mid-diagram (provider token limit) still carries most of
   // the chart; render the salvageable part behind an explicit notice instead
   // of dumping raw JSON on the reader. Recovery waits for the exhaustion
@@ -102,7 +111,41 @@ export function StewardDiagramFigure({
   }
 
   if (!model) {
-    if (exhausted) return <>{fallback}</>;
+    if (exhausted && !forceVisual) return <>{fallback}</>;
+    if (exhausted) {
+      return (
+        <figure className="md-diagram-panel is-error" data-diagram-type="structure-error">
+          <figcaption className="md-code-toolbar">
+            <span className="md-code-toolbar-main">
+              <Network size={15} />
+              <strong>diagram</strong>
+              <span>needs repair</span>
+            </span>
+            {!preview && (
+              <span className="md-code-actions">
+                <button
+                  className="md-code-action"
+                  type="button"
+                  data-tooltip="Copy the diagram source"
+                  onClick={() => void copySource()}
+                >
+                  {copyStatus === "copied" ? <Check size={14} /> : <Copy size={14} />}
+                  <StableLabel
+                    label={copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Failed" : "Copy"}
+                    reserve={["Copied", "Failed", "Copy"]}
+                  />
+                </button>
+              </span>
+            )}
+          </figcaption>
+          <div className="md-diagram-error-visual" role="img" aria-label="Diagram source needs repair">
+            <TriangleAlert size={28} />
+            <strong>Diagram source needs repair</strong>
+            <span>The response was marked as a diagram, but its structure is incomplete.</span>
+          </div>
+        </figure>
+      );
+    }
     return (
       <figure className="md-diagram-panel is-loading">
         <div className="md-diagram-loading">
@@ -114,12 +157,15 @@ export function StewardDiagramFigure({
   }
 
   return (
-    <figure className="md-diagram-panel">
+    <figure
+      className="md-diagram-panel"
+      data-diagram-type={summaryModel ? "structured-summary" : "structure"}
+    >
       <figcaption className="md-code-toolbar">
         <span className="md-code-toolbar-main">
           <Network size={15} />
-          <strong>structure</strong>
-          <span>diagram</span>
+          <strong>{summaryModel ? "summary" : "structure"}</strong>
+          <span>{summaryModel ? "visual" : "diagram"}</span>
         </span>
         {!preview && (
           <span className="md-code-actions">

@@ -303,6 +303,21 @@ function investmentMemoProviderDraft() {
   ].join("\n\n");
 }
 
+function cloningResearchPaper() {
+  return [
+    '# “Cloning” Human Organs: Current Science, Clinical Reality, and Prospects',
+    "Bioprinting, organoids, and xenotransplantation are related but distinct research programs. Each program addresses a different constraint in the effort to produce safe replacement organs for patients with end-stage disease.",
+    "Patient-derived organoids model tissue development and disease in controlled laboratory settings. They support drug screening and mechanistic research, but they are not complete vascularized organs suitable for routine transplantation.",
+    "Three-dimensional bioprinting can arrange cells and biomaterials into increasingly complex tissue structures. Reliable vascular networks, innervation, mechanical durability, and manufacturing consistency remain major translational barriers.",
+    "Gene-edited pig organs have entered closely monitored clinical evaluation. These procedures test immune compatibility and physiologic performance, while long-term survival, infection risk, rehabilitation, and equitable access remain unresolved.",
+    "Stem-cell differentiation protocols can generate specialized cardiac, hepatic, renal, and retinal cell types. The scientific progress is meaningful, although maturation and integration still separate experimental grafts from complete replacement organs.",
+    "Registered trials and peer-reviewed case reports must be distinguished from institutional announcements. A rigorous review retains dates, patient context, adverse events, and uncertainty instead of treating every milestone as established clinical practice.",
+    "The current evidence therefore supports cautious optimism rather than claims that literal human organ cloning is complete. Continued progress depends on transparent reporting, reproducible manufacturing, ethical oversight, and durable patient outcomes.",
+    "## Works Consulted",
+    "National Institutes of Health. Research resources on regenerative medicine and transplantation.",
+  ].join("\n\n");
+}
+
 test("starts the draft chat clean until the user talks to the assistant", () => {
   render(
     <DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />,
@@ -654,6 +669,135 @@ test("a changed-my-mind pivot starts a fresh draft instead of a focused revision
   // contract that preserves the old document.
   expect(prompt).not.toContain("Revision request:");
   expect(documentText()).not.toContain("lease analysis");
+});
+
+test("treats an MLA request on a populated paper as an in-place transformation", async () => {
+  const sourcePaper = cloningResearchPaper();
+  const deferredRevision = installDeferredChatCompletionFetchMock(
+    [
+      "Taylor Example",
+      "Professor Rivera",
+      "BIO 410",
+      "29 August 2026",
+      "",
+      sourcePaper,
+    ].join("\n\n"),
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "mla-transform-transfer",
+        title: "Cloning Human Organs Scientific Review",
+        sourceLabel: "transferred chat",
+        createdAt: "9:24 PM",
+        content: sourcePaper,
+      }}
+    />,
+  );
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value: "Write this paper in MLA format without removing any research or citations.",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(deferredRevision.requests).toHaveLength(1));
+  // The old document stays visible while the transformation is running.
+  expect(documentText()).toContain("Reliable vascular networks");
+  expect(documentText()).toContain("literal human organ cloning is complete");
+  expect(screen.getByLabelText("Document title")).toHaveValue(
+    "Cloning Human Organs Scientific Review",
+  );
+  const payload = deferredRevision.requests[0] as {
+    max_completion_tokens: number;
+    messages: Array<{ content: string }>;
+  };
+  expect(payload.messages[0].content).toContain("Revision request:");
+  expect(payload.messages[0].content).toContain("Current document:");
+  expect(payload.messages[0].content).toContain("in-place transformation");
+  expect(payload.messages[0].content).not.toContain("Draft type:");
+  expect(payload.max_completion_tokens).toBe(12000);
+
+  deferredRevision.resolve();
+  await waitFor(() => {
+    expect(screen.getByText(/Version 2 applied from provider revision/)).toBeInTheDocument();
+  });
+  expect(documentText()).toContain("Professor Rivera");
+  expect(documentText()).toContain("Reliable vascular networks");
+  expect(documentText()).toContain("ethical oversight");
+});
+
+test("leaves a populated paper unchanged when a whole-document transform drops its content", async () => {
+  const sourcePaper = cloningResearchPaper();
+  installChatCompletionFetchMock(
+    "# MLA Paper\n\nTaylor Example\nProfessor Rivera\nBIO 410\n29 August 2026\n\n## Works Cited",
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "unsafe-mla-transform-transfer",
+        title: "Cloning Human Organs Scientific Review",
+        sourceLabel: "transferred chat",
+        createdAt: "9:24 PM",
+        content: sourcePaper,
+      }}
+    />,
+  );
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Convert the entire paper to MLA format." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByText(/in-place transformation must retain/i).length).toBeGreaterThan(0);
+  });
+  expect(documentText()).toContain("Reliable vascular networks");
+  expect(documentText()).toContain("ethical oversight");
+  expect(documentText()).not.toContain("Taylor Example");
+  expect(screen.queryByText(/Version 2 applied from provider revision/)).not.toBeInTheDocument();
+});
+
+test("keeps the current document visible until an explicit replacement succeeds", async () => {
+  const deferredDraft = installDeferredChatCompletionFetchMock(
+    "# Solar Microgrid Report\n\nA new report about community solar microgrids.",
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "transactional-replacement-transfer",
+        title: "Office lease memo",
+        sourceLabel: "transferred chat",
+        createdAt: "7:11 PM",
+        content: "# Office lease memo\n\nDetailed lease analysis for the downtown office.",
+      }}
+    />,
+  );
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value: "I changed my mind — start over with a new report about community solar microgrids.",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(deferredDraft.requests).toHaveLength(1));
+  expect(screen.getByLabelText("Document title")).toHaveValue("Office lease memo");
+  expect(documentText()).toContain("Detailed lease analysis");
+
+  deferredDraft.resolve();
+  await waitFor(() => expect(documentText()).toContain("community solar microgrids"));
+  expect(documentText()).not.toContain("Detailed lease analysis");
 });
 
 test("clears revision instructions immediately and keeps a durable working lifecycle", async () => {

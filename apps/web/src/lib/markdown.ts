@@ -1,4 +1,7 @@
-import { looksLikeStructuredDiagramSource } from "./structuredDiagramSource";
+import {
+  looksLikeStructuredDiagramSource,
+  looksLikeStructuredSummarySource,
+} from "./structuredDiagramSource";
 
 export type MarkdownColumnAlign = "left" | "center" | "right" | null;
 
@@ -263,7 +266,12 @@ export function isStewardDiagramBlock(language: string, text?: string): boolean 
   const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
   if (STEWARD_DIAGRAM_LANGUAGES.has(tag)) return true;
   if (text === undefined || !GENERIC_FENCE_TAGS.has(tag)) return false;
-  return looksLikeStewardDiagramSource(text);
+  return looksLikeStewardDiagramSource(text) || looksLikeStructuredSummarySource(text);
+}
+
+export function isDedicatedStewardDiagramLanguage(language: string): boolean {
+  const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  return STEWARD_DIAGRAM_LANGUAGES.has(tag);
 }
 
 /** Structural check shared with the JSON/YAML diagram parser. Ordinary data

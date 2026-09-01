@@ -73,6 +73,14 @@ def _route() -> ModelGatewayRoute:
     )
 
 
+def test_runtime_prompt_requires_every_diagram_block_to_render_on_first_delivery() -> None:
+    prompt = chat_route._runtime_prompt(_model(), {})
+
+    assert "every block intended as a diagram must render as a visual on first delivery" in prompt
+    assert "Never substitute a generic ```json or ```yaml status object" in prompt
+    assert "non-empty rows array" in prompt
+
+
 def _sse_events(response_text: str) -> list[object]:
     events: list[object] = []
     for line in response_text.splitlines():

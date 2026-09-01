@@ -6,6 +6,7 @@ import { copyCodeToClipboard, triggerBlobDownload } from "../lib/clipboard";
 import {
   imageFallbackUrl,
   imageUrlWithFallback,
+  isDedicatedStewardDiagramLanguage,
   isVisualDiagramBlock,
   isStewardDiagramBlock,
   mermaidDiagramSource,
@@ -242,6 +243,7 @@ export function Markdown({
             return (
               <StewardDiagramFigure
                 fallback={<MarkdownCodeBlock language="json" preview={preview} text={block.text} />}
+                forceVisual={isDedicatedStewardDiagramLanguage(block.language)}
                 key={index}
                 onUpdate={onUpdateDiagram}
                 preview={preview}
