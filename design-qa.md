@@ -1,36 +1,47 @@
-# Prompt Editing Design QA
+# Design QA: Dismissible Tool Library Status
 
-## Source truth
+## Comparison Target
 
-- Browser Comment 1 attachment in this task: agent System prompt and Meta prompt fields.
-- Browser Comment 2 attachment in this task: prompt-template Content field.
-- Browser Comments 3 and 4 attachments in this task: chat pencil action and composer.
-- Source viewport: 912 x 728 CSS pixels. The attachments are conversation-local and do not have filesystem paths.
-- Existing design language retained: Aperture teal, quiet icon actions, soft blue-gray surfaces, rounded controls, compact helper copy, and the composer progress rail proportions.
+- Source visual truth path: conversation attachment, Browser Comment 1 (`1159 x 824`, device scale factor 1).
+- Implementation screenshot path: `/private/tmp/aperture-tool-library-dismissible-status-desktop-final.png`.
+- Responsive evidence paths: `/private/tmp/aperture-tool-library-dismissible-status-mobile-final.png` and `/private/tmp/aperture-tool-library-dismissible-status-mobile-dark-final.png`.
+- Desktop viewport: `1159 x 824` CSS pixels; source and implementation are both `1159 x 824` pixels at device scale factor 1, so no density normalization was required.
+- Responsive viewport: `390 x 844` CSS pixels at device scale factor 1.
+- State: Tools Library, Skills tab, inline action feedback visible with its dismiss control. The implementation uses local synthetic sample content; the notification copy differs because the local API is intentionally unavailable.
 
-## Implementation evidence
+## Full-View Comparison Evidence
 
-- Chat composer expanded state: visually verified in a conversation-local QA capture.
-- Agent System prompt expanded state: visually verified in a conversation-local QA capture.
-- Prompt-template Content expanded state: visually verified in a conversation-local QA capture.
-- Implementation viewport: 912 x 728 CSS pixels, matching the supplied references.
-- State: authenticated Platform Owner seed data in a local browser QA environment. The local environment intentionally had no connected provider, so the pencil was visually verified in its disabled state; successful improvement, progress, and restore behavior were verified with mocked provider responses in automated tests.
+The implementation preserves the source screen's navigation, panel hierarchy, tabs, centered inline notice, typography, semantic status pill, spacing, borders, radii, and light-theme tokens. The requested close affordance is added at the right edge of the existing notice without moving or redesigning surrounding content. No custom image assets were introduced.
 
-## Comparison findings
+## Focused Region Comparison Evidence
 
-1. The first chat expanded-state capture inherited the empty-composer shrink-to-fit rule and rendered about 482 pixels wide. This was corrected by stretching the fixed composer within its viewport insets. The final capture is about 839 pixels wide and preserves comfortable edge margins.
-2. The first agent expanded-state capture repeated the expand icon beside the Collapse button. The expanded header now keeps only the prompt improver and the clearly labeled Collapse action.
-3. Agent, Meta, and template fields use the same compact action grammar as the chat composer: AI pencil, restore, and four-corner expand icons with quiet teal hover treatment.
-4. Expanded editors retain the product's typography, border radii, muted chrome, and teal progress treatment instead of introducing a visually separate tool.
-5. The chat expanded state clearly says that collapse is required before sending. Send and send-options are disabled, while Enter remains available for multiline editing.
-6. Large editors expose modal semantics, support Escape collapse, lock background scrolling, retain unsaved draft changes, and show character counts without competing with the writing surface.
-7. No clipping, overflow, broken margins, or console-visible runtime failures were found in the three final key states.
+The status region is legible in the full-view captures, so a separate crop was not required. Focused DOM measurements confirmed the desktop control is `38 x 38` pixels. At the phone breakpoint it is `44 x 44` pixels, the notice remains within its content column, and document horizontal overflow is `0` pixels.
 
-## Verification history
+## Findings
 
-- Visual QA: browser screenshots compared at the supplied 912 x 728 viewport.
-- Interaction QA: chat expand/collapse and disabled sending, agent System prompt expand/collapse, and template Content expand/collapse.
-- Automated QA: 43 web test files and 535 tests passed.
-- Production build: TypeScript and Vite production build passed.
+- No remaining P0, P1, or P2 differences.
+- Fonts and typography: unchanged from the existing component and source design; wrapping remains readable at phone width.
+- Spacing and layout rhythm: the close control fits the existing notice rhythm on desktop and the notice wraps within the phone content column.
+- Colors and visual tokens: existing light and dark semantic notice tokens are preserved.
+- Image quality and asset fidelity: no image or brand asset changes were needed; the close icon uses the project's existing icon library.
+- Copy and content: status copy remains owned by the existing save/delete actions; only an accessible dismiss label and tooltip were added.
 
-Final result: passed
+## Comparison History
+
+1. Initial responsive pass found a P2: the notice's intrinsic width caused `79` pixels of page overflow at `390` CSS pixels, clipping the close control.
+2. Fixed the grid min-width and mobile notice sizing, then increased the mobile dismiss target to `44 x 44` pixels.
+3. Post-fix light and dark captures showed `0` pixels of horizontal overflow. Clicking `Dismiss notification` removed both the status region and control, and the browser reported no console errors.
+
+## Implementation Checklist
+
+- [x] Add an accessible close button to Tool Library status feedback.
+- [x] Clear only the current status when the button is activated.
+- [x] Preserve existing success and warning semantics.
+- [x] Prevent phone-width overflow and provide a touch-sized mobile target.
+- [x] Verify desktop, phone, light, dark, interaction, and console state.
+
+## Follow-up Polish
+
+None.
+
+final result: passed

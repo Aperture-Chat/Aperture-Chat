@@ -4551,6 +4551,11 @@ export function DocumentAssistantWorkspace({
     options?: Partial<Pick<DraftContextOptions, "useTemplateContext" | "useWebSearch">>,
   ) {
     clearDraftTimers();
+    // Stage provider-created documents transactionally. Keep the current
+    // editor, versions, and server binding visible until the replacement has
+    // completed successfully; a slow or failed request must never blank a
+    // populated draft merely because the user asked for a new artifact.
+    const sourceHtmlBeforeDraft = contentRef.current;
     const contextOptions = draftContextOptions(sourceSummaryForDraft, options);
     const liveWebSearch = contextOptions.useWebSearch;
     const requestText = request?.trim() || `Create a complete ${template.name} draft from the selected template.`;
@@ -4580,23 +4585,12 @@ export function DocumentAssistantWorkspace({
     const userEvent = draftEvent("user", "user", requestText, {
       createdAt: requestStartedAt,
     });
-    const placeholderVersion: DraftVersion = {
-      id: "version-1",
-      label: "Version 1",
-      time: draftTimeLabel(requestStartedAt),
-      executedAt: requestStartedAt,
-      content: "",
-      summary: liveWebSearch ? "Provider web-search draft in progress" : "Provider draft in progress",
-    };
     const runningSummary = liveWebSearch
       ? `Drafting with provider web search through ${selectedAgent.name}`
       : `Drafting with ${selectedAgent.name}`;
-    // A brand-new provider draft is a new document: drop any server binding so
-    // the first completed save creates its own server draft. Running
-    // placeholders stay cache-only — the server never stores a fake
-    // "drafting" state it cannot honestly resume.
-    serverDraftRef.current = { id: null, revision: null };
-    setServerSaveState({ kind: "idle" });
+    // Running placeholders stay cache-only — the server never stores a fake
+    // "drafting" state it cannot honestly resume. The current document keeps
+    // its server binding until the new draft has passed every response check.
     liveDraftRunIds.add(historyItemId);
     const runningHistory = persistDraftDocumentHistorySnapshot(draftScope, {
       id: historyItemId,
@@ -4614,11 +4608,6 @@ export function DocumentAssistantWorkspace({
     setActiveHistoryItemId(historyItemId);
     setDocumentHistory(runningHistory);
     setSelectedTemplateId(template.id);
-    setDocumentTitle(nextTitle);
-    setContent("");
-    clearEditHistory();
-    setVersions([placeholderVersion]);
-    setSelectedVersionId(placeholderVersion.id);
     setRequireCitations(liveWebSearch || template.requiresCitations);
     setCodeArtifact(null);
     setShowEdits(false);
@@ -4669,6 +4658,11 @@ export function DocumentAssistantWorkspace({
       });
       advanceDraftTrace("generate");
       const markdownWithSources = appendWebCitationList(reply.content, reply.citations);
+      if (contentRef.current !== sourceHtmlBeforeDraft) {
+        throw new Error(
+          "The document changed while the assistant was working, so the new draft was not substituted. Submit the request again from the current version.",
+        );
+      }
       let nextContentHtml = paginateTransferredDocumentHtml(
         documentHtmlFromMarkdown(markdownWithSources),
         `${requestText}\n\n${reply.content}`,
@@ -4719,6 +4713,12 @@ export function DocumentAssistantWorkspace({
         summary: finalVersion.summary,
         sourceLabel: historySourceLabel,
       });
+      // The staged draft is now complete. Only at this point does it become a
+      // new document with a new server identity and version chain.
+      serverDraftRef.current = { id: null, revision: null };
+      setServerSaveState({ kind: "idle" });
+      setDocumentTitle(nextTitle);
+      clearEditHistory();
       setContent(nextContentHtml);
       setVersions([finalVersion]);
       setSelectedVersionId(finalVersion.id);
@@ -4918,7 +4918,10 @@ export function DocumentAssistantWorkspace({
           webEnabled: contextOptions.useWebSearch,
           citationsEnabled: true,
           knowledgeConfigIds: sourceIdsForRevision,
-          maxCompletionTokens: requestedAdditionalPages ? 24000 : 12000,
+          maxCompletionTokens: revisionCompletionTokenBudget(
+            currentDraftText,
+            requestedAdditionalPages,
+          ),
           reasoningEffort: reasoningEffortForSend,
         },
       });
@@ -4940,6 +4943,14 @@ export function DocumentAssistantWorkspace({
             missingAssets.length === 1 ? "" : "s"
           }. The current document was left unchanged.`,
         );
+      }
+      const preservationIssue = revisionContentPreservationIssue(
+        currentDraftText,
+        revisedMarkdown,
+        request,
+      );
+      if (preservationIssue) {
+        throw new Error(`${preservationIssue} The current document was left unchanged.`);
       }
       const restoredRevisionHtml = restoreRevisionAssetsInHtml(
         documentHtmlFromMarkdown(revisedMarkdown),
@@ -5102,7 +5113,12 @@ export function DocumentAssistantWorkspace({
       request,
       fallbackTemplate,
     );
-    if (isDraftCreationRequest(request) && requestedTemplate) {
+    const hasExistingDocument = documentHasSubstantiveContent(contentRef.current);
+    if (
+      isDraftCreationRequest(request) &&
+      requestedTemplate &&
+      (!hasExistingDocument || isExplicitDraftReplacementRequest(request))
+    ) {
       if (webSearchEnabled) {
         if (!webSearchAvailable) {
           setStatus("Web search is turned off for this model by your workspace configuration.");
@@ -9697,6 +9713,8 @@ function providerRevisionPrompt(
     `Drafting agent: ${context.agentName}`,
     "Revise the current document as the deliverable. Return only editable Markdown for the revised document body.",
     "Do not describe what should be changed; make the changes directly.",
+    "This is an in-place transformation of a populated document, not permission to draft a substitute. Preserve every factual claim, supporting detail, quotation, citation, footnote, note, table, list, image, and hyperlink unless the user's request explicitly changes or removes that content.",
+    "A formatting, style, tone, citation-style, or template request changes presentation across the document while retaining the document's substantive information. Return the complete transformed document from beginning to end.",
     "Treat every /api/drafts/preserved-assets/ token as immutable document content. Keep each token exactly once unless the user explicitly asks to remove that image or hyperlink.",
     "Preserve existing tables as Markdown pipe tables unless the user explicitly asks to remove or convert them.",
     "When adding or editing table content, include a Markdown separator row such as |---|---| so the editor renders a native table.",
@@ -9881,6 +9899,74 @@ function documentHtmlToText(value: string) {
   const decoder = document.createElement("textarea");
   decoder.innerHTML = withBreaks;
   return decoder.value;
+}
+
+function documentHasSubstantiveContent(value: string) {
+  const words = revisionWordTokens(documentHtmlToText(value));
+  if (words.length >= 3) return true;
+  return /<(?:img|table|figure|pre)\b/i.test(value);
+}
+
+function revisionCompletionTokenBudget(currentDraftText: string, additionalPages: number) {
+  if (additionalPages > 0) return 24000;
+  const sourceWords = revisionWordTokens(currentDraftText).length;
+  if (sourceWords >= 5_000) return 24000;
+  // A complete transformed document must fit in the response. Prose commonly
+  // consumes 1.3-1.8 tokens per word, with headings, tables, citations, and
+  // Markdown adding overhead.
+  return Math.max(12000, Math.min(24000, Math.ceil(sourceWords * 1.8) + 2_000));
+}
+
+function revisionContentPreservationIssue(
+  currentDraftText: string,
+  revisedMarkdown: string,
+  request: string,
+) {
+  if (
+    isExplicitDraftReplacementRequest(request) ||
+    revisionRequestAllowsContentReduction(request)
+  ) {
+    return null;
+  }
+  const sourceWords = revisionWordTokens(currentDraftText);
+  const revisedWords = revisionWordTokens(revisedMarkdown);
+  if (sourceWords.length < 80) return null;
+
+  const minimumWords = Math.ceil(sourceWords.length * 0.82);
+  if (revisedWords.length < minimumWords) {
+    return `The drafting agent returned only ${revisedWords.length.toLocaleString()} words for a ${sourceWords.length.toLocaleString()}-word document; an in-place transformation must retain at least ${minimumWords.toLocaleString()} words unless shortening is explicitly requested.`;
+  }
+
+  // Length alone cannot stop a generic substitute padded to the same size.
+  // Require the transformed draft to retain the document's distinctive
+  // vocabulary. Translation is the one legitimate transformation that
+  // intentionally changes that vocabulary.
+  if (!/\btranslate|translation\b/i.test(request)) {
+    const sourceTerms = significantRevisionTerms(sourceWords);
+    if (sourceTerms.length >= 20) {
+      const revisedTerms = new Set(significantRevisionTerms(revisedWords));
+      const retainedTerms = sourceTerms.filter((term) => revisedTerms.has(term)).length;
+      const minimumTerms = Math.ceil(sourceTerms.length * 0.55);
+      if (retainedTerms < minimumTerms) {
+        return `The drafting agent retained only ${retainedTerms} of ${sourceTerms.length} distinctive source terms; the response appears to substitute new material instead of transforming the existing document.`;
+      }
+    }
+  }
+  return null;
+}
+
+function revisionWordTokens(value: string) {
+  return value.toLocaleLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? [];
+}
+
+function significantRevisionTerms(words: string[]) {
+  return Array.from(new Set(words.filter((word) => word.length >= 6))).sort();
+}
+
+function revisionRequestAllowsContentReduction(request: string) {
+  return /\b(?:summari[sz]e|condense|shorten|abridge|compress)\b|\b(?:cut|reduce)\b.{0,40}\b(?:length|words?|pages?|content)\b/i.test(
+    request,
+  );
 }
 
 function documentHtmlToRevisionSnapshot(value: string): RevisionDocumentSnapshot {
@@ -12768,6 +12854,12 @@ const DRAFT_COUNTED_SLIDES =
   "(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty[- ]five|thirty|forty|fifty)[- ]?(?:page|slide)s?(?:[- ]?(?:page|slide)s?)?";
 const DRAFT_START_OVER_PATTERN =
   /\b(?:start over|start again|start fresh|from scratch|changed? (?:my|our) mind|scrap (?:it|this|that|the)|forget (?:it|this|that|the)|new topic|different topic)\b/i;
+const DRAFT_EXPLICIT_REPLACEMENT_PATTERN = new RegExp(
+  `\\b(?:new|another|fresh|replacement)\\s+(?:${DRAFT_ARTIFACT_NOUN})\\b|` +
+    `\\b(?:replace|discard)\\b.{0,30}\\b(?:this|entire|whole|current)\\b.{0,40}\\b(?:with|instead)\\b|` +
+    `\\b(?:clear|delete|remove)\\b.{0,30}\\b(?:all content|everything|entire document|whole document)\\b`,
+  "i",
+);
 /** "make me a 20 page slide on Y", "give me a new proposal", "redo the deck
  * as…" — verbs outside the classic creation set count as creation only when
  * aimed at a whole artifact. The counted form must be followed by a subject
@@ -12788,6 +12880,16 @@ function isDraftCreationRequest(instruction: string) {
   if (/\b(draft|write|create|prepare|generate|start|build)\b/i.test(instruction)) return true;
   return (
     DRAFT_START_OVER_PATTERN.test(instruction) || DRAFT_WHOLE_ARTIFACT_PATTERN.test(instruction)
+  );
+}
+
+/** A populated editor is an iteration surface by default. Creation verbs such
+ * as "write" or "draft" are not destructive authority on their own; only an
+ * explicit new/start-over/discard instruction may replace the current work. */
+function isExplicitDraftReplacementRequest(instruction: string) {
+  return (
+    DRAFT_START_OVER_PATTERN.test(instruction) ||
+    DRAFT_EXPLICIT_REPLACEMENT_PATTERN.test(instruction)
   );
 }
 

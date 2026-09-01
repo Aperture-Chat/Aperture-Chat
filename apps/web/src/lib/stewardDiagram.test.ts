@@ -4,6 +4,7 @@ import {
   moveStewardCard,
   parseStewardDiagram,
   parseStewardDiagramTruncated,
+  parseStructuredSummaryDiagram,
   removeStewardCard,
   renderStewardDiagramSvg,
   serializeStewardDiagram,
@@ -99,6 +100,28 @@ test("parseStewardDiagram rejects invalid or incomplete structured input", () =>
   expect(parseStewardDiagram('{"rows": []}')).toBeNull();
   expect(parseStewardDiagram('"just a string"')).toBeNull();
   expect(parseStewardDiagram("service: steward\nreplicas: 2")).toBeNull();
+});
+
+test("categorized research JSON converts to a complete card-summary visual", () => {
+  const model = parseStructuredSummaryDiagram(
+    JSON.stringify({
+      search_completed: "2026-08-29",
+      literal_complete_human_organ_cloning: "not achieved",
+      established_research: ["organoids", "disease models", "small tissues"],
+      human_clinical_evaluation: ["islets", "retinal sheets", "cardiac muscle"],
+    }),
+  );
+
+  expect(model?.title).toBe("Research status summary");
+  expect(model?.tag).toBe("Visual summary");
+  expect(model?.rows.flat().map((card) => card.title)).toEqual([
+    "Search completed",
+    "Literal complete human organ cloning",
+    "Established research",
+    "Human clinical evaluation",
+  ]);
+  expect(model?.rows[0][1].footer).toEqual({ text: "not achieved", tone: "warning" });
+  expect(renderStewardDiagramSvg(model!, false)).toContain("organoids");
 });
 
 test("renderStewardDiagramSvg draws cards, bands, notes, legend, and edges", () => {

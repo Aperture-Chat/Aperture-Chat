@@ -3861,6 +3861,7 @@ def _validate_and_revise_completion_if_needed(
             *_completion_quality_issues(request, runtime_context, combined),
             *_draft_revision_preservation_issues(request, combined),
             *_draft_revision_iteration_issues(request, combined),
+            *_draft_revision_content_retention_issues(request, combined),
             *_draft_revision_length_issues(request, combined),
             *_draft_inline_edit_quality_issues(request, combined),
         ]
@@ -3904,14 +3905,15 @@ def _validate_and_revise_completion_if_needed(
     revision_issues = [
         *_draft_revision_preservation_issues(request, combined),
         *_draft_revision_iteration_issues(request, combined),
+        *_draft_revision_content_retention_issues(request, combined),
         *_draft_revision_length_issues(request, combined),
     ]
     if revision_issues:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=(
-                "The drafting agent could not complete the requested focused edit at the "
-                "required scope without rewriting or removing protected document content. "
+                "The drafting agent could not complete the requested document transformation "
+                "at the required scope without replacing or removing protected document content. "
                 "The original document was left unchanged."
             ),
         )
@@ -3992,12 +3994,13 @@ def _revision_messages(
     if draft_revision is not None:
         instruction, _document = draft_revision
         validator_prompt = (
-            "The focused document revision failed its preservation review.\n"
+            "The document revision failed its preservation review.\n"
             f"Exact requested change: {instruction}\n"
             f"Validation findings:\n{issue_lines}\n\n"
             "Restart from the complete Current document in the original user message. "
-            "Walk through it from top to bottom, retain every unrelated passage and Markdown "
-            "asset exactly, and apply only the requested change. Return the complete revised "
+            "Walk through it from top to bottom, retain every substantive fact, supporting "
+            "detail, quotation, citation, note, table, list, and Markdown asset, and apply the "
+            "requested transformation across the intended scope. Return the complete revised "
             "Markdown document, not advice, commentary, HTML, or a new document."
         )
     elif inline_edit is not None:
@@ -5303,21 +5306,49 @@ _MARKDOWN_IMAGE_TARGET = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+|/api/[^\s)]
 _MARKDOWN_LINK_TARGET = re.compile(r"(?<!!)\[[^\]]+\]\((https?://[^\s)]+|/api/[^\s)]+)")
 
 _DRAFT_SUPERSEDE_PATTERN = re.compile(
-    r"\b(?:rewrite|redraft|replace|overhaul|recreate|redo|rebuild)\b.{0,35}"
-    r"\b(?:entire|whole|full|all|everything)\b"
-    r"|\b(?:start over|start again|start fresh|from scratch|new document|new draft|"
+    r"\b(?:start over|start again|start fresh|from scratch|new document|new draft|"
     r"new deck|new presentation|new topic|different topic|"
     r"changed? (?:my|our) mind|scrap (?:it|this|that|the)|forget (?:it|this|that|the))\b"
+    r"|\b(?:replace|discard)\b.{0,30}\b(?:this|entire|whole|current)\b.{0,40}"
+    r"\b(?:with|instead)\b"
+    r"|\b(?:clear|delete|remove)\b.{0,30}"
+    r"\b(?:all content|everything|entire document|whole document)\b"
+)
+
+_DRAFT_WHOLE_TRANSFORM_PATTERN = re.compile(
+    r"\b(?:format|reformat|convert|transform|restructure|restyle|translate)\b"
+    r"|\b(?:mla|apa|chicago)\b"
+    r"|\b(?:rewrite|redraft|revise|edit|update|change|overhaul)\b.{0,50}"
+    r"\b(?:entire|whole|full|all|throughout)\b"
+    r"|\b(?:entire|whole|full)\b.{0,30}\b(?:document|draft|paper|report|memo)\b"
+)
+
+_DRAFT_CONTENT_REDUCTION_PATTERN = re.compile(
+    r"\b(?:summari[sz]e|condense|shorten|abridge|compress)\b"
+    r"|\b(?:cut|reduce)\b.{0,40}\b(?:length|words?|pages?|content)\b"
 )
 
 
 def _draft_revision_supersedes_document(instruction: str) -> bool:
-    """True when the revision request replaces the document instead of editing
-    it — explicit whole-rewrite or start-over language. Preservation rules
-    exist to protect content the user wants kept; a supersede request has no
-    such content, so enforcing them would block the user's actual ask."""
+    """True only for explicit discard/start-over requests.
+
+    Whole-document scope is not destructive authority: "rewrite the entire
+    paper in MLA format" is still an in-place transformation and must retain
+    the paper's information. Preservation is skipped only when the user clearly
+    asks for a new document or topic instead of the current one.
+    """
     normalized = " ".join(instruction.lower().split())
     return bool(_DRAFT_SUPERSEDE_PATTERN.search(normalized))
+
+
+def _draft_revision_is_whole_document_transform(instruction: str) -> bool:
+    normalized = " ".join(instruction.lower().split())
+    return bool(_DRAFT_WHOLE_TRANSFORM_PATTERN.search(normalized))
+
+
+def _draft_revision_allows_content_reduction(instruction: str) -> bool:
+    normalized = " ".join(instruction.lower().split())
+    return bool(_DRAFT_CONTENT_REDUCTION_PATTERN.search(normalized))
 
 
 def _draft_revision_preservation_issues(
@@ -5388,6 +5419,8 @@ def _draft_revision_iteration_issues(
     instruction, document = parts
     if _draft_revision_supersedes_document(instruction):
         return []
+    if _draft_revision_is_whole_document_transform(instruction):
+        return []
 
     source_lines = _substantive_revision_lines(document)
     if len(source_lines) < 3:
@@ -5402,6 +5435,40 @@ def _draft_revision_iteration_issues(
     return [
         f"The response omitted {missing} of {len(source_lines)} substantive existing-document "
         "lines. Restore the original document and make only the requested localized edits."
+    ]
+
+
+def _draft_revision_content_retention_issues(
+    request: ChatCompletionRequest, response: ChatCompletionResponse
+) -> list[str]:
+    """Fail closed when an iteration silently substitutes a much smaller draft.
+
+    Exact-line preservation is appropriate for localized edits, but a genuine
+    whole-document style or formatting transformation can change markup and
+    wording everywhere. Word-volume retention supplies the invariant that both
+    cases share: absent an explicit shortening or start-over instruction, the
+    complete body must come back.
+    """
+    parts = _draft_revision_parts(request)
+    if parts is None:
+        return []
+    instruction, document = parts
+    if _draft_revision_supersedes_document(instruction) or _draft_revision_allows_content_reduction(
+        instruction
+    ):
+        return []
+    source_words = _word_count(document)
+    if source_words < 80:
+        return []
+    output_words = _word_count(_response_text(response))
+    required_words = (source_words * 82 + 99) // 100
+    if output_words >= required_words:
+        return []
+    return [
+        f"The response retained only {output_words} of about {source_words} existing-document "
+        f"words. Restore the complete document and retain at least {required_words} words; "
+        "formatting, style, tone, citation-style, and template changes do not authorize "
+        "removing substantive information."
     ]
 
 
@@ -5907,10 +5974,18 @@ def _messages_with_runtime_context(
         system_prompts.append(
             "\n".join(
                 [
-                    "Focused Drafts revision contract:",
-                    "- Inspect the submitted document from top to bottom and make only the requested change.",
+                    "In-place Drafts transformation contract:",
+                    "- Inspect the submitted document from top to bottom and apply the requested change across its intended scope.",
                     f"- The user's exact revision request is: {instruction}",
-                    "- Preserve all unrelated wording, headings, tables, ordering, formatting, and citations.",
+                    (
+                        "- Preserve every factual claim, supporting detail, quotation, citation, "
+                        "footnote, note, table, list, image, and hyperlink that the request does "
+                        "not explicitly change or remove."
+                    ),
+                    (
+                        "- Formatting, style, tone, citation-style, and template requests transform "
+                        "the complete current document; they do not authorize a shorter substitute."
+                    ),
                     (
                         f"- Preserve all {image_count} submitted Markdown image reference(s) and "
                         f"all {link_count} submitted hyperlink target(s) exactly unless the user explicitly asks to remove them."
@@ -6006,6 +6081,15 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             "fenced blocks only for data- or time-scaled visuals it renders better: pie, "
             "xychart-beta (bar/line), gantt, timeline, sequenceDiagram, mindmap, "
             "quadrantChart, erDiagram, stateDiagram-v2."
+        ),
+        (
+            "- Diagram delivery contract: every block intended as a diagram must render as a "
+            "visual on first delivery. Never substitute a generic ```json or ```yaml status "
+            "object for a requested diagram. Before sending, verify that every structure "
+            "visual uses the exact ```aperture-diagram schema with a non-empty rows array, "
+            "and that every row contains at least one card with a non-empty id and title. "
+            "If the data is only a categorized summary, express those categories as cards in "
+            "that schema; do not leave diagram-shaped data in a code panel."
         ),
         (
             "- Structure charts (the default diagram): whenever the user asks for a "

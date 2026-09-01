@@ -18,6 +18,7 @@ a false "you missed this" is worse than a soft miss.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -440,14 +441,90 @@ def _contains_markdown_image(text: str) -> bool:
 
 
 def _contains_diagram(text: str) -> bool:
-    """A drawn diagram counts as satisfying an image request."""
-    if re.search(r"```\s*(mermaid|graphviz|dot|plantuml|steward-diagram|aperture-diagram)\b", text, flags=re.IGNORECASE):
-        return True
+    """A block counts only when the client can actually render it visually.
+
+    In particular, a generic research-summary JSON fence is visualizable by
+    the card renderer, while a malformed block merely labelled
+    ``aperture-diagram`` is not allowed to satisfy the directive and trigger a
+    raw-code failure in the UI.
+    """
+    for match in re.finditer(r"```\s*([^\s`]*)[^\n]*\n(.*?)```", text, flags=re.S):
+        language = (match.group(1) or "").strip().lower()
+        body = (match.group(2) or "").strip()
+        if not body:
+            continue
+        if language in {"mermaid", "mmd", "mermaidjs", "mermaid-js", "graphviz", "dot", "gv", "plantuml", "puml", "uml"}:
+            return True
+        if language in {
+            "aperture-diagram",
+            "aperture_diagram",
+            "aperturediagram",
+            "steward-diagram",
+            "steward_diagram",
+            "stewarddiagram",
+        } and _valid_card_diagram_json(body):
+            return True
+        if language in {"json", "json5", "", "text", "txt", "plain", "plaintext"} and _visual_summary_json(body):
+            return True
     # ASCII/box-drawing art inside a fenced block.
     for block in re.findall(r"```[^\n]*\n(.*?)```", text, flags=re.S):
         if len(re.findall(r"[|+─│┌└├→<>^v]", block)) >= 8:
             return True
     return False
+
+
+def _json_object(text: str) -> dict[str, object] | None:
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _valid_card_diagram_json(text: str) -> bool:
+    value = _json_object(text)
+    rows = value.get("rows") if value else None
+    if not isinstance(rows, list):
+        return False
+    for row in rows:
+        cards = row if isinstance(row, list) else row.get("cards") if isinstance(row, dict) else None
+        if not isinstance(cards, list):
+            continue
+        if any(
+            isinstance(card, dict)
+            and isinstance(card.get("id"), str)
+            and bool(card["id"].strip())
+            and isinstance(card.get("title"), str)
+            and bool(card["title"].strip())
+            for card in cards
+        ):
+            return True
+    return False
+
+
+def _visual_summary_json(text: str) -> bool:
+    value = _json_object(text)
+    if not value:
+        return False
+    collections = 0
+    status_scalars = 0
+    detail_count = 0
+    status_pattern = re.compile(
+        r"\b(?:achieved|active|blocked|complete(?:d)?|failed|false|inactive|missing|not|pending|ready|success|true|unavailable|yes|no)\b",
+        flags=re.IGNORECASE,
+    )
+    for key, item in value.items():
+        if str(key).lower() in {"title", "subtitle", "tag", "footnote"}:
+            continue
+        if isinstance(item, (str, int, float, bool)):
+            detail_count += 1
+            if status_pattern.search(str(item)):
+                status_scalars += 1
+            continue
+        if isinstance(item, list) and item and all(isinstance(entry, (str, int, float, bool)) for entry in item):
+            collections += 1
+            detail_count += len(item)
+    return detail_count >= 4 and (collections >= 2 or (collections >= 1 and status_scalars >= 1))
 
 
 def _looks_like_outline_only(text: str) -> bool:

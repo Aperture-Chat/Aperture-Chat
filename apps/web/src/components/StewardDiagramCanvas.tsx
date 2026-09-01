@@ -34,8 +34,20 @@ export function StewardDiagramCanvas({
   model: StewardDiagramModel;
   onCommit?: (next: StewardDiagramModel) => void;
 }) {
-  const layout = useMemo(() => computeStewardDiagramLayout(model, dark), [model, dark]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const summary = model.tag === "Visual summary";
+  const [availableWidth, setAvailableWidth] = useState<number | null>(() => {
+    if (!summary || typeof window === "undefined" || window.innerWidth >= 700) return null;
+    return Math.max(320, window.innerWidth - 72);
+  });
+  const displayModel = useMemo<StewardDiagramModel>(() => {
+    if (!summary || availableWidth === null || availableWidth >= 700) return model;
+    return { ...model, rows: model.rows.flat().map((card) => [card]) };
+  }, [availableWidth, model, summary]);
+  const layout = useMemo(
+    () => computeStewardDiagramLayout(displayModel, dark, summary && availableWidth ? availableWidth : undefined),
+    [availableWidth, dark, displayModel, summary],
+  );
   const [scale, setScale] = useState(1);
   const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
   const hoverClearTimer = useRef<number | null>(null);
@@ -45,12 +57,17 @@ export function StewardDiagramCanvas({
 
   useEffect(() => {
     const node = containerRef.current;
-    if (!node || typeof ResizeObserver !== "function") return;
-    const observer = new ResizeObserver(() => setScale(node.clientWidth / layout.width));
+    if (!node) return;
+    const syncSize = () => {
+      setScale(node.clientWidth / layout.width);
+      if (summary) setAvailableWidth(Math.max(320, node.clientWidth));
+    };
+    syncSize();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(syncSize);
     observer.observe(node);
-    setScale(node.clientWidth / layout.width);
     return () => observer.disconnect();
-  }, [layout.width]);
+  }, [layout.width, summary]);
 
   function hoverCard(cardId: string | null) {
     if (hoverClearTimer.current !== null) window.clearTimeout(hoverClearTimer.current);
@@ -81,7 +98,7 @@ export function StewardDiagramCanvas({
 
   function move(cardId: string, direction: "left" | "right" | "up" | "down") {
     if (!onCommit) return;
-    const next = moveStewardCard(model, cardId, direction);
+    const next = moveStewardCard(displayModel, cardId, direction);
     if (next) onCommit(next);
   }
 
@@ -236,7 +253,7 @@ export function StewardDiagramCanvas({
             className="sdc-chip-delete"
             aria-label="Delete box"
             data-tooltip="Delete this box and its arrows"
-            onClick={() => onCommit?.(removeStewardCard(model, hoveredBox.id))}
+            onClick={() => onCommit?.(removeStewardCard(displayModel, hoveredBox.id))}
           >
             <Trash2 size={13} />
           </button>

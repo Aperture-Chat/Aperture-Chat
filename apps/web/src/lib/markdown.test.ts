@@ -208,3 +208,19 @@ edges:
   expect(ordinary).toContain("service: aperture");
   expect(ordinary).not.toContain("data-diagram-kind");
 });
+
+test("categorized research JSON becomes a document visual while ordinary JSON stays code", () => {
+  const summary = JSON.stringify({
+    search_completed: "2026-08-29",
+    outcome: "not achieved",
+    established_research: ["organoids", "disease models", "small tissues"],
+    clinical_evaluation: ["islets", "retinal sheets", "cardiac muscle"],
+  });
+
+  expect(isStewardDiagramBlock("json", summary)).toBe(true);
+  const html = markdownToDocumentHtml(`\`\`\`json\n${summary}\n\`\`\``);
+  expect(html).toContain('data-diagram-kind="structure"');
+  expect(html).not.toContain("document-code-block");
+
+  expect(isStewardDiagramBlock("json", '{"replicas":2,"regions":["us-east-1"]}')).toBe(false);
+});

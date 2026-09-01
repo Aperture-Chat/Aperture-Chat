@@ -198,6 +198,18 @@ test("tool library creates template variables and deletes library items through 
     currentData.models.find((model) => model.id === "agent-client-update")
       ?.skill_file_ids,
   ).not.toContain("skill-client-update-package");
+
+  expect(screen.getByRole("status")).toHaveClass(
+    "inline-warning",
+    "tool-library-action-status",
+  );
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Client Update Package Skill was deleted.",
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Dismiss notification" }),
+  );
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
 });
 
 function renderToolLibrary(mode: "template" | "skill") {
