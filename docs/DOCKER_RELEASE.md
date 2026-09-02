@@ -69,6 +69,18 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.4.6
+
+- Populated Drafts now treat whole-document formatting, tone, citation-style,
+  and template requests as preservation-first revisions. Provider output is
+  staged transactionally, checked for content and protected-asset retention,
+  and cannot replace the current document unless replacement is explicit.
+- Structured JSON and YAML summaries render as responsive visual diagrams in
+  chat and transfer into Drafts as images, while response validation accepts
+  only diagram sources the client can actually render.
+- Tool Library status notices can be dismissed without interrupting the
+  underlying connection or tool state.
+
 ## New Since v0.4.5
 
 - Model routing is hardened following a CRAP and mutation-testing audit of the
