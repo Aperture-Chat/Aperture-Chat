@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/sizzle-reel.svg" alt="Aperture Chat — a 75-second animated tour captured from the current live product: a research prompt is typed and sent, a five-step work trace runs to completion, a long cited answer with tables streams into the chat, an image is generated inside the same conversation, and the tour continues through light and dark mode, the model picker, session details, Drafts with export, Knowledge, Tools, the Admin Console, and the Platform Owner Console." width="100%">
+<img src="docs/images/sizzle-reel.svg" alt="Aperture Chat — a 75-second animated tour of reviewed screenshots from the current application: real chat answers, work traces, generated images, session details, Drafts and decks, agent and knowledge configuration, account security, mobile navigation, Help, and administrator and platform-owner controls. All example accounts and content are synthetic." width="100%">
 
 <sub><em>Current Aperture Chat product screens in light and dark mode, animated as one self-contained SVG from the live deployment.</em></sub>
 
@@ -105,8 +105,8 @@ Three clearly separated roles run the platform:
 
 | Role | Scope |
 | --- | --- |
-| **Platform Owner** | Providers and API keys, org-wide model catalog and availability, workspace branding, analytics, audit, and release-level controls. |
-| **Tenant Admin** | Users, groups, SSO, model restrictions, connectors, knowledge bases, tools, MCP settings, and tenant analytics. |
+| **Platform Owner** | Providers and API keys, org-wide model catalog and availability, connector switches and credentials, workspace branding, analytics, audit, and release-level controls. |
+| **Tenant Admin** | Users, groups, SSO, model restrictions, knowledge bases, tools, MCP settings, response actions, and tenant analytics. |
 | **User** | Chats, drafts, agents, knowledge, and tools granted through tenant, group, or individual assignments. |
 
 - **Layered model access policy:** effective runtime access is `provider_connected AND platform_allow AND group_or_user_grant AND NOT explicit_deny`. Platform owners can manage the full synced provider catalog, but chat, agents, and user-facing model selectors only expose models that are actually enabled for runtime use.
@@ -164,7 +164,12 @@ Caddy publicly, replace the safe `localhost` site address with your DNS name,
 set `APERTURE_API_BASE_URL` and `APERTURE_WEB_ORIGINS` in `.env`, then run the
 `vps` or `prod` profile. Caddy obtains and renews HTTPS certificates for the
 configured public hostname.
-Full release details are in
+
+The release stack includes an `updater` service. Platform owners can review a
+new tagged release and start an update from the sidebar. It pulls both images,
+recreates the API and web services, verifies both, and attempts to restore the
+previous images if either service fails. Persistent data volumes are retained;
+back up application data before an upgrade. Full release details are in
 [docs/DOCKER_RELEASE.md](docs/DOCKER_RELEASE.md).
 
 ## Development
@@ -212,7 +217,10 @@ participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - [docs/architecture.md](docs/architecture.md) — runtime shape, boundaries, and service contracts.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch flow, review evidence, tests, and container inspection.
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting and supported versions.
-- [Platform owner guide (PDF)](docs/aperture-owner-guide.pdf) — downloadable copy of the same guide available from the Platform Owner Console.
+- [User guide (PDF)](docs/aperture-user-guide.pdf) — sign-in, first steps, chat, sources, drafts, and account help.
+- [Administrator guide (PDF)](docs/aperture-admin-guide.pdf) — user guidance plus access approval, groups, policies, retention, and issue review.
+- [Platform owner guide (PDF)](docs/aperture-owner-guide.pdf) — administrator guidance plus initial setup, providers, organization controls, and operations.
+- [Training publication](docs/TRAINING.md) — lesson inventory, source files, media regeneration, and verification.
 
 ## License
 

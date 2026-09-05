@@ -54,6 +54,7 @@ from app.core.policy import (
     is_temp_user_model,
     is_workspace_agent_profile,
     require_admin_or_owner,
+    require_platform_owner,
     same_tenant,
 )
 from app.core.sessions import sign_oidc_state
@@ -1536,11 +1537,13 @@ def connectors(
 
 
 @router.get("/connector-configs")
+# These established URLs remain compatible with saved clients, while shared
+# credentials and connector administration belong to the platform owner.
 def connector_configs(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[ConnectorConfig]:
-    require_admin_or_owner(actor)
+    require_platform_owner(actor)
     return _visible_tenant_records(store.connector_configs, actor)
 
 
@@ -1550,7 +1553,7 @@ def create_connector_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> ConnectorConfig:
-    require_admin_or_owner(actor)
+    require_platform_owner(actor)
     connector = store.connectors.get(payload.connector_id)
     if connector is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown connector.")
@@ -1592,7 +1595,7 @@ def update_connector_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> ConnectorConfig:
-    require_admin_or_owner(actor)
+    require_platform_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     updates = payload.model_dump(exclude_unset=True)
     replace_settings = bool(updates.pop("replace_settings", False))
@@ -1630,7 +1633,7 @@ def delete_connector_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> dict[str, str]:
-    require_admin_or_owner(actor)
+    require_platform_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     linked_knowledge = [
         knowledge.name
@@ -1684,7 +1687,7 @@ def connector_oauth_authorize_url(
 
 
 def _google_oauth_authorize_url(config_id: str, actor: User, store: SeedStore) -> str:
-    require_admin_or_owner(actor)
+    require_platform_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     if config.connector_id != "google-drive":
         raise HTTPException(
@@ -1737,7 +1740,7 @@ def test_connector_config(
     store: SeedStore = Depends(get_store),
 ) -> dict[str, Any]:
     """Live-verify connector credentials: required fields, token acquisition, API probe."""
-    require_admin_or_owner(actor)
+    require_platform_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     result = connector_auth.run_connector_test(store, config)
     settings = dict(config.settings)

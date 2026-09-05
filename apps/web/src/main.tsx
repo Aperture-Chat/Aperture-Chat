@@ -4,6 +4,7 @@ import { App } from "./App";
 import { initPwaInstallCapture } from "./lib/pwa";
 import { applyCachedBrandBoot } from "./lib/brandTheme";
 import "./styles.css";
+import "./workspace-refresh.css";
 
 /* Capture the browser's install prompt before first render — Chromium can
  * fire beforeinstallprompt before React mounts. */

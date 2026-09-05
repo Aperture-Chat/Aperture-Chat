@@ -35,7 +35,7 @@ export type OwnerFocus =
   | "policyFloor"
   | "policyToggles"
   | "budgetControls"
-  | "policyCallout"
+  | "sharedConnectors"
   | "analyticsFilters"
   | "runtimeScorecards"
   | "runtimeRows"
@@ -57,71 +57,81 @@ export type OwnerFocus =
   | "retentionTagsSwitch"
   | "retentionTagsExplorer"
   | "retentionPreview"
-  | "retentionBatch";
+  | "retentionBatch"
+  | "firstOwnerSetup"
+  | "firstOwnerWelcome"
+  | "firstProviderValidated"
+  | "firstWorkspaceAccess"
+  | "firstWorkspaceReply";
 
 export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
-  addProvider: { frame: "training/owner/providers.png", rect: { x: 942, y: 170, w: 141, h: 42 } },
-  providerCard: { frame: "training/owner/providers.png", rect: { x: 295, y: 266, w: 382, h: 226 } },
-  providerStats: { frame: "training/owner/providers.png", rect: { x: 368, y: 312, w: 268, h: 44 } },
-  providerCardActions: { frame: "training/owner/providers.png", rect: { x: 372, y: 398, w: 300, h: 91 } },
+  addProvider: { frame: "training/owner/providers.png", rect: { x: 940, y: 279, w: 141, h: 45 } },
+  providerCard: { frame: "training/owner/providers.png", rect: { x: 282, y: 382, w: 420, h: 340 } },
+  providerStats: { frame: "training/owner/providers.png", rect: { x: 376, y: 431, w: 308, h: 119 } },
+  providerCardActions: { frame: "training/owner/providers.png", rect: { x: 376, y: 613, w: 308, h: 91 } },
   // vault/audit/alerts frames are local-stack re-captures with staged synthetic
   // keys, events, rules, and deliveries; rects measured from the live DOM.
-  vaultPanel: { frame: "training/owner/vault.png", rect: { x: 300, y: 334, w: 811, h: 184 } },
-  vaultKeyRow: { frame: "training/owner/vault.png", rect: { x: 300, y: 427, w: 811, h: 44 } },
-  vaultKeyActions: { frame: "training/owner/vault.png", rect: { x: 1007, y: 428, w: 104, h: 43 } },
-  modelsSearch: { frame: "training/owner/models.png", rect: { x: 590, y: 155, w: 500, h: 55 } },
-  modelsColumnFilters: { frame: "training/owner/models.png", rect: { x: 279, y: 238, w: 851, h: 45 } },
-  modelsToggle: { frame: "training/owner/models.png", rect: { x: 854, y: 292, w: 45, h: 29 } },
-  rolesDisclosure: { frame: "training/owner/roles.png", rect: { x: 268, y: 1, w: 875, h: 64 } },
-  rolesCreateForm: { frame: "training/owner/roles.png", rect: { x: 282, y: 80, w: 847, h: 135 } },
-  rolesSetPassword: { frame: "training/owner/roles.png", rect: { x: 1034, y: 235, w: 38, h: 38 } },
-  rolesUserRows: { frame: "training/owner/roles.png", rect: { x: 282, y: 222, w: 847, h: 395 } },
-  ssoIntro: { frame: "training/owner/sso.png", rect: { x: 268, y: 0, w: 875, h: 52 } },
-  ssoProtocol: { frame: "training/owner/sso.png", rect: { x: 712, y: 67, w: 418, h: 59 } },
-  ssoFields: { frame: "training/owner/sso.png", rect: { x: 282, y: 67, w: 847, h: 270 } },
-  ssoRedirect: { frame: "training/owner/sso.png", rect: { x: 282, y: 343, w: 847, h: 83 } },
-  ssoToggles: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 236, w: 847, h: 164 } },
-  ssoSaveTest: { frame: "training/owner/sso-actions.png", rect: { x: 278, y: 405, w: 276, h: 44 } },
-  ssoEnforce: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 353, w: 847, h: 44 } },
-  brandPreview: { frame: "training/owner/branding.png", rect: { x: 282, y: 67, w: 847, h: 80 } },
-  brandFields: { frame: "training/owner/branding.png", rect: { x: 282, y: 168, w: 847, h: 180 } },
-  brandThemeColors: { frame: "training/owner/branding.png", rect: { x: 282, y: 352, w: 847, h: 248 } },
-  brandActions: { frame: "training/owner/branding.png", rect: { x: 282, y: 612, w: 847, h: 90 } },
+  vaultPanel: { frame: "training/owner/vault.png", rect: { x: 300, y: 390, w: 811, h: 165 } },
+  vaultKeyRow: { frame: "training/owner/vault.png", rect: { x: 300, y: 496, w: 800, h: 59 } },
+  vaultKeyActions: { frame: "training/owner/vault.png", rect: { x: 989, y: 496, w: 111, h: 49 } },
+  modelsSearch: { frame: "training/owner/models.png", rect: { x: 583, y: 269, w: 500, h: 45 } },
+  modelsColumnFilters: { frame: "training/owner/models.png", rect: { x: 283, y: 363, w: 845, h: 48 } },
+  modelsToggle: { frame: "training/owner/models.png", rect: { x: 849, y: 418, w: 47, h: 30 } },
+  rolesDisclosure: { frame: "training/owner/roles.png", rect: { x: 262, y: 0, w: 887, h: 90 } },
+  rolesCreateForm: { frame: "training/owner/roles.png", rect: { x: 282, y: 104, w: 847, h: 142 } },
+  rolesSetPassword: { frame: "training/owner/roles.png", rect: { x: 1027, y: 338, w: 45, h: 45 } },
+  rolesUserRows: { frame: "training/owner/roles.png", rect: { x: 282, y: 262, w: 847, h: 527 } },
+  ssoIntro: { frame: "training/owner/sso.png", rect: { x: 262, y: 0, w: 887, h: 90 } },
+  ssoProtocol: { frame: "training/owner/sso.png", rect: { x: 708, y: 104, w: 421, h: 66 } },
+  ssoFields: { frame: "training/owner/sso.png", rect: { x: 282, y: 104, w: 847, h: 751 } },
+  ssoRedirect: { frame: "training/owner/sso.png", rect: { x: 282, y: 381, w: 847, h: 90 } },
+  ssoToggles: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 237, w: 847, h: 163 } },
+  ssoSaveTest: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 405, w: 847, h: 45 } },
+  ssoEnforce: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 349, w: 847, h: 51 } },
+  brandPreview: { frame: "training/owner/branding.png", rect: { x: 282, y: 85, w: 847, h: 87 } },
+  brandFields: { frame: "training/owner/branding.png", rect: { x: 282, y: 186, w: 847, h: 539 } },
+  brandThemeColors: { frame: "training/owner/branding.png", rect: { x: 282, y: 370, w: 847, h: 255 } },
+  brandActions: { frame: "training/owner/branding.png", rect: { x: 282, y: 630, w: 847, h: 45 } },
   // A 4:3 camera zoom removes the capture tool's unused right/bottom canvas
   // while preserving the native console text. Expanded sections use dedicated
   // scrolled frames, and rects are measured in the final zoomed composition.
-  policyCollapsed: { frame: "training/owner/policies-current-collapsed.png", rect: { x: 377, y: 630, w: 764, h: 202 }, zoom: 4 / 3 },
+  policyCollapsed: { frame: "training/owner/policies-current-collapsed.png", rect: { x: 261, y: 380, w: 889, h: 98 } },
   // The enforced-floor row sits above the toggle stack in the toggles frame,
   // inside the readable-viewport envelope pinned by trainingVideoKit.test.ts;
   // sharing the frame with policyToggles glides the highlight down the stack.
-  policyFloor: { frame: "training/owner/policies-toggles-current.png", rect: { x: 377, y: 287, w: 770, h: 66 }, zoom: 4 / 3 },
-  policyToggles: { frame: "training/owner/policies-toggles-current.png", rect: { x: 377, y: 355, w: 770, h: 477 }, zoom: 4 / 3 },
-  budgetControls: { frame: "training/owner/policies-budget-current.png", rect: { x: 377, y: 568, w: 770, h: 132 }, zoom: 4 / 3 },
-  // No zoom here: the 4/3 crop pushed the lock callout below the canvas, so
-  // this scene shows the full capture where the callout is visible.
-  policyCallout: { frame: "training/owner/policies-callout-current.png", rect: { x: 277, y: 654, w: 855, h: 56 } },
-  analyticsFilters: { frame: "training/owner/analytics.png", rect: { x: 282, y: 79, w: 847, h: 131 } },
-  runtimeScorecards: { frame: "training/owner/analytics.png", rect: { x: 268, y: 210, w: 875, h: 137 } },
-  runtimeRows: { frame: "training/owner/analytics.png", rect: { x: 278, y: 355, w: 850, h: 78 } },
-  activityCharts: { frame: "training/owner/analytics-activity.png", rect: { x: 268, y: 200, w: 875, h: 290 } },
-  usageScorecards: { frame: "training/owner/analytics-usage.png", rect: { x: 268, y: 500, w: 875, h: 95 } },
-  usageCharts: { frame: "training/owner/analytics-usage.png", rect: { x: 268, y: 595, w: 875, h: 215 } },
-  usageByUser: { frame: "training/owner/analytics-usage-users.png", rect: { x: 282, y: 598, w: 848, h: 158 } },
-  auditCriticalTile: { frame: "training/owner/audit.png", rect: { x: 282, y: 138, w: 160, h: 109 } },
-  auditTileGrid: { frame: "training/owner/audit.png", rect: { x: 268, y: 124, w: 875, h: 379 } },
-  auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 282, y: 470, w: 847, h: 131 } },
-  trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 268, y: 211, w: 875, h: 66 } },
-  trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 268, y: 289, w: 875, h: 520 } },
-  alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 268, y: 65, w: 875, h: 170 } },
-  alertRules: { frame: "training/owner/alerts-deliveries.png", rect: { x: 268, y: 71, w: 875, h: 166 } },
-  alertTemplates: { frame: "training/owner/alerts-deliveries.png", rect: { x: 732, y: 11, w: 397, h: 38 } },
-  alertDeliveries: { frame: "training/owner/alerts-deliveries.png", rect: { x: 268, y: 335, w: 875, h: 520 } },
-  retentionPanel: { frame: "training/owner/retention-policy.png", rect: { x: 267, y: 542, w: 877, h: 268 } },
-  retentionToggles: { frame: "training/owner/retention-policy.png", rect: { x: 268, y: 623, w: 875, h: 186 } },
-  retentionTagsSwitch: { frame: "training/owner/retention-tags.png", rect: { x: 268, y: 65, w: 875, h: 66 } },
-  retentionTagsExplorer: { frame: "training/owner/retention-tags.png", rect: { x: 268, y: 143, w: 875, h: 556 } },
-  retentionPreview: { frame: "training/owner/retention-preview.png", rect: { x: 183, y: 215, w: 820, h: 424 } },
-  retentionBatch: { frame: "training/owner/retention-batch.png", rect: { x: 268, y: 356, w: 875, h: 143 } },
+  policyFloor: { frame: "training/owner/policies-toggles-current.png", rect: { x: 282, y: 217, w: 847, h: 51 } },
+  policyToggles: { frame: "training/owner/policies-toggles-current.png", rect: { x: 262, y: 197, w: 887, h: 462 } },
+  budgetControls: { frame: "training/owner/policies-budget-current.png", rect: { x: 283, y: 280, w: 845, h: 94 } },
+  // The legacy filename is retained; recapture the new owner Connectors panel
+  // and apply its measured bounds before publishing the reconciled UI.
+  sharedConnectors: { frame: "training/owner/policies-callout-current.png", rect: { x: 261, y: 0, w: 889, h: 855 } },
+  analyticsFilters: { frame: "training/owner/analytics.png", rect: { x: 276, y: 98, w: 859, h: 154 } },
+  runtimeScorecards: { frame: "training/owner/analytics.png", rect: { x: 262, y: 245, w: 887, h: 156 } },
+  runtimeRows: { frame: "training/owner/analytics.png", rect: { x: 262, y: 408, w: 887, h: 447 } },
+  activityCharts: { frame: "training/owner/analytics-activity.png", rect: { x: 262, y: 224, w: 887, h: 277 } },
+  usageScorecards: { frame: "training/owner/analytics-usage.png", rect: { x: 262, y: 264, w: 887, h: 156 } },
+  usageCharts: { frame: "training/owner/analytics-usage.png", rect: { x: 262, y: 427, w: 887, h: 277 } },
+  usageByUser: { frame: "training/owner/analytics-usage-users.png", rect: { x: 262, y: 638, w: 887, h: 190 } },
+  auditCriticalTile: { frame: "training/owner/audit.png", rect: { x: 282, y: 342, w: 166, h: 139 } },
+  auditTileGrid: { frame: "training/owner/audit.png", rect: { x: 262, y: 322, w: 887, h: 467 } },
+  auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 276, y: 419, w: 859, h: 154 } },
+  trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 262, y: 224, w: 887, h: 85 } },
+  trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 262, y: 314, w: 887, h: 527 } },
+  alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 261, y: 234, w: 889, h: 459 } },
+  alertRules: { frame: "training/owner/alerts-deliveries.png", rect: { x: 261, y: 0, w: 889, h: 302 } },
+  alertTemplates: { frame: "training/owner/alerts-deliveries.png", rect: { x: 726, y: 31, w: 403, h: 45 } },
+  alertDeliveries: { frame: "training/owner/alerts-deliveries.png", rect: { x: 262, y: 419, w: 887, h: 436 } },
+  retentionPanel: { frame: "training/owner/retention-policy.png", rect: { x: 261, y: 479, w: 889, h: 338 } },
+  retentionToggles: { frame: "training/owner/retention-policy.png", rect: { x: 262, y: 587, w: 887, h: 229 } },
+  retentionTagsSwitch: { frame: "training/owner/retention-tags.png", rect: { x: 262, y: 385, w: 887, h: 85 } },
+  retentionTagsExplorer: { frame: "training/owner/retention-tags.png", rect: { x: 262, y: 475, w: 887, h: 380 } },
+  retentionPreview: { frame: "training/owner/retention-preview.png", rect: { x: 179, y: 98, w: 827, h: 659 } },
+  retentionBatch: { frame: "training/owner/retention-batch.png", rect: { x: 262, y: 599, w: 887, h: 87 } },
+  firstOwnerSetup: { frame: "training/owner/first-owner-setup.png", rect: { x: 104, y: 362, w: 399, h: 443 } },
+  firstOwnerWelcome: { frame: "training/owner/first-owner-welcome.png", rect: { x: 261, y: 24, w: 889, h: 272 } },
+  firstProviderValidated: { frame: "training/owner/first-provider-validated.png", rect: { x: 713, y: 386, w: 413, h: 333 } },
+  firstWorkspaceAccess: { frame: "training/owner/first-workspace-access.png", rect: { x: 282, y: 104, w: 847, h: 685 } },
+  firstWorkspaceReply: { frame: "training/owner/first-workspace-reply.png", rect: { x: 315, y: 332, w: 839, h: 163 } },
 };
 
 type OwnerGuideIcon =
@@ -142,6 +152,65 @@ export type OwnerTrainingVideo = TrainingVideoBase & { icon: OwnerGuideIcon };
 
 const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
   {
+    id: "owner-first-workspace",
+    audioSrc: "training/owner/owner-first-workspace.mp3",
+    title: "Set up the first workspace",
+    description: "Create the first owner, connect and validate a provider, arrange access, and verify a new live conversation.",
+    icon: "provider",
+    outcomes: ["Owner created", "Provider validated", "Workspace conversation verified"],
+    setupSteps: [
+      "On a fresh installation that requires setup, enter the first owner's email, display name, and a matching password of at least 12 characters, then choose Create platform owner.",
+      "Use Getting started to review readiness. Set up models opens the owner console when no model is available; Open owner guide provides the detailed walkthroughs.",
+      "Without a model, Drafts still supports editing, importing, saving, and exporting documents and decks. AI drafting remains unavailable until a usable model is connected and enabled.",
+      "In Providers, configure a supported provider and its endpoint, store an active provider key, and run Sync Models. Check the actual result, Connected status, and returned catalog. Needs key or Needs validation means setup is incomplete; a saved key alone does not prove the connection works.",
+      "Enable the intended organization models. In Admin console, review Users, Groups, and Model Access so approved accounts belong to groups that can use those models.",
+      "For each approved account, arrange Organization SSO or a temporary password and share the workspace sign-in address. Approval does not send an automatic email.",
+      "Complete a new sign-in with an intended user account, select an available model, send a fresh message, and confirm that a provider response arrives.",
+    ],
+    scenes: [
+      {
+        title: "Create the first platform owner",
+        caption: "Fresh installations start with an owner email, display name, and a confirmed password of at least 12 characters.",
+        narration:
+          "When a fresh installation requires setup, create the first platform owner. Enter the owner's email and display name, create a password with at least twelve characters, and confirm it. Choose Create platform owner to establish the account that manages this workspace.",
+        durationSeconds: 18,
+        focus: "firstOwnerSetup",
+      },
+      {
+        title: "Follow the Getting started checklist",
+        caption: "Getting started shows model readiness. Set up models opens the owner console; Drafts can still be used manually.",
+        narration:
+          "After sign-in, Getting started shows account and model readiness. Without a model, Drafts still supports editing, importing, saving, and exporting; AI drafting is unavailable. Choose Set up models, then open Providers. Open owner guide supplies the detailed setup instructions.",
+        durationSeconds: 20,
+        focus: "firstOwnerWelcome",
+      },
+      {
+        title: "Validate the provider connection",
+        caption: "Run Sync Models and check the result, Connected status, and returned catalog before enabling models.",
+        narration:
+          "Configure a supported provider and endpoint, then store an active key. Run Sync Models and inspect its result, the Connected status, and the returned catalog. Needs key or Needs validation means setup is incomplete. Resolve errors before enabling models, and verify an actual chat response at the end.",
+        durationSeconds: 22,
+        focus: "firstProviderValidated",
+      },
+      {
+        title: "Give the team a working access path",
+        caption: "Enable organization models, assign them to platform groups, and arrange sign-in for approved accounts.",
+        narration:
+          "Enable the intended organization models, then use Admin console to review accounts, groups, and Model Access. Approved users need an active account, the right platform group, and a model assigned to that group. Arrange SSO or a temporary password and share the workspace address; approval sends no automatic email.",
+        durationSeconds: 23,
+        focus: "firstWorkspaceAccess",
+      },
+      {
+        title: "Verify a new conversation",
+        caption: "Sign in as an intended user, select an available model, send a new message, and read the provider's response.",
+        narration:
+          "Finish with a new sign-in by an intended user. Complete any password or authenticator steps, select an available model, and send a fresh message. Confirm that the provider returns a response. This verifies that account setup, group access, model availability, and the connection work together.",
+        durationSeconds: 21,
+        focus: "firstWorkspaceReply",
+      },
+    ],
+  },
+  {
     id: "provider-setup",
     audioSrc: "training/owner/provider-setup.mp3",
     title: "Providers and connections",
@@ -151,7 +220,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     setupSteps: [
       "Open the account drawer, then Management, then Platform owner console; it opens on Org Settings — switch to the Providers tab.",
       "Add Provider registers OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP Gemini, Bedrock, Open WebUI, OpenRouter, Ollama, OpenAI-compatible, or local gateways.",
-      "Save the base URL, auth type, region, and first key label with the connection.",
+      "Save the base URL, auth type, region, and first key label with the connection. A successful save records configuration; it does not prove the provider responds.",
       "Open API Keys on the card to add or replace that provider's vaulted secrets.",
       "Run Sync Models once an active key exists; newly synced models arrive disabled.",
       "Finish in the Models tab to enable the routes you have reviewed.",
@@ -167,10 +236,10 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Read the card honestly",
-        caption: "Each card shows the brand logo and a truthful badge: Connected, Adapter needed, or Needs key.",
+        caption: "Read the badge: Needs key, Needs validation, Adapter needed, or Connected.",
         narration:
-          "Each card leads with the brand logo and a badge that tells the truth: Connected, Adapter needed, or Needs key. Bedrock registers cleanly but shows Adapter needed, because its gateway adapter is not built yet.",
-        durationSeconds: 15,
+          "Read the status separately from the save confirmation. Needs key means a credential is missing. Needs validation means the saved provider still needs a successful runtime check. Adapter needed identifies unsupported routing. Connected reflects a validated usable route.",
+        durationSeconds: 20,
         focus: "providerCard",
       },
       {
@@ -266,6 +335,12 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     description: "Create accounts, issue passwords, and understand the owner and admin floors.",
     icon: "users",
     outcomes: ["Account created", "Password issued", "Floors clear"],
+    setupSteps: [
+      "Create accounts only at the role level the person needs, then verify their groups and model access in Admin console.",
+      "Use the Admin console Users queue to review access requests. After approval, finish the sign-in handoff; approval does not send an email.",
+      "For password accounts, provide a temporary password securely. The person chooses a new password at first sign-in; existing sessions are revoked when that change succeeds.",
+      "For SSO accounts, confirm the person exists with the identity provider and give them the workspace sign-in address.",
+    ],
     scenes: [
       {
         title: "The Role Boundary panel",
@@ -432,7 +507,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "policies-connectors",
     audioSrc: "training/owner/policies-connectors.mp3",
     title: "Policies, budget, and connectors",
-    description: "Set the organization ceiling, the workspace usage budget, and the org-wide connector switches.",
+    description: "Set organization policies and budget, and manage shared connector configuration and credentials.",
     icon: "policy",
     outcomes: ["Ceiling set", "Budget set", "Connectors gated"],
     scenes: [
@@ -473,12 +548,12 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         calloutPlacement: "left-rail",
       },
       {
-        title: "The ceiling holds",
-        caption: "Admins operate inside these boundaries; platform connectors stay the org-wide switch below.",
+        title: "Owner-managed shared connectors",
+        caption: "Org Settings → Connectors is the owner-only home for shared configuration, credentials, connection tests, and workspace authorization.",
         narration:
-          "Active policies define the organization ceiling — tenant admins can only operate inside it. Platform connectors remain the org-wide switch just below: disable a source here and no one can offer it.",
-        durationSeconds: 15,
-        focus: "policyCallout",
+          "Owners manage shared connectors in Org Settings. Configure the vendor's fields and credentials, save, then test the actual connection. Workspace authorization here supports shared operations such as knowledge sync; chat attachments still use each person's own cloud account. Tenant administrators do not manage these shared credentials. Read the saved, disabled, or missing-credential status before relying on a source.",
+        durationSeconds: 28,
+        focus: "sharedConnectors",
         calloutPlacement: "left-rail",
       },
     ],
@@ -691,6 +766,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
     ],
   },
+
 ];
 
 const VIDEO_ICONS = {

@@ -7,6 +7,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     profiles: ["local", "vps", "prod"]
 
   api:
@@ -22,8 +27,12 @@ services:
       APERTURE_SECRET_KEY: ${APERTURE_SECRET_KEY:?set a strong secret}
       APERTURE_RUNTIME_STATE_PATH: /srv/aperture/services/api/data/runtime_state.json
       APERTURE_VECTOR_DB_PATH: /srv/aperture/services/api/data/knowledge_vectors.sqlite3
+      # Hand-off directory for the updater sidecar below. The API only writes
+      # a small request file here; it never reaches the Docker socket.
+      APERTURE_PLATFORM_UPDATER_STATE_DIR: /srv/aperture/updater-state
     volumes:
       - aperture-api-data:/srv/aperture/services/api/data
+      - aperture-updater-state:/srv/aperture/updater-state
     ports:
       - "${APERTURE_API_BIND:-127.0.0.1:8000}:8000"
     healthcheck:
@@ -31,6 +40,30 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    profiles: ["local", "vps", "prod"]
+
+  # One-click upgrades from the platform-owner sidebar. This is the only
+  # service with the Docker socket: it pulls the requested vX.Y.Z images,
+  # records the tag in .env, recreates api then web, checks both services, and
+  # attempts to restore their recorded images on failure. It never deletes
+  # data volumes. Start
+  # the stack from the project directory so ${PWD} mounts it at the same path
+  # (Compose bind mounts must resolve on the host). Remove this service or run
+  # `docker compose -f docker-compose.release.yml up -d api web caddy` if you
+  # do not want it. The Docker socket grants this sidecar host-level control.
+  updater:
+    image: docker:28-cli
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/opt/aperture/updater.sh"]
+    environment:
+      APERTURE_UPDATER_STATE_DIR: /state
+      APERTURE_UPDATER_SERVICES: "api web"
+      APERTURE_UPDATER_HEALTH_TIMEOUT_SECONDS: ${APERTURE_UPDATER_HEALTH_TIMEOUT_SECONDS:-300}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./infra/updater/updater.sh:/opt/aperture/updater.sh:ro
+      - ${PWD}:${PWD}
+      - aperture-updater-state:/state
     profiles: ["local", "vps", "prod"]
 
   # Opt-in relational database. Enabling this profile does not silently switch
@@ -84,5 +117,6 @@ services:
 volumes:
   aperture-api-data:
   aperture-postgres-data:
+  aperture-updater-state:
   caddy-data:
   caddy-config:

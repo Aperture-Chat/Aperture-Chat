@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
@@ -9,6 +9,8 @@ export default defineConfig({
     alias: [{ find: /^mammoth$/, replacement: "mammoth/mammoth.browser.js" }],
   },
   test: {
+    // Training-generator regressions use node:test and run separately in CI.
+    exclude: [...configDefaults.exclude, "scripts/**/*.test.cjs"],
     environment: "jsdom",
     setupFiles: "./src/test-setup.ts",
   },

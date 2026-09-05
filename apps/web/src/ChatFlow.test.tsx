@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { PlatformConsole } from "./components/PlatformConsole";
@@ -2597,4 +2597,211 @@ test("prompt improver stays hidden until there is a draft, then rewrites in plac
   expect(messages[0].role).toBe("system");
   expect(messages[0].content).toContain("Do not answer the prompt");
   expect(messages[1].content).toContain("check policy ok?");
+});
+
+
+test("knowledge shortcut loads delayed files through draft rerenders and retries a failed listing", async () => {
+  const originalFetch = globalThis.fetch;
+  let releaseDocuments!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseDocuments = resolve; });
+  let fail = true;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (/\/api\/knowledge\/[^/]+\/documents$/.test(url)) {
+      await gate;
+      if (fail) return new Response("unavailable", { status: 503 });
+      return new Response(JSON.stringify([{ id: `doc-handbook-${url.split("/").at(-2)}`, name: "Team handbook.pdf" }]), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  }));
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "#" } });
+  expect(screen.getByText("Loading files…")).toBeInTheDocument();
+  fireEvent.change(textarea, { target: { value: "#Team" } });
+  await act(async () => releaseDocuments());
+  expect(await screen.findByText(/Some files could not be loaded/)).toBeInTheDocument();
+  expect(screen.queryByText("Loading files…")).not.toBeInTheDocument();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const choices = await screen.findAllByRole("option", { name: /Team handbook.pdf/ });
+  fireEvent.click(choices[0]);
+  expect(textarea).toHaveValue("#Team handbook.pdf ");
+  expect(screen.queryByText(/Some files could not be loaded/)).not.toBeInTheDocument();
+});
+
+test("IME confirmation does not send a message or choose a shortcut", async () => {
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "日本語の質問" } });
+  fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+  expect(chatRequests).toHaveLength(0);
+  expect(textarea).toHaveValue("日本語の質問");
+  fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 });
+  expect(chatRequests).toHaveLength(0);
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+});
+
+test("composer shortcut lists do not trap Tab and expose the highlighted choice", async () => {
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "#" } });
+  const list = screen.getByRole("listbox", { name: "Knowledge commands" });
+  expect(textarea).toHaveAttribute("aria-controls", list.id);
+  const activeId = textarea.getAttribute("aria-activedescendant");
+  expect(activeId && document.getElementById(activeId)).toHaveAttribute("aria-selected", "true");
+  expect(fireEvent.keyDown(textarea, { key: "Tab" })).toBe(true);
+  expect(screen.queryByRole("listbox", { name: "Knowledge commands" })).not.toBeInTheDocument();
+});
+
+test("composer shortcuts are discoverable without an autofocus tooltip", async () => {
+  await renderApp();
+  expect(await screen.findByLabelText("Message")).not.toHaveAttribute("data-tooltip");
+  fireEvent.click(screen.getByRole("button", { name: "Composer shortcuts" }));
+  expect(screen.getByRole("note", { name: "Composer shortcuts" })).toHaveTextContent("Shift + Enter adds a line");
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss shortcuts" }));
+  expect(screen.queryByRole("note", { name: "Composer shortcuts" })).not.toBeInTheDocument();
+});
+
+test("attachment send preserves the next prompt and files staged while an upload is in flight", async () => {
+  const originalFetch = globalThis.fetch;
+  let releaseUpload!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseUpload = resolve; });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.endsWith("/api/chat/attachments")) await gate;
+    return originalFetch(input, init);
+  }));
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  const fileInput = screen.getByLabelText("Upload files from computer");
+  fireEvent.change(textarea, { target: { value: "Read the first document." } });
+  fireEvent.change(fileInput, { target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  fireEvent.change(textarea, { target: { value: "Compare this second document next." } });
+  fireEvent.change(fileInput, { target: { files: [new File(["second"], "second.pdf", { type: "application/pdf" })] } });
+  await act(async () => releaseUpload());
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const nextTextarea = screen.getByLabelText("Message");
+  expect(nextTextarea).toHaveValue("Compare this second document next.");
+  const composer = nextTextarea.closest("form")!;
+  expect(within(composer).getByRole("button", { name: "Remove second.pdf" })).toBeInTheDocument();
+  expect(within(composer).queryByRole("button", { name: "Remove first.pdf" })).not.toBeInTheDocument();
+  expect(uploadRequests.map((request) => request.name)).toEqual(["first.pdf"]);
+});
+
+test("a failed upload keeps the draft and staged files without marking later attachments as failed", async () => {
+  const originalFetch = globalThis.fetch;
+  let releaseUpload!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseUpload = resolve; });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.endsWith("/api/chat/attachments")) {
+      await gate;
+      return new Response(JSON.stringify({ detail: "Upload unavailable. Try again." }), {
+        status: 503, headers: { "Content-Type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  }));
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  const fileInput = screen.getByLabelText("Upload files from computer");
+  fireEvent.change(textarea, { target: { value: "Review these documents." } });
+  fireEvent.change(fileInput, { target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  fireEvent.change(fileInput, { target: { files: [new File(["second"], "second.pdf", { type: "application/pdf" })] } });
+  await act(async () => releaseUpload());
+  expect(await screen.findByText("Upload unavailable. Try again.")).toBeInTheDocument();
+  expect(textarea).toHaveValue("Review these documents.");
+  expect(chatRequests).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "Remove first.pdf" }).closest(".attach-chip")).toHaveClass("is-error");
+  expect(screen.getByRole("button", { name: "Remove second.pdf" }).closest(".attach-chip")).not.toHaveClass("is-error");
+});
+
+test("starter actions stage an editable prompt without sending it", async () => {
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.click(screen.getByRole("button", { name: "Compare options" }));
+  expect(textarea).toHaveValue("Help me compare these options: ");
+  expect(textarea).toHaveFocus();
+  expect(chatRequests).toHaveLength(0);
+  expect(screen.queryByRole("group", { name: "Start a conversation" })).not.toBeInTheDocument();
+});
+
+test("expanded composer and its nested file picker contain focus and dismiss one layer at a time", async () => {
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "Review this document." } });
+  const expand = screen.getByRole("button", { name: "Expand prompt editor" });
+  act(() => expand.focus());
+  fireEvent.click(expand);
+  const editor = screen.getByRole("dialog", { name: "Expanded prompt editor" });
+  expect(textarea).toHaveFocus();
+  expect(within(editor).queryByRole("button", { name: "Expand prompt editor" })).not.toBeInTheDocument();
+  const attach = within(editor).getByRole("button", { name: "Add attachment" });
+  fireEvent.click(attach);
+  fireEvent.click(within(editor).getByRole("menuitem", { name: "Google Drive" }));
+  const picker = await screen.findByRole("dialog", { name: "Choose from Google Drive" });
+  const pickerClose = within(picker).getByRole("button", { name: "Close" });
+  expect(pickerClose).toHaveFocus();
+  fireEvent.keyDown(pickerClose, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Choose from Google Drive" })).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Expanded prompt editor" })).toBeInTheDocument();
+  expect(attach).toHaveFocus();
+  fireEvent.keyDown(attach, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Expanded prompt editor" })).not.toBeInTheDocument();
+  expect(expand).toHaveFocus();
+  expect(textarea).toHaveValue("Review this document.");
+});
+
+test("session details behaves as a keyboard modal on smaller screens", async () => {
+  const previousWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { value: 700, configurable: true, writable: true });
+  try {
+    await renderApp();
+    const trigger = screen.getByRole("button", { name: "Session info" });
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Session details" });
+    const close = within(dialog).getByRole("button", { name: "Close session details" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Session details" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  } finally {
+    Object.defineProperty(window, "innerWidth", { value: previousWidth, configurable: true, writable: true });
+    act(() => window.dispatchEvent(new Event("resize")));
+  }
+});
+
+test("cloud file arrow navigation moves focus and Space toggles a file without attaching it", async () => {
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/api/chat/cloud-attachments/google-drive/items")) {
+      return new Response(JSON.stringify(["Alpha memo", "Beta memo"].map((name, index) => ({
+        id: `file-${index}`, name, kind: "Text", size: "10 B", mime_type: "text/plain", item_type: "file",
+      }))), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return originalFetch(input, init);
+  }));
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Google Drive" }));
+  const first = await screen.findByRole("option", { name: /Alpha memo/ });
+  const second = screen.getByRole("option", { name: /Beta memo/ });
+  expect(screen.getByRole("listbox", { name: "Google Drive files" })).toHaveAttribute("aria-multiselectable", "true");
+  act(() => first.focus());
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(second).toHaveFocus();
+  expect(second).toHaveAttribute("aria-selected", "false");
+  fireEvent.keyDown(second, { key: " " });
+  expect(second).toHaveAttribute("aria-selected", "true");
+  expect(cloudImportRequests).toHaveLength(0);
+  fireEvent.keyDown(second, { key: "Home" });
+  expect(first).toHaveFocus();
 });

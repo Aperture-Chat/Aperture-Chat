@@ -336,7 +336,7 @@ type DocRun = {
 type DocBlockAlignment = "center" | "right" | "justify";
 type DocBlock =
   | { kind: "heading"; level: 1 | 2 | 3; runs: DocRun[]; align?: DocBlockAlignment }
-  | { kind: "paragraph"; runs: DocRun[]; align?: DocBlockAlignment }
+  | { kind: "paragraph"; runs: DocRun[]; align?: DocBlockAlignment; mla?: "heading" | "body" | "reference" }
   | { kind: "list-item"; marker: string; runs: DocRun[]; align?: DocBlockAlignment }
   | { kind: "quote"; runs: DocRun[]; align?: DocBlockAlignment }
   | { kind: "code"; text: string }
@@ -418,7 +418,7 @@ function parseDocBlocks(contentHtml: string, documentTitle: string): DocBlock[] 
     collapsed.push(block);
   });
   while (collapsed.length && collapsed[collapsed.length - 1].kind === "page-break") collapsed.pop();
-  if (!collapsed.some((block) => block.kind === "heading" && block.level === 1) && documentTitle) {
+  if (!template.content.querySelector(".document-mla-text") && !collapsed.some((block) => block.kind === "heading" && block.level === 1) && documentTitle) {
     collapsed.unshift({
       kind: "heading",
       level: 1,
@@ -443,6 +443,11 @@ function collectDocBlocks(node: Node, blocks: DocBlock[], imageCounter: { value:
     // it reaches the exporter outside a paginated section. Treating it as a
     // decorative rule made the preview and Word disagree for manual breaks.
     blocks.push({ kind: node.classList.contains("document-page-break") ? "page-break" : "divider" });
+    return;
+  }
+  if (node.classList.contains("document-mla-text") && /^(p|h[1-3]|li|blockquote)$/.test(tag)) {
+    blocks.push({ kind: "paragraph", runs: collectDocRuns(node), align: blockAlignment(node),
+      mla: node.classList.contains("document-mla-reference") ? "reference" : node.classList.contains("document-mla-body") ? "body" : "heading" });
     return;
   }
   if (tag === "h1" || tag === "h2" || tag === "h3") {
@@ -888,6 +893,7 @@ type ParagraphOptions = {
   lineTwips?: number;
   indentLeftTwips?: number;
   hangingTwips?: number;
+  firstLineTwips?: number;
   centered?: boolean;
   align?: DocBlockAlignment;
   keepNext?: boolean;
@@ -916,6 +922,7 @@ function paragraphXml(content: string, options: ParagraphOptions = {}) {
     const hanging = options.hangingTwips ? ` w:hanging="${options.hangingTwips}"` : "";
     props.push(`<w:ind w:left="${options.indentLeftTwips}"${hanging}/>`);
   }
+  if (options.firstLineTwips) props.push(`<w:ind w:firstLine="${options.firstLineTwips}"/>`);
   const justification = options.align ?? (options.centered ? "center" : undefined);
   if (justification) {
     props.push(`<w:jc w:val="${justification === "justify" ? "both" : justification}"/>`);
@@ -1031,7 +1038,11 @@ function renderDocBlocks(
       }
       case "paragraph": {
         paragraph(runsXml(block.runs, {}, hyperlinks), {
-          spacingAfterTwips: twips(20),
+          spacingAfterTwips: block.mla ? 0 : twips(20),
+          lineTwips: block.mla ? 480 : undefined,
+          firstLineTwips: block.mla === "body" ? 720 : undefined,
+          indentLeftTwips: block.mla === "reference" ? 720 : undefined,
+          hangingTwips: block.mla === "reference" ? 720 : undefined,
           align: block.align,
         });
         break;
@@ -1160,7 +1171,7 @@ const ROOT_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:color w:val="242424"/><w:sz w:val="${BODY_SIZE_HALF_PT}"/><w:szCs w:val="${BODY_SIZE_HALF_PT}"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="${BODY_LINE_TWIPS}" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`;
 
-function documentXml(bodyXml: string) {
+function documentXml(bodyXml: string, mla = false) {
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
     `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ` +
@@ -1168,7 +1179,7 @@ function documentXml(bodyXml: string) {
     `xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">` +
     `<w:body>${bodyXml}` +
     `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>` +
-    `<w:pgMar w:top="1080" w:right="1181" w:bottom="1080" w:left="1181" w:header="720" w:footer="720" w:gutter="0"/>` +
+    `<w:pgMar w:top="${mla ? 1440 : 1080}" w:right="${mla ? 1440 : 1181}" w:bottom="${mla ? 1440 : 1080}" w:left="${mla ? 1440 : 1181}" w:header="720" w:footer="720" w:gutter="0"/>` +
     `</w:sectPr></w:body></w:document>`
   );
 }
@@ -1258,7 +1269,7 @@ function assembleDocx(blocks: DocBlock[], images: Map<number, DocxImageResource>
   const entries: ZipEntry[] = [
     { name: "[Content_Types].xml", bytes: encoder.encode(CONTENT_TYPES_XML) },
     { name: "_rels/.rels", bytes: encoder.encode(ROOT_RELS_XML) },
-    { name: "word/document.xml", bytes: encoder.encode(documentXml(bodyXml)) },
+    { name: "word/document.xml", bytes: encoder.encode(documentXml(bodyXml, blocks.some(b => b.kind === "paragraph" && b.mla !== undefined))) },
     {
       name: "word/_rels/document.xml.rels",
       bytes: encoder.encode(documentRelsXml(images, hyperlinks)),

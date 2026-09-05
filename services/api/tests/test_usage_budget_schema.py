@@ -218,7 +218,7 @@ def test_usage_budget_fresh_upgrade_has_exact_schema_and_metadata_parity(
         upgrade_database(engine)
         inspector = inspect(engine)
 
-        assert current_schema_revision(engine) == HEAD_REVISION == "20260820_0018"
+        assert current_schema_revision(engine) == HEAD_REVISION == "20260905_0019"
         assert USAGE_BUDGET_TABLES <= set(inspector.get_table_names())
 
         for table, expected_columns in EXPECTED_COLUMNS.items():
@@ -316,7 +316,7 @@ def test_usage_budget_0006_upgrade_and_downgrade_preserve_existing_rows(
             )
 
         upgrade_database(engine)
-        assert current_schema_revision(engine) == HEAD_REVISION == "20260820_0018"
+        assert current_schema_revision(engine) == HEAD_REVISION == "20260905_0019"
         assert USAGE_BUDGET_TABLES <= set(inspect(engine).get_table_names())
 
         _downgrade(engine, "20260720_0006")

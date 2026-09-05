@@ -1,5 +1,6 @@
 import { FlaskConical, TerminalSquare, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { useModalFocus } from "../lib/useModalFocus";
 import { StableLabel } from "./Primitives";
 import type {
   AdminToolConfigCreateRequest,
@@ -57,6 +58,9 @@ export function CustomToolBuilder({
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeBuilder = () => { if (!saving) onClose(); };
+  useModalFocus(dialogRef, true, closeBuilder);
 
   const valid = name.trim().length > 0 && script.trim().length > 0;
 
@@ -118,8 +122,10 @@ export function CustomToolBuilder({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={closeBuilder}>
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal custom-tool-modal"
         role="dialog"
         aria-modal="true"
@@ -142,7 +148,8 @@ export function CustomToolBuilder({
             type="button"
             aria-label="Close response action builder"
             data-tooltip="Close without saving"
-            onClick={onClose}
+            disabled={saving}
+            onClick={closeBuilder}
           >
             <X size={17} />
           </button>
@@ -153,6 +160,7 @@ export function CustomToolBuilder({
             <label className="auth-field custom-tool-field">
               <span>Action name</span>
               <input
+                disabled={saving}
                 value={name}
                 placeholder="e.g. Export response as PowerPoint"
                 onChange={(event) => setName(event.target.value)}
@@ -164,6 +172,7 @@ export function CustomToolBuilder({
                 type="number"
                 min={1}
                 max={30}
+                disabled={saving}
                 value={timeoutSeconds}
                 onChange={(event) => {
                   const next = Number(event.target.value);
@@ -175,6 +184,7 @@ export function CustomToolBuilder({
           <label className="auth-field custom-tool-field">
             <span>Description</span>
             <input
+              disabled={saving}
               value={description}
               placeholder="What this action adds to assistant responses"
               onChange={(event) => setDescription(event.target.value)}
@@ -185,6 +195,7 @@ export function CustomToolBuilder({
             <span>Python script</span>
             <textarea
               className="custom-tool-script"
+              disabled={saving}
               value={script}
               rows={8}
               spellCheck={false}
@@ -260,6 +271,7 @@ print("Your file is ready.")`}</pre>
                   <label className="model-group-check" key={group.id}>
                     <input
                       type="checkbox"
+                      disabled={saving}
                       checked={allowedGroupIds.includes(group.id)}
                       aria-label={`Allow ${group.name} to run this response action`}
                       onChange={(event) => toggleGroup(group.id, event.target.checked)}
@@ -277,6 +289,7 @@ print("Your file is ready.")`}</pre>
             <strong>Test run</strong>
             <textarea
               aria-label="Test input for the script"
+              disabled={saving}
               value={testInput}
               rows={2}
               placeholder="Paste sample text the script will receive on stdin."
@@ -286,7 +299,7 @@ print("Your file is ready.")`}</pre>
               <button
                 className="secondary-button compact"
                 type="button"
-                disabled={!script.trim() || testing}
+                disabled={!script.trim() || testing || saving}
                 data-tooltip="Run the script in the server sandbox against this sample"
                 onClick={() => void runTest()}
               >
@@ -311,9 +324,9 @@ print("Your file is ready.")`}</pre>
             )}
           </div>
 
-          {error && <p className="connector-config-error">{error}</p>}
+          {error && <p className="connector-config-error" role="alert">{error}</p>}
           <div className="modal-actions">
-            <button className="secondary-button" type="button" onClick={onClose}>
+            <button className="secondary-button" type="button" disabled={saving} onClick={closeBuilder}>
               Cancel
             </button>
             <button

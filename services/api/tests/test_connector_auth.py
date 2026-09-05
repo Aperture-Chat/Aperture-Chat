@@ -81,7 +81,7 @@ def test_graph_client_credentials_acquires_caches_and_test_endpoint_reports_ok(
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-graph-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -134,7 +134,7 @@ def test_graph_vendor_401_surfaces_error_and_test_endpoint_fails_without_leaking
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-graph-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -155,7 +155,7 @@ def test_box_ccg_posts_subject_params_and_probe_names_service_account(
 ) -> None:
     patch = client.patch(
         "/api/admin/connector-configs/conncfg-box-example",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
         json={
             "settings": {"client_id": "box-client-id", "enterprise_id": "4711"},
             "secret_value": "box-client-secret",
@@ -178,7 +178,7 @@ def test_box_ccg_posts_subject_params_and_probe_names_service_account(
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-box-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -206,7 +206,7 @@ def test_box_missing_enterprise_id_reports_incomplete_with_exact_field(
 ) -> None:
     patch = client.patch(
         "/api/admin/connector-configs/conncfg-box-example",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
         json={"settings": {"client_id": "box-client-id"}, "secret_value": "box-client-secret"},
     )
     assert patch.status_code == 200
@@ -214,7 +214,7 @@ def test_box_missing_enterprise_id_reports_incomplete_with_exact_field(
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-box-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -266,7 +266,7 @@ def test_google_refresh_flow_exchanges_stored_refresh_token(monkeypatch: pytest.
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-google-drive-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -300,7 +300,7 @@ def test_google_without_refresh_token_tells_admin_to_run_connect_flow(
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-google-drive-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -315,7 +315,7 @@ def test_google_without_refresh_token_tells_admin_to_run_connect_flow(
 def test_google_oauth_authorize_redirects_with_offline_consent_or_400_when_unconfigured() -> None:
     missing = client.get(
         "/api/admin/connector-configs/conncfg-google-drive-example/oauth/authorize",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
         follow_redirects=False,
     )
     assert missing.status_code == 400
@@ -325,7 +325,7 @@ def test_google_oauth_authorize_redirects_with_offline_consent_or_400_when_uncon
     store.set_configuration_secret("connector", "conncfg-google-drive-example", "google-client-secret")
     response = client.get(
         "/api/admin/connector-configs/conncfg-google-drive-example/oauth/authorize",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
         follow_redirects=False,
     )
     assert response.status_code == 302
@@ -354,7 +354,7 @@ def test_google_oauth_callback_stores_tokens_and_redirects_to_web_origin(
         )
 
     _fake_httpx(monkeypatch, post=fake_post)
-    state = sign_oidc_state({"config_id": config.id, "actor_id": "user-admin"}, get_settings().secret_key)
+    state = sign_oidc_state({"config_id": config.id, "actor_id": "user-owner"}, get_settings().secret_key)
 
     response = client.get(
         "/api/connector-oauth/callback",
@@ -410,7 +410,7 @@ def test_imanage_password_grant_posts_to_base_url_and_probes_libraries(
 ) -> None:
     patch = client.patch(
         "/api/admin/connector-configs/conncfg-imanage-example",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
         json={
             "enabled": True,
             "auth_type": "password",
@@ -454,7 +454,7 @@ def test_imanage_password_grant_posts_to_base_url_and_probes_libraries(
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-imanage-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -490,7 +490,7 @@ def test_imanage_missing_base_url_reports_incomplete(monkeypatch: pytest.MonkeyP
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-imanage-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200
@@ -520,7 +520,7 @@ def test_imanage_delegated_oauth_test_reports_user_sign_in_as_the_live_gate(
 
     response = client.post(
         "/api/admin/connector-configs/conncfg-imanage-example/test",
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200

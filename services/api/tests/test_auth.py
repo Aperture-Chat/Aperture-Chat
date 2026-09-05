@@ -856,3 +856,39 @@ def test_uploaded_avatars_are_downscaled_before_they_reach_every_payload() -> No
     )
     assert remote.status_code == 200
     assert remote.json()["avatar_url"] == "https://cdn.example.com/a.png"
+
+
+def test_concurrent_first_owner_setup_creates_exactly_one_owner(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import time
+    from app.routes import auth
+
+    store = get_store()
+    store.users.pop("user-owner")
+    validate = auth._assert_bootstrap_identity
+    start = threading.Barrier(2)
+
+    def delayed_validation(*args):
+        # Expose the check-to-create interval while the two requests arrive
+        # together; the creation lock must keep the second request outside it.
+        time.sleep(0.05)
+        return validate(*args)
+
+    monkeypatch.setattr(auth, "_assert_bootstrap_identity", delayed_validation)
+
+    def create_owner(index):
+        start.wait(timeout=5)
+        return client.post("/api/auth/bootstrap-owner", json={
+            "email": f"concurrent.owner.{index}@example.test",
+            "display_name": f"Owner {index}",
+            "password": "valid-owner-password-123",
+        })
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(create_owner, range(2)))
+    assert sorted(response.status_code for response in responses) == [201, 409]
+    owners = [user for user in store.users.values() if user.role == Role.PLATFORM_OWNER]
+    assert len(owners) == 1
+    assert store.verify_password_credential(owners[0].id, "valid-owner-password-123")
+    assert sum(event.action == "auth.bootstrap_owner_created" for event in store.audit_events) == 1

@@ -113,6 +113,8 @@ export function AgentWorkspaceConsole({
   // Memories the Hermes companion has saved for the profile being edited.
   // null = not loaded (unsaved profile or fetch pending/failed).
   const [hermesMemories, setHermesMemories] = useState<HermesMemory[] | null>(null);
+  const [hermesMemoryLoad, setHermesMemoryLoad] = useState<"loading" | "ready" | "error">("loading");
+  const [hermesMemoryReload, setHermesMemoryReload] = useState(0);
   // Mirror of the API's hermes_companion_allowed policy: the companion is an
   // admin-granted, off-by-default group permission. The API enforces the same
   // gate on save and at chat runtime.
@@ -140,6 +142,7 @@ export function AgentWorkspaceConsole({
   const canAuthorProfile = (agent: ModelConfig | null) =>
     canAuthorAgents && (isAgentAdmin || agentProfileCreatorMatches(data, agent));
   const canEditSelectedAgent = !draft.id ? canAuthorAgents : canAuthorProfile(selectedAgent);
+  const selectedBaseModelAvailable = baseModels.some((model) => model.id === draft.base_model_id);
   // Say which of the two gates is closed rather than silently hiding the
   // authoring controls, so the missing button is never a mystery.
   const authoringBlockedReason = canAuthorAgents
@@ -154,17 +157,22 @@ export function AgentWorkspaceConsole({
       setHermesMemories(null);
       return;
     }
+    setHermesMemories(null);
+    setHermesMemoryLoad("loading");
     listHermesMemories(data.me.id, draft.id)
       .then((memories) => {
-        if (!cancelled) setHermesMemories(memories);
+        if (!cancelled) {
+          setHermesMemories(memories);
+          setHermesMemoryLoad("ready");
+        }
       })
       .catch(() => {
-        if (!cancelled) setHermesMemories(null);
+        if (!cancelled) setHermesMemoryLoad("error");
       });
     return () => {
       cancelled = true;
     };
-  }, [data.me.id, draft.id, draft.agentic_companion]);
+  }, [data.me.id, draft.id, draft.agentic_companion, hermesMemoryReload]);
 
   async function removeHermesMemory(memoryId: string) {
     if (!draft.id) return;
@@ -226,11 +234,10 @@ export function AgentWorkspaceConsole({
       const models = await syncAdminModelAccess(data.me.id);
       const syncedData = mergeAdminModelCatalogForAgents(data, models);
       const syncedBaseModels = availableAgentBaseModels(syncedData);
-      onDataChange(() => syncedData);
+      onDataChange((current) => mergeAdminModelCatalogForAgents(current, models));
       setDraft((current) => {
-        if (
-          syncedBaseModels.some((model) => model.id === current.base_model_id)
-        ) {
+        // Catalog refresh must never silently reroute an existing agent.
+        if (current.id || current.base_model_id) {
           return current;
         }
         return { ...current, base_model_id: defaultAgentBaseModel(syncedBaseModels)?.id ?? "" };
@@ -251,9 +258,7 @@ export function AgentWorkspaceConsole({
   }
 
   async function saveAgentProfile() {
-    const baseModel =
-      baseModels.find((model) => model.id === draft.base_model_id) ??
-      baseModels[0];
+    const baseModel = baseModels.find((model) => model.id === draft.base_model_id);
     const name = draft.name.trim();
     if (!baseModel || !name) {
       setActionStatus({
@@ -275,12 +280,9 @@ export function AgentWorkspaceConsole({
       meta_prompt: draft.meta_prompt,
       knowledge_config_ids: draft.knowledge_config_ids,
       tool_config_ids: toolConfigIds,
-      platform_enabled: true,
       tenant_restricted: draft.visibility !== "organization",
       group_ids: draft.group_ids,
-      notes: `${draft.agentic_companion === "hermes" ? "Hermes companion enabled. " : ""}Agent profile.`,
       is_custom: true,
-      created_by: data.me.display_name,
       context_window: baseModel.context_window ?? 128000,
       visibility: draft.visibility,
       agentic_companion: draft.agentic_companion,
@@ -305,9 +307,9 @@ export function AgentWorkspaceConsole({
             platform_enabled: true,
             tenant_restricted: payload.tenant_restricted,
             group_ids: payload.group_ids,
-            notes: payload.notes,
+            notes: `${draft.agentic_companion === "hermes" ? "Hermes companion enabled. " : ""}Agent profile.`,
             is_custom: true,
-            created_by: payload.created_by,
+            created_by: data.me.display_name,
             context_window: payload.context_window,
             visibility: payload.visibility,
             agentic_companion: payload.agentic_companion,
@@ -436,8 +438,8 @@ export function AgentWorkspaceConsole({
         <div>
           <h1>Agents</h1>
           <p>
-            Workspace agent profiles with model routing, meta prompts,
-            knowledge, MCP tools, and Hermes companion mode.
+            Build focused assistants with their own instructions, knowledge,
+            and tools. Choose who can use them in your workspace.
           </p>
         </div>
         {sectionTabs}
@@ -645,7 +647,7 @@ export function AgentWorkspaceConsole({
                         : "Save your changes so this agent is available across the workspace"
                     }
                     onClick={() => void saveAgentProfile()}
-                    disabled={pendingAction === "agent:save"}
+                    disabled={pendingAction === "agent:save" || !selectedBaseModelAvailable || !draft.name.trim()}
                   >
                     <Save size={15} />{" "}
                     <StableLabel
@@ -710,21 +712,32 @@ export function AgentWorkspaceConsole({
                   <label>
                     AI model
                     <SelectControl
+                      aria-label="AI model"
                       value={draft.base_model_id}
                       onChange={(event) =>
                         updateDraft({ base_model_id: event.target.value })
                       }
                     >
-                      {baseModels.length ? (
-                        baseModels.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.name} · {model.provider_name}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">No connected models available</option>
+                      {!selectedBaseModelAvailable && (
+                        <option value={draft.base_model_id}>
+                          {draft.id
+                            ? `${selectedAgent?.upstream_model_id ?? "Saved model"} (unavailable)`
+                            : baseModels.length ? "Choose an available model" : "No connected models available"}
+                        </option>
                       )}
+                      {baseModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name} · {model.provider_name}
+                        </option>
+                      ))}
                     </SelectControl>
+                    {!selectedBaseModelAvailable && (
+                      <span className="field-hint" role="status">
+                        {draft.id
+                          ? "This agent's saved model is unavailable. Restore model access or explicitly select a replacement before saving."
+                          : "Connect and enable a model, then choose it here before saving."}
+                      </span>
+                    )}
                   </label>
                   <button
                     className="secondary-button compact agent-model-sync-button"
@@ -943,6 +956,15 @@ export function AgentWorkspaceConsole({
                       Save the profile, then chat with it in agent mode — memories Hermes
                       saves will appear here.
                     </p>
+                  ) : hermesMemoryLoad === "loading" ? (
+                    <p className="hermes-learning-empty" role="status">Loading saved memories…</p>
+                  ) : hermesMemoryLoad === "error" ? (
+                    <div className="hermes-learning-empty">
+                      <p role="alert">Saved memories could not be loaded. Try again to see what this agent has learned.</p>
+                      <button className="secondary-button compact-button" type="button" onClick={() => setHermesMemoryReload((current) => current + 1)}>
+                        <RefreshCw size={14} /> Retry memories
+                      </button>
+                    </div>
                   ) : !hermesMemories || hermesMemories.length === 0 ? (
                     <p className="hermes-learning-empty">
                       No memories saved yet. Hermes records them from real conversations;
@@ -1102,14 +1124,14 @@ function draftFromAgent(
   hermesToolId: string | undefined,
 ): AgentDraft {
   const baseModel =
-    agent && fallbackBaseModel
-      ? (data.models.find(
+    agent
+      ? data.models.find(
           (model) =>
             !isAgentProfile(model) &&
             model.provider_id === agent.provider_id &&
             (model.upstream_model_id ?? model.name) ===
               (agent.upstream_model_id ?? agent.name),
-        ) ?? fallbackBaseModel)
+        )
       : fallbackBaseModel;
   const toolIds = agent
     ? modelToolIds(agent)

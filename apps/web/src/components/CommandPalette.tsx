@@ -126,6 +126,7 @@ export function CommandPalette({
   const [sections, setSections] = useState<GlobalSearchSection[]>([]);
   /** The query the current `sections` were fetched for; "" means none yet. */
   const [resultsQuery, setResultsQuery] = useState("");
+  const [resultsScope, setResultsScope] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -142,6 +143,7 @@ export function CommandPalette({
   }, [threads]);
 
   const trimmed = query.trim();
+  const searchScope = JSON.stringify([userId, tenantSlug]);
 
   // Focus the input on open and hand focus back to the opener on close.
   useEffect(() => {
@@ -166,6 +168,8 @@ export function CommandPalette({
         tenantSlug,
       })
         .then((response) => {
+          if (controller.signal.aborted) return;
+          setResultsScope(JSON.stringify([userId, tenantSlug]));
           setSections(response.sections.filter((section) => section.results.length > 0));
           setResultsQuery(trimmed);
         })
@@ -188,9 +192,10 @@ export function CommandPalette({
 
   // Only results fetched for the query currently typed are rendered; while a
   // newer query is in flight the list shows a searching state instead.
-  const showSections = trimmed && resultsQuery === trimmed ? sections : [];
+  const resultsAreCurrent = resultsQuery === trimmed && resultsScope === searchScope;
+  const showSections = trimmed && resultsAreCurrent ? sections : [];
   const resultItems = showSections.flatMap((section) => section.results);
-  const searching = Boolean(trimmed) && resultsQuery !== trimmed && !error;
+  const searching = Boolean(trimmed) && !resultsAreCurrent && !error;
   const itemCount = resultItems.length;
   const boundedActive = itemCount === 0 ? -1 : Math.min(activeIndex, itemCount - 1);
   const noMatches = Boolean(trimmed) && !searching && !error && resultItems.length === 0;
@@ -236,6 +241,7 @@ export function CommandPalette({
   };
 
   const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -245,7 +251,7 @@ export function CommandPalette({
     if (event.key === "Tab") {
       // Focus trap: cycle within the dialog.
       const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button, [href], input, [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]):not([tabindex="-1"]), [href]:not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"]):not([disabled])',
       );
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
@@ -447,6 +453,9 @@ export function CommandPalette({
             <small>Chats first, workspace second</small>
           </span>
           <kbd>Ctrl / ⌘ K</kbd>
+          <button className="icon-button" type="button" aria-label="Close search dialog" onClick={onClose}>
+            <X size={17} />
+          </button>
         </div>
         <div
           className="search-box"

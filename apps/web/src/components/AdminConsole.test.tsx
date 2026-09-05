@@ -107,8 +107,9 @@ test("admin reviews a pending request and approves Luna-only temporary access", 
     access_reviewed_at: "2026-08-13T12:05:00Z",
   };
   const approveAccessRequest = vi.fn(async () => approved);
+  const resetUserPassword = vi.fn(async () => ({ status: "password_set", user_id: approved.id, temporary: true }));
 
-  renderAdmin({ approveAccessRequest }, data);
+  renderAdmin({ approveAccessRequest, resetUserPassword }, data);
   expect(screen.getByRole("heading", { name: "Access requests" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Access level for Jamie Rivera"), {
     target: { value: "TEMP_USER" },
@@ -125,6 +126,14 @@ test("admin reviews a pending request and approves Luna-only temporary access", 
   );
   expect(screen.queryByRole("heading", { name: "Access requests" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Role for Jamie Rivera")).toHaveValue("TEMP_USER");
+  expect(screen.getByText(/No email has been sent/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Set temporary password" }));
+  expect(screen.getByRole("dialog", { name: "Set a password for Jamie Rivera" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("New password"), { target: { value: "temporary-password-123" } });
+  fireEvent.click(screen.getByRole("button", { name: "Set password" }));
+  expect(await screen.findByText(/Password set for Jamie Rivera/)).toBeInTheDocument();
+  expect(screen.getByText(/Sign in at .*jamie@example.com/)).toBeInTheDocument();
+  expect(resetUserPassword).toHaveBeenCalledWith("user-admin", approved.id, { password: "temporary-password-123", temporary: true }, expect.any(Object));
 });
 
 test("admin console applies role changes only from the returned API user", async () => {
@@ -216,7 +225,7 @@ test("admin console keeps users, platform groups, and model grants in separate t
   selectTab("Model Access");
   expect(await screen.findByRole("button", { name: "Sync models" })).toBeInTheDocument();
   expect(screen.getAllByText("6").length).toBeGreaterThan(0);
-  expect(screen.getByText(/models synced to this tenant/i)).toBeInTheDocument();
+  expect(screen.getByText(/synced models/i)).toBeInTheDocument();
   expect(screen.getByText(/visible to users/i)).toBeInTheDocument();
   expect(screen.queryByLabelText("Model access group")).not.toBeInTheDocument();
   expect(screen.queryByText("o3-mini")).not.toBeInTheDocument();
@@ -1033,167 +1042,24 @@ test("prompt preview loads and shows the clicked thread's full conversation", as
   expect(within(secondExchange).getByText("Selected exchange")).toBeInTheDocument();
 });
 
-test("connector configuration form saves provider credentials and runs a live test", async () => {
-  const saveConnectorConfig = vi.fn(async (_actor: string, connector: { id: string }, payload: { auth_type?: string | null; settings?: Record<string, unknown> | null }) => ({
-    connector: {
-      tenant_config_id: "conncfg-graph-example",
-      auth_status: "configured" as const,
-    },
-    record: {
-      id: "conncfg-graph-example",
-      tenant_id: "tenant-example",
-      connector_id: connector.id,
-      enabled: true,
-      auth_type: String(payload.auth_type),
-      scopes: [],
-      settings: payload.settings ?? {},
-      secret_set: true,
-      masked_secret: "gr•••••et",
-    },
-  }));
-  const testConnectorConfig = vi.fn(async () => ({
-    status: "ok" as const,
-    message: "Connected to Microsoft Graph.",
-    checks: [
-      { name: "Authentication", status: "ok", detail: "Token issued by login.microsoftonline.com" },
-      { name: "API access", status: "ok", detail: "Reached the tenant root site" },
-    ],
-  }));
-
-  renderAdmin({ saveConnectorConfig, testConnectorConfig } as unknown as AdminConsoleApi);
-  selectTab("Connections");
-
-  const graphBlock = screen
-    .getByText("OneDrive / SharePoint / Outlook")
-    .closest(".connector-config-block") as HTMLElement;
-  fireEvent.click(within(graphBlock).getByRole("button", { name: /Configure/ }));
-
-  fireEvent.change(screen.getByLabelText(/Directory \(tenant\) ID/), {
-    target: { value: "11111111-2222-3333-4444-555555555555" },
-  });
-  fireEvent.change(screen.getByLabelText(/Application \(client\) ID/), {
-    target: { value: "app-client-id" },
-  });
-  fireEvent.change(screen.getByLabelText(/Client secret/), {
-    target: { value: "graph-secret" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: /Save configuration/ }));
-
-  await waitFor(() => expect(saveConnectorConfig).toHaveBeenCalledTimes(1));
-  const payload = saveConnectorConfig.mock.calls[0][2];
-  expect(payload).toMatchObject({
-    connector_id: "microsoft-graph",
-    auth_type: "client-credentials",
-    secret_value: "graph-secret",
-    settings: expect.objectContaining({
-      auth_mode: "client-credentials",
-      tenant_id: "11111111-2222-3333-4444-555555555555",
-      client_id: "app-client-id",
-    }),
-  });
-
-  fireEvent.click(await screen.findByRole("button", { name: /Test connection/ }));
-  await waitFor(() =>
-    expect(testConnectorConfig).toHaveBeenCalledWith(expect.any(String), "conncfg-graph-example", expect.anything()),
-  );
-  expect((await screen.findAllByText("Connected to Microsoft Graph.")).length).toBeGreaterThan(0);
-  expect(screen.getByText(/Reached the tenant root site/)).toBeInTheDocument();
-});
-
-test("iManage defaults to delegated user sign-in and keeps service credentials out of chat", async () => {
-  renderAdmin({});
-  selectTab("Connections");
-
-  const block = screen.getByText("iManage").closest(".connector-config-block") as HTMLElement;
-  fireEvent.click(within(block).getByRole("button", { name: /Configure/ }));
-  const form = screen.getByTestId("connector-config-imanage");
-
-  expect(within(form).getByLabelText("Authentication method")).toHaveValue("oauth-client");
-  expect(within(form).getByRole("option", { name: "Each user signs in (recommended)" })).toBeInTheDocument();
-  expect(within(form).getByText(/Chat users sign in individually/)).toBeInTheDocument();
-  expect(within(form).queryByLabelText(/Service account username/)).not.toBeInTheDocument();
-
-  fireEvent.change(within(form).getByLabelText("Authentication method"), {
-    target: { value: "password" },
-  });
-  expect(within(form).getByLabelText(/Service account username/)).toBeInTheDocument();
-  expect(within(form).getByRole("option", { name: "Service account for background sync" })).toBeInTheDocument();
-});
-
-test("connector form saves an intentionally cleared existing configuration", async () => {
-  const data = cloneData();
-  data.connectors = data.connectors.map((connector) =>
-    connector.id === "google-drive" ? { ...connector, tenant_config_id: "conncfg-google-drive-example" } : connector,
-  );
-  const saveConnectorConfig = vi.fn(async (_actor: string, connector: { id: string }, payload: { settings?: Record<string, unknown> | null }) => ({
-    connector: {
-      tenant_config_id: "conncfg-google-drive-example",
-      tenant_enabled: false,
-      auth_status: "not-configured" as const,
-    },
-    record: {
-      id: "conncfg-google-drive-example",
-      tenant_id: "tenant-example",
-      connector_id: connector.id,
-      enabled: false,
-      auth_type: "oauth-client",
-      scopes: [],
-      settings: payload.settings ?? {},
-      secret_set: false,
-      masked_secret: null,
-    },
-  }));
-
-  renderAdmin({ saveConnectorConfig } as unknown as AdminConsoleApi, data);
-  selectTab("Connections");
-
-  const driveBlock = screen.getByText("Google Drive").closest(".connector-config-block") as HTMLElement;
-  fireEvent.click(within(driveBlock).getByRole("button", { name: /Configure/ }));
-  const driveForm = screen.getByTestId("connector-config-google-drive");
-
-  fireEvent.change(within(driveForm).getByLabelText(/OAuth client ID/), { target: { value: "" } });
-  fireEvent.change(within(driveForm).getByLabelText(/Drive folder ID/), { target: { value: "" } });
-  fireEvent.change(within(driveForm).getByLabelText(/Source label/), { target: { value: "" } });
-  fireEvent.click(within(driveForm).getByRole("button", { name: /Save configuration/ }));
-
-  await waitFor(() => expect(saveConnectorConfig).toHaveBeenCalledTimes(1));
-  expect(saveConnectorConfig.mock.calls[0][2]).toMatchObject({
-    connector_id: "google-drive",
-    enabled: false,
-    auth_type: "oauth-client",
-    settings: {},
-    replace_settings: true,
-    clear_secret: true,
-    clear_oauth: true,
-    clear_service_password: true,
-  });
-});
-
-test("connector form blocks saving when required provider fields are missing", async () => {
+test("admin connections keeps response actions but exposes no deployment connector controls", () => {
+  const setConnectorEnabled = vi.fn();
   const saveConnectorConfig = vi.fn();
-  renderAdmin({ saveConnectorConfig } as unknown as AdminConsoleApi);
+  renderAdmin({ setConnectorEnabled, saveConnectorConfig });
   selectTab("Connections");
 
-  const boxBlock = screen.getByText("Box").closest(".connector-config-block") as HTMLElement;
-  fireEvent.click(within(boxBlock).getByRole("button", { name: /Configure/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Save configuration/ }));
-
-  expect(await screen.findByRole("alert")).toHaveTextContent(/Client ID.*Enterprise ID/);
+  const connections = screen.getByRole("tabpanel", { name: "Connections" });
+  expect(within(connections).getByRole("heading", { name: "Chat output actions" })).toBeInTheDocument();
+  expect(within(connections).getByRole("button", { name: "New response action" })).toBeInTheDocument();
+  expect(within(connections).queryByRole("heading", { name: "Connectors" })).not.toBeInTheDocument();
+  expect(within(connections).queryByRole("switch", { name: "Enable Box" })).not.toBeInTheDocument();
+  expect(connections.querySelector(".connector-config-block")).toBeNull();
+  expect(setConnectorEnabled).not.toHaveBeenCalled();
   expect(saveConnectorConfig).not.toHaveBeenCalled();
 });
 
-test("connector and SSO forms keep field labels aligned", () => {
+test("SSO forms keep field labels aligned", () => {
   renderAdmin({});
-  selectTab("Connections");
-
-  const driveBlock = screen.getByText("Google Drive").closest(".connector-config-block") as HTMLElement;
-  fireEvent.click(within(driveBlock).getByRole("button", { name: /Configure/ }));
-  const driveForm = screen.getByTestId("connector-config-google-drive");
-  expect(driveForm.querySelector(":scope > label.connector-config-selector select")).toBeInTheDocument();
-  for (const mark of Array.from(driveForm.querySelectorAll(".required-mark"))) {
-    expect(mark.parentElement).toHaveClass("connector-field-label");
-  }
-
   selectTab("SSO");
   fireEvent.click(screen.getByRole("button", { name: "Add SSO configuration" }));
   const ssoForm = screen.getByTestId("sso-create-form");
@@ -1615,10 +1481,12 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
 
   expect(await screen.findByRole("dialog", { name: "Admin console documentation" })).toBeInTheDocument();
   for (const title of [
+    "Approve access and finish sign-in",
+    "Review feedback and reported issues",
     "Users and accounts",
     "Groups and permissions",
     "Tenant model access",
-    "Connections and response actions",
+    "Response actions and connector responsibilities",
     "Tenant SSO and provisioning",
     "Tenant analytics",
     "Policies and memory governance",
@@ -1628,7 +1496,7 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/Remotion video$/)).toHaveLength(10);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(12);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "docs/aperture-admin-guide.pdf");

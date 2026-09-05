@@ -141,6 +141,7 @@ class DraftDocument(BaseModel):
     tenant_id: ScopedId
     owner_user_id: ScopedId
     matter_id: ScopedId | None = None
+    archived: bool = False
     title: str = Field(min_length=1, max_length=MAX_DRAFT_TITLE_CHARS)
     current_revision: int = Field(ge=1, le=MAX_DRAFT_REVISIONS)
     created_at: datetime

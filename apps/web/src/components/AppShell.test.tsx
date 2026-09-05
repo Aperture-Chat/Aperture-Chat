@@ -1031,6 +1031,83 @@ function cloneData(): BootstrapData {
   return structuredClone(sampleData) as BootstrapData;
 }
 
+test("account drawers trap keyboard focus and restore the entry point on Escape", () => {
+  renderShell(cloneData());
+  const entry = screen.getByRole("button", { name: /Account: Alex Morgan/ });
+  entry.focus();
+  fireEvent.click(entry);
+  const dialog = screen.getByRole("dialog", { name: "Account" });
+  const close = within(dialog).getByRole("button", { name: "Close", exact: true });
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, { key: "Escape", isComposing: true, keyCode: 229 });
+  expect(dialog).toBeInTheDocument();
+  fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(close).not.toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Account" })).not.toBeInTheDocument();
+  expect(entry).toHaveFocus();
+});
+
+test("mobile navigation hides offscreen controls and closes with Escape", () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  renderShell(cloneData());
+  const sidebar = document.querySelector(".sidebar")!;
+  expect(sidebar).toHaveAttribute("inert");
+  const entry = screen.getByRole("button", { name: "Open menu" });
+  entry.focus();
+  fireEvent.click(entry);
+  expect(screen.getByRole("dialog", { name: "Navigation" })).not.toHaveAttribute("inert");
+  expect(document.getElementById("workspace-content")).toHaveAttribute("inert");
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(sidebar).toHaveAttribute("inert");
+  expect(entry).toHaveFocus();
+});
+
+test("sidebar width supports keyboard resizing within its bounds", () => {
+  renderShell(cloneData());
+  const handle = screen.getByRole("button", { name: "Resize sidebar" });
+  fireEvent.keyDown(handle, { key: "End" });
+  expect(window.localStorage.getItem("aperture-sidebar-width")).toBe("340");
+  fireEvent.keyDown(handle, { key: "ArrowRight" });
+  expect(window.localStorage.getItem("aperture-sidebar-width")).toBe("340");
+  fireEvent.keyDown(handle, { key: "Home" });
+  expect(window.localStorage.getItem("aperture-sidebar-width")).toBe("208");
+  fireEvent.keyDown(handle, { key: "ArrowRight" });
+  expect(window.localStorage.getItem("aperture-sidebar-width")).toBe("224");
+});
+
+test("switching accounts never writes the previous user's folder or read state into the next account", () => {
+  const first = cloneData();
+  const second = cloneData();
+  second.me.id = "user-second";
+  const firstFolder = { id: "folder-first", name: "First private folder", created_at: "2026-09-01" };
+  const secondFolder = { id: "folder-second", name: "Second private folder", created_at: "2026-09-02" };
+  localStorage.setItem(`aperture-chat-folders-${first.me.id}`, JSON.stringify([firstFolder]));
+  localStorage.setItem(`aperture-chat-folders-${second.me.id}`, JSON.stringify([secondFolder]));
+  localStorage.setItem(`aperture-chat-read-v1-${first.me.id}`, JSON.stringify({ firstThread: 100 }));
+  localStorage.setItem(`aperture-chat-read-v1-${second.me.id}`, JSON.stringify({ secondThread: 200 }));
+  const writes = vi.spyOn(Storage.prototype, "setItem");
+  const shell = (data: BootstrapData) => <AppShell
+    data={data} actualRole={data.me.role} viewAsRole={null} onViewAsRoleChange={vi.fn()}
+    currentView="chat" onViewChange={vi.fn()} darkMode={false} onToggleDarkMode={vi.fn()}
+    threads={[]} activeChatId="chat-new" onOpenChat={vi.fn()} onNewChat={vi.fn()}
+    onTogglePin={vi.fn()} onArchiveThread={vi.fn()} onRestoreThread={vi.fn()}
+    onDeleteThread={vi.fn()} onMoveThreadToFolder={vi.fn()}
+  ><div>Workspace</div></AppShell>;
+  const { rerender } = render(shell(first));
+  writes.mockClear();
+  rerender(shell(second));
+  expect(writes.mock.calls.filter(([key]) => key.endsWith(second.me.id)).every(([, value]) =>
+    !value.includes("folder-first") && !value.includes("firstThread"),
+  )).toBe(true);
+  expect(JSON.parse(localStorage.getItem(`aperture-chat-folders-${second.me.id}`)!)).toEqual([secondFolder]);
+  expect(JSON.parse(localStorage.getItem(`aperture-chat-read-v1-${second.me.id}`)!)).toEqual({ secondThread: 200 });
+  writes.mockRestore();
+});
+
 test("Cmd/Ctrl+K opens conversation-first search and Escape closes it", () => {
   renderShell(cloneData());
 
@@ -1182,4 +1259,55 @@ test("all-chats drawer rows carry the same pin, archive, and folder actions as t
   );
   expect(screen.queryByRole("dialog", { name: "All chats" })).not.toBeInTheDocument();
   expect(within(sidebar).getByLabelText("Folder name")).toBeInTheDocument();
+});
+
+test("the platform update row is requested for owners only and shows when a release is newer", async () => {
+  const updateStatus = {
+    current_version: "v9.0.0",
+    latest_version: "v9.1.0",
+    update_available: true,
+    releases: [
+      {
+        version: "v9.1.0",
+        name: "Aperture Chat v9.1.0",
+        url: "https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v9.1.0",
+        published_at: "2026-09-03T10:00:00Z",
+        highlights: "- Sidebar upgrades",
+        notes: "- Sidebar upgrades",
+      },
+    ],
+    checked_at: "2026-09-03T11:00:00Z",
+    check_error: null,
+    check_enabled: true,
+    repository: "Aperture-Chat/Aperture-Chat",
+    releases_page_url: "https://github.com/Aperture-Chat/Aperture-Chat/releases",
+    updater: { configured: true, connected: true, run: { phase: "idle", message: "" }, log_tail: "" },
+  };
+  const requestedUrls: string[] = [];
+  vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requestedUrls.push(url);
+    if (url.endsWith("/api/platform/updates")) {
+      return new Response(JSON.stringify(updateStatus), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ detail: "offline" }), { status: 503 });
+  });
+
+  // Tenant admins never see the control and the shell never asks for it.
+  const adminView = renderShell(cloneData());
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.queryByRole("button", { name: /Update to v9\.1\.0/ })).not.toBeInTheDocument();
+  expect(requestedUrls.some((url) => url.includes("/api/platform/updates"))).toBe(false);
+  adminView.unmount();
+
+  const ownerData = cloneData();
+  ownerData.me = { ...ownerData.me, role: "PLATFORM_OWNER" };
+  renderShell(ownerData, vi.fn(), vi.fn(), [], null, vi.fn(), "PLATFORM_OWNER");
+  const row = await screen.findByRole("button", { name: /Update to v9\.1\.0/ });
+  expect(row.closest(".utility-rows")).not.toBeNull();
 });

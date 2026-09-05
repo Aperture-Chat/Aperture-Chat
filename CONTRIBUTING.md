@@ -85,7 +85,8 @@ Also run `git diff --check` before requesting review.
 ## Branch container inspection
 
 Every permanent branch publishes multi-architecture API and web images for
-each commit. Moving branch tags point to the newest successfully built commit:
+each commit. Moving branch tags are promoted only after both SHA images pass
+architecture and build-digest inspection:
 
 ```text
 ghcr.io/aperture-chat/aperture-chat-api:<dev|test|main>
@@ -105,6 +106,10 @@ pair with `docker-compose.release.yml` by setting
 `APERTURE_IMAGE_TAG=test-<full-commit-sha>` in a disposable review environment.
 The release-only `latest` tag is unchanged and is updated only by the Docker
 release workflow. Never use a production data volume for contributor testing.
+Alias updates are not atomic; use the verified SHA pair for deployments and
+retain its digests for exact reproducibility. See the
+[publication recovery runbook](docs/DOCKER_RELEASE.md#branch-images-and-failed-publications)
+before deploying moving tags after a failed or canceled publication.
 
 ## Review and merge expectations
 

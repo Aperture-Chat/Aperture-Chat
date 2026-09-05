@@ -174,3 +174,11 @@ test("restores focus to the previously focused element after afterprint", async 
   expect(document.activeElement).toBe(button);
   button.remove();
 });
+
+test('MLA print never prepends the file title ahead of the student heading', async () => {
+  const { formatMlaDocument } = await import('./draftMla');
+  await printSavedDraftVersion({ title: 'Internal filename', contentHtml: formatMlaDocument('<p>Alex Example</p><p>Taylor Example</p><p>History 101</p><p>5 September 2026</p><h2>Crossing the River</h2><p>Essay body.</p>', 'MLA') });
+  const root = document.getElementById(DRAFT_PRINT_ROOT_ID)!;
+  expect(root.textContent?.startsWith('Alex Example')).toBe(true);
+  expect(root.textContent).not.toContain('Internal filename');
+});

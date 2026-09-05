@@ -824,6 +824,17 @@ def bootstrap_owner(
     store: SeedStore = Depends(get_store),
 ) -> AuthLoginResponse:
     _no_store(response)
+    # Checking first-run state and creating its owner are one operation. Two
+    # setup tabs may submit together; only the winning request can create the
+    # initial owner and credential, and the other must receive a conflict.
+    with store._store_lock:
+        return _bootstrap_owner_locked(payload, store)
+
+
+def _bootstrap_owner_locked(
+    payload: AuthBootstrapOwnerRequest,
+    store: SeedStore,
+) -> AuthLoginResponse:
     if not store.bootstrap_required():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A platform owner already exists.")
     if not get_settings().local_auth_enabled:
@@ -955,11 +966,43 @@ def mark_first_run_guide_seen(
 @router.post("/password")
 def update_password(
     payload: AuthPasswordUpdateRequest,
+    response: Response,
     actor: User = Depends(current_user),
+    authenticated: AuthenticatedSession | None = Depends(optional_signed_session),
     store: SeedStore = Depends(get_store),
-) -> dict[str, str]:
+) -> dict[str, str | AuthSession]:
+    _no_store(response)
     with store._store_lock:
-        return _update_password_locked(payload, actor, store)
+        # Recheck the presented session inside the credential mutation lock:
+        # a reset, suspension, or MFA policy change may have happened after
+        # request dependencies authenticated it. Never revive that session.
+        if authenticated is not None and store.user_for_session_claims(authenticated.claims) is not actor:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session is invalid or expired. Sign in again.",
+            )
+        result: dict[str, str | AuthSession] = _update_password_locked(payload, actor, store)
+        if authenticated is not None:
+            # All previous session families were revoked by the password
+            # change. Give only this authenticated browser a new family and
+            # carry forward exactly the factor assurance it already proved.
+            try:
+                result["session"] = _issue_session(
+                    actor,
+                    "local",
+                    None,
+                    store,
+                    mfa_assured=authenticated.claims.mfa,
+                    mfa_factor_generation=authenticated.claims.mfg,
+                )
+            except HTTPException as exc:
+                # The credential update has already committed. Make the
+                # recovery step honest if session storage cannot issue a token.
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail="Your password was updated. Sign in again with your new password to continue.",
+                ) from exc
+        return result
 
 
 def _update_password_locked(

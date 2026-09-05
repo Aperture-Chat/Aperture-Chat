@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, type ViewKey } from "./components/AppShell";
 import { AdminConsole, type AdminConsoleApi } from "./components/AdminConsole";
 import { AgentWorkspaceConsole } from "./components/AgentWorkspaceConsole";
@@ -17,6 +17,7 @@ import {
 import { AutomationsConsole } from "./components/AutomationsConsole";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { SessionRestoreScreen } from "./components/SessionRestoreScreen";
+import { FirstRunWelcome } from "./components/FirstRunWelcome";
 import {
   createAdminConnectorConfig,
   bulkCreateAdminGroups,
@@ -98,6 +99,7 @@ import {
   markFirstRunGuideSeen,
   resetAdminUserPassword,
   resumeSession,
+  revokeSession,
   getSessionToken,
   setSessionToken,
   mapConnectorConfigRecordToConnector,
@@ -151,13 +153,16 @@ import type {
   AuthOptionsResponse,
   BootstrapData,
   ChatMessage,
+  Connector,
   ModelConfig,
   PlatformModelUpdateRequest,
   Role,
   User,
 } from "./lib/types";
+import { ConnectorUpdateError, connectorUsesCredentialRecord } from "./components/ConnectorsPanel";
 import { applyBrandTheme, cacheBrandBoot } from "./lib/brandTheme";
 import { appendChatCitationsForDraft } from "./lib/draftCitations";
+import type { DraftNavigationGuard } from "./lib/draftNavigation";
 import { sampleData } from "./data/sampleData";
 
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
@@ -190,9 +195,22 @@ export function App() {
   const [draftImport, setDraftImport] = useState<DraftImportPayload | null>(null);
   /** Server draft id a search hit asked to open fully loaded in the Drafter. */
   const [draftOpenServerId, setDraftOpenServerId] = useState<string | null>(null);
+  const draftNavigationGuardRef = useRef<DraftNavigationGuard | null>(null);
+  const registerDraftNavigationGuard = useCallback((guard: DraftNavigationGuard | null) => {
+    draftNavigationGuardRef.current = guard;
+  }, []);
+  // Only voluntary navigation uses this guard. Session invalidation and
+  // security-driven sign-out must never depend on saving a local document.
+  const requestWorkspaceNavigation = useCallback((label: string, proceed: () => void) => {
+    const guard = draftNavigationGuardRef.current;
+    if (guard) guard(label, proceed);
+    else proceed();
+  }, []);
   const [requestedAgentId, setRequestedAgentId] = useState<string | null>(null);
   const [helpDrawerRequestKey, setHelpDrawerRequestKey] = useState(0);
   const [adminDocumentationRequestKey, setAdminDocumentationRequestKey] = useState(0);
+  const [ownerDocumentationRequestKey, setOwnerDocumentationRequestKey] = useState(0);
+  const [platformSetupRequestKey, setPlatformSetupRequestKey] = useState(0);
   const [firstRunGuideRequest, setFirstRunGuideRequest] = useState<FirstRunGuideRequest | null>(null);
   const [pwaInstallPlatform, setPwaInstallPlatform] = useState<MobilePlatform | null>(null);
   /* Which mobile OS this browser tab runs on, or null on desktop and inside
@@ -217,6 +235,8 @@ export function App() {
   );
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
+  const [authOptionsAttempt, setAuthOptionsAttempt] = useState(0);
   /* Set when a temporary-password sign-in succeeded and the account must
    * choose its own password before the workspace loads. */
   const [pendingPasswordChange, setPendingPasswordChange] = useState<{
@@ -315,7 +335,7 @@ export function App() {
             ? error.message
             : "Could not load sign-in configuration.",
         );
-        setAuthOptions({ local_auth_enabled: true, providers: [] });
+        setAuthOptions(null);
       })
       .finally(() => {
         if (active) setAuthLoading(false);
@@ -323,7 +343,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [sessionUserId]);
+  }, [sessionUserId, authOptionsAttempt]);
 
   useEffect(() => {
     if (!sessionUserId) {
@@ -467,6 +487,7 @@ export function App() {
   const handleAuthLogin = useCallback(async (payload: AuthLoginRequest) => {
     setAuthLoading(true);
     setAuthError(null);
+    setSignOutNotice(null);
     try {
       const result = await loginWithAuth(payload);
       setSessionToken(result.session?.token ?? null);
@@ -540,6 +561,7 @@ export function App() {
 
 
   const handleSignOut = useCallback(() => {
+    const endedToken = getSessionToken();
     clearSessionUserId();
     setSessionToken(null);
     setSessionUserId(null);
@@ -549,8 +571,22 @@ export function App() {
     setViewAsRole(null);
     setBootstrapError(null);
     setAuthError(null);
+    setSignOutNotice(null);
     setLoading(false);
+    // Local cleanup must succeed offline. A captured token lets the server
+    // revoke this family without touching a later sign-in or MFA replacement.
+    if (endedToken) {
+      void revokeSession(endedToken).catch(() => {
+        if (getSessionToken() === null) {
+          setSignOutNotice("Signed out on this device. The server could not confirm that the session was revoked.");
+        }
+      });
+    }
   }, []);
+
+  const requestSignOut = useCallback(() => {
+    requestWorkspaceNavigation("sign out", handleSignOut);
+  }, [handleSignOut, requestWorkspaceNavigation]);
 
   const handleToggleDarkMode = useCallback(() => {
     setDarkMode((current) => {
@@ -605,7 +641,7 @@ export function App() {
     setView((current) => resolveViewForRole(current, effectiveData.me.role));
   }, [effectiveData.me.role]);
 
-  useEffect(() => {
+  const acknowledgeFirstRun = useCallback(() => {
     if (!sessionUserId || !firstRunGuideRequest) return;
     if (firstRunGuideRequest.userId !== data.me.id) return;
     if (data.me.first_run_guide_seen_at) {
@@ -613,14 +649,13 @@ export function App() {
       return;
     }
 
-    const seenAt = new Date().toISOString();
-    setData((current) => markBootstrapFirstRunGuideSeen(current, firstRunGuideRequest.userId, seenAt));
     void markFirstRunGuideSeen(firstRunGuideRequest.userId)
       .then((updatedUser) => {
         setData((current) => replaceBootstrapUser(current, updatedUser));
       })
       .catch(() => {
-        // A future sign-in can retry the durable marker.
+        // Keep the current visit unobstructed; the server will offer the
+        // welcome again next sign-in if this preference could not be saved.
       });
 
     setFirstRunGuideRequest(null);
@@ -665,47 +700,58 @@ export function App() {
 
   const openChat = useCallback(
     (id: string) => {
-      chat.selectThread(id);
-      setView("chat");
+      requestWorkspaceNavigation("open another chat", () => {
+        chat.selectThread(id);
+        setView("chat");
+      });
     },
-    [chat],
+    [chat, requestWorkspaceNavigation],
   );
 
   const startNewChat = useCallback(() => {
-    chat.newChat();
-    setView("chat");
-  }, [chat]);
+    requestWorkspaceNavigation("start a new chat", () => {
+      chat.newChat();
+      setView("chat");
+    });
+  }, [chat, requestWorkspaceNavigation]);
 
   const handleViewChange = useCallback((nextView: ViewKey) => {
-    if (nextView === "drafts") {
-      setDraftImport(null);
-      setDraftOpenServerId(null);
-      setDraftSessionKey((current) => current + 1);
-    }
-    setView(nextView);
-  }, []);
+    requestWorkspaceNavigation(nextView === "drafts" ? "start a new draft" : "leave Drafts", () => {
+      if (nextView === "drafts") {
+        setDraftImport(null);
+        setDraftOpenServerId(null);
+        setDraftSessionKey((current) => current + 1);
+      }
+      setView(nextView);
+    });
+  }, [requestWorkspaceNavigation]);
 
   /** A draft search hit opens that document loaded, not a blank workspace. */
   const handleOpenDraftFromSearch = useCallback((draftId: string) => {
-    setDraftImport(null);
-    setDraftOpenServerId(draftId);
-    setDraftSessionKey((current) => current + 1);
-    setView("drafts");
-  }, []);
+    requestWorkspaceNavigation("open another draft", () => {
+      setDraftImport(null);
+      setDraftOpenServerId(draftId);
+      setDraftSessionKey((current) => current + 1);
+      setView("drafts");
+    });
+  }, [requestWorkspaceNavigation]);
 
   const openHelpDrawer = useCallback(() => {
     setHelpDrawerRequestKey((current) => current + 1);
   }, []);
 
   const openAdminDocumentation = useCallback(() => {
-    setView("admin");
-    setAdminDocumentationRequestKey((current) => current + 1);
-  }, []);
+    requestWorkspaceNavigation("open the administrator guide", () => {
+      setView("admin");
+      setAdminDocumentationRequestKey((current) => current + 1);
+    });
+  }, [requestWorkspaceNavigation]);
 
   const handleTransferToDraft = useCallback(
     (message: ChatMessage) => {
       const threadTitle = chat.activeThread?.title ?? "Chat response";
       const title = transferredDraftTitle(threadTitle, message.content);
+      setDraftOpenServerId(null);
       setDraftImport({
         id: `${message.id}-${Date.now()}`,
         title,
@@ -774,56 +820,6 @@ export function App() {
         await deleteAdminToolConfig(actorUserId, toolId);
       },
       previewToolScript: (actorUserId, payload) => previewAdminToolScript(actorUserId, payload),
-      setConnectorEnabled: async (
-        actorUserId,
-        _connectorId,
-        enabled,
-        context,
-      ) => {
-        const payload = {
-          enabled,
-          scopes: context.connector.scopes,
-          settings: {
-            description: context.connector.description,
-            last_sync: enabled ? "Saved now" : "Disabled now",
-            sync_status: enabled ? "idle" : "idle",
-          },
-        };
-        const record = context.connector.tenant_config_id
-          ? await updateAdminConnectorConfig(
-              actorUserId,
-              context.connector.tenant_config_id,
-              payload,
-            )
-          : await createAdminConnectorConfig(actorUserId, {
-              connector_id: context.connector.id,
-              auth_type: "oauth",
-              ...payload,
-            });
-        return mapConnectorConfigRecordToConnector(record, context.connector);
-      },
-      saveConnectorConfig: async (actorUserId, connector, payload) => {
-        const record = connector.tenant_config_id
-          ? await updateAdminConnectorConfig(actorUserId, connector.tenant_config_id, payload)
-          : await createAdminConnectorConfig(actorUserId, {
-              connector_id: connector.id,
-              enabled: connector.tenant_enabled,
-              auth_type: payload.auth_type ?? undefined,
-              settings: payload.settings ?? undefined,
-              secret_value: payload.secret_value ?? undefined,
-              service_password: payload.service_password ?? undefined,
-            });
-        return {
-          connector: mapConnectorConfigRecordToConnector(record, connector),
-          record,
-        };
-      },
-      testConnectorConfig: (actorUserId, configId) =>
-        testAdminConnectorConfig(actorUserId, configId),
-      connectorOAuthUrl: async (actorUserId, configId) => {
-        const result = await connectorOAuthStartUrl(actorUserId, configId);
-        return result.url;
-      },
       setToolEnabled: async (actorUserId, _toolId, enabled, context) => {
         const record = await updateAdminToolConfig(
           actorUserId,
@@ -958,8 +954,80 @@ export function App() {
       rotateProviderKey: (keyId) => rotateProviderKey(data.me.id, keyId),
       deleteProviderKey: (keyId) => deleteProviderKey(data.me.id, keyId),
       deleteProvider: (providerId, confirm) => deletePlatformProvider(data.me.id, providerId, confirm),
-      updateConnector: (connectorId, patch) =>
-        updatePlatformConnector(data.me.id, connectorId, patch),
+      // Connectors are owner-managed. The switch writes the catalog flags the
+      // API enforces (chat, tools, bootstrap all read platform_enabled AND
+      // tenant_enabled) and keeps the tenant credential record, when one
+      // exists, in step so the displayed state cannot drift from the server.
+      setConnectorEnabled: async (connector, enabled) => {
+        const saved = await updatePlatformConnector(data.me.id, connector.id, {
+          platform_enabled: enabled,
+          tenant_enabled: enabled,
+        });
+        const patch: Partial<Connector> = {
+          platform_enabled: saved.platform_enabled,
+          tenant_enabled: saved.tenant_enabled,
+        };
+        try {
+          if (connector.tenant_config_id) {
+            const record = await updateAdminConnectorConfig(data.me.id, connector.tenant_config_id, {
+              enabled,
+              settings: { last_sync: enabled ? "Saved now" : "Disabled now" },
+            });
+            return { ...mapConnectorConfigRecordToConnector(record, { ...connector, ...patch }), ...patch };
+          }
+          if (enabled && connectorUsesCredentialRecord(connector.id)) {
+            // Credential connectors need a tenant record to hold "on, awaiting
+            // credentials"; without one the bootstrap mapping reads them as off.
+            const record = await createAdminConnectorConfig(data.me.id, {
+              connector_id: connector.id,
+              tenant_id: data.currentTenant.id,
+              enabled: true,
+              auth_type: "oauth",
+              scopes: connector.scopes,
+              settings: { description: connector.description, last_sync: "Saved now" },
+            });
+            return { ...mapConnectorConfigRecordToConnector(record, { ...connector, ...patch }), ...patch };
+          }
+          return patch;
+        } catch (error) {
+          // The catalog write already committed. Show the persisted state
+          // even when saving its credential record fails; retry can repair it.
+          let persisted: Partial<Connector> = patch;
+          try {
+            const refreshed = await loadBootstrap(data.me.id);
+            persisted = refreshed.connectors.find((item) => item.id === connector.id) ?? patch;
+          } catch {
+            // Preserve the fields confirmed by the first response, and leave
+            // credentials unchanged until the user can retry or reload.
+          }
+          throw new ConnectorUpdateError(
+            `${connector.name} availability was saved, but its credential settings could not be synchronized. ${error instanceof Error ? error.message : "Retry the change to finish saving."}`,
+            persisted,
+          );
+        }
+      },
+      saveConnectorConfig: async (connector, payload) => {
+        const record = connector.tenant_config_id
+          ? await updateAdminConnectorConfig(data.me.id, connector.tenant_config_id, payload)
+          : await createAdminConnectorConfig(data.me.id, {
+              connector_id: connector.id,
+              tenant_id: data.currentTenant.id,
+              enabled: payload.enabled ?? connector.tenant_enabled,
+              auth_type: payload.auth_type ?? undefined,
+              settings: payload.settings ?? undefined,
+              secret_value: payload.secret_value ?? undefined,
+              service_password: payload.service_password ?? undefined,
+            });
+        return {
+          connector: mapConnectorConfigRecordToConnector(record, connector),
+          record,
+        };
+      },
+      testConnectorConfig: (configId) => testAdminConnectorConfig(data.me.id, configId),
+      connectorOAuthUrl: async (configId) => {
+        const result = await connectorOAuthStartUrl(data.me.id, configId);
+        return result.url;
+      },
       createUser: (payload) => createAdminUser(data.me.id, payload),
       updateUser: (userId, patch) => updateAdminUser(data.me.id, userId, patch),
       deactivateUser: async (userId) => {
@@ -1106,12 +1174,15 @@ export function App() {
           initialServerDraftId={draftOpenServerId}
           actorUserId={effectiveData.me.id}
           onCloseDraft={() => setView("chat")}
+          onNavigationGuardChange={registerDraftNavigationGuard}
         />
       );
     }
     if (view === "platform" && effectiveData.me.role === "PLATFORM_OWNER") {
       return (
         <PlatformConsole
+          openDocumentationRequestKey={ownerDocumentationRequestKey}
+          openProvidersRequestKey={platformSetupRequestKey}
           data={effectiveData}
           onDataChange={setData}
           platformActions={platformActions}
@@ -1145,27 +1216,27 @@ export function App() {
           onSelect={(key) => setAgentsSection(key as "agents" | "automations")}
         />
       );
-      if (agentsSection === "automations") {
-        return (
+      return (
+        <div className="console-page agent-workspace-shell">
+          <div className="console-section-controls">{agentTabs}</div>
+          {agentsSection === "automations" ? (
           <AutomationsConsole
             data={effectiveData}
             actorUserId={data.me.id}
             onDataChange={setData}
-            sectionTabs={agentTabs}
           />
-        );
-      }
-      return (
+          ) : (
         <AgentWorkspaceConsole
           data={effectiveData}
           onDataChange={setData}
-          sectionTabs={agentTabs}
           onUseInChat={(modelId) => {
             chat.setModel(modelId);
             setRequestedAgentId(modelId);
             setView("chat");
           }}
         />
+          )}
+        </div>
       );
     }
     return (
@@ -1198,7 +1269,14 @@ export function App() {
     chatBrandLogoUrl,
     draftSessionKey,
     draftImport,
+    draftOpenServerId,
+    registerDraftNavigationGuard,
     handleTransferToDraft,
+    openAdminDocumentation,
+    openHelpDrawer,
+    adminDocumentationRequestKey,
+    ownerDocumentationRequestKey,
+    platformSetupRequestKey,
     requestedAgentId,
     data.me.id,
   ]);
@@ -1221,7 +1299,8 @@ export function App() {
         tenantLogoUrl={authBrandLogoUrl}
         isLoading={authLoading && !authOptions}
         isSubmitting={authLoading && Boolean(authOptions)}
-        error={authError}
+        error={authError ?? signOutNotice}
+        onRetry={() => setAuthOptionsAttempt((attempt) => attempt + 1)}
         onSubmit={(payload) => void handleAuthLogin(payload)}
         onLocalLogin={(payload) => {
           if (payload) void handleAuthLogin(payload);
@@ -1279,6 +1358,7 @@ export function App() {
       onDeleteThread={chat.deleteThread}
       onMoveThreadToFolder={chat.moveThreadToFolder}
       onSignOut={handleSignOut}
+      onRequestSignOut={requestSignOut}
       onProfileUpdate={handleAccountProfileUpdate}
       onPasswordUpdate={handleAccountPasswordUpdate}
       onApiKeyLoad={handleAccountApiKeyLoad}
@@ -1319,6 +1399,29 @@ export function App() {
           onDismiss={dismissPwaInstallPrompt}
         />
       )}
+      {sessionHydrated && !viewAsRole && firstRunGuideRequest?.userId === data.me.id && !data.me.first_run_guide_seen_at && (
+        <FirstRunWelcome
+          data={data}
+          onDismiss={acknowledgeFirstRun}
+          onNavigate={(next) => {
+            acknowledgeFirstRun();
+            if (next === "platform") setPlatformSetupRequestKey((key) => key + 1);
+            handleViewChange(next);
+          }}
+          onGuide={() => {
+            acknowledgeFirstRun();
+            if (data.me.role === "PLATFORM_OWNER") {
+              handleViewChange("platform");
+              setOwnerDocumentationRequestKey((key) => key + 1);
+            } else if (data.me.role === "TENANT_ADMIN") {
+              handleViewChange("admin");
+              setAdminDocumentationRequestKey((key) => key + 1);
+            } else {
+              setHelpDrawerRequestKey((key) => key + 1);
+            }
+          }}
+        />
+      )}
       {content}
     </AppShell>
   );
@@ -1337,8 +1440,38 @@ function SectionTabs({
   onSelect: (key: string) => void;
   ariaLabel: string;
 }) {
+  const dragStart = useRef<number | null>(null);
+  const suppressClick = useRef(false);
+  const activeIndex = Math.max(0, tabs.findIndex(tab => tab.key === active));
   return (
-    <div className="section-switch" role="group" aria-label={ariaLabel}>
+    <div className="section-switch" role="group" aria-label={ariaLabel}
+      data-active-index={activeIndex}
+      onPointerDown={event => {
+        if (event.button !== 0) return;
+        dragStart.current = event.clientX;
+        suppressClick.current = false;
+        // Capture on the pressed button so a normal click keeps its target,
+        // while a drag can finish beyond the edge of the track.
+        const button = event.target instanceof Element ? event.target.closest("button") : null;
+        button?.setPointerCapture?.(event.pointerId);
+      }}
+      onPointerUp={event => {
+        const start = dragStart.current;
+        dragStart.current = null;
+        if (start !== null && Math.abs(event.clientX - start) > 24) {
+          suppressClick.current = true;
+          onSelect(tabs[event.clientX > start ? tabs.length - 1 : 0].key);
+        }
+      }}
+      onPointerCancel={() => { dragStart.current = null; }}
+      onKeyDown={event => {
+        const index = event.key === "ArrowRight" || event.key === "End" ? tabs.length - 1
+          : event.key === "ArrowLeft" || event.key === "Home" ? 0 : null;
+        if (index === null) return;
+        event.preventDefault();
+        onSelect(tabs[index].key);
+        event.currentTarget.querySelectorAll("button")[index]?.focus();
+      }}>
       {tabs.map((tab) => (
         <button
           key={tab.key}
@@ -1346,7 +1479,10 @@ function SectionTabs({
           aria-pressed={active === tab.key}
           className={`section-switch-tab${active === tab.key ? " is-active" : ""}`}
           data-tooltip={`Switch to the ${tab.label} section`}
-          onClick={() => onSelect(tab.key)}
+          onClick={() => {
+            if (suppressClick.current) { suppressClick.current = false; return; }
+            onSelect(tab.key);
+          }}
         >
           {tab.label}
         </button>
@@ -1420,19 +1556,6 @@ function replaceBootstrapUser(data: BootstrapData, updatedUser: User): Bootstrap
     me: data.me.id === updatedUser.id ? updatedUser : data.me,
     users: data.users.map(replaceUser),
     visibleUsers: data.visibleUsers.map(replaceUser),
-  };
-}
-
-function markBootstrapFirstRunGuideSeen(data: BootstrapData, userId: string, seenAt: string): BootstrapData {
-  const markUser = (user: User) =>
-    user.id === userId && !user.first_run_guide_seen_at
-      ? { ...user, first_run_guide_seen_at: seenAt }
-      : user;
-  return {
-    ...data,
-    me: markUser(data.me),
-    users: data.users.map(markUser),
-    visibleUsers: data.visibleUsers.map(markUser),
   };
 }
 

@@ -174,6 +174,14 @@ def test_temporary_password_login_requires_change_then_clears() -> None:
         headers={"x-aperture-session": token},
     )
     assert change.status_code == 200
+    assert change.headers["cache-control"] == "no-store"
+    replacement = change.json()["session"]
+    assert replacement["token"] != token
+    assert replacement["mfa_assured"] is False
+    assert client.get("/api/auth/session", headers={"x-aperture-session": token}).status_code == 401
+    resumed = client.get("/api/auth/session", headers={"x-aperture-session": replacement["token"]})
+    assert resumed.status_code == 200
+    assert resumed.json()["must_change_password"] is False
 
     second_login = client.post(
         "/api/auth/login",
@@ -181,3 +189,78 @@ def test_temporary_password_login_requires_change_then_clears() -> None:
     )
     assert second_login.status_code == 200
     assert second_login.json()["must_change_password"] is False
+
+
+def test_password_change_never_revives_a_suspended_account() -> None:
+    store = get_store()
+    user = store.users["user-jane"]
+    user.email = "password.suspension@local.invalid"
+    user.auth_method = "local"
+    store.set_password_credential(user.id, "existing-password-123")
+    login = client.post("/api/auth/login", json={
+        "email": user.email, "auth_method": "local", "password": "existing-password-123",
+    })
+    assert login.status_code == 200
+    user.active = False
+    change = client.post("/api/auth/password", json={
+        "current_password": "existing-password-123", "new_password": "replacement-password-123",
+    }, headers={"x-aperture-session": login.json()["session"]["token"]})
+    assert change.status_code == 401
+    assert "session" not in change.json()
+    assert store.verify_password_credential(user.id, "existing-password-123")
+
+
+def test_password_change_rechecks_session_before_mutating_credentials(monkeypatch) -> None:
+    store = get_store()
+    user = store.users["user-jane"]
+    user.email = "password.race@local.invalid"
+    user.auth_method = "local"
+    store.set_password_credential(user.id, "existing-password-123")
+    login = client.post("/api/auth/login", json={
+        "email": user.email, "auth_method": "local", "password": "existing-password-123",
+    })
+    assert login.status_code == 200
+    validate = store.user_for_session_claims
+    validations = 0
+
+    def invalidate_after_dependencies(claims):
+        nonlocal validations
+        validations += 1
+        # current_user and optional_signed_session are dependency checks;
+        # the third validation must refuse the now-revoked session.
+        return None if validations >= 3 else validate(claims)
+
+    monkeypatch.setattr(store, "user_for_session_claims", invalidate_after_dependencies)
+    change = client.post("/api/auth/password", json={
+        "current_password": "existing-password-123", "new_password": "replacement-password-123",
+    }, headers={"x-aperture-session": login.json()["session"]["token"]})
+    assert change.status_code == 401
+    assert "session" not in change.json()
+    assert store.verify_password_credential(user.id, "existing-password-123")
+
+
+def test_session_renewal_failure_explains_that_the_new_password_was_saved(monkeypatch) -> None:
+    from fastapi import HTTPException
+    from app.routes import auth
+
+    store = get_store()
+    user = store.users["user-jane"]
+    user.email = "password.renewal@local.invalid"
+    user.auth_method = "local"
+    store.set_password_credential(user.id, "existing-password-123")
+    login = client.post("/api/auth/login", json={
+        "email": user.email, "auth_method": "local", "password": "existing-password-123",
+    })
+    assert login.status_code == 200
+
+    def unavailable(*args, **kwargs):
+        raise HTTPException(status_code=503, detail="Session issuance is unavailable.")
+
+    monkeypatch.setattr(auth, "_issue_session", unavailable)
+    change = client.post("/api/auth/password", json={
+        "current_password": "existing-password-123", "new_password": "replacement-password-123",
+    }, headers={"x-aperture-session": login.json()["session"]["token"]})
+    assert change.status_code == 503
+    assert change.json()["detail"] == "Your password was updated. Sign in again with your new password to continue."
+    assert store.verify_password_credential(user.id, "replacement-password-123")
+    assert not store.verify_password_credential(user.id, "existing-password-123")

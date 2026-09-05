@@ -2,7 +2,7 @@
 
 Two flows land here, distinguished by the signed OIDC-style state token:
 
-- Workspace flow (Google Drive knowledge sync): started by an admin from the
+- Workspace flow (Google Drive knowledge sync): started by a platform owner from the
   connector configuration; the outcome redirects back to the web app.
 - Per-user flow (chat attachments): started by any user from the attach menu
   in a popup window; tokens are stored per (config, user) so each user only
@@ -29,7 +29,7 @@ from app.core.connector_auth import (
     user_oauth_provider,
 )
 from app.core.sessions import verify_oidc_state
-from app.models.schemas import Role, User
+from app.models.schemas import Role
 from app.repositories.deps import get_store
 from app.repositories.seed import SeedStore
 
@@ -61,6 +61,11 @@ def _workspace_callback(
     config = store.connector_configs.get(str(payload.get("config_id") or ""))
     if config is None or config.connector_id != "google-drive":
         return _error_redirect("The OAuth callback does not match a Google Drive connector configuration.")
+    # Signed state proves who started consent, but their current privilege may
+    # have changed before the provider returned. Shared credentials stay owner-only.
+    actor = store.users.get(str(payload.get("actor_id") or ""))
+    if actor is None or not actor.active or actor.role != Role.PLATFORM_OWNER:
+        return _error_redirect("Only an active platform owner can connect workspace credentials.")
     if not code:
         return _error_redirect("The provider did not return an authorization code.")
 
@@ -73,7 +78,7 @@ def _workspace_callback(
     settings["oauth_connected_at"] = "Saved now"
     config.settings = settings
     store.record_audit(
-        _callback_actor(payload, config, store),
+        actor,
         "admin.connector_oauth_connected",
         config.id,
         {"connector_id": config.connector_id, "refresh_token": "[redacted]"},
@@ -151,18 +156,3 @@ def _error_redirect(message: str) -> RedirectResponse:
 def _web_origin() -> str:
     origins = get_settings().web_origin_list
     return origins[0] if origins else "http://localhost:5173"
-
-
-def _callback_actor(state_payload: dict, config: object, store: SeedStore) -> User:
-    actor = store.users.get(str(state_payload.get("actor_id") or ""))
-    if actor is not None:
-        return actor
-    # Provider redirects are unauthenticated; audit them as an explicit system actor.
-    return User(
-        id="system-connector-oauth-callback",
-        tenant_id=getattr(config, "tenant_id", None),
-        email="connector-oauth-callback@aperture.local",
-        display_name="Connector OAuth callback",
-        role=Role.USER,
-        auth_method="local",
-    )

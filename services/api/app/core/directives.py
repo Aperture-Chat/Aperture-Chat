@@ -181,6 +181,15 @@ def extract_directives(prompt: str, standing_instructions: list[str] | None = No
     return directives[:MAX_DIRECTIVES]
 
 
+def extract_draft_directives(prompt: str, standing_instructions: list[str] | None = None) -> list[Directive]:
+    # Deck output is validated against its JSON contract in the deck pipeline.
+    # The editor adds artwork afterward; prose/image verifiers are inapplicable.
+    if prompt.startswith(("You are a presentation writer producing a slide deck", "You are revising an existing slide deck")):
+        return []
+    match = re.search(r"\AUser request: (.*?)\n\nDraft type:", prompt, re.DOTALL)
+    return extract_directives(match.group(1) if match else prompt, standing_instructions)
+
+
 def directive_prompt_block(directives: list[Directive]) -> str:
     """Render the checklist for the tail of the system prompt."""
     if not directives:
@@ -249,6 +258,12 @@ def _verify_code(directive: Directive, text: str) -> str | None:
 
 def _verify_citations(directive: Directive, text: str) -> str | None:
     if re.search(r"https?://\S+", text) or re.search(r"\[[KWM]\d+\]", text) or "](" in text:
+        return None
+    # Academic citations need not be hyperlinks. Require both a bibliography
+    # with entries and an author/title parenthetical, not just its heading.
+    if re.search(r"(?im)^\s*#{0,3}\s*(?:Works Cited|References)\s*\n+\S.{20,}", text) and re.search(
+        r"\([A-Z][^()\n]{2,120}\)", text
+    ):
         return None
     return "The user asked for sources, but the answer cites none."
 
@@ -372,6 +387,7 @@ def _code_requested(prompt: str) -> bool:
 
 
 def _citations_requested(prompt: str) -> bool:
+    prompt = re.sub(r"\b(?:do not|don't|never)\s+(?:invent|fabricate|make up)\s+(?:citations?|sources?|references?)\b", "", prompt, flags=re.IGNORECASE)
     return bool(
         re.search(r"\b(cite|citations?|sources?|references?|footnotes?)\b", prompt, flags=re.IGNORECASE)
     )
