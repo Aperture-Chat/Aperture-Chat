@@ -36,11 +36,22 @@ jobs:
             dev|test|main) ;;
             *) echo "Branch images are only published for dev, test, and main." >&2; exit 1 ;;
           esac
+          version="$(python3 - <<'PYTHON'
+          import json, pathlib, re, tomllib
+          root = json.loads(pathlib.Path("package.json").read_text())["version"]
+          web = json.loads(pathlib.Path("apps/web/package.json").read_text())["version"]
+          api = tomllib.loads(pathlib.Path("services/api/pyproject.toml").read_text())["project"]["version"]
+          if root != web or root != api or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", root):
+              raise SystemExit("API, web, and root versions must match a stable semantic version.")
+          print(root)
+          PYTHON
+          )"
           owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
           {
             echo "API_IMAGE=ghcr.io/${owner_lc}/aperture-chat-api"
             echo "WEB_IMAGE=ghcr.io/${owner_lc}/aperture-chat-web"
             echo "BRANCH_TAG=${GITHUB_REF_NAME}"
+            echo "VERSION_TAG=v${version}-${GITHUB_REF_NAME}"
             echo "IMMUTABLE_TAG=${GITHUB_REF_NAME}-${GITHUB_SHA}"
           } >> "$GITHUB_ENV"
 
@@ -80,7 +91,10 @@ jobs:
         env:
           API_EXPECTED_DIGEST: ${{ steps.api.outputs.digest }}
           WEB_EXPECTED_DIGEST: ${{ steps.web.outputs.digest }}
-        run: bash scripts/promote-branch-images.sh
+        run: |
+          # Publish the version-qualified pair before advancing the branch channel.
+          BRANCH_TAG="${VERSION_TAG}" bash scripts/promote-branch-images.sh
+          bash scripts/promote-branch-images.sh
 
       - name: Record inspection references
         shell: bash
@@ -92,8 +106,10 @@ jobs:
             echo
             echo "- \`${API_IMAGE}:${IMMUTABLE_TAG}\`"
             echo "- \`${API_IMAGE}:${BRANCH_TAG}\`"
+            echo "- \`${API_IMAGE}:${VERSION_TAG}\`"
             echo "- \`${WEB_IMAGE}:${IMMUTABLE_TAG}\`"
             echo "- \`${WEB_IMAGE}:${BRANCH_TAG}\`"
+            echo "- \`${WEB_IMAGE}:${VERSION_TAG}\`"
             echo
             if [[ "${GITHUB_REF_NAME}" == "test" ]]; then
               echo "Promotions to \`main\` must use the immutable \`test-${GITHUB_SHA}\` image pair."

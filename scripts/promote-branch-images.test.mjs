@@ -50,7 +50,7 @@ if (args[2] === 'create') {
 finish(1, 'Unexpected command');
 `;
 
-function run(mode = '', initialAliases = true) {
+function run(mode = '', initialAliases = true, branchTag = 'dev') {
   const directory = mkdtempSync(join(tmpdir(), 'aperture-image-promotion-'));
   try {
     const stateFile = join(directory, 'registry.json');
@@ -58,7 +58,7 @@ function run(mode = '', initialAliases = true) {
     writeFileSync(stateFile, JSON.stringify({ mode, events: [], refs: {
       [`${api}:dev-sha`]: mode === 'sha-digest-mismatch' ? digest('f') : nextApi,
       [`${web}:dev-sha`]: nextWeb,
-      ...(initialAliases ? { [`${api}:dev`]: previousApi, [`${web}:dev`]: previousWeb } : {}),
+      ...(initialAliases ? { [`${api}:${branchTag}`]: previousApi, [`${web}:${branchTag}`]: previousWeb } : {}),
     } }));
     const result = spawnSync('bash', [script], { encoding: 'utf8', env: {
       ...process.env,
@@ -67,7 +67,7 @@ function run(mode = '', initialAliases = true) {
       API_IMAGE: api,
       WEB_IMAGE: web,
       IMMUTABLE_TAG: 'dev-sha',
-      BRANCH_TAG: 'dev',
+      BRANCH_TAG: branchTag,
       API_EXPECTED_DIGEST: nextApi,
       WEB_EXPECTED_DIGEST: nextWeb,
       GITHUB_STEP_SUMMARY: join(directory, 'summary.md'),
@@ -136,4 +136,13 @@ test('one failed rollback is reported and does not prevent recovery of the other
   assert.equal(result.state.refs[`${api}:dev`], nextApi);
   assert.equal(result.state.refs[`${web}:dev`], previousWeb);
   assert.match(result.stdout, /Recovery failed/);
+});
+
+test('version-qualified branch tags publish the verified pair and retain the SHA tags', () => {
+  const result = run('', false, 'v0.5.0-dev');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.state.refs[`${api}:v0.5.0-dev`], nextApi);
+  assert.equal(result.state.refs[`${web}:v0.5.0-dev`], nextWeb);
+  assert.equal(result.state.refs[`${api}:dev-sha`], nextApi);
+  assert.equal(result.state.refs[`${web}:dev-sha`], nextWeb);
 });

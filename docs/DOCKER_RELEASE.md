@@ -126,6 +126,13 @@ digest pair for exact reproducibility because a workflow rerun can rebuild a
 SHA tag. The `test` to `main` promotion gate and release-only `latest` tags
 continue to use the existing release workflow.
 
+Version-qualified branch tags follow `v<version>-<branch>`, for example
+`v0.5.0-dev`, `v0.5.0-test`, and `v0.5.0-main`. Both the API and web package
+use these tags. They advance with subsequent commits carrying that version;
+use the recorded digest pair to pin an exact build. The workflow verifies the
+version-qualified pair before moving the plain branch aliases. Stable
+`v0.5.0` and `latest` remain exclusive to the tagged main release.
+
 ## Upgrade
 
 1. Back up the persistent application-data volume.
@@ -202,6 +209,23 @@ docker compose -f docker-compose.release.yml --profile local logs --tail=200 web
 Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
+
+## New Since v0.4.7
+
+- Version 0.5.0 brings the latest workspace, training, document, and slide-deck
+  changes into one release, including MLA layout, cleaner reference styling,
+  draft history preview/archive/delete, and compact formatting controls.
+- Section switches use a shared sliding indicator and stable positioning.
+  Mobile switches, status labels, user actions, model search, and prompt
+  dialogs now fit compact screens; chat tools have a dedicated chip row.
+- Training videos offer an explicit fullscreen control and expand when a
+  phone rotates to landscape, with an in-page fallback when native fullscreen
+  is unavailable.
+- Each release branch publishes version-qualified API and web image pairs:
+  `v0.5.0-dev`, `v0.5.0-test`, and `v0.5.0-main`. Stable `v0.5.0` and `latest`
+  are published only after the inspected test build reaches main.
+- Draft archive persistence includes migration `20260905_0019_draft_archive`.
+  Follow the normal backup and migration procedure when upgrading.
 
 ## New Since v0.4.6
 

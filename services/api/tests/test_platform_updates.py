@@ -32,6 +32,9 @@ def isolated_update_state(monkeypatch):
     get_store.cache_clear()
     update_checker.reset(lambda _settings: [])
     monkeypatch.setattr(clock, "now", lambda: NOW)
+    # The updater scenarios have a fixed synthetic release catalog. Pin their
+    # running build too, so a package bump cannot make the candidate older.
+    monkeypatch.setattr(platform_updates, "APP_VERSION", "0.4.7")
     yield
     update_checker.reset()
     get_store.cache_clear()

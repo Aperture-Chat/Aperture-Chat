@@ -74,8 +74,9 @@ jobs:
           expected = os.environ["RELEASE_TAG"].removeprefix("v")
           api = tomllib.loads(pathlib.Path("services/api/pyproject.toml").read_text())["project"]["version"]
           root = json.loads(pathlib.Path("package.json").read_text())["version"]
-          if api != expected or root != expected:
-              raise SystemExit("Release tag must match API and root package versions before publication.")
+          web = json.loads(pathlib.Path("apps/web/package.json").read_text())["version"]
+          if api != expected or root != expected or web != expected:
+              raise SystemExit("Release tag must match API, web, and root package versions before publication.")
           PYTHON
 
       - name: Set up Docker Buildx
@@ -133,8 +134,8 @@ jobs:
           EOF
 
           awk '
-            /^## New Since / { capture = 1; next }
             capture && /^## / { exit }
+            /^## New Since / { capture = 1; next }
             capture { print }
           ' docs/DOCKER_RELEASE.md
 
