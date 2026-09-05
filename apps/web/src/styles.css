@@ -5869,6 +5869,15 @@ button:disabled {
   word-break: break-word;
 }
 
+/* Paper stays light even in dark mode, so browser-default link colors do not
+   provide reliable contrast here (including links already visited). */
+.document-canvas a[href],
+.draft-print-root a[href] {
+  color: #164e80;
+  text-decoration-line: underline;
+  text-underline-offset: .13em;
+}
+
 .document-canvas pre {
   width: 100%;
   min-width: 0;
@@ -24568,6 +24577,13 @@ button.feedback-event-row.is-clickable:focus-visible {
 .document-mla-title { text-align: center; }
 .document-mla-body { text-indent: .5in; }
 .document-mla-reference { padding-left: .5in; text-indent: -.5in; }
+/* Numbered references already have an outside list marker. A bibliography
+   paragraph's negative indent would pull its first line over that number. */
+.document-canvas li.document-mla-reference,
+.draft-print-root li.document-mla-reference {
+  padding-left: .25em;
+  text-indent: 0;
+}
 .document-canvas.is-paginated .document-page:has(.document-mla-text) { padding: 1in; }
 @media print {
   @page draft-mla { size: letter; margin: 1in; }
