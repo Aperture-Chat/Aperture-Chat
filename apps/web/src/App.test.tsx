@@ -15,6 +15,36 @@ import type { ConnectorConfigRecord } from "./lib/types";
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
 const DARK_MODE_STORAGE_KEY = "aperture-dark-mode";
 
+test("console switches retain their track and keyboard focus between sections", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    return url.includes("/api/bootstrap")
+      ? new Response(JSON.stringify(sampleData), { status: 200, headers: { "Content-Type": "application/json" } })
+      : new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  render(<App />);
+  const primary = await screen.findByRole("navigation", { name: "Primary" });
+  fireEvent.click(within(primary).getByRole("button", { name: "Agents/Automations" }));
+  const track = await screen.findByRole("group", { name: "Agent workspace sections" });
+  const agents = within(track).getByRole("button", { name: "Agents", exact: true });
+  fireEvent.keyDown(agents, { key: "ArrowRight" });
+  const automations = within(track).getByRole("button", { name: "Automations", exact: true });
+  expect(await screen.findByRole("button", { name: "New automation" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Agent workspace sections" })).toBe(track);
+  expect(automations).toHaveFocus();
+  expect(track).toHaveAttribute("data-active-index", "1");
+  fireEvent.keyDown(automations, { key: "Home" });
+  expect(await screen.findByRole("button", { name: "New Agent" })).toBeInTheDocument();
+  expect(agents).toHaveFocus();
+  expect(track).toHaveAttribute("data-active-index", "0");
+
+  fireEvent.click(within(primary).getByRole("button", { name: "Knowledge/Tools" }));
+  const library = await screen.findByRole("group", { name: "Library sections" });
+  fireEvent.keyDown(within(library).getByRole("button", { name: "Knowledge", exact: true }), { key: "End" });
+  expect(library).toHaveAttribute("data-active-index", "1");
+  expect(within(library).getByRole("button", { name: "Tools", exact: true })).toHaveFocus();
+});
+
 function fileListForInput(files: File[]): FileList {
   const fileList = {
     length: files.length,

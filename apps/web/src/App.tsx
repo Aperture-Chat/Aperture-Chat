@@ -1216,27 +1216,27 @@ export function App() {
           onSelect={(key) => setAgentsSection(key as "agents" | "automations")}
         />
       );
-      if (agentsSection === "automations") {
-        return (
+      return (
+        <div className="console-page agent-workspace-shell">
+          <div className="console-section-controls">{agentTabs}</div>
+          {agentsSection === "automations" ? (
           <AutomationsConsole
             data={effectiveData}
             actorUserId={data.me.id}
             onDataChange={setData}
-            sectionTabs={agentTabs}
           />
-        );
-      }
-      return (
+          ) : (
         <AgentWorkspaceConsole
           data={effectiveData}
           onDataChange={setData}
-          sectionTabs={agentTabs}
           onUseInChat={(modelId) => {
             chat.setModel(modelId);
             setRequestedAgentId(modelId);
             setView("chat");
           }}
         />
+          )}
+        </div>
       );
     }
     return (
@@ -1440,8 +1440,38 @@ function SectionTabs({
   onSelect: (key: string) => void;
   ariaLabel: string;
 }) {
+  const dragStart = useRef<number | null>(null);
+  const suppressClick = useRef(false);
+  const activeIndex = Math.max(0, tabs.findIndex(tab => tab.key === active));
   return (
-    <div className="section-switch" role="group" aria-label={ariaLabel}>
+    <div className="section-switch" role="group" aria-label={ariaLabel}
+      data-active-index={activeIndex}
+      onPointerDown={event => {
+        if (event.button !== 0) return;
+        dragStart.current = event.clientX;
+        suppressClick.current = false;
+        // Capture on the pressed button so a normal click keeps its target,
+        // while a drag can finish beyond the edge of the track.
+        const button = event.target instanceof Element ? event.target.closest("button") : null;
+        button?.setPointerCapture?.(event.pointerId);
+      }}
+      onPointerUp={event => {
+        const start = dragStart.current;
+        dragStart.current = null;
+        if (start !== null && Math.abs(event.clientX - start) > 24) {
+          suppressClick.current = true;
+          onSelect(tabs[event.clientX > start ? tabs.length - 1 : 0].key);
+        }
+      }}
+      onPointerCancel={() => { dragStart.current = null; }}
+      onKeyDown={event => {
+        const index = event.key === "ArrowRight" || event.key === "End" ? tabs.length - 1
+          : event.key === "ArrowLeft" || event.key === "Home" ? 0 : null;
+        if (index === null) return;
+        event.preventDefault();
+        onSelect(tabs[index].key);
+        event.currentTarget.querySelectorAll("button")[index]?.focus();
+      }}>
       {tabs.map((tab) => (
         <button
           key={tab.key}
@@ -1449,7 +1479,10 @@ function SectionTabs({
           aria-pressed={active === tab.key}
           className={`section-switch-tab${active === tab.key ? " is-active" : ""}`}
           data-tooltip={`Switch to the ${tab.label} section`}
-          onClick={() => onSelect(tab.key)}
+          onClick={() => {
+            if (suppressClick.current) { suppressClick.current = false; return; }
+            onSelect(tab.key);
+          }}
         >
           {tab.label}
         </button>
