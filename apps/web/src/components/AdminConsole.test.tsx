@@ -1481,6 +1481,8 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
 
   expect(await screen.findByRole("dialog", { name: "Admin console documentation" })).toBeInTheDocument();
   for (const title of [
+    "Approve access and finish sign-in",
+    "Review feedback and reported issues",
     "Users and accounts",
     "Groups and permissions",
     "Tenant model access",
@@ -1494,7 +1496,7 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/guided video$/)).toHaveLength(10);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(12);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "docs/aperture-admin-guide.pdf");

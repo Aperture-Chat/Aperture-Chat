@@ -663,6 +663,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
 
   expect(await screen.findByRole("dialog", { name: "Platform owner documentation" })).toBeInTheDocument();
   const videoTitles = [
+    "Set up the first workspace",
     "Providers and connections",
     "API Key Vault and replacement",
     "Organization model availability",
