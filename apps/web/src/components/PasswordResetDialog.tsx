@@ -1,6 +1,7 @@
 import { Check, Copy, KeyRound, RefreshCw, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Toggle } from "./Primitives";
+import { useModalFocus } from "../lib/useModalFocus";
 
 /* Owner/admin dialog for issuing an account password. The password is stored
  * hashed server-side, so it is shown exactly once here — hence the generate
@@ -17,10 +18,12 @@ function generatePassword(): string {
 
 export function PasswordResetDialog({
   userName,
+  userEmail,
   onClose,
   onSubmit,
 }: {
   userName: string;
+  userEmail?: string;
   onClose: () => void;
   onSubmit: (password: string, temporary: boolean) => Promise<void>;
 }) {
@@ -32,8 +35,11 @@ export function PasswordResetDialog({
   const [error, setError] = useState<string | null>(null);
   const titleId = useId();
   const inputId = useId();
+  const dialogRef = useRef<HTMLElement>(null);
+  useModalFocus(dialogRef, true, () => { if (!pending) onClose(); });
 
   async function save() {
+    if (pending) return;
     setPending(true);
     setError(null);
     try {
@@ -57,8 +63,10 @@ export function PasswordResetDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={() => { if (!pending) onClose(); }}>
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal password-reset-modal"
         role="dialog"
         aria-modal="true"
@@ -79,6 +87,7 @@ export function PasswordResetDialog({
             aria-label="Close password dialog"
             data-tooltip="Close without changing anything else"
             onClick={onClose}
+            disabled={pending}
           >
             <X size={17} />
           </button>
@@ -89,6 +98,7 @@ export function PasswordResetDialog({
               <Check size={15} /> Password set for {userName}.
               {temporary ? " They must choose their own password at first sign-in." : ""}
             </p>
+            {userEmail && <p className="password-reset-hint">Sign in at {window.location.origin} with {userEmail}. Choose Email &amp; password if organization SSO is also available. An enforced SSO policy still applies.</p>}
             <div className="password-reveal-row">
               <code>{password}</code>
               <button
@@ -114,6 +124,7 @@ export function PasswordResetDialog({
               <span className="password-generate-row">
                 <input
                   id={inputId}
+                  disabled={pending}
                   type="text"
                   value={password}
                   placeholder="At least 12 characters"
@@ -126,6 +137,7 @@ export function PasswordResetDialog({
                   type="button"
                   data-tooltip="Fill in a strong random password"
                   onClick={() => setPassword(generatePassword())}
+                  disabled={pending}
                 >
                   <RefreshCw size={14} /> Generate
                 </button>
@@ -133,6 +145,7 @@ export function PasswordResetDialog({
             </label>
             <Toggle
               checked={temporary}
+              disabled={pending}
               onChange={setTemporary}
               label="Temporary password"
               tooltip={
@@ -157,7 +170,7 @@ export function PasswordResetDialog({
               >
                 {pending ? "Setting..." : "Set password"}
               </button>
-              <button className="secondary-button" type="button" onClick={onClose}>
+              <button className="secondary-button" type="button" disabled={pending} onClick={onClose}>
                 Cancel
               </button>
             </div>

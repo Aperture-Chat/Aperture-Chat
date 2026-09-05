@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.scheduler import scheduler_loop
+from app.version import API_VERSION
 from app.repositories.deps import get_store
 from app.repositories.review_deps import close_review_services, initialize_review_services
 from app.routes import (
@@ -32,6 +33,7 @@ from app.routes import (
     matters,
     memory,
     platform,
+    platform_updates,
     pwa,
     review,
     scim,
@@ -124,7 +126,7 @@ app = FastAPI(
         "Secure enterprise AI chat: auth and SSO, platform-owner controls, tenant "
         "admin, SCIM, chat, knowledge, tools, agents, and scheduled automations."
     ),
-    version="0.4.5",
+    version=API_VERSION,
     lifespan=lifespan,
 )
 
@@ -226,6 +228,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(bootstrap.router)
 app.include_router(platform.router)
+app.include_router(platform_updates.router)
 app.include_router(admin.router)
 app.include_router(chat.router)
 app.include_router(issue_reports.router)

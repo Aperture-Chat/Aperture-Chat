@@ -1,4 +1,6 @@
 import { DictationControl } from "./DictationControl";
+import { DraftModelMenu } from "./DraftModelMenu";
+import type { DraftNavigationGuard } from "../lib/draftNavigation";
 import { SelectControl } from "./SelectControl";
 import {
   ALargeSmall,
@@ -60,7 +62,6 @@ import {
   Upload,
   X,
   type LucideIcon,
-  Star,
 } from "lucide-react";
 import {
   BoxIcon,
@@ -115,9 +116,11 @@ import {
 import {
   loadLegacyDraftHistory,
   loadScopedDraftCache,
+  limitDraftCacheEntries,
   mergeServerDraftsIntoCache,
   removeLegacyDraftHistoryEntry,
   saveScopedDraftCache,
+  scopedDraftCacheKey,
   utf8ByteLength,
   type DraftCacheScope,
   type DraftSyncFields,
@@ -176,7 +179,7 @@ import { markdownOutlineFromDeck } from "../lib/deck/deckToDocument";
 import { PPTX_MIME_TYPE, buildPptxExportDocument } from "../lib/pptxExport";
 import { markdownToDocumentHtml } from "../lib/markdown";
 import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "../lib/documentDiagrams";
-import { approvedWorkspaceModels, isModelUsable, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
+import { approvedWorkspaceModels, isModelUsable, modelsForTextDefault, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
 import {
   ReasoningSlider,
   REASONING_EFFORT_BY_LEVEL,
@@ -186,6 +189,7 @@ import {
 } from "./ReasoningSlider";
 import { fetchServerTime, formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { useViewportWidth } from "../lib/useViewport";
+import { useModalFocus } from "../lib/useModalFocus";
 
 /** Below this width the assistant rail becomes a slide-out drawer so the
  * document gets the full screen instead of being pushed down a vertical stack. */
@@ -260,7 +264,21 @@ type DraftServerSyncSnapshot = {
   content: string;
   summary: string;
   sourceLabel: string;
+  storedLocally?: boolean;
 };
+
+type DraftServerBinding = {
+  id: string | null;
+  revision: number | null;
+  historyId: string;
+  lastSnapshot?: DraftServerSyncSnapshot;
+  chain?: Promise<void>;
+};
+
+// Background saves survive workspace remounts. Share only within the exact
+// tenant/user/history scope so reopening that draft joins its existing queue.
+const draftServerBindings = new Map<string, DraftServerBinding>();
+const draftCacheWriterId = crypto.randomUUID();
 
 type AssistantEvent = {
   id: string;
@@ -702,13 +720,6 @@ const DRAFT_ATTACHMENT_CONNECTORS: DraftConnectorOption[] = [
   },
 ];
 
-const DEFAULT_DRAFT_AGENT: DraftAgentOption = {
-  id: "local-document-assistant",
-  name: "Document Assistant",
-  providerName: "Aperture",
-  description: "Local drafting workflow for template and editor actions.",
-};
-
 const INITIAL_DOCUMENT = `Client Update Draft
 
 Matter: Anderson v. Northstar Logistics
@@ -1038,6 +1049,7 @@ export function DocumentAssistantWorkspace({
   data,
   brandName,
   onCloseDraft,
+  onNavigationGuardChange,
   initialDraft,
   initialServerDraftId,
   actorUserId,
@@ -1045,6 +1057,7 @@ export function DocumentAssistantWorkspace({
   data: BootstrapData;
   brandName?: string | null;
   onCloseDraft?: () => void;
+  onNavigationGuardChange?: (guard: DraftNavigationGuard | null) => void;
   initialDraft?: DraftImportPayload | null;
   /** Server draft to open fully loaded on mount (e.g. from a search hit). */
   initialServerDraftId?: string | null;
@@ -1080,12 +1093,16 @@ export function DocumentAssistantWorkspace({
     [data, uploadedWordTemplates],
   );
   const draftAgents = useMemo(() => draftingAgentsFromData(data), [data]);
+  const defaultDraftAgentId = useMemo(() => {
+    const candidates = modelsForTextDefault(approvedWorkspaceModels(data));
+    return candidates.find((model) => model.is_custom)?.id ?? candidates[0]?.id ?? "";
+  }, [data]);
   const importedDraftState = useMemo(
     () => (initialDraft ? buildImportedDraftState(initialDraft) : null),
     [initialDraft?.id],
   );
   const [selectedAgentId, setSelectedAgentId] = useState(() =>
-    loadDraftModelSelection(draftAgents),
+    loadDraftModelSelection(draftAgents, defaultDraftAgentId),
   );
   const [defaultAgentId, setDefaultAgentId] = useState<string | null>(() =>
     loadStoredDraftModelId(),
@@ -1093,9 +1110,14 @@ export function DocumentAssistantWorkspace({
   // Once the user picks a model this session, the starred default stops
   // auto-applying so their explicit choice is respected.
   const userPickedAgentRef = useRef(false);
-  const selectedAgent =
-    draftAgents.find((agent) => agent.id === selectedAgentId) ?? draftAgents[0];
-  const webSearchAvailable = supportsDraftWebSearch(data, selectedAgent.id);
+  const selectedAgent: DraftAgentOption | undefined =
+    draftAgents.find((agent) => agent.id === selectedAgentId) ??
+    draftAgents.find((agent) => agent.id === defaultDraftAgentId);
+  const draftAiAvailable = Boolean(selectedAgent);
+  const draftAiUnavailableReason = data.me.role === "PLATFORM_OWNER"
+    ? "Connect a provider and enable a model in the Platform Owner Console to use AI drafting."
+    : "Ask your administrator to connect a model and grant your group access to use AI drafting.";
+  const webSearchAvailable = selectedAgent ? supportsDraftWebSearch(data, selectedAgent.id) : false;
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     BUILT_IN_DRAFT_TEMPLATES[0].id,
   );
@@ -1112,6 +1134,13 @@ export function DocumentAssistantWorkspace({
       ? draftTemplates
       : draftTemplates.filter((template) => template.category === templateCategory);
   const [documentTitle, setDocumentTitle] = useState(importedDraftState?.title ?? EMPTY_DOCUMENT_TITLE);
+  const [savedDocumentTitle, setSavedDocumentTitle] = useState(importedDraftState?.title ?? EMPTY_DOCUMENT_TITLE);
+  const [pendingDraftNavigation, setPendingDraftNavigation] = useState<{ label: string; run: () => void } | null>(null);
+  const [draftNavigationError, setDraftNavigationError] = useState<string | null>(null);
+  const draftNavigationDialogRef = useRef<HTMLElement | null>(null);
+  const draftOpenRequestRef = useRef(0);
+  const hasUnsavedEditsRef = useRef(false);
+  useModalFocus(draftNavigationDialogRef, pendingDraftNavigation !== null, () => setPendingDraftNavigation(null));
   const [draftTitleGenerating, setDraftTitleGenerating] = useState(false);
   const [content, setContent] = useState(importedDraftState?.content ?? "");
   const [instruction, setInstruction] = useState("");
@@ -1155,7 +1184,7 @@ export function DocumentAssistantWorkspace({
   );
   // The slider only engages for models with real reasoning control; the API
   // enforces the same gate before anything reaches the provider.
-  const reasoningTargetModel = data.models.find((model) => model.id === selectedAgent.id);
+  const reasoningTargetModel = data.models.find((model) => model.id === selectedAgent?.id);
   const reasoningSupported = supportsReasoningEffort(reasoningTargetModel);
   const reasoningEffortForSend = reasoningSupported ? REASONING_EFFORT_BY_LEVEL[reasoningLevel] : null;
 
@@ -1289,6 +1318,8 @@ export function DocumentAssistantWorkspace({
   const viewportWidth = useViewportWidth();
   const railIsDrawer = viewportWidth <= DRAFT_RAIL_DRAWER_WIDTH;
   const [railOpen, setRailOpen] = useState(false);
+  const assistantRailRef = useRef<HTMLElement | null>(null);
+  useModalFocus(assistantRailRef, railIsDrawer && railOpen, () => setRailOpen(false));
   const [mobileFormattingExpanded, setMobileFormattingExpanded] = useState(false);
   const assistantWorking = draftTrace !== null && !draftTrace.complete;
   const documentAiEditing = assistantWorking || inlineEditState.working;
@@ -1306,14 +1337,15 @@ export function DocumentAssistantWorkspace({
   const revisionInFlightRef = useRef(false);
   // Server binding for the document currently in the editor. `revision` is the
   // CAS token for the next PUT; a null id means the next save creates a draft.
-  const serverDraftRef = useRef<{ id: string | null; revision: number | null }>({
+  const serverDraftRef = useRef<DraftServerBinding>({
     id: null,
     revision: null,
+    historyId: createDraftHistoryId(),
   });
-  // Server saves are serialized so a create and its follow-up update can never
-  // race each other into duplicate drafts.
-  const serverSyncChainRef = useRef<Promise<void>>(Promise.resolve());
-  const lastServerSyncSnapshotRef = useRef<DraftServerSyncSnapshot | null>(null);
+  const deckHistoryIdRef = useRef(createDraftHistoryId());
+  const lastDraftHistoryWriteSucceededRef = useRef(true);
+  const documentHistoryRef = useRef(documentHistory);
+  documentHistoryRef.current = documentHistory;
   const sheetHealRunRef = useRef(0);
   const diagramHydrationRunRef = useRef(0);
   const pageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1464,10 +1496,20 @@ export function DocumentAssistantWorkspace({
   );
   const hasUnsavedEdits = Boolean(
     selectedVersion &&
-      (draftKind === "deck"
+      (documentTitle.trim() !== savedDocumentTitle.trim() || (draftKind === "deck"
         ? serializedDeck !== null && selectedVersion.content !== serializedDeck
-        : selectedVersion.content !== content),
+        : selectedVersion.content !== content)),
   );
+  hasUnsavedEditsRef.current = hasUnsavedEdits || serverSaveState.kind === "not-stored";
+  useEffect(() => {
+    const protectUnsavedWork = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedEditsRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectUnsavedWork);
+    return () => window.removeEventListener("beforeunload", protectUnsavedWork);
+  }, []);
   const shouldShowChangeSummary =
     showEdits &&
     versions.length > 1 &&
@@ -1528,9 +1570,10 @@ export function DocumentAssistantWorkspace({
 
   useEffect(() => {
     function handleHistoryUpdate(event: Event) {
-      const detail = (event as CustomEvent<unknown>).detail;
-      const nextHistory = Array.isArray(detail)
-        ? detail.filter(isDraftDocumentHistoryItem).slice(0, 24)
+      const detail = (event as CustomEvent<{ scope?: DraftCacheScope; items?: unknown }>).detail;
+      if (detail?.scope && (detail.scope.tenantId !== draftScope.tenantId || detail.scope.userId !== draftScope.userId)) return;
+      const nextHistory = Array.isArray(detail?.items)
+        ? limitDraftCacheEntries(detail.items.filter(isDraftDocumentHistoryItem))
         : loadDraftDocumentHistory(draftScope);
       setDocumentHistory(nextHistory);
       if (!activeHistoryItemId) return;
@@ -1554,7 +1597,7 @@ export function DocumentAssistantWorkspace({
       .then((serverDrafts) => {
         if (!active) return;
         const merged = mergeServerDraftsIntoCache(
-          loadDraftDocumentHistory(draftScope),
+          documentHistoryRef.current,
           serverDrafts,
           serverDraftHistoryStub,
         );
@@ -1764,16 +1807,6 @@ export function DocumentAssistantWorkspace({
     if (railIsDrawer && assistantWorking) setRailOpen(true);
   }, [railIsDrawer, assistantWorking]);
 
-  // Close the drawer on Escape, matching the chat session panel.
-  useEffect(() => {
-    if (!railIsDrawer || !railOpen) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setRailOpen(false);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [railIsDrawer, railOpen]);
-
   useEffect(() => {
     // The starred default wins whenever its model is usable and the user has
     // not picked a model this session. The agent list is transient (the
@@ -1790,14 +1823,14 @@ export function DocumentAssistantWorkspace({
     }
     if (draftAgents.some((agent) => agent.id === selectedAgentId)) return;
     // Display fallback only; deliberately not saved, so the star survives.
-    setSelectedAgentId(storedUsable ? (storedAgentId as string) : draftAgents[0].id);
-  }, [draftAgents, selectedAgentId]);
+    setSelectedAgentId(storedUsable ? (storedAgentId as string) : defaultDraftAgentId);
+  }, [defaultDraftAgentId, draftAgents, selectedAgentId]);
 
   useEffect(() => {
     if (webSearchAvailable || !webSearchEnabled) return;
     setWebSearchEnabled(false);
-    setStatus("Web search is turned off for this model by your workspace configuration.");
-  }, [selectedAgent.id, webSearchAvailable, webSearchEnabled]);
+    if (selectedAgent) setStatus("Web search is turned off for this model by your workspace configuration.");
+  }, [selectedAgent?.id, webSearchAvailable, webSearchEnabled]);
 
   useEffect(() => () => clearDraftTimers(), []);
 
@@ -1814,7 +1847,7 @@ export function DocumentAssistantWorkspace({
     clearDraftTimers();
     // A transferred chat draft is a new document owned by the signed-in user;
     // its first save creates a fresh server draft.
-    serverDraftRef.current = { id: null, revision: null };
+    serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
     setServerSaveState({ kind: "idle" });
     const nextImport = buildImportedDraftState(initialDraft);
     setDocumentTitle(nextImport.title);
@@ -2027,6 +2060,47 @@ export function DocumentAssistantWorkspace({
     setDraftKind("document");
     setStatus(`${version.label} restored in the editor.`);
     window.setTimeout(() => editorRef.current?.focus(), 0);
+  }
+
+  const requestDraftNavigation = useCallback<DraftNavigationGuard>((label, run) => {
+    // A later navigation wins over any history request still loading.
+    draftOpenRequestRef.current += 1;
+    if (!hasUnsavedEditsRef.current) {
+      run();
+      return;
+    }
+    setDraftNavigationError(null);
+    setPendingDraftNavigation({ label, run });
+  }, []);
+
+  useLayoutEffect(() => {
+    onNavigationGuardChange?.(requestDraftNavigation);
+    return () => onNavigationGuardChange?.(null);
+  }, [onNavigationGuardChange, requestDraftNavigation]);
+
+  function continueDraftNavigation(preserveCopy: boolean) {
+    const pending = pendingDraftNavigation;
+    if (!pending) return;
+    if (preserveCopy) {
+      const deck = draftKind === "deck" ? flushDeckTextEdits() : null;
+      const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
+        id: createDraftHistoryId(),
+        title: `${documentTitle.trim() || EMPTY_DOCUMENT_TITLE} (unsaved copy)`,
+        content: deck ? serializeSlideDeck(deck) : contentRef.current,
+        summary: "Unsaved edits preserved before leaving this version",
+        sourceLabel: activeSourceLabel,
+        serverId: null,
+        serverRevision: null,
+      });
+      setDocumentHistory(nextHistory);
+      if (!lastDraftHistoryWriteSucceededRef.current) {
+        setDraftNavigationError("Browser storage could not keep a recovery copy. Keep editing and export your work, or explicitly discard these edits to continue.");
+        return;
+      }
+    }
+    setPendingDraftNavigation(null);
+    setDraftNavigationError(null);
+    pending.run();
   }
 
   /* ------------------------------ deck mode ------------------------------ */
@@ -2645,6 +2719,7 @@ export function DocumentAssistantWorkspace({
    * returns a short title. Failures land in the status line — no fake
    * success states. */
   async function generateDraftTitleWithAi() {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (draftTitleGenerating) return;
     const deck = draftKind === "deck" ? flushDeckTextEdits() ?? deckState : null;
     const body =
@@ -2815,6 +2890,7 @@ export function DocumentAssistantWorkspace({
    * a slide block. Falls back to the floating-pill capture when the live
    * selection was consumed by the click. Honest gate: no selection, no dialog. */
   function openDeckAiEdit() {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (deckAiEditState.open) {
       closeDeckAiEdit();
       return;
@@ -2863,6 +2939,10 @@ export function DocumentAssistantWorkspace({
    * model and swaps the selection for the reply — the same interaction as the
    * document editor's inline AI edit, scoped to one slide region. */
   async function runDeckAiEdit() {
+    if (!selectedAgent) {
+      setDeckAiEditState((current) => ({ ...current, error: draftAiUnavailableReason }));
+      return;
+    }
     const { slideId, region, selectionText, instruction } = deckAiEditState;
     const ask = instruction.trim();
     if (!slideId || !region || !ask) return;
@@ -3555,6 +3635,7 @@ export function DocumentAssistantWorkspace({
    * current one through the provider, with strict validation, one retry, and
    * a deterministic fallback — invalid AI JSON never renders. */
   async function runDeckAssistantRequest(request: string) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (revisionInFlightRef.current) {
       setStatus("The deck assistant is already working on the current request.");
       return;
@@ -3778,16 +3859,18 @@ export function DocumentAssistantWorkspace({
    * device with an explicit Local-only badge until deck sync ships. */
   function rememberDeckSnapshot(title: string, serialized: string, summary: string) {
     const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
+      id: deckHistoryIdRef.current,
       title,
       content: serialized,
       summary,
       sourceLabel: activeSourceLabel,
     });
+    setSavedDocumentTitle(title);
     setDocumentHistory(nextHistory);
     // A successful device save is the expected outcome for decks — announcing
     // it added a badge that reflowed the topbar. Only failures get a badge.
     setServerSaveState(
-      lastDraftHistoryWriteSucceeded
+      lastDraftHistoryWriteSucceededRef.current
         ? { kind: "idle" }
         : {
             kind: "not-stored",
@@ -3832,6 +3915,7 @@ export function DocumentAssistantWorkspace({
   }
 
   function startBlankDeck() {
+    deckHistoryIdRef.current = createDraftHistoryId();
     const deck = blankSlideDeck(documentTitle.trim() || EMPTY_DOCUMENT_TITLE);
     setDeckState(deck);
     setSelectedSlideId(deck.slides[0]?.id ?? null);
@@ -3862,6 +3946,7 @@ export function DocumentAssistantWorkspace({
   }
 
   function convertDocumentToDeckNow() {
+    deckHistoryIdRef.current = createDraftHistoryId();
     const sourceLabel =
       versions.find((version) => version.id === selectedVersionId)?.label ?? "the document";
     const { deck, warnings } = deckFromDocumentHtml(
@@ -4085,11 +4170,16 @@ export function DocumentAssistantWorkspace({
 
   function rememberDocumentSnapshot(title: string, html: string, summary: string) {
     const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
+      id: serverDraftRef.current.historyId,
       title,
       content: html,
       summary,
       sourceLabel: activeSourceLabel,
+      serverId: serverDraftRef.current.id,
+      serverRevision: serverDraftRef.current.revision,
+      serverSavePending: true,
     });
+    setSavedDocumentTitle(title);
     setDocumentHistory(nextHistory);
     queueDraftServerSync({
       historyId: nextHistory[0].id,
@@ -4104,28 +4194,52 @@ export function DocumentAssistantWorkspace({
    * server-assigned id) and CAS-updates afterwards. Saves are chained so they
    * settle in order; every failure keeps the scoped local cache intact and is
    * reported as "Local only", never "Saved". */
-  function queueDraftServerSync(snapshot: DraftServerSyncSnapshot) {
-    lastServerSyncSnapshotRef.current = snapshot;
-    serverSyncChainRef.current = serverSyncChainRef.current
-      .then(() => syncDraftSnapshotToServer(snapshot))
-      .catch(() => {});
+  function queueDraftServerSync(
+    snapshot: DraftServerSyncSnapshot,
+    binding = serverDraftRef.current,
+  ) {
+    const queued = {
+      ...snapshot,
+      storedLocally: snapshot.storedLocally ?? lastDraftHistoryWriteSucceededRef.current,
+    };
+    binding.lastSnapshot = queued;
+    draftServerBindings.set(`${scopedDraftCacheKey(draftScope)}:${binding.historyId}`, binding);
+    binding.chain = (binding.chain ?? Promise.resolve())
+      .then(() => syncDraftSnapshotToServer(queued, binding))
+      .catch(() => {})
+      .finally(() => {
+        if (binding.lastSnapshot === queued) {
+          draftServerBindings.delete(`${scopedDraftCacheKey(draftScope)}:${binding.historyId}`);
+        }
+      });
   }
 
-  async function syncDraftSnapshotToServer(snapshot: DraftServerSyncSnapshot) {
+  async function syncDraftSnapshotToServer(
+    snapshot: DraftServerSyncSnapshot,
+    binding: DraftServerBinding,
+  ) {
+    // A save owns the document binding captured when it was queued. Switching
+    // the editor must never retarget a pending PUT or adopt its response.
+    const reportSaveState = (state: DraftServerSaveState) => {
+      if (serverDraftRef.current === binding && binding.lastSnapshot === snapshot) {
+        setServerSaveState(state);
+      }
+    };
+    const reportUnstored = (reason: string) => reportSaveState({
+      kind: snapshot.storedLocally ? "local-only" : "not-stored",
+      message: snapshot.storedLocally
+        ? `Local only — ${reason}. Your changes are kept on this device.`
+        : `Not saved — ${reason}, and browser storage could not keep a copy. Keep this workspace open and retry or export your changes.`,
+    });
     const title = snapshot.title.trim() || EMPTY_DOCUMENT_TITLE;
     if (utf8ByteLength(snapshot.content) > MAX_DRAFT_CONTENT_BYTES) {
-      setServerSaveState({
-        kind: "local-only",
-        message:
-          "Local only — this draft exceeds the 2 MB server draft limit, so it was kept on this device.",
-      });
+      reportUnstored("this draft exceeds the 2 MB server draft limit");
       return;
     }
-    const binding = { ...serverDraftRef.current };
     if (binding.id && binding.revision === null) {
       // The server copy has revisions this device has not fetched; updating
       // blind would overwrite them. Ask for an explicit reload instead.
-      setServerSaveState({
+      reportSaveState({
         kind: "conflict",
         serverId: binding.id,
         message:
@@ -4133,7 +4247,7 @@ export function DocumentAssistantWorkspace({
       });
       return;
     }
-    setServerSaveState({ kind: "saving" });
+    reportSaveState({ kind: "saving" });
     try {
       // matter_id is deliberately never sent from this workspace: omitting the
       // field preserves any existing matter assignment on the server, and only
@@ -4151,42 +4265,89 @@ export function DocumentAssistantWorkspace({
               { title, content: snapshot.content },
               { tenantSlug: draftTenantSlug },
             );
-      serverDraftRef.current = {
-        id: result.document.id,
-        revision: result.document.current_revision,
-      };
+      binding.id = result.document.id;
+      binding.revision = result.document.current_revision;
+      // If another version is already queued, retain that newest local content
+      // while recording the acknowledged revision for the next serialized PUT.
+      const latest = binding.lastSnapshot ?? snapshot;
+      const diskHistory = loadDraftDocumentHistory(draftScope);
+      const foreignPending = diskHistory.find((item) =>
+        item.id === snapshot.historyId && item.serverSavePending &&
+        item.cacheWriterId && item.cacheWriterId !== draftCacheWriterId,
+      );
+      if (foreignPending) {
+        // CAS protects the server, but localStorage is shared by browser tabs.
+        // Another tab's unsent work keeps its original revision token and copy.
+        setDocumentHistory(diskHistory);
+        reportSaveState({ kind: "saved", revision: result.document.current_revision });
+        return;
+      }
       const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
         id: snapshot.historyId,
-        title: snapshot.title,
-        content: snapshot.content,
-        summary: snapshot.summary,
-        sourceLabel: snapshot.sourceLabel,
+        title: latest.title,
+        content: latest.content,
+        summary: latest.summary,
+        sourceLabel: latest.sourceLabel,
         serverId: result.document.id,
         serverRevision: result.document.current_revision,
         serverContentStale: false,
+        serverSavePending: latest !== snapshot,
       });
+      latest.storedLocally = lastDraftHistoryWriteSucceededRef.current;
       setDocumentHistory(nextHistory);
-      setServerSaveState({ kind: "saved", revision: result.document.current_revision });
+      reportSaveState({ kind: "saved", revision: result.document.current_revision });
     } catch (error) {
       if (isDraftConflictError(error) && binding.id) {
-        setServerSaveState({
+        reportSaveState({
           kind: "conflict",
           serverId: binding.id,
           message:
             "This draft changed somewhere else (another tab or device) before this save. Reload the server copy to continue from it — nothing was overwritten.",
         });
       } else {
-        setServerSaveState({
-          kind: "local-only",
-          message: `Local only — server save failed (${draftErrorText(error)}). Your changes are kept on this device.`,
-        });
+        reportUnstored(`server save failed (${draftErrorText(error)})`);
       }
     }
   }
 
   function retryDraftServerSync() {
-    const snapshot = lastServerSyncSnapshotRef.current;
+    const snapshot = serverDraftRef.current.lastSnapshot;
     if (snapshot) queueDraftServerSync(snapshot);
+  }
+
+  function persistDraftDocumentHistorySnapshot(scope: DraftCacheScope, snapshot: DraftHistorySnapshot) {
+    // A save can finish after this workspace unmounts. Merge the newest disk
+    // entries before writing so that response cannot erase a newer workspace's
+    // drafts, while failed in-memory writes remain available for recovery.
+    const merged = new Map(loadDraftDocumentHistory(scope).map((item) => [item.id, item]));
+    for (const item of documentHistoryRef.current) {
+      const stored = merged.get(item.id);
+      if (!stored || Date.parse(item.updatedAt) > Date.parse(stored.updatedAt)) merged.set(item.id, item);
+    }
+    const previous = merged.get(snapshot.id ?? "");
+    if (snapshot.serverSavePending && previous?.serverSavePending && previous.cacheWriterId &&
+      previous.cacheWriterId !== draftCacheWriterId) {
+      // Keep a recoverable copy before this tab explicitly saves new edits
+      // over an entry another tab still owns.
+      const recovery: DraftDocumentHistoryItem = {
+        ...previous,
+        id: `recovery-${previous.id}-${previous.updatedAt}`,
+        title: `${previous.title} (local copy)`,
+        summary: "Local edits preserved from another draft session",
+        serverId: null,
+        serverRevision: null,
+        serverContentStale: false,
+        serverSavePending: false,
+      };
+      merged.set(recovery.id, recovery);
+    }
+    if (snapshot.serverSavePending) snapshot = { ...snapshot, cacheWriterId: draftCacheWriterId };
+    const nextHistory = upsertDraftDocumentHistory([...merged.values()], snapshot);
+    // Retain failed writes in this mounted workspace so retries and exports
+    // still have the content even when browser storage is unavailable.
+    documentHistoryRef.current = nextHistory;
+    lastDraftHistoryWriteSucceededRef.current = saveDraftDocumentHistory(scope, nextHistory);
+    return nextHistory;
   }
 
   /** Explicit conflict resolution: load the server copy into the editor. The
@@ -4196,9 +4357,11 @@ export function DocumentAssistantWorkspace({
    * Fetches the canonical server copy, persists it into the history cache,
    * and hydrates the editor; a failed fetch reports honestly via status. */
   async function openServerDraftById(serverId: string) {
+    const requestId = ++draftOpenRequestRef.current;
     setStatus("Loading your saved draft…");
     try {
       const snapshot = await getDraft(completionUserId, serverId, { tenantSlug: draftTenantSlug });
+      if (requestId !== draftOpenRequestRef.current) return;
       const opened: DraftDocumentHistoryItem = {
         id: `server-${snapshot.document.id}`,
         title: snapshot.document.title,
@@ -4213,8 +4376,10 @@ export function DocumentAssistantWorkspace({
       };
       const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, opened);
       setDocumentHistory(nextHistory);
-      hydrateDocumentHistoryItem(opened);
-      window.setTimeout(() => editorRef.current?.focus(), 0);
+      requestDraftNavigation(`open ${opened.title}`, () => {
+        hydrateDocumentHistoryItem(opened);
+        window.setTimeout(() => editorRef.current?.focus(), 0);
+      });
     } catch (error) {
       setStatus(
         `This draft could not be loaded from your account (${draftErrorText(error)}). Try again once the connection recovers.`,
@@ -4231,8 +4396,11 @@ export function DocumentAssistantWorkspace({
   }, [initialServerDraftId]);
 
   async function reloadServerDraftCopy(serverId: string) {
+    const requestId = ++draftOpenRequestRef.current;
+    const binding = serverDraftRef.current;
     try {
       const snapshot = await getDraft(completionUserId, serverId, { tenantSlug: draftTenantSlug });
+      if (requestId !== draftOpenRequestRef.current || serverDraftRef.current !== binding) return;
       const localContent = contentRef.current;
       if (localContent && localContent !== snapshot.revision.content) {
         persistDraftDocumentHistorySnapshot(draftScope, {
@@ -4244,6 +4412,14 @@ export function DocumentAssistantWorkspace({
           serverId: null,
           serverRevision: null,
         });
+        if (!lastDraftHistoryWriteSucceededRef.current) {
+          setServerSaveState({
+            kind: "conflict",
+            serverId,
+            message: "The server copy was not opened because browser storage could not preserve your local edits. Export your changes before reloading.",
+          });
+          return;
+        }
       }
       const restoredItem: DraftDocumentHistoryItem = {
         id: `server-${snapshot.document.id}`,
@@ -4262,6 +4438,7 @@ export function DocumentAssistantWorkspace({
       hydrateDocumentHistoryItem(restoredItem);
       setServerSaveState({ kind: "idle" });
     } catch (error) {
+      if (requestId !== draftOpenRequestRef.current || serverDraftRef.current !== binding) return;
       setServerSaveState({
         kind: "conflict",
         serverId,
@@ -4320,7 +4497,8 @@ export function DocumentAssistantWorkspace({
         setStatus(`This saved deck could not be restored: ${parsed.error}`);
         return;
       }
-      serverDraftRef.current = { id: null, revision: null };
+      serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
+      deckHistoryIdRef.current = item.id;
       setServerSaveState({ kind: "idle" });
       const restoredVersion: DraftVersion = {
         id: "version-1",
@@ -4333,6 +4511,7 @@ export function DocumentAssistantWorkspace({
       };
       setActiveHistoryItemId(null);
       setDocumentTitle(item.title);
+      setSavedDocumentTitle(item.title);
       setContent("");
       clearEditHistory();
       setDeckState(parsed.deck);
@@ -4354,11 +4533,31 @@ export function DocumentAssistantWorkspace({
     // never reinstated through innerHTML without the same allowlist
     // sanitization the print/redline surfaces already enforce.
     const safeContent = sanitizeDocumentHtml(item.content);
-    serverDraftRef.current = {
+    const bindingKey = `${scopedDraftCacheKey(draftScope)}:${item.id}`;
+    const existingBinding = draftServerBindings.get(bindingKey);
+    serverDraftRef.current = existingBinding ?? {
       id: item.serverId ?? null,
       revision: item.serverRevision ?? null,
+      historyId: item.id,
     };
-    setServerSaveState({ kind: "idle" });
+    if (existingBinding && !item.serverSavePending) {
+      existingBinding.id = item.serverId ?? existingBinding.id;
+      existingBinding.revision = item.serverRevision ?? existingBinding.revision;
+    }
+    draftServerBindings.set(bindingKey, serverDraftRef.current);
+    if (item.serverSavePending && !serverDraftRef.current.lastSnapshot) {
+      serverDraftRef.current.lastSnapshot = {
+        historyId: item.id,
+        title: item.title,
+        content: item.content,
+        summary: item.summary,
+        sourceLabel: item.sourceLabel,
+        storedLocally: true,
+      };
+    }
+    setServerSaveState(item.serverSavePending
+      ? { kind: "local-only", message: "This version is kept on this device; its account save has not completed." }
+      : { kind: "idle" });
     const restoredVersion: DraftVersion = {
       id: "version-1",
       label: "Version 1",
@@ -4374,6 +4573,7 @@ export function DocumentAssistantWorkspace({
     };
     setActiveHistoryItemId(status === "running" ? item.id : null);
     setDocumentTitle(item.title);
+    setSavedDocumentTitle(item.title);
     setContent(safeContent);
     clearEditHistory();
     setDraftKind("document");
@@ -4400,13 +4600,15 @@ export function DocumentAssistantWorkspace({
   }
 
   async function restoreDocumentHistoryItem(item: DraftDocumentHistoryItem) {
+    const requestId = ++draftOpenRequestRef.current;
     // Server wins at a higher revision: entries whose server copy advanced
     // (or that only exist as server stubs) fetch the recoverable HTML first.
-    if (item.serverId && (item.serverContentStale || !item.content)) {
+    if (item.serverId && !item.serverSavePending && (item.serverContentStale || !item.content)) {
       try {
         const snapshot = await getDraft(completionUserId, item.serverId, {
           tenantSlug: draftTenantSlug,
         });
+        if (requestId !== draftOpenRequestRef.current) return;
         const refreshed: DraftDocumentHistoryItem = {
           ...item,
           title: snapshot.document.title,
@@ -4418,10 +4620,13 @@ export function DocumentAssistantWorkspace({
         };
         const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, refreshed);
         setDocumentHistory(nextHistory);
-        hydrateDocumentHistoryItem(refreshed);
-        window.setTimeout(() => editorRef.current?.focus(), 0);
+        requestDraftNavigation(`open ${refreshed.title}`, () => {
+          hydrateDocumentHistoryItem(refreshed);
+          window.setTimeout(() => editorRef.current?.focus(), 0);
+        });
         return;
       } catch (error) {
+        if (requestId !== draftOpenRequestRef.current) return;
         if (!item.content) {
           setStatus(
             `This draft is stored in your account but could not be loaded (${draftErrorText(error)}). Try again once the connection recovers.`,
@@ -4433,8 +4638,10 @@ export function DocumentAssistantWorkspace({
         );
       }
     }
-    hydrateDocumentHistoryItem(item);
-    window.setTimeout(() => editorRef.current?.focus(), 0);
+    requestDraftNavigation(`open ${item.title}`, () => {
+      hydrateDocumentHistoryItem(item);
+      window.setTimeout(() => editorRef.current?.focus(), 0);
+    });
   }
 
   function draftContextOptions(
@@ -4443,7 +4650,7 @@ export function DocumentAssistantWorkspace({
   ): DraftContextOptions {
     return {
       primarySourceName: sourceSummaryForDraft.primarySourceName,
-      agentName: selectedAgent.name,
+      agentName: selectedAgent?.name ?? "Manual editing",
       useWebSearch: options?.useWebSearch ?? webSearchEnabled,
       useWorkspaceSources: sourceSummaryForDraft.activeKnowledge.length > 0,
       useTemplateContext: options?.useTemplateContext ?? templateContextEnabled,
@@ -4457,6 +4664,7 @@ export function DocumentAssistantWorkspace({
     sourceIdsForDraft: string[] = activeSourceIds,
     options?: Partial<Pick<DraftContextOptions, "useTemplateContext" | "useWebSearch">>,
   ) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     const useWebSearch = options?.useWebSearch ?? webSearchEnabled;
     if (useWebSearch && !webSearchAvailable) {
       setStatus("Web search is turned off for this model by your workspace configuration.");
@@ -4550,6 +4758,7 @@ export function DocumentAssistantWorkspace({
     sourceIdsForDraft: string[] = activeSourceIds,
     options?: Partial<Pick<DraftContextOptions, "useTemplateContext" | "useWebSearch">>,
   ) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     clearDraftTimers();
     // Stage provider-created documents transactionally. Keep the current
     // editor, versions, and server binding visible until the replacement has
@@ -4706,6 +4915,9 @@ export function DocumentAssistantWorkspace({
         request: requestText,
         events: [userEvent, assistantCompletionEvent],
       });
+      // Establish the new identity before enqueuing; older saves retain their
+      // own binding even if they finish after this replacement is displayed.
+      serverDraftRef.current = { id: null, revision: null, historyId: historyItemId };
       queueDraftServerSync({
         historyId: historyItemId,
         title: nextTitle,
@@ -4715,9 +4927,9 @@ export function DocumentAssistantWorkspace({
       });
       // The staged draft is now complete. Only at this point does it become a
       // new document with a new server identity and version chain.
-      serverDraftRef.current = { id: null, revision: null };
       setServerSaveState({ kind: "idle" });
       setDocumentTitle(nextTitle);
+      setSavedDocumentTitle(nextTitle);
       clearEditHistory();
       setContent(nextContentHtml);
       setVersions([finalVersion]);
@@ -4780,14 +4992,16 @@ export function DocumentAssistantWorkspace({
   function saveManualVersion() {
     if (draftKind === "deck") {
       endDeckEditSession();
-      const deck = flushDeckTextEdits();
-      if (!deck) return;
+      const editedDeck = flushDeckTextEdits();
+      if (!editedDeck) return;
+      const deck = { ...editedDeck, title: documentTitle.trim() || EMPTY_DOCUMENT_TITLE };
       const serialized = serializeSlideDeck(deck);
-      if (selectedVersion && selectedVersion.content === serialized) {
+      if (selectedVersion && selectedVersion.content === serialized && documentTitle.trim() === savedDocumentTitle.trim()) {
         setStatus("Current version already matches the deck.");
         return;
       }
       const nextVersion = appendDeckVersion(deck, "Manual deck edit snapshot");
+      setDeckState(deck);
       setStatus(`${nextVersion.label} saved from deck edits.`);
       rememberDeckSnapshot(documentTitle, serialized, nextVersion.summary);
       return;
@@ -4817,6 +5031,7 @@ export function DocumentAssistantWorkspace({
     sourceSummaryForRevision = sourceSummary,
     sourceIdsForRevision: string[] = activeSourceIds,
   ) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (revisionInFlightRef.current) {
       setStatus("The document assistant is already revising this draft.");
       return;
@@ -4842,7 +5057,8 @@ export function DocumentAssistantWorkspace({
       useWebSearch,
     });
     const requestStartedAt = draftNowIso();
-    const historyItemId = slugify(documentTitle);
+    const revisionBinding = serverDraftRef.current;
+    const historyItemId = revisionBinding.historyId;
     const userEvent = draftEvent("user", "user", request, { createdAt: requestStartedAt });
     const pendingEvent = assistantEvent(
       "provider-revision-working",
@@ -4925,7 +5141,7 @@ export function DocumentAssistantWorkspace({
           reasoningEffort: reasoningEffortForSend,
         },
       });
-      if (contentRef.current !== sourceHtml) {
+      if (contentRef.current !== sourceHtml || serverDraftRef.current !== revisionBinding) {
         throw new Error(
           "The document changed while the assistant was working, so the returned revision was not applied. Submit the instruction again from the current version.",
         );
@@ -5004,6 +5220,9 @@ export function DocumentAssistantWorkspace({
         updatedAt: completedAt,
         request,
         events: completedEvents,
+        serverId: revisionBinding.id,
+        serverRevision: revisionBinding.revision,
+        serverSavePending: true,
       });
       queueDraftServerSync({
         historyId: historyItemId,
@@ -5011,8 +5230,9 @@ export function DocumentAssistantWorkspace({
         content: revisedHtml,
         summary: nextVersion.summary,
         sourceLabel: activeSourceLabel,
-      });
+      }, revisionBinding);
       recordUndoSnapshot();
+      setSavedDocumentTitle(documentTitle);
       setContent(revisedHtml);
       setCodeArtifact(null);
       setVersions((current) => [...current, nextVersion]);
@@ -5048,7 +5268,9 @@ export function DocumentAssistantWorkspace({
       const failedHistory = persistDraftDocumentHistorySnapshot(draftScope, {
         id: historyItemId,
         title: documentTitle,
-        content: contentRef.current,
+        content: serverDraftRef.current === revisionBinding
+          ? contentRef.current
+          : documentHistoryRef.current.find((item) => item.id === historyItemId)?.content ?? sourceHtml,
         summary: message,
         sourceLabel: activeSourceLabel,
         status: "failed",
@@ -5070,6 +5292,8 @@ export function DocumentAssistantWorkspace({
 
   async function submitInstruction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Keep the prompt intact if model access disappears while it is being composed.
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     const request = instruction.trim();
     if (!request) return;
     if (draftKind === "deck") {
@@ -5978,6 +6202,7 @@ export function DocumentAssistantWorkspace({
   }
 
   function openInlineAiEdit() {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     closeLinkEditor();
     const liveSelection = getEditorSelection(editorRef.current);
     const savedRange = inlineEditRangeRef.current;
@@ -6071,6 +6296,7 @@ export function DocumentAssistantWorkspace({
 
   async function applyInlineAiEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     const editor = editorRef.current;
     const range = inlineEditRangeRef.current;
     const instructionText = inlineEditState.instruction.trim();
@@ -6302,22 +6528,59 @@ export function DocumentAssistantWorkspace({
         railIsDrawer && railOpen ? "rail-drawer-open" : ""
       } ${draftKind === "deck" ? "is-deck-mode" : ""}`}
     >
+      {pendingDraftNavigation && createPortal(
+        <div className="modal-backdrop" role="presentation" onClick={() => setPendingDraftNavigation(null)}>
+          <section
+            ref={draftNavigationDialogRef}
+            tabIndex={-1}
+            className="modal confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Unsaved draft edits"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.altKey) return;
+              if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
+                event.preventDefault();
+                event.stopPropagation();
+              }
+            }}
+          >
+            <h2>Keep your unsaved edits?</h2>
+            <p>Before you {pendingDraftNavigation.label}, save a recovery copy in document history or discard these edits.</p>
+            {draftNavigationError && <p role="alert">{draftNavigationError}</p>}
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" onClick={() => setPendingDraftNavigation(null)}>Keep editing</button>
+              <button type="button" className="secondary-button" onClick={() => continueDraftNavigation(false)}>Discard and continue</button>
+              <button type="button" className="primary-button" onClick={() => continueDraftNavigation(true)}>Save copy and continue</button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
       {railIsDrawer && railOpen && (
         <button
           type="button"
           className="draft-rail-backdrop"
           aria-label="Close the document assistant"
+          tabIndex={-1}
+          inert={pendingDraftNavigation !== null}
           data-tooltip="Close the assistant panel and return to the document"
           onClick={() => setRailOpen(false)}
         />
       )}
       <section className="document-assistant-shell" aria-label="Draft editor">
         <aside
+          ref={assistantRailRef}
           className={`document-assistant-rail ${railIsDrawer ? "is-drawer" : ""} ${
             railIsDrawer && railOpen ? "is-open" : ""
           }`}
           aria-label="Assistant workflow"
-          aria-hidden={railIsDrawer && !railOpen}
+          role={railIsDrawer ? "dialog" : undefined}
+          aria-modal={railIsDrawer && railOpen ? true : undefined}
+          aria-hidden={(railIsDrawer && !railOpen) || pendingDraftNavigation !== null}
+          inert={(railIsDrawer && !railOpen) || pendingDraftNavigation !== null}
+          tabIndex={railIsDrawer ? -1 : undefined}
         >
           <header className="draft-assistant-header">
             <button
@@ -6325,7 +6588,7 @@ export function DocumentAssistantWorkspace({
               type="button"
               aria-label="Back to chat"
               data-tooltip="Leave the drafting workspace and go back to your chat"
-              onClick={onCloseDraft}
+              onClick={() => { if (onCloseDraft) requestDraftNavigation("return to chat", onCloseDraft); }}
             >
               <Home size={18} />
             </button>
@@ -6679,7 +6942,8 @@ export function DocumentAssistantWorkspace({
                   <button
                     className="draft-template-start-button"
                     type="button"
-                    data-tooltip={`Create a new draft using the selected ${selectedTemplate.name} template`}
+                    disabled={!draftAiAvailable}
+                    data-tooltip={draftAiAvailable ? `Create a new draft using the selected ${selectedTemplate.name} template` : draftAiUnavailableReason}
                     onClick={() => {
                       setTemplateContextEnabled(true);
                       void startDraftFromTemplate(
@@ -6747,9 +7011,11 @@ export function DocumentAssistantWorkspace({
                     <span>Drafting agent</span>
                     <SelectControl
                       aria-label="Drafting agent"
-                      value={selectedAgent.id}
+                      value={selectedAgent?.id ?? ""}
+                      disabled={!draftAiAvailable}
                       onChange={(event) => selectDraftingModel(event.target.value)}
                     >
+                      {!draftAiAvailable && <option value="">No models connected</option>}
                       {draftAgents.map((agent) => (
                         <option key={agent.id} value={agent.id}>
                           {agent.name} · {agent.providerName}
@@ -6770,7 +7036,7 @@ export function DocumentAssistantWorkspace({
                     <ReasoningSlider
                       level={reasoningLevel}
                       supported={reasoningSupported}
-                      modelName={selectedAgent.name}
+                      modelName={selectedAgent?.name ?? "No model available"}
                       onChange={updateReasoningLevel}
                     />
                   </div>
@@ -6807,7 +7073,7 @@ export function DocumentAssistantWorkspace({
                                 className={`draft-history-status is-${
                                   item.status === "running" || item.status === "failed"
                                     ? item.status
-                                    : item.serverId
+                                    : item.serverId && !item.serverSavePending
                                       ? "complete"
                                       : "local-only"
                                 }`}
@@ -6899,7 +7165,7 @@ export function DocumentAssistantWorkspace({
                                 ? `Restore ${version.label} in the deck editor`
                                 : `Restore the document to ${version.label} so you can review or edit it`
                             }
-                            onClick={() => selectVersion(version)}
+                            onClick={() => requestDraftNavigation(`restore ${version.label}`, () => selectVersion(version))}
                           >
                             <span>
                               <strong>
@@ -6931,6 +7197,7 @@ export function DocumentAssistantWorkspace({
             </label>
             <textarea
               id="draft-assistant-command"
+              aria-describedby={!draftAiAvailable ? "draft-ai-unavailable" : undefined}
               data-tooltip={
                 draftKind === "deck"
                   ? "Describe the deck you want the assistant to build, or ask for changes to the current slides."
@@ -7131,8 +7398,8 @@ export function DocumentAssistantWorkspace({
                 className="draft-send-button"
                 type="submit"
                 aria-label="Apply instruction"
-                data-tooltip="Send this instruction so the assistant drafts or revises the document"
-                disabled={!instruction.trim() || assistantWorking}
+                data-tooltip={draftAiAvailable ? "Send this instruction so the assistant drafts or revises the document" : draftAiUnavailableReason}
+                disabled={!draftAiAvailable || !instruction.trim() || assistantWorking}
               >
                 {assistantWorking ? (
                   <LoaderCircle className="is-spinning" size={18} />
@@ -7144,7 +7411,7 @@ export function DocumentAssistantWorkspace({
           </form>
         </aside>
 
-        <main className="document-editor-workspace">
+        <main className="document-editor-workspace" inert={(railIsDrawer && railOpen) || pendingDraftNavigation !== null}>
           <header className="document-editor-topbar">
             <div className="document-title-cluster">
               {railIsDrawer && (
@@ -7192,25 +7459,30 @@ export function DocumentAssistantWorkspace({
                   Deck
                 </button>
               </div>
-              <input
-                aria-label="Document title"
-                value={documentTitle}
-                onChange={(event) => setDocumentTitle(event.target.value)}
-              />
-              <button
-                type="button"
-                className="draft-title-ai-button"
-                aria-label={draftKind === "deck" ? "Rename deck with AI" : "Rename document with AI"}
-                data-tooltip={`Let AI name this ${draftKind === "deck" ? "deck" : "draft"} from its content`}
-                disabled={draftTitleGenerating || assistantWorking}
-                onClick={() => void generateDraftTitleWithAi()}
-              >
-                {draftTitleGenerating ? (
-                  <LoaderCircle size={15} className="chat-title-ai-spinner" />
-                ) : (
-                  <Sparkles size={15} />
-                )}
-              </button>
+              <div className="draft-title-edit">
+                <div className="draft-title-input-wrap">
+                  <span className="draft-title-measure" data-title={documentTitle || " "} aria-hidden="true" />
+                  <input
+                    aria-label="Document title"
+                    value={documentTitle}
+                    onChange={(event) => setDocumentTitle(event.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="draft-title-ai-button"
+                  aria-label={draftKind === "deck" ? "Rename deck with AI" : "Rename document with AI"}
+                  data-tooltip={draftAiAvailable ? `Let AI name this ${draftKind === "deck" ? "deck" : "draft"} from its content` : draftAiUnavailableReason}
+                  disabled={!draftAiAvailable || draftTitleGenerating || assistantWorking}
+                  onClick={() => void generateDraftTitleWithAi()}
+                >
+                  {draftTitleGenerating ? (
+                    <LoaderCircle size={15} className="chat-title-ai-spinner" />
+                  ) : (
+                    <Sparkles size={15} />
+                  )}
+                </button>
+              </div>
               {deckModeDialogOpen && (
                 <div
                   className="inline-ai-popover deck-mode-dialog"
@@ -7266,6 +7538,7 @@ export function DocumentAssistantWorkspace({
                 defaultAgentId={defaultAgentId}
                 onSelect={selectDraftingModel}
                 onSetDefault={setDefaultDraftingModel}
+                unavailableReason={draftAiUnavailableReason}
               />
               {serverSaveState.kind !== "idle" && (
                 <span
@@ -7289,13 +7562,13 @@ export function DocumentAssistantWorkspace({
                       <CheckCircle2 size={14} aria-hidden="true" /> Saved
                     </>
                   ) : serverSaveState.kind === "not-stored" ? (
-                    "Not saved — too large for this browser"
+                    serverSaveState.message
                   ) : serverSaveState.kind === "local-only" ? (
                     draftKind === "deck" ? "Local only — decks save on this device" : "Local only — server save failed"
                   ) : (
                     "Draft changed elsewhere"
                   )}
-                  {serverSaveState.kind === "local-only" && draftKind !== "deck" && (
+                  {(serverSaveState.kind === "local-only" || serverSaveState.kind === "not-stored") && draftKind !== "deck" && (
                     <button type="button" onClick={retryDraftServerSync}>
                       Retry
                     </button>
@@ -7313,6 +7586,7 @@ export function DocumentAssistantWorkspace({
               <button
                 className="document-save-version-button"
                 type="button"
+                aria-label="Save version"
                 data-tooltip={
                   draftKind === "deck"
                     ? "Save a version on this device — decks stay local until you export them"
@@ -7322,11 +7596,13 @@ export function DocumentAssistantWorkspace({
                 disabled={!hasUnsavedEdits || assistantWorking}
               >
                 <Save size={17} />
-                Save version
+                <span className="draft-action-label-full">Save version</span>
+                <span className="draft-action-label-mobile" aria-hidden="true">Save</span>
               </button>
               <button
                 className="document-compare-button"
                 type="button"
+                aria-label="Compare versions"
                 data-tooltip={
                   canCompareVersions
                     ? "Open a read-only visual redline of two saved versions"
@@ -7338,7 +7614,8 @@ export function DocumentAssistantWorkspace({
                 disabled={!canCompareVersions}
               >
                 <FileDiff size={17} />
-                Compare versions
+                <span className="draft-action-label-full">Compare versions</span>
+                <span className="draft-action-label-mobile" aria-hidden="true">Compare</span>
               </button>
               <button
                 className="document-export-button"
@@ -7525,6 +7802,12 @@ export function DocumentAssistantWorkspace({
                 </div>
               )}
             </div>
+            {!draftAiAvailable && (
+              <p className="draft-ai-unavailable" id="draft-ai-unavailable" role="status">
+                <strong>AI drafting is unavailable.</strong> {draftAiUnavailableReason}{" "}
+                You can still edit, import, save, and export documents and decks.
+              </p>
+            )}
           </header>
 
           {draftKind === "document" && (
@@ -7802,7 +8085,8 @@ export function DocumentAssistantWorkspace({
               <button
                 type="button"
                 aria-label="Inline AI edit"
-                data-tooltip="Rewrite the highlighted text with AI using your own instruction"
+                data-tooltip={draftAiAvailable ? "Rewrite the highlighted text with AI using your own instruction" : draftAiUnavailableReason}
+                disabled={!draftAiAvailable}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={openInlineAiEdit}
               >
@@ -8030,7 +8314,7 @@ export function DocumentAssistantWorkspace({
                         <button
                           type="submit"
                           data-tooltip="Replace the highlighted text with the AI rewrite"
-                          disabled={!inlineEditState.instruction.trim() || inlineEditState.working}
+                          disabled={!draftAiAvailable || !inlineEditState.instruction.trim() || inlineEditState.working}
                         >
                           {inlineEditState.working ? "Rewriting..." : "Replace highlight"}
                         </button>
@@ -8292,7 +8576,8 @@ export function DocumentAssistantWorkspace({
                     type="button"
                     aria-label="Edit selection with AI"
                     aria-expanded={deckAiEditState.open}
-                    data-tooltip="Highlight slide text, then tell the AI how to change it"
+                    data-tooltip={draftAiAvailable ? "Highlight slide text, then tell the AI how to change it" : draftAiUnavailableReason}
+                    disabled={!draftAiAvailable}
                     onClick={openDeckAiEdit}
                   >
                     <AiPenIcon size={18} />
@@ -8380,8 +8665,8 @@ export function DocumentAssistantWorkspace({
                         </button>
                         <button
                           type="submit"
-                          data-tooltip={`Rewrite the highlighted text with ${selectedAgent.name}`}
-                          disabled={deckAiEditState.working || !deckAiEditState.instruction.trim()}
+                          data-tooltip={selectedAgent ? `Rewrite the highlighted text with ${selectedAgent.name}` : draftAiUnavailableReason}
+                          disabled={!draftAiAvailable || deckAiEditState.working || !deckAiEditState.instruction.trim()}
                         >
                           {deckAiEditState.working ? "Rewriting…" : "Replace highlight"}
                         </button>
@@ -8707,7 +8992,8 @@ export function DocumentAssistantWorkspace({
                         type="button"
                         style={{ top: deckAiSelectionOffer.top, left: deckAiSelectionOffer.left }}
                         aria-label="Ask AI to edit highlighted slide text"
-                        data-tooltip="Rewrite the highlighted slide text with AI"
+                        data-tooltip={draftAiAvailable ? "Rewrite the highlighted slide text with AI" : draftAiUnavailableReason}
+                        disabled={!draftAiAvailable}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={openDeckAiEdit}
                       >
@@ -9079,6 +9365,8 @@ export function DocumentAssistantWorkspace({
                   type="button"
                   style={{ top: inlineAiSelectionOffer.top, left: inlineAiSelectionOffer.left }}
                   aria-label="Ask AI to edit highlighted text"
+                  data-tooltip={!draftAiAvailable ? draftAiUnavailableReason : undefined}
+                  disabled={!draftAiAvailable}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={openInlineAiEdit}
                 >
@@ -9513,9 +9801,7 @@ function draftingAgentsFromData(data: BootstrapData): DraftAgentOption[] {
       model.notes ??
       `${model.provider_name} drafting model with ${model.context_window?.toLocaleString() ?? "configured"} context.`,
   }));
-  if (agents.length) return agents;
-  const brand = data.currentTenant.chat_brand_name?.trim() || DEFAULT_DRAFT_AGENT.providerName;
-  return [{ ...DEFAULT_DRAFT_AGENT, providerName: brand }];
+  return agents;
 }
 
 /** Upper bound on template text sent to the drafting model. Large uploaded
@@ -11305,114 +11591,12 @@ function loadStoredDraftModelId(): string | null {
   }
 }
 
-function loadDraftModelSelection(agents: DraftAgentOption[]) {
+function loadDraftModelSelection(agents: DraftAgentOption[], fallbackAgentId: string) {
   const storedAgentId = loadStoredDraftModelId();
   if (storedAgentId && agents.some((agent) => agent.id === storedAgentId)) {
     return storedAgentId;
   }
-  return agents[0].id;
-}
-
-/** The chat model picker, carried over to Drafts: one fully clickable
- * trigger (label text, name, and chevron all open it) and a star on every
- * row that pins the default drafting model across sessions. */
-function DraftModelMenu({
-  agents,
-  selectedAgent,
-  defaultAgentId,
-  onSelect,
-  onSetDefault,
-}: {
-  agents: DraftAgentOption[];
-  selectedAgent: DraftAgentOption;
-  defaultAgentId: string | null;
-  onSelect: (agentId: string) => void;
-  onSetDefault: (agentId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: PointerEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div className="model-select document-model-menu" ref={rootRef}>
-      <button
-        className="select-button"
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label="Document drafting model"
-        data-tooltip="Choose which AI model drafts and revises this document"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="model-select-label">
-          Model: <strong>{selectedAgent.name}</strong>
-        </span>
-        {selectedAgent.id === defaultAgentId && (
-          <Star size={13} fill="currentColor" aria-hidden="true" />
-        )}
-        <ChevronDown size={16} />
-      </button>
-      {open && (
-        <div className="model-menu" role="listbox" aria-label="Select drafting model">
-          {agents.map((agent) => (
-            <div className="model-option-row" key={agent.id}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={agent.id === selectedAgent.id}
-                className={`model-option ${agent.id === selectedAgent.id ? "is-selected" : ""}`}
-                data-tooltip={`Draft and revise this document with ${agent.name}`}
-                onClick={() => {
-                  onSelect(agent.id);
-                  setOpen(false);
-                }}
-              >
-                <span>
-                  <strong>{agent.name}</strong>
-                  <small>{agent.providerName}</small>
-                </span>
-                {agent.id === selectedAgent.id && <Check size={16} />}
-              </button>
-              <button
-                type="button"
-                className={`model-default-button ${agent.id === defaultAgentId ? "is-default" : ""}`}
-                aria-label={`Set ${agent.name} as default drafting model`}
-                aria-pressed={agent.id === defaultAgentId}
-                data-tooltip={
-                  agent.id === defaultAgentId
-                    ? `${agent.name} is your default drafting model`
-                    : `Make ${agent.name} your default drafting model`
-                }
-                onClick={() => {
-                  onSetDefault(agent.id);
-                  setOpen(false);
-                }}
-              >
-                <Star size={15} fill={agent.id === defaultAgentId ? "currentColor" : "none"} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return fallbackAgentId;
 }
 
 function saveDraftModelSelection(agentId: string) {
@@ -11433,12 +11617,12 @@ function loadDraftDocumentHistory(scope: DraftCacheScope): DraftDocumentHistoryI
 
 function saveDraftDocumentHistory(scope: DraftCacheScope, items: DraftDocumentHistoryItem[]) {
   if (typeof window === "undefined") return false;
-  const nextItems = items.slice(0, 24);
+  const nextItems = limitDraftCacheEntries(items);
   const stored = saveScopedDraftCache(scope, nextItems);
   try {
     window.dispatchEvent(
-      new CustomEvent<DraftDocumentHistoryItem[]>(DOCUMENT_HISTORY_UPDATED_EVENT, {
-        detail: nextItems,
+      new CustomEvent<{ scope: DraftCacheScope; items: DraftDocumentHistoryItem[] }>(DOCUMENT_HISTORY_UPDATED_EVENT, {
+        detail: { scope, items: nextItems },
       }),
     );
   } catch {
@@ -11446,20 +11630,6 @@ function saveDraftDocumentHistory(scope: DraftCacheScope, items: DraftDocumentHi
   }
   return stored;
 }
-
-function persistDraftDocumentHistorySnapshot(
-  scope: DraftCacheScope,
-  snapshot: DraftHistorySnapshot,
-) {
-  const nextHistory = upsertDraftDocumentHistory(loadDraftDocumentHistory(scope), snapshot);
-  lastDraftHistoryWriteSucceeded = saveDraftDocumentHistory(scope, nextHistory);
-  return nextHistory;
-}
-
-/** Whether the most recent history write actually reached device storage.
- * Image-heavy decks can exceed the browser quota, and a deck that says it is
- * saved when it is not is worse than one that says it could not be. */
-let lastDraftHistoryWriteSucceeded = true;
 
 /** Cached entries still marked "running" after a reload are interrupted — no
  * server job exists, so the interface must not claim drafting continues.
@@ -11596,7 +11766,7 @@ function upsertDraftDocumentHistory(
   snapshot: DraftHistorySnapshot,
 ) {
   const title = snapshot.title.trim() || "Untitled Draft";
-  const id = snapshot.id ?? slugify(title) ?? `draft-${Date.now()}`;
+  const id = snapshot.id ?? createDraftHistoryId();
   const updatedAt = snapshot.updatedAt ?? new Date().toISOString();
   const existing = current.find((item) => item.id === id);
   const nextItem: DraftDocumentHistoryItem = {
@@ -11620,11 +11790,17 @@ function upsertDraftDocumentHistory(
       snapshot.serverContentStale !== undefined
         ? snapshot.serverContentStale
         : existing?.serverContentStale,
+    serverSavePending: snapshot.serverSavePending ?? existing?.serverSavePending,
+    cacheWriterId: snapshot.cacheWriterId ?? existing?.cacheWriterId,
   };
-  return [
+  return limitDraftCacheEntries([
     nextItem,
     ...current.filter((item) => item.id !== id),
-  ].slice(0, 24);
+  ]);
+}
+
+function createDraftHistoryId() {
+  return `draft-${crypto.randomUUID()}`;
 }
 
 function createDraftHistoryRunId(title: string, startedAt: string) {
@@ -11633,8 +11809,9 @@ function createDraftHistoryRunId(title: string, startedAt: string) {
 
 /** "Saved" is reserved for entries with a confirmed server copy; cache-only
  * entries are honestly labelled "Local only". */
-function draftHistoryStatusLabel(item: Pick<DraftDocumentHistoryItem, "status" | "serverId">) {
+function draftHistoryStatusLabel(item: Pick<DraftDocumentHistoryItem, "status" | "serverId" | "serverSavePending">) {
   if (item.status === "running") return "Drafting";
+  if (item.serverId && item.serverSavePending) return "Local changes";
   if (item.status === "failed") return "Needs attention";
   return item.serverId ? "Saved" : "Local only";
 }

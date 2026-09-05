@@ -470,6 +470,90 @@ function selectTab(name: string) {
   fireEvent.click(tab);
 }
 
+
+test.each(["missing", "disabled"] as const)("an agent with a %s base model cannot be silently rerouted when edited or synced", async (availability) => {
+  const agent = currentData.models.find((model) => model.id === "agent-client-update")!;
+  const base = currentData.models.find((model) => !model.is_custom && model.provider_id === agent.provider_id &&
+    (model.upstream_model_id ?? model.name) === (agent.upstream_model_id ?? agent.name))!;
+  expect(base).toBeTruthy();
+  currentData = {
+    ...currentData,
+    models: availability === "missing"
+      ? currentData.models.filter((model) => model.id !== base.id)
+      : currentData.models.map((model) => model.id === base.id ? { ...model, platform_enabled: false } : model),
+  };
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const selector = screen.getByRole("combobox", { name: "AI model" });
+  expect(selector).toHaveValue(availability === "missing" ? "" : base.id);
+  expect(screen.getByText(/saved model is unavailable/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Agent name"), { target: { value: "Renamed agent" } });
+  expect(screen.getByRole("button", { name: "Save Profile" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Sync models" }));
+  await screen.findByText("Agent model catalog synced.");
+  expect(selector).toHaveValue(availability === "missing" ? "" : base.id);
+  expect(screen.getByRole("button", { name: "Save Profile" })).toBeDisabled();
+
+  const replacement = within(selector).getAllByRole("option").find((option) => (option as HTMLOptionElement).value &&
+    (option as HTMLOptionElement).value !== base.id) as HTMLOptionElement;
+  expect(replacement).toBeTruthy();
+  fireEvent.change(selector, { target: { value: replacement.value } });
+  expect(screen.getByRole("button", { name: "Save Profile" })).toBeEnabled();
+  fetchMock.mockImplementationOnce(async (_input, init) => new Response(JSON.stringify({
+    ...agent, ...JSON.parse(String(init?.body)),
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
+  await screen.findByText(/Renamed agent saved/);
+  const savedCall = fetchMock.mock.calls.find(([input, init]) => String(input).includes("/agent-profiles/") && init?.method === "PATCH");
+  const payload = JSON.parse(String(savedCall?.[1]?.body));
+  const replacementModel = currentData.models.find((model) => model.id === replacement.value)!;
+  expect(payload).toMatchObject({ provider_id: replacementModel.provider_id, upstream_model_id: replacementModel.upstream_model_id ?? replacementModel.name });
+});
+
+
+test("Hermes memory loading and failures stay distinct from an empty memory list and can retry", async () => {
+  let rejectLoad: (error: Error) => void = () => undefined;
+  fetchMock.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectLoad = reject; }));
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  selectTab("Hermes");
+  expect(screen.getByText("Loading saved memories…")).toBeInTheDocument();
+  expect(screen.queryByText(/No memories saved yet/)).not.toBeInTheDocument();
+  rejectLoad(new Error("Temporarily unavailable"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Saved memories could not be loaded");
+  expect(screen.queryByText(/No memories saved yet/)).not.toBeInTheDocument();
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([{
+    id: "memory-synthetic", tenant_id: "tenant-example", profile_id: "agent-client-update",
+    content: "Use the agreed response format.", created_by: "user-owner", created_at: "2026-01-01T00:00:00Z",
+  }]), { status: 200, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry memories" }));
+  expect(await screen.findByText("Use the agreed response format.")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+
+test("editing an existing agent preserves its original owner and disabled state", async () => {
+  const original = { ...currentData.models.find((model) => model.id === "agent-client-update")!,
+    created_by: "original-author", platform_enabled: false, notes: "Reviewed routing policy" };
+  currentData = { ...currentData, models: currentData.models.map((model) => model.id === original.id ? original : model) };
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Agent name"), { target: { value: "Updated agent name" } });
+  fetchMock.mockImplementationOnce(async (_input, init) => new Response(JSON.stringify({
+    ...original, ...JSON.parse(String(init?.body)),
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
+  await screen.findByText(/Updated agent name saved/);
+  const savedCall = fetchMock.mock.calls.find(([input, init]) => String(input).includes("/agent-profiles/") && init?.method === "PATCH");
+  const payload = JSON.parse(String(savedCall?.[1]?.body));
+  expect(payload).not.toHaveProperty("created_by");
+  expect(payload).not.toHaveProperty("platform_enabled");
+  expect(payload).not.toHaveProperty("notes");
+  expect(currentData.models.find((model) => model.id === original.id)).toMatchObject({
+    created_by: "original-author", platform_enabled: false, notes: "Reviewed routing policy", name: "Updated agent name",
+  });
+});
+
 function renderAgentWorkspace(onUseInChat = vi.fn()) {
   render(<AgentWorkspaceHarness onUseInChat={onUseInChat} />);
 }

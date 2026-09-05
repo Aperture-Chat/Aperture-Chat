@@ -210,6 +210,25 @@ class Settings(BaseSettings):
     # case-insensitive, host-only (no scheme/port). Binds APERTURE_EGRESS_ALLOW_HOSTS.
     egress_allow_hosts: str = ""
 
+    # Platform update checker (platform owners only). The API polls the public
+    # GitHub Releases API for the repository below and offers a one-click
+    # upgrade when a newer vX.Y.Z release exists. Checks run in the in-process
+    # scheduler at this interval; the unauthenticated GitHub limit is 60/h, so
+    # keep the interval in hours. Disable to run fully offline.
+    platform_update_check_enabled: bool = True
+    platform_update_repository: str = "Aperture-Chat/Aperture-Chat"
+    # Empty derives the endpoint from repository, including independent forks.
+    platform_update_releases_url: str = ""
+    platform_update_check_interval_seconds: float = Field(default=6 * 3600.0, ge=300.0)
+    platform_update_request_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+    # Deprecated compatibility input; update checks use app/version.py so stale
+    # deployment environment files cannot override the running image identity.
+    release_version: str = ""
+    # Directory shared with the updater sidecar (docker-compose.release.yml
+    # mounts the aperture-updater-state volume here). Empty means no sidecar:
+    # updates are still detected and described, but must be applied manually.
+    platform_updater_state_dir: str = ""
+
     model_config = SettingsConfigDict(
         env_prefix="APERTURE_",
         env_file=".env",

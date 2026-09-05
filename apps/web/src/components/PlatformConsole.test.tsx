@@ -253,20 +253,40 @@ test("expired provider keys are visibly expired and cannot reveal or enable mode
 
 test("platform connector switches persist through platform connector action", async () => {
   const data = platformOwnerData();
-  const updateConnector = vi.fn(async (connectorId: string, patch: Partial<Connector>) => {
-    const connector = data.connectors.find((item) => item.id === connectorId) as Connector;
-    return { ...connector, ...patch, tenant_enabled: patch.platform_enabled === false ? false : connector.tenant_enabled };
+  const setConnectorEnabled = vi.fn(async (connector: Connector, enabled: boolean) => {
+    return { ...connector, platform_enabled: enabled, tenant_enabled: enabled };
   });
 
-  renderPlatform(data, { updateConnector });
+  renderPlatform(data, { setConnectorEnabled });
   selectTab("Org Settings");
   await screen.findByRole("tabpanel", { name: "Org Settings" });
-  expandPanel("Platform Connectors");
-  fireEvent.click(screen.getByRole("switch", { name: "Platform enable Box" }));
+  expect(screen.queryByRole("switch", { name: "Enable Box" })).not.toBeInTheDocument();
+  expandPanel("Connectors");
+  fireEvent.click(screen.getByRole("switch", { name: "Enable Box" }));
 
-  expect(await screen.findByText("Box platform availability saved through the platform API.")).toBeInTheDocument();
-  expect(updateConnector).toHaveBeenCalledWith("box", { platform_enabled: false });
-  expect(screen.getByRole("switch", { name: "Platform enable Box" })).toHaveAttribute("aria-checked", "false");
+  expect(await screen.findByText("Box is now off for everyone in this deployment.")).toBeInTheDocument();
+  expect(setConnectorEnabled).toHaveBeenCalledWith(expect.objectContaining({ id: "box" }), false);
+  expect(screen.getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "false");
+});
+
+
+test("explicit model setup requests open Providers and expand its connection panel", async () => {
+  const data = platformOwnerData();
+  const onDataChange = vi.fn();
+  const actions = {};
+  const { rerender } = render(<PlatformConsole data={data} onDataChange={onDataChange} platformActions={actions} />);
+  expect(screen.getByRole("tab", { name: "Org Settings" })).toHaveAttribute("aria-selected", "true");
+  rerender(<PlatformConsole data={data} onDataChange={onDataChange} platformActions={actions} openProvidersRequestKey={1} />);
+  expect(await screen.findByRole("tabpanel", { name: "Providers" })).toBeInTheDocument();
+  const panel = screen.getByRole("heading", { name: "Provider Connections" }).closest("section")!;
+  fireEvent.click(within(panel).getByRole("button", { name: "Collapse panel" }));
+  expect(panel).toHaveClass("is-panel-collapsed");
+  selectTab("Org Settings");
+  rerender(<PlatformConsole data={data} onDataChange={onDataChange} platformActions={actions} openProvidersRequestKey={2} />);
+  expect(screen.getByRole("tab", { name: "Providers" })).toHaveAttribute("aria-selected", "true");
+  const reopened = screen.getByRole("heading", { name: "Provider Connections" }).closest("section")!;
+  expect(reopened).not.toHaveClass("is-panel-collapsed");
+  expect(within(reopened).getByRole("button", { name: "Add Provider" })).toBeVisible();
 });
 
 test("platform owner can create a provider with a vaulted key", async () => {
@@ -304,7 +324,7 @@ test("platform owner can create a provider with a vaulted key", async () => {
     expect.objectContaining({
       name: "Anthropic Legal",
       kind: "anthropic",
-      connected: true,
+      connected: false,
       auth_type: "api-key",
       auth_metadata: expect.objectContaining({ header_name: "x-api-key" }),
     }),
@@ -321,6 +341,67 @@ test("platform owner can create a provider with a vaulted key", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "API keys for Anthropic Legal" }));
   expect(await screen.findByText("Anthropic Legal Primary")).toBeInTheDocument();
   expect(screen.getByText("••••••••1234")).toBeInTheDocument();
+});
+
+
+test("failed provider registration keeps the form and creates no ghost provider or key", async () => {
+  const createProvider = vi.fn().mockRejectedValueOnce(new Error("Provider service unavailable"))
+    .mockImplementationOnce(async (provider: Provider) => ({ ...provider, id: "provider-retry" }));
+  const createProviderKey = vi.fn(async (payload: PlatformProviderKeyCreateRequest) => ({
+    id: "key-retry", provider_id: payload.provider_id, provider_name: "Retry Provider", name: payload.name,
+    environment: "Production", status: "Active", last_rotated: "Just now", expires: "Not set", masked_value: "••••••••test",
+  }));
+  renderPlatform(platformOwnerData(), { createProvider, createProviderKey });
+  selectTab("Providers");
+  fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Retry Provider" } });
+  fireEvent.change(screen.getByLabelText("API key or secret"), { target: { value: "synthetic-key-test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Provider" }));
+  expect(await screen.findByText(/Retry Provider was not added/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Name")).toHaveValue("Retry Provider");
+  expect(screen.getByLabelText("API key or secret")).toHaveValue("synthetic-key-test");
+  expect(screen.queryByRole("heading", { name: "Retry Provider" })).not.toBeInTheDocument();
+  expect(createProviderKey).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save Provider" }));
+  const heading = await screen.findByRole("heading", { name: "Retry Provider" });
+  expect(screen.getAllByRole("heading", { name: "Retry Provider" })).toHaveLength(1);
+  expect(within(heading.closest(".provider-card") as HTMLElement).getByText("Needs validation")).toBeInTheDocument();
+});
+
+test("failed key setup retains the registered provider and retries its key without creating another provider", async () => {
+  const createProvider = vi.fn(async (provider: Provider) => ({ ...provider, id: "provider-partial" }));
+  const createProviderKey = vi.fn().mockRejectedValueOnce(new Error("Vault unavailable"))
+    .mockImplementationOnce(async (payload: PlatformProviderKeyCreateRequest) => ({
+      id: "key-partial", provider_id: payload.provider_id, provider_name: "Partial Provider", name: payload.name,
+      environment: "Production", status: "Active", last_rotated: "Just now", expires: "Not set", masked_value: "••••••••test",
+    }));
+  renderPlatform(platformOwnerData(), { createProvider, createProviderKey });
+  selectTab("Providers");
+  fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Partial Provider" } });
+  fireEvent.change(screen.getByLabelText("API key or secret"), { target: { value: "synthetic-key-test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Provider" }));
+  expect(await screen.findByText(/Partial Provider was created, but its key setup did not finish/)).toBeInTheDocument();
+  const card = screen.getByRole("heading", { name: "Partial Provider" }).closest(".provider-card") as HTMLElement;
+  expect(within(card).getByText("Needs key")).toBeInTheDocument();
+  expect(within(card).getByLabelText("API key or secret")).toHaveValue("synthetic-key-test");
+  expect(within(card).queryByText("••••••••test")).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole("button", { name: "Save Key" }));
+  expect(await within(card).findByText("••••••••test")).toBeInTheDocument();
+  expect(createProvider).toHaveBeenCalledTimes(1);
+  expect(createProviderKey).toHaveBeenLastCalledWith(expect.objectContaining({ provider_id: "provider-partial" }));
+  expect(within(card).getByText("Needs validation")).toBeInTheDocument();
+});
+
+test("provider creation without a connected API does not invent a local provider", async () => {
+  renderPlatform(platformOwnerData(), {});
+  selectTab("Providers");
+  fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unconnected Provider" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Provider" }));
+  expect(await screen.findByText(/provider or key API is not connected/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Name")).toHaveValue("Unconnected Provider");
+  expect(screen.queryByRole("heading", { name: "Unconnected Provider" })).not.toBeInTheDocument();
 });
 
 test("openrouter provider drafts use the zdr catalog endpoint by default", async () => {
@@ -423,6 +504,51 @@ test("provider model sync imports key-scoped provider catalog into the model tab
   await screen.findByRole("tabpanel", { name: "Models" });
   expect(screen.getByText("OpenAI: GPT-4o")).toBeInTheDocument();
   expect(screen.getByText("openai/gpt-4o")).toBeInTheDocument();
+});
+
+test("failed catalog sync never marks an unvalidated provider connected", async () => {
+  const data = platformOwnerData();
+  data.providers = data.providers.map((provider) => provider.id === "provider-openrouter" ? { ...provider, connected: false } : provider);
+  let rejectSync!: (error: Error) => void;
+  const syncProviderModels = vi.fn(() => new Promise<ProviderModelSyncResult>((_resolve, reject) => { rejectSync = reject; }));
+  renderPlatform(data, { syncProviderModels });
+  selectTab("Providers");
+  const card = screen.getByRole("heading", { name: "OpenRouter" }).closest(".provider-card") as HTMLElement;
+  fireEvent.click(within(card).getByRole("button", { name: "Sync Models" }));
+  expect(within(card).getByText("Needs validation")).toBeInTheDocument();
+  rejectSync(new Error("Provider is unavailable"));
+  expect(await screen.findByText("OpenRouter model sync failed: Provider is unavailable")).toBeInTheDocument();
+  expect(within(card).getByText("Needs validation")).toBeInTheDocument();
+});
+
+test("catalog sync without a discovery API cannot manufacture connection metadata", async () => {
+  const data = platformOwnerData();
+  data.providers = data.providers.map((provider) => provider.id === "provider-openrouter" ? { ...provider, connected: false } : provider);
+  const updateProvider = vi.fn();
+  renderPlatform(data, { updateProvider });
+  selectTab("Providers");
+  const card = screen.getByRole("heading", { name: "OpenRouter" }).closest(".provider-card") as HTMLElement;
+  fireEvent.click(within(card).getByRole("button", { name: "Sync Models" }));
+  expect(await screen.findByText(/OpenRouter model sync failed: Model discovery is unavailable/)).toBeInTheDocument();
+  expect(updateProvider).not.toHaveBeenCalled();
+  expect(within(card).getByText("Needs validation")).toBeInTheDocument();
+});
+
+test("provider setup protects the pending draft and permits retry after failure", async () => {
+  let rejectCreation!: (error: Error) => void;
+  const createProvider = vi.fn(() => new Promise<Provider>((_resolve, reject) => { rejectCreation = reject; }));
+  renderPlatform(platformOwnerData(), { createProvider });
+  selectTab("Providers");
+  fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Example provider" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Provider" }));
+  expect(screen.getByLabelText("Name")).toBeDisabled();
+  expect(screen.getByLabelText("API key or secret")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Close form" })).toBeDisabled();
+  rejectCreation(new Error("Connection unavailable"));
+  expect(await screen.findByText(/Example provider was not added/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Name")).toBeEnabled();
+  expect(screen.getByLabelText("Name")).toHaveValue("Example provider");
 });
 
 test("models tab only exposes synced provider catalog controls", async () => {
@@ -553,7 +679,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
   for (const title of videoTitles) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/Remotion video$/)).toHaveLength(videoTitles.length);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(videoTitles.length);
   expect(screen.queryByText("Training video plan")).not.toBeInTheDocument();
 
   const guidePdf = screen.getByRole("link", { name: /Platform owner guide \(PDF\)/ });
@@ -1247,7 +1373,7 @@ test("platform owner side panels manage users, policies, branding, and elastic s
   expandPanel("Single Sign-On");
   expandPanel("Platform Branding");
   expandPanel("Policy Controls");
-  expandPanel("Platform Connectors");
+  expandPanel("Connectors");
   expandPanel("Elastic Analytics");
   const soleOwnerRow = screen.getByText("owner@aperture.local").closest(".owner-user-row") as HTMLElement;
   expect(within(soleOwnerRow).getByLabelText("Role for Aperture Platform Owner")).toBeDisabled();

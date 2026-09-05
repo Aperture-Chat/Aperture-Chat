@@ -66,6 +66,18 @@ jobs:
             echo "PREVIEW_COMMIT=${preview_commit}"
           } >> "$GITHUB_ENV"
 
+      - name: Verify running build identity matches release tag
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, pathlib, tomllib
+          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          api = tomllib.loads(pathlib.Path("services/api/pyproject.toml").read_text())["project"]["version"]
+          root = json.loads(pathlib.Path("package.json").read_text())["version"]
+          if api != expected or root != expected:
+              raise SystemExit("Release tag must match API and root package versions before publication.")
+          PYTHON
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
@@ -100,6 +112,8 @@ jobs:
             docker-compose.release.yml \
             .env.example \
             infra/caddy/Caddyfile \
+            infra/updater/updater.sh \
+            scripts/install-release.py \
             docs/DOCKER_RELEASE.md \
             README.md \
             LICENSE.md \
@@ -137,10 +151,12 @@ jobs:
 
           ## Deploy
 
-          Download \`${RELEASE_BUNDLE}\`, copy \`.env.example\` to \`.env\`, then run:
+          Download \`${RELEASE_BUNDLE}\`, copy \`.env.example\` to \`.env\`, and set
+          \`APERTURE_IMAGE_TAG=${RELEASE_TAG}\` plus a strong \`APERTURE_SECRET_KEY\`
+          in that file. From the extracted project directory, run:
 
           \`\`\`bash
-          APERTURE_IMAGE_TAG=${RELEASE_TAG} docker compose -f docker-compose.release.yml --profile local up -d
+          docker compose -f docker-compose.release.yml --profile local up -d
           \`\`\`
 
           Fresh deploys start with no users or demo data. The first account created from the browser becomes the platform owner, and runtime state persists on the \`aperture-api-data\` volume.

@@ -37,21 +37,21 @@ const SECTIONS = [
     summary: "What Aperture Chat is and how to read this guide.",
     blocks: [
       p(
-        "Aperture Chat is your organization's secure workspace assistant. You can chat with approved AI models, draft documents and slide decks, search your organization's knowledge, and schedule recurring work — all in one place, with every answer traceable back to its sources.",
+        "Aperture Chat is your organization's workspace assistant. You can chat with approved AI models, draft documents and slide decks, search your organization's knowledge, and schedule recurring work. Review the sources and work trace when a response uses connected knowledge or tools.",
       ),
       p(
-        "This guide assumes nothing. Every instruction spells out where to look and what to click. Words in bold — like Save version — are the exact labels you will see on screen. If a step says “hover”, rest your mouse pointer on the item without clicking; a short explanation appears for every clickable control in the platform.",
+        "This guide explains where to look and what to choose. Words in bold — like Save version — match the labels on screen. If a step says “hover”, rest your pointer on the item without clicking; controls that offer extra help show it nearby.",
       ),
       table(
         ["Guide", "Who it is for", "What it covers"],
         [
           ["User Guide", "Everyone", "Chat, cross-session personalization memory, Drafts, slide decks, Agents/Automations, Knowledge/Tools, search, folders, appearance, and installing the app on your phone."],
-          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, connections, SSO, analytics, policies and memory governance, audit, and alerts."],
+          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, audit, and alerts."],
         ],
       ),
       note(
         "tip",
-        "The platform is honest by design. If a feature is not configured — a connector without credentials, a model that is not enabled — the screen says so plainly instead of pretending it works. When you see “Needs credentials” or “not configured”, that is real, and your administrator can fix it.",
+        "If a feature is not configured — a connector without credentials, a model that is not enabled — the screen reports that state. Ask your administrator about account or model access; shared connector settings and credentials are managed by the service team outside tenant administration.",
       ),
     ],
   },
@@ -66,7 +66,7 @@ const SECTIONS = [
         "Open the web address your organization gave you for Aperture Chat in a modern browser (Chrome, Edge, Safari, or Firefox).",
         "On the sign-in screen, type your work email address in the field marked you@company.com.",
         "If your organization uses single sign-on (SSO), the screen recognizes your email domain and offers Continue with SSO. Click it — you are sent to your organization's identity provider (for example Microsoft or Google), sign in there as usual, and return to Aperture Chat already signed in.",
-        "If your account uses a password instead, type it in the Password field and click the sign-in button.",
+        "When both methods are offered, choose Organization SSO or Email & password. The password field appears in Email & password mode; enter your password and click Sign in. Pressing Enter submits the method you selected.",
       ]),
       note(
         "info",
@@ -79,6 +79,44 @@ const SECTIONS = [
     ],
   },
   {
+    id: "request-access",
+    part: "basics",
+    minRole: "user",
+    title: "Request access and finish your first sign-in",
+    summary: "Submit a request, understand the administrator handoff, and enter the workspace.",
+    blocks: [
+      steps([
+        "On the sign-in screen, choose Request access. Enter your first name, last name, and work email, then submit the form.",
+        "The Request received screen confirms submission for your email. If this email is new to the workspace, an administrator reviews the request. This form does not email you or create a password.",
+        "Contact your administrator for an update. After approval, they provide the workspace address and confirm whether to use organization SSO or a temporary password.",
+        "Choose Back to sign in. Your submitted email remains filled in. Use the sign-in method your administrator arranged.",
+        "If you received a temporary password, sign in with it and complete Set a new password. Enter a new password of at least 12 characters twice. After saving, the app continues with a new authenticated session and revokes your older sessions.",
+        "Complete any required authenticator verification. Once in the workspace, select an available model and send a short first message. If no model is available, ask your administrator to check your account, group, and model access.",
+      ]),
+      note("info", "Submitting another access request does not approve an account or recover an existing password. Trouble signing in explains the recovery path: contact your administrator for local password access, or use your organization identity provider for SSO. If sign-in settings cannot load, choose Retry connection."),
+    ],
+  },
+  {
+    id: "two-step-verification",
+    part: "basics",
+    minRole: "user",
+    title: "Two-step verification and recovery codes",
+    summary: "Set up an authenticator, complete required verification, and manage recovery codes.",
+    blocks: [
+      p("To add an authenticator after signing in with a local password, open your account drawer, choose Manage security, and select Set up authenticator. Confirm your current password, add the QR code or setup key to your authenticator, acknowledge that you added it, and verify a current code. Copy the one-time recovery codes into secure storage, acknowledge that you saved them, and choose Done. Copying alone does not store them for you; finish verification and code storage before leaving the panel."),
+      steps([
+        "If sign-in asks you to set up an authenticator, choose Begin authenticator setup. Add the displayed QR code or setup secret to your authenticator app.",
+        "Confirm that you added the account, enter the current six-digit Authenticator code, and choose Verify and enable MFA before the setup expires.",
+        "Use Copy recovery codes and save the codes privately when they are shown. They are not saved to a file automatically. Each recovery code can be used once when your authenticator is unavailable; do not include these codes in screenshots or issue reports.",
+        "On later sign-ins, enter your current authenticator code. Use a recovery code instead switches to a single-use recovery code when necessary.",
+        "If you cancel or the challenge expires, return to sign-in and start again. A cancelled setup or failed verification does not finish sign-in.",
+      ]),
+      p("When verification is enabled, the account card shows how many recovery codes remain. Replace recovery codes requires a fresh authenticator code or an unused recovery code; after replacement, all previous recovery codes stop working. Save the new set before leaving the dialog."),
+      p("Turn off verification appears only when your organization's policy allows it. Confirm with an authenticator or recovery code; successful removal signs you out. Organization-required verification cannot be turned off here."),
+      note("info", "SSO accounts manage voluntary authenticator setup in their identity-provider settings. Your identity provider may also require its own verification during SSO. Follow the provider's screen for that check; these instructions describe Aperture Chat's authenticator screens."),
+    ],
+  },
+  {
     id: "layout",
     part: "basics",
     minRole: "user",
@@ -88,6 +126,9 @@ const SECTIONS = [
       p(
         "The screen has two areas: a sidebar on the left and the main work area on the right. The sidebar is how you move between the platform's views and your saved chats.",
       ),
+      sub("Your first visit"),
+      p("The Getting started card explains what is ready for your account and what comes next. Open quick-start guide opens user help. Administrators see Open admin guide and Manage access. Follow the setup action offered for your role when no model is available. A missing model is an access or setup task, not a successful chat connection."),
+      p("Choose a guide, take the suggested action, or select I'll explore on my own (or Dismiss welcome) when you are ready. Simply loading the page does not dismiss this card. You can return to guides from Help or console Documentation later."),
       table(
         ["Sidebar button", "What it opens"],
         [
@@ -106,6 +147,8 @@ const SECTIONS = [
         "Drag the sidebar's right edge to make it wider or narrower. Double-click that edge to collapse it.",
         "On a narrow window or a phone, the sidebar hides behind a menu button (three stacked lines, ☰) in the top-left corner. Tap it to open the menu; tap the dimmed area to close it.",
       ]),
+      sub("Using the keyboard"),
+      p("Use Tab and Shift+Tab to move between controls and Enter or Space to activate the focused control. In a dialog, keyboard focus stays with that dialog. Use its Close or Cancel button, or Escape when available, to return to the control that opened it. Confirmations explain when an action is permanent before you commit it."),
       sub("The bottom of the sidebar"),
       list([
         "Search — opens a search box over your past work: chats (including archived ones), agents, drafts, and indexed documents. The keyboard shortcut is Ctrl+K (Windows) or ⌘K (Mac).",
@@ -183,12 +226,14 @@ const SECTIONS = [
       steps([
         "Click New chat in the sidebar. A fresh chat greets you by the time of day — “Good morning”, “Good afternoon”, or “Good evening” with your first name (late at night it asks if you are burning the midnight oil) — above the tagline “Your approved models, your sources, your guardrails — ask Aperture Chat anything.” (The name reflects your organization's branding.)",
         "Click into the message box (the composer) — it reads Ask anything... — and type your question.",
+        "Explore an idea, Compare options, and Draft a message offer starting points. Selecting one fills an editable prompt; review it before sending.",
         "Press Enter to send. Press Shift+Enter when you want a new line without sending.",
       ]),
       sub("Picking the model"),
       p(
         "The model selector sits in the top bar of every chat. Click it to choose which AI model answers this conversation. Each chat remembers its own choice, and the list only ever shows models your workspace has approved for you.",
       ),
+      p("Use the arrow keys, Home, End, or type a model name to move through available models; Enter selects the highlighted model. Use as default for new chats is a separate action for the highlighted model. Choosing a model for this conversation does not by itself change that default."),
       sub("Web search and the active-tools chip"),
       list([
         "When the selected model supports it, public web search starts turned on. A chip at the bottom of the composer shows what is active: with one tool on it names it — for example Web search — and with several on it reads Tools with a count.",
@@ -258,7 +303,7 @@ const SECTIONS = [
     summary: "Five characters that insert prompts, agents, knowledge, skills, and automations.",
     blocks: [
       p(
-        "Start a word in the composer with one of five symbols and a menu opens with matching items. Hover the composer to see this cheat sheet at any time.",
+        "Start a word in the composer with one of five symbols and a menu opens with matching items. Use the Composer shortcuts information button to open the cheat sheet without changing your message.",
       ),
       table(
         ["Type", "What it opens"],
@@ -292,17 +337,17 @@ const SECTIONS = [
       ]),
       sub("Attach from source"),
       p(
-        "Below those options, under the Attach from source heading, the menu lists your organization's workspace sources: Google Drive, OneDrive, SharePoint, Box, and iManage. Which of these actually work depends on what your administrators have connected.",
+        "Below those options, under the Attach from source heading, the menu lists your organization's workspace sources: Google Drive, OneDrive, SharePoint, Box, and iManage. Availability depends on the service team's connector setup and your own source-account access.",
       ),
       sub("Connecting your own account"),
       list([
         "Cloud sources read from your own account. The first time you pick one, the picker may ask you to connect it — click the Connect button for that source and a sign-in window opens.",
         "Approve read access in that window. The file list refreshes on its own once access is granted, and only you can see files from your account.",
-        "The picker shows files at the top level of the drive or the folder your administrators configured.",
+        "The picker shows files at the top level of the drive or the folder configured for the source, within your account's permissions.",
       ]),
       note(
         "info",
-        "If a source is not configured, the platform says so honestly when you try it — nothing silently fails. Ask your administrator to configure the connector (the Administrator Guide covers exactly how).",
+        "If a source needs shared configuration, ask your administrator to coordinate with the service team. Shared connector administration is managed outside tenant administration. Your own Connect action in the attach menu remains separate and grants access only through your source account.",
       ),
     ],
   },
@@ -366,6 +411,7 @@ const SECTIONS = [
       p(
         "Click Drafts in the sidebar. The view pairs a full document editor with an AI assistant rail on the left that writes into the editor for you. A Draft format switch at the top of the editor has two buttons — Document and Deck. This section covers document mode; “Building a slide deck” covers deck mode.",
       ),
+      note("info", "If the model selector says No models connected, AI drafting, AI rename, inline AI edits, and AI deck prompts are unavailable. You can still edit manually, import, save, use document history, and export. Follow the setup guidance for your role or ask your administrator for access to a working model."),
       sub("Generating a draft"),
       steps([
         "Look at the assistant rail first: it shows which context sources are on — workspace files, web, and templates — before you generate anything.",
@@ -386,6 +432,8 @@ const SECTIONS = [
         "Click Save version whenever the draft reaches a good state. You can restore an earlier version at any time from the draft's history.",
         "Compare versions opens a read-only visual redline of two saved versions, so you can see exactly what changed between them. It needs two genuinely different saved versions before it activates.",
       ]),
+      sub("Leaving with unsaved changes"),
+      p("When you leave an edited draft through workspace navigation, open another chat or draft, or choose Sign out, the unsaved-changes dialog lets you Keep editing, Save copy and continue, or Discard and continue. The saved copy goes into local document history in this browser. If browser storage fails, the app keeps you in the draft so you can recover it. A forced security sign-out can still interrupt work; save important changes regularly."),
       sub("Exporting"),
       list([
         "Click Export to open the export panel. In document mode it offers a Word document (an editable Word file with preview page breaks and embedded images), Markdown (best for plain text or web publishing), and Print / Save as PDF, which opens your browser's print dialog with the saved version — choose “Save as PDF” there to keep a PDF copy.",
@@ -463,20 +511,20 @@ const SECTIONS = [
     summary: "Reusable bundles of model, prompts, knowledge, and tools.",
     blocks: [
       p(
-        "An agent profile bundles a model route, meta prompts, knowledge bases, and MCP tools into one reusable configuration. Instead of switching all of those on by hand, you route a reply through the agent and get its whole setup at once.",
+        "An agent profile bundles a model route, meta prompts, knowledge bases, and MCP tools into one reusable configuration. A usable profile needs an approved, enabled model backed by a working provider. A saved profile marked not connected is a configuration example, not proof that it can run.",
       ),
       sub("Creating an agent"),
       steps([
-        "Click Agents/Automations in the sidebar, then New Agent.",
+        "If your account has agent authoring permission, click Agents/Automations in the sidebar, then New Agent.",
         "Give it a name and a short description of what it is for.",
         "Work through the editor tabs: Profile (name, model, and description), Knowledge (assign knowledge bases), Tools (select MCP tools), Prompts & Skills (attach system prompts and skill files), Access (who can use it), and Hermes (the optional learning companion).",
-        "Click the save button. The agent is now available to every chat.",
+        "Click the save button. Standard users create private profiles; administrators control group sharing and organization publishing. Check model readiness and access before trying the profile in chat.",
       ]),
       sub("Using an agent in chat"),
       list([
-        "Type @ in the composer and pick the profile, or",
-        "Turn on Agent in the send options menu.",
-        "Either way, the reply routes through the agent's full configuration — its model, prompts, knowledge, and tools.",
+        "Type @ in the composer and pick an available profile to use its configured model route, instructions, knowledge, and tools.",
+        "The Agent option in send options separately permits enabled tools; it does not choose an agent profile.",
+        "If no profiles appear, ask your administrator to check that a ready profile is available to your account.",
       ]),
       p(
         "From the Agents view you can also open a profile to edit it, jump straight into a chat with it, or delete it. The Automations tab at the top of this view holds your scheduled runs — covered in “Scheduled automations”.",
@@ -506,10 +554,11 @@ const SECTIONS = [
       ),
       sub("Using knowledge in a conversation"),
       list([
-        "Type # in the composer to reference a knowledge base or a specific file inside one.",
+        "Type # in the composer to reference a knowledge source or choose from Files in knowledge sources. A file choice references its name in your prompt and searches that file's knowledge source; the row says which source will be searched.",
         "Or turn on the Knowledge switch in send options to let the reply search your enabled bases.",
         "Replies grounded in knowledge return citations that link straight back to the source documents.",
       ]),
+      note("info", "The # shortcut menu shows Loading files… while retrieving file choices. If Some files could not be loaded appears, use Retry in that menu. Files from sources that loaded successfully remain usable. If access was removed or a source needs configuration, ask your administrator to resolve it."),
     ],
   },
   {
@@ -608,7 +657,8 @@ const SECTIONS = [
         "Profile — click the card with your name and the pencil icon to edit your display name, firm, website, bio, phone number, and photo (upload an image up to 5 MB, or paste a URL). Click Save profile when done, or Cancel to discard.",
         "Management — organization administrators see this section; expanding it opens the Admin console. Regular users do not have it.",
         "Personalization memory — opens your private memory manager when the feature is enabled. Use it to control, review, add, correct, pin, forget, or clear what the assistant remembers about you.",
-        "Password — accounts that sign in with a password can change it here (click the pencil, enter the current password, then the new one twice — at least 12 characters). Accounts that sign in through SSO manage their password with the SSO provider instead, and the panel says so.",
+        "Password — accounts that sign in with a password can change it here (click the pencil, enter the current password, then the new one twice — at least 12 characters). The app continues with a new authenticated session after saving and revokes previous sessions. Accounts that sign in through SSO manage their password with the SSO provider instead, and the panel says so.",
+        "Security — choose Manage security to set up an authenticator for a local account, review the remaining recovery-code count, or replace codes after verifying your identity. Turning verification off is available only when organization policy permits it and signs you out. SSO accounts follow their identity-provider settings for voluntary enrollment.",
         "Role and organization — your role, your organization, any personal token caps that apply to you, and how you sign in.",
         "View as — if your role allows it, preview the workspace exactly as a lower role would see it. A note reminds you which role you are previewing; switch back the same way.",
         "Usage this month — your prompts, responses, and estimated tokens.",
@@ -684,10 +734,10 @@ const SECTIONS = [
     summary: "Walkthrough videos and this guide, always one click away.",
     blocks: [
       list([
-        "Click Help at the bottom of the sidebar to open the guided walkthroughs — short narrated videos of real platform screens, with captions and transcripts, covering everything in this guide.",
-        "Choose Personalization memory in the Help playlist for the narrated account-card path, the two memory switches, plain-English save and recall examples, and cross-session behavior.",
-        "The same panel offers this guide as a downloadable PDF, so you can keep it, print it, or share it with a new teammate.",
-        "Administrators have a Documentation button inside the Admin console with role-specific videos and a printable guide.",
+        "Click Help at the bottom of the sidebar for guided videos, captions, transcripts, and this downloadable PDF. The guide also covers procedures without a dedicated video.",
+        "The Personalization memory video demonstrates the account menu, memory switches, and saving and recalling preferences across sessions.",
+        "Administrators can also open Documentation inside the console for role-specific videos and a printable guide.",
+        "Choose Report a problem in Help to describe a problem, the affected screen, and the expected result. Share only permitted details with your administrators; omit passwords, keys, and recovery codes.",
       ]),
     ],
   },
@@ -735,6 +785,14 @@ const SECTIONS = [
         "Use the group filter to work one team at a time.",
         "Watch the auth and status columns: users who arrived through SSO stay Pending until you assign them to a group — that is the signal they are waiting on you.",
       ]),
+      sub("Reviewing access requests"),
+      steps([
+        "Open Users and review the Access requests queue. Check the requester's name, email, and request time before choosing their access level under Approve as.",
+        "Choose User for standard group-based access, Temp User for the restricted Luna-only 30,000-reported-token allowance, or Admin only when that option is permitted and appropriate. Click Approve, or Decline to reject the request.",
+        "After approval, use Finish sign-in setup for the approved person. Share the workspace's sign-in address and confirm the sign-in method. Approval does not send an email.",
+        "For organization SSO, confirm the account exists with the identity provider. For email and password, choose Set temporary password, save a generated or entered password, and share it securely. The person must choose their own password at first sign-in.",
+        "Check the person's group membership and model access, then ask them to sign in and complete a first message. Approval alone does not establish every resource permission.",
+      ]),
       sub("Per-row actions"),
       p("Every row has an Actions column with three controls:"),
       list([
@@ -765,7 +823,7 @@ const SECTIONS = [
         "On the Import tab — headed “Import Users to” the group's name — paste addresses into the User emails box and click Add users to group to bulk-add them.",
         "On the Permissions tab, switch each capability on or off.",
       ]),
-      sub("The seven permission toggles"),
+      sub("Runtime access and authoring permissions"),
       table(
         ["Toggle", "What it grants"],
         [
@@ -773,9 +831,12 @@ const SECTIONS = [
           ["Can use knowledge", "Query approved knowledge bases."],
           ["Can use agents", "Run approved agent workspaces."],
           ["Can use tools", "Invoke enabled tools and MCP actions."],
-          ["Can use API", "Create a personal API key for approved models. Service policy must make downstream API access available; otherwise the toggle says so and stays off."],
+          ["Can use API", "Create personal keys for approved models when service policy allows API access."],
           ["Can use Hermes companion", "Build and run agent profiles with the Hermes learning companion. Off until approved."],
-          ["Can build agents", "Create and edit their own private agent profiles from models available to the organization. Off by default, and it only takes effect when service policy permits user-built agents. Publishing agents to the organization stays admin-only."],
+          ["Can build agents", "Create private agent profiles when service policy permits. Organization publishing stays admin-only."],
+          ["Can build knowledge bases", "Create private knowledge bases. Group sharing and organization management stay admin-only."],
+          ["Can build tools", "Create private tools. Group sharing, stdio commands, and organization management stay admin-only."],
+          ["Can use memory", "Allow personal preferences to be learned and reused within the workspace memory policy."],
         ],
       ),
       note("warning", "Deleting a group removes its members' access that flowed through it. Check what the group grants before deleting."),
@@ -812,38 +873,21 @@ const SECTIONS = [
     id: "admin-tools",
     part: "admin",
     minRole: "admin",
-    title: "Connections: connectors and response actions",
-    summary: "Configure real credentials for each source, and add admin-approved chat output actions.",
+    title: "Connections: response actions and connector handoff",
+    summary: "Manage response actions and route shared connector setup to the service team.",
     blocks: [
       p(
-        "The Connections tab holds the workspace-wide switches for the sources and tools your tenant offers. Every toggle applies to every user in the workspace: turning a connector off removes the capability everywhere users would meet it — chat attach pickers, the / command palette, and the Knowledge/Tools library — and the API refuses it too, so off really is off. Credential connectors also carry an honest pill with three states: Credentials saved (configured and enabled), Saved · disabled (configured but switched off), and Needs credentials (not configured yet). Switch-style rows — MCP Servers, Prompt Library, Knowledge Ingestion, Document Templates, and Audit and Analytics Export — need no credentials; their toggle is the whole story.",
+        "The Admin console's Connections tab contains Chat output actions. Shared connector switches, saved credentials, connection tests, and workspace OAuth are managed by the service team outside tenant administration.",
       ),
-      sub("Configuring a connector"),
-      steps([
-        "Click Configure on the connector's card. The form shows that vendor's real fields:",
-      ]),
-      table(
-        ["Connector", "What it needs"],
-        [
-          ["OneDrive / SharePoint", "Microsoft Graph client credentials: tenant ID, client ID, and client secret from your Azure app registration."],
-          ["Box", "A client-credentials grant with your Box enterprise ID."],
-          ["Google Drive", "A Google OAuth client — save it, then click Connect Google to authorize."],
-          ["iManage", "The server base URL plus a service account username and password."],
-          ["Web Search", "Nothing — it works keyless out of the box. You can choose the engine (DuckDuckGo or a self-hosted SearXNG URL) and the number of results."],
-        ],
-      ),
-      steps([
-        "Save the configuration, then click Test connection. The test calls the real vendor API and reports the genuine result — including the vendor's own error message if the credentials are wrong.",
-        "Only enable the connector once its test passes.",
-      ]),
       note(
         "info",
-        "The credentials you save here power knowledge sync and workspace-level access. For chat attachments, users connect their own Google, Microsoft, or Box account from the composer's attach menu and only ever see their own files — the connector card's setup notes list the extra redirect URI and delegated permissions that flow requires.",
+        "Users still connect their own Google, Microsoft, Box, or iManage account from the composer's attach menu. Those delegated connections respect each user's source permissions. Shared credentials managed by the service team support connector setup and background knowledge sync; they do not grant users someone else's files.",
       ),
       sub("Chat output actions"),
       p(
-        "The second panel on this tab, Chat output actions, adds admin-approved buttons to assistant responses — export, format, or handoff actions. It does not add MCP servers or model-callable tools; those are managed from the Tools tab under Knowledge/Tools in the sidebar (Connections), where each MCP connection and its transport is configured.",
+        "Chat output actions adds admin-approved buttons to assistant responses for export, formatting, or handoff. Choose New response action to create one; existing custom actions offer Edit and Delete. Each row shows Enabled or Draft and an enable switch. Creating these actions does not configure a shared source connector.",
       ),
+      p("MCP connections and model-callable tools remain in Knowledge/Tools → Tools → Connections. Prompts and Skills also remain in the Tools library. Their authoring and use follow the existing permissions and the shared connector availability set by the service team."),
     ],
   },
   {
@@ -854,13 +898,13 @@ const SECTIONS = [
     summary: "What admins need to configure before users can rely on recurring model chains.",
     blocks: [
       p(
-        "Users create and run automations from the Automations tab of the Agents view, and enabled schedules fire automatically in the background (UTC), delivering each run's output as a new chat thread. Admins control whether those runs have the models, groups, and connectors they need. Treat every automation failure as a setup signal first: the run is usually missing model access, source access, or a connector credential.",
+        "Users create and run automations from the Automations tab of the Agents view, and enabled schedules fire automatically in the background (UTC), delivering each run's output as a new chat thread. Admins manage group and model access; the service team manages shared connector availability and credentials outside tenant administration. Check the actual failure details to determine which setup needs attention.",
       ),
       sub("Admin readiness checklist"),
       steps([
         "Open Model Access and confirm the automation's model is visible to the user's group.",
         "Open Groups and confirm the user belongs to the group that receives the model grant.",
-        "Open Connections and configure any connector the automation expects to use, then run Test connection before enabling it.",
+        "Ask the service team to confirm any required shared connector and inspect its real connection-test result. Users complete their own source-account connection when the workflow needs delegated access.",
         "If the automation uses knowledge, confirm the knowledge base is enabled and its source ACL allows the user's group.",
         "Ask the user to press Run now after saving the automation; the transcript and last-run status will show whether the setup is complete.",
       ]),
@@ -941,7 +985,7 @@ const SECTIONS = [
         "New model defaults — shows whether newly available models begin with Default Users or require explicit grants.",
       ]),
       p(
-        "Below those status rows are three downstream switches for the protected Default Users group: personal API keys, private-agent building, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions, Model Access for available models, and Connections for available connectors.",
+        "Below those status rows are defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Shared connector availability is managed by the service team outside tenant administration.",
       ),
       sub("Personalization Memory"),
       steps([
@@ -955,6 +999,39 @@ const SECTIONS = [
         "warning",
         "Memory administration never grants reading access. Administrators see policy, counts, and purge controls only; the API and the interface do not return another person's memory content.",
       ),
+    ],
+  },
+  {
+    id: "admin-retention",
+    part: "admin",
+    minRole: "admin",
+    title: "Data retention and conversation tags",
+    summary: "Find tagged conversations, inspect their contents, and review batch actions.",
+    blocks: [
+      steps([
+        "Open Policies and expand Data Retention. The switches control tagging for MCP connections, file uploads, and conversation subjects. Read each switch's description before changing it.",
+        "To inspect chats, open Audit, expand User Prompt Activity, and select Tags. This list includes tagged and untagged conversations available in your administrative scope.",
+        "Use Search chats and tags to find titles, people, tags, or client/matter identifiers. Filter by tag type when you need a narrower set.",
+        "Click a conversation title to open Tagged conversation and review its saved prompts and outputs. Close the preview to return to the same list.",
+        "Select the intended chats. Archive selected keeps them stored and searchable but removes them from the active list. Delete selected opens a permanent-deletion confirmation; it does not delete until you choose Yes, delete.",
+        "Read the completed action status. Chats under an active hold are skipped by deletion. A failure or skipped record needs review; do not assume every selected row was deleted.",
+      ]),
+      note("warning", "Permanent deletion removes the selected conversations and their attachments and cannot be undone. Preview contents and check the selected count before confirming. A tagging switch records classification; it is not a scheduled deletion rule or an action that places a hold."),
+    ],
+  },
+  {
+    id: "admin-feedback-issues",
+    part: "admin",
+    minRole: "admin",
+    title: "Review feedback and reported issues",
+    summary: "Read response ratings, written feedback, and platform reports in Analytics.",
+    blocks: [
+      steps([
+        "Open Analytics and expand Chat Feedback. Set its person and date filters; these apply to that feedback panel.",
+        "Select a response rating to preview its feedback and saved conversation. Read any written comment alongside the model output.",
+        "Under Reported platform issues, select a report to review its subject, description, reporter, time, and optional screenshot. If a screenshot cannot load, read the error rather than treating it as an empty attachment.",
+        "Use the report to reproduce the problem with permitted test data, then follow your organization's support process. Viewing a report does not send a reply or mark the problem resolved.",
+      ]),
     ],
   },
   {
@@ -1024,8 +1101,8 @@ const SECTIONS = [
       table(
         ["Role", "What it controls"],
         [
-          ["Platform owner", "Providers, API keys and secrets, organization model availability, SSO, branding, policies, usage budgets, alert email, and removing admins. The highest level."],
-          ["Admin", "Tenant users, groups, connectors, and tenant model access — always inside the boundaries the owner sets."],
+          ["Platform owner", "Providers, API keys and secrets, shared connectors, organization model availability, SSO, branding, policies, usage budgets, platform updates, alert email, and removing admins. The highest level."],
+          ["Admin", "Tenant users, groups, response actions, and tenant model access — always inside the boundaries the owner sets."],
           ["User", "Chat, drafts, assigned agents, and whatever models and sources their groups allow."],
         ],
       ),
@@ -1040,6 +1117,25 @@ const SECTIONS = [
     ],
   },
   {
+    id: "owner-first-run",
+    part: "owner",
+    minRole: "owner",
+    title: "First-run setup: from owner account to a working team",
+    summary: "Create the first owner, connect a model, and verify access before inviting the team.",
+    blocks: [
+      steps([
+        "On a new installation with no active owner, complete Create the first platform owner with your display name, work email, and a password of at least 12 characters. Confirm the password and choose Create platform owner.",
+        "The Getting started card offers Set up models when no usable model is available, or Manage access when models are ready. Open owner guide opens this role's documentation. Choose an action or explicitly dismiss the card; merely loading the workspace does not mark it reviewed.",
+        "Open the account drawer, expand Management, and choose Platform owner console. Review Org Settings before changing organization-wide policy or branding.",
+        "Open Providers, register the intended gateway, and save its real credential in API Keys. A successful save confirms configuration storage; Needs validation still requires a successful runtime check.",
+        "Sync Models and inspect the result. In Models, enable only the models you intend to offer. Check the provider's runtime support and status if a model is unavailable.",
+        "Open Admin console to configure the team's groups, model access, and any permitted knowledge or tools. Approve access requests or create accounts, then complete the sign-in handoff described in Users.",
+        "Verify a real first message with a synthetic standard-user account. Confirm the intended model works, restricted resources stay unavailable, and any temporary password or authenticator requirement completes correctly.",
+        "If you will use SSO, test the provider configuration before enforcing it. Keep an authorized administrative sign-in path available while validating the setup.",
+      ]),
+    ],
+  },
+  {
     id: "owner-providers",
     part: "owner",
     minRole: "owner",
@@ -1050,7 +1146,7 @@ const SECTIONS = [
         "Open the Providers tab and click Add Provider.",
         "Pick the kind. Eleven are available: openai, anthropic, azure-openai, azure-foundry, gcp, amazon-bedrock, open-webui, openrouter, ollama, openai-compatible, and local. Save the base URL, auth type, region, and the label for its first key.",
         "Read the provider's card after saving. It shows the provider's brand logo, the kind, region, and a Models counter that reads enabled “of” total — for example “12 of 40” — so you can see the ceiling at a glance.",
-        "Check the status badge. It has three honest states: Connected (the gateway responds and the platform can route to it), Adapter needed (registered and responding, but no runtime adapter ships for it yet — Bedrock currently shows this), and Needs key (no active key in the vault yet).",
+        "Read the status badge separately from the save confirmation: Needs key means no active credential is available; Needs validation means the saved connection and credential still need a successful runtime check; Adapter needed means the required runtime adapter is unavailable; Connected reflects a validated usable route. Saving a provider or key is not a successful model test.",
         "Click API Keys on the card — the button shows how many keys are stored — to manage that provider's vaulted credentials. The next section covers the vault in detail.",
         "Click Sync Models to pull the provider's catalog. The button stays disabled until an active key exists, and says so.",
         "Use Edit Connection whenever a base URL, auth header, or catalog scope needs correction.",
@@ -1204,8 +1300,8 @@ const SECTIONS = [
     id: "owner-policies",
     part: "owner",
     minRole: "owner",
-    title: "Org Settings: policies, budgets, and platform connectors",
-    summary: "Set the organization ceiling, the usage budget, and gate connectors platform-wide.",
+    title: "Org Settings: policies and budgets",
+    summary: "Set the organization ceiling and the workspace usage budget.",
     blocks: [
       sub("Policy Controls"),
       p(
@@ -1235,12 +1331,78 @@ const SECTIONS = [
       ]),
       sub("Elastic Analytics"),
       p(
-        "The Elastic Analytics panel shows whether audit export to Elastic is configured. The real configuration lives in the backend environment (APERTURE_ELASTIC_URL and APERTURE_ELASTIC_API_KEY); the connection fields in this panel are a session preview and are not persisted — the panel says so when you save.",
+        "The Elastic Analytics panel reports whether backend audit export is configured, its status, and buffered events. Configure APERTURE_ELASTIC_URL or APERTURE_ELASTIC_CLOUD_ID, together with APERTURE_ELASTIC_API_KEY, in the backend environment and restart the API. The browser never receives this API key. Buffered events are delivered once the configured cluster is reachable; the panel has no connection form to save.",
       ),
-      sub("Platform Connectors"),
-      p(
-        "The master switch per source: Google Drive, the Microsoft stack (OneDrive and SharePoint), Box, iManage, Web Search, and MCP servers. Disable one here and no tenant can offer it, no matter what their admins configure.",
+    ],
+  },
+  {
+    id: "owner-connectors",
+    part: "owner",
+    minRole: "owner",
+    title: "Org Settings: shared connectors and source credentials",
+    summary: "Configure deployment-wide availability, test real connections, and distinguish shared access from personal sign-in.",
+    blocks: [
+      p("Open Platform owner console → Org Settings and expand Connectors. This owner-only panel controls shared source settings and availability. Turning a connector off removes that capability across chat, source pickers, the command palette, the Tools library, and the API. Tenant administrators do not configure these shared connections."),
+      p("Credential-backed sources show Credentials saved, Saved · disabled, or Needs credentials. A saved credential is configuration evidence; read Test connection for the live result. Switch-only capabilities, such as MCP Servers and Prompt Library, have an enable switch without a vendor credential form."),
+      sub("Configure and test a source"),
+      steps([
+        "Choose Configure on the source row. Select Authentication method and fill in the fields shown for that method. Read the source's setup notes for its required permissions and redirect URI.",
+        "Choose Save configuration. For an existing saved secret, leave its password field blank to retain it, or enter a new value to replace it. Wait for the save result before testing.",
+        "For Google OAuth, save the client ID and secret first, then choose Connect Google Drive to authorize the workspace account used for knowledge sync. Complete the consent flow before checking the connection.",
+        "Choose Test connection and read its result and individual checks. An incomplete, failed, or missing result is not proof of access. Resolve the reported issue before relying on the source.",
+        "Set the source's enable switch for the deployment and verify the resulting status. Configure the intended users' source-account access separately when they will attach files in chat.",
+      ]),
+      table(
+        ["Source", "Configuration shown by the form"],
+        [
+          ["Google Drive", "Google OAuth client ID and secret, with an optional Drive folder ID and source label. Paste access token is a testing option."],
+          ["OneDrive / SharePoint", "Microsoft Graph directory ID, application ID, and client secret for app-only access, with optional site, drive, and root-folder IDs."],
+          ["Box", "Client ID, enterprise ID, and client secret for Client Credentials Grant; an optional folder ID limits the starting location. Developer token is a testing option."],
+          ["iManage", "Instance URL, API key (client ID), and OAuth client secret for Each user signs in. Service account for background sync adds the service username and password; chat still requires each user's OAuth sign-in."],
+        ],
       ),
+      note("info", "Google, Microsoft, Box, and iManage chat attachments use each signed-in user's delegated source account. Shared knowledge-sync credentials do not replace that sign-in or bypass source permissions. Users keep their Connect action in the attach menu."),
+      sub("Clear saved configuration"),
+      p("Clear configuration removes the source's saved fields, stored secret, shared OAuth data, and service-account password, and disables its saved configuration. Use it only when that removal is intended. An empty secret field alone retains the saved secret; clearing all visible fields and saving an existing configuration also performs a clear."),
+      sub("Web Search"),
+      p("Choose Configure on Web Search, then select Search engine and Results per search (1 to 10). DuckDuckGo is keyless. SearXNG requires an instance URL with JSON search output enabled. OpenAI, Anthropic, and OpenRouter choices use the corresponding saved provider key and bill searches to that provider account. Choose Save configuration, then Test connection to run a real query."),
+      p("The engine choice applies to models without hosted web search of their own. OpenRouter-backed models use OpenRouter's built-in search regardless of this selection. The Web Search enable switch still governs availability for the deployment."),
+    ],
+  },
+  {
+    id: "owner-platform-updates",
+    part: "owner",
+    minRole: "owner",
+    title: "Review and install a platform release",
+    summary: "Use the owner-only sidebar update notice to review release notes, install when available, and verify the reported result.",
+    blocks: [
+      p("For platform owners, the sidebar says Release available followed by a version when the updater is unavailable, and Update to followed by a version only when it is ready. It can also show an active update or a recent undismissed result. Tenant administrators and users do not receive this control. The current version comes from the running build; a stale deployment version setting does not establish which build is running."),
+      steps([
+        "When the update row appears, hover over or focus it to read release highlights and the current version. Click it to open the update dialog.",
+        "Review What this update brings, and use Show full release notes or Release page when offered. Check the Release list checked timestamp and any error. Check again requests a fresh release list when no update is running.",
+        "Read How the update runs before proceeding. Installation restarts the API and web app, so arrange an appropriate interruption window and follow the deployment's backup procedure.",
+        "Choose Install followed by the target version only when ready. The button is available when the updater service is configured and connected. If the dialog shows Manual install on this deployment or an offline-updater message, follow those deployment instructions instead. A fresh VPS can use the release bundle installer to prepare private configuration and a stable project, then pull, start, and health-check the stack. Existing installations need the documented one-time API and updater-sidecar configuration in the same project; do not run a fresh-install workflow over existing data. Forks use their own repository release source by default. See the repository Docker release guide for the exact commands and prerequisites.",
+        "Follow the recorded progress through downloading, restarting, and verifying. Show updater log opens available detail. Closing the dialog does not cancel an update that has already started.",
+        "After Update installed, choose Reload now to load the new web build, then verify the workspace. If the result is Update failed or Update rolled back, inspect the reported details before using an offered Retry action. Dismiss hides a finished result; it does not install or repair a release.",
+      ]),
+      note("info", "A release check or accepted install request is not a completed update. During an active run the API may be temporarily unreachable; the dialog continues polling. Wait for the reported outcome and verify the refreshed application before treating the release as complete."),
+    ],
+  },
+  {
+    id: "owner-retention",
+    part: "owner",
+    minRole: "owner",
+    title: "Organization retention and tagging",
+    summary: "Set the tagging policy and govern conversations within owner access.",
+    blocks: [
+      p("In Platform owner console, expand Data Retention under Org Settings to control MCP, upload, and subject tagging. The controls follow the same behavior as the administrator chapter, within the owner's permitted scope."),
+      steps([
+        "Open Audit, expand User Prompt Activity, and select Tags. Search and filter the conversations before selecting rows.",
+        "Preview the saved prompts and model outputs for a conversation. If the data cannot load, resolve the error before deciding on an action.",
+        "Review the selected count and choose Archive selected or Delete selected. Read the confirmation carefully; archival preserves stored conversations, while confirmed deletion permanently removes eligible chats and attachments.",
+        "Inspect the resulting action status and skipped records. Active holds prevent deletion. The page does not provide a control to invent or silently override a hold.",
+      ]),
+      note("warning", "Tagging is a way to identify conversations. Enabling tags does not prove a retention schedule has run, create a hold, or authorize deletion. Use the explicit batch confirmation only after checking the selected records."),
     ],
   },
   {
@@ -1275,7 +1437,7 @@ const SECTIONS = [
         "In Providers, confirm each gateway a schedule depends on shows Connected — not Needs key, and not Adapter needed (a Bedrock provider registers but cannot serve runs until its adapter ships).",
         "Open API Keys on each provider card and replace invalid or expired keys before teams build scheduled workflows around them.",
         "In Models, enable only the routes the organization has reviewed — newly synced models start disabled, and disabled models never flow to tenant admins or user automations.",
-        "In Org Settings, keep platform connector switches aligned with what tenants are allowed to use in recurring runs, and check the Workspace Usage Budget: once the ceiling is spent, completions — scheduled ones included — are refused (the API answers with HTTP 429) until the period resets, and a refused run is recorded as failed rather than retried automatically.",
+        "In Org Settings → Connectors, configure and test the shared sources a schedule needs and keep their enable switches aligned with approved use. Check the Workspace Usage Budget: once the ceiling is spent, completions — scheduled ones included — are refused (the API answers with HTTP 429) until the period resets, and a refused run is recorded as failed rather than retried automatically.",
         "In Analytics and Audit, review automation-related chat/runtime events the same way you review normal completions: who ran it, which provider served it, and whether the run produced the expected output.",
       ]),
       note(
@@ -1352,14 +1514,14 @@ const GUIDES = {
     docTitle: "Administrator Guide",
     badge: "For workspace administrators",
     subtitle:
-      "The complete User Guide, plus the Admin console: accounts, groups, model access, connections, single sign-on, analytics, token budgets, the tenant audit trail, and alerts. No prior knowledge assumed.",
+      "The complete User Guide, plus the Admin console: accounts, groups, model access, response actions, single sign-on, analytics, token budgets, the tenant audit trail, and alerts. No prior knowledge assumed.",
   },
   owner: {
     file: "aperture-owner-guide",
     docTitle: "Platform Owner Guide",
     badge: "For platform owners",
     subtitle:
-      "The complete User and Administrator Guides, plus the Platform owner console: providers, the API key vault, organization model availability, SSO, branding, policies, usage budgets, analytics, audit, and alerts. No prior knowledge assumed.",
+      "The complete User and Administrator Guides, plus provider and shared-connector configuration, the API key vault, organization model availability, SSO, branding, policies, usage budgets, platform releases, analytics, audit, and alerts. No prior knowledge assumed.",
   },
 };
 

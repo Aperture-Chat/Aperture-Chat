@@ -195,7 +195,7 @@ function TrainingVideoGridLibrary({
                 <span>{video.description}</span>
                 <span className="owner-video-meta">
                   <FileVideo size={14} />
-                  {formatDuration(getVideoDuration(video))} Remotion video
+                  {formatDuration(getVideoDuration(video))} guided video
                 </span>
               </span>
             </button>

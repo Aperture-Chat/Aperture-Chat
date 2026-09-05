@@ -17,6 +17,7 @@ import { renderMermaidFallbackSvg } from "../lib/mermaidFallback";
 import { DiagramEditorModal } from "./DiagramEditorModal";
 import { StewardDiagramFigure } from "./StewardDiagram";
 import { StableLabel } from "./Primitives";
+import { useModalFocus } from "../lib/useModalFocus";
 
 const GENERATED_IMAGE_PREFIX = "/api/chat/generated-images/";
 const PREVIEWABLE_HTML_LANGUAGES = new Set(["html", "htm"]);
@@ -325,6 +326,15 @@ function MarkdownCodeBlock({ language, preview = false, text }: { language: stri
   const lineCount = Math.max(lines.length, 1);
   const displayLanguage = language.trim() || "code";
 
+  // Response versions and streamed completions reuse the same block position.
+  // A new source must replace the previous version's local editor/preview state.
+  useEffect(() => {
+    setCode(text);
+    setEditing(false);
+    setCopyStatus("idle");
+    setPreviewOpen(false);
+  }, [text]);
+
   async function copyCode() {
     try {
       await copyCodeToClipboard(code);
@@ -432,10 +442,14 @@ function CodePreviewModal({
   onCopy: () => void;
 }) {
   const preview = useMemo(() => buildCodePreview(code, language), [code, language]);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalFocus(dialogRef, true, onClose);
   return (
     <div className="modal-backdrop code-preview-backdrop" role="presentation" onClick={onClose}>
       <section
         className="modal code-preview-modal"
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Artifact preview"

@@ -1467,6 +1467,68 @@ export type AccountApiKeyCreateResponse = AccountApiKeyStatus & {
   secret_value: string;
 };
 
+// --- Platform updates (platform owner only) ---------------------------------
+// Mirrors services/api/app/models/schemas.py PlatformUpdateStatus.
+
+export type PlatformReleaseInfo = {
+  version: string;
+  name: string;
+  url: string;
+  published_at?: string | null;
+  /** Markdown of the release's Highlights section (or the whole body). */
+  highlights: string;
+  notes: string;
+};
+
+export type PlatformUpdaterPhase =
+  | "idle"
+  | "requested"
+  | "accepted"
+  | "pulling"
+  | "applying"
+  | "verifying"
+  | "succeeded"
+  | "failed"
+  | "rolled_back";
+
+export type PlatformUpdaterRun = {
+  id?: string | null;
+  phase: PlatformUpdaterPhase;
+  target_version?: string | null;
+  previous_version?: string | null;
+  requested_by?: string | null;
+  message: string;
+  started_at?: string | null;
+  updated_at?: string | null;
+  finished_at?: string | null;
+};
+
+export type PlatformUpdaterStatus = {
+  /** The API has a shared state directory for the updater sidecar. */
+  configured: boolean;
+  /** The sidecar reported a fresh heartbeat and can drive Compose. */
+  connected: boolean;
+  last_heartbeat_at?: string | null;
+  project?: string | null;
+  problem?: string | null;
+  run: PlatformUpdaterRun;
+  log_tail: string;
+};
+
+export type PlatformUpdateStatus = {
+  current_version: string;
+  latest_version?: string | null;
+  update_available: boolean;
+  /** Releases newer than the running build, newest first. */
+  releases: PlatformReleaseInfo[];
+  checked_at?: string | null;
+  check_error?: string | null;
+  check_enabled: boolean;
+  repository: string;
+  releases_page_url: string;
+  updater: PlatformUpdaterStatus;
+};
+
 export type AuthLoginResponse = {
   user: User;
   session: {
@@ -1475,6 +1537,8 @@ export type AuthLoginResponse = {
     sso_config_id?: string | null;
     token?: string | null;
     expires_at?: number | null;
+    mfa_assured?: boolean;
+    mfa_factor_generation?: number | null;
   };
   bootstrap: BootstrapWireData;
   /** True when the account signed in with an admin-issued temporary password. */

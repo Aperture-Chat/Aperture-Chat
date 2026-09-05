@@ -1,11 +1,114 @@
-import { expect, test } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { sampleData } from "../data/sampleData";
+import * as api from "./api";
 import {
   preservePendingTraceState,
   resumablePendingAssistant,
   targetModelForRequest,
+  useChatStore,
   type ChatResponseVersion,
 } from "./chatStore";
-import type { ChatMessage, ChatThread, ModelConfig } from "./types";
+import type { BootstrapData, ChatMessage, ChatThread, ModelConfig } from "./types";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.localStorage.clear();
+});
+
+function firstUseData(): BootstrapData {
+  return {
+    ...sampleData,
+    me: { ...sampleData.me, id: "fresh-user", role: "USER", group_ids: ["group-1"] },
+    providers: [{ ...sampleData.providers[0], id: "openrouter", connected: true }],
+    models: [
+      { ...model("image-model", "Gemini 2.5 Flash Image"), capabilities: { output_modalities: ["text", "image"] } },
+      { ...model("text-model", "GPT-4o mini"), capabilities: { output_modalities: ["text"] } },
+    ],
+  };
+}
+
+test.each(["USER", "TENANT_ADMIN"] as const)("new %s chats use a member group when another group appears first", async (role) => {
+  const data = firstUseData();
+  data.me = { ...data.me, role, group_ids: ["member-group"] };
+  data.groups = [
+    { ...sampleData.groups[0], id: "other-group" },
+    { ...sampleData.groups[0], id: "member-group" },
+  ];
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  expect(view.result.current.activeThread?.group_id).toBe("member-group");
+  act(() => view.result.current.newChat());
+  expect(view.result.current.activeThread?.group_id).toBe("member-group");
+});
+
+test("new chats without an available member group remain unassigned", async () => {
+  const data = firstUseData();
+  data.me.group_ids = ["unavailable-group"];
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  expect(view.result.current.activeThread?.group_id).toBe("");
+});
+
+test("platform owners retain their permitted workspace group for new chats", async () => {
+  const data = firstUseData();
+  data.me = { ...data.me, role: "PLATFORM_OWNER", group_ids: [] };
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  expect(view.result.current.activeThread?.group_id).toBe(data.groups[0].id);
+});
+
+test("fresh chats prefer text while an explicit image choice survives history hydration and reload", async () => {
+  const data = firstUseData();
+  let finishHistory!: (threads: ChatThread[]) => void;
+  const history = new Promise<ChatThread[]>((resolve) => { finishHistory = resolve; });
+  vi.spyOn(api, "listChatThreads").mockReturnValueOnce(history).mockResolvedValue([]);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+
+  expect(view.result.current.model).toBe("text-model");
+  act(() => view.result.current.setModel("image-model"));
+  await act(async () => { finishHistory([]); await history; });
+  expect(view.result.current.model).toBe("image-model");
+  expect(targetModelForRequest(view.result.current.enabledModels, view.result.current.model, "text-model")).toBe("image-model");
+  view.unmount();
+
+  const restored = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  expect(restored.result.current.model).toBe("image-model");
+});
+
+test("a valid pinned image default remains preferred for a fresh chat", async () => {
+  const data = firstUseData();
+  window.localStorage.setItem(`aperture-default-model-${data.me.id}`, "image-model");
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  expect(view.result.current.model).toBe("image-model");
+  expect(view.result.current.defaultModelId).toBe("image-model");
+  act(() => view.result.current.setModel("text-model"));
+  act(() => view.result.current.newChat());
+  expect(view.result.current.model).toBe("image-model");
+});
+
+test("an unavailable saved selection falls back to text without erasing its pinned preference", async () => {
+  const data = firstUseData();
+  data.models = data.models.map((item) => item.id === "image-model" ? { ...item, platform_enabled: false } : item);
+  window.localStorage.setItem(`aperture-default-model-${data.me.id}`, "image-model");
+  window.localStorage.setItem(`aperture-chats-v2-${data.me.id}`, JSON.stringify([
+    { ...thread([]), title: "New chat", model_id: "image-model", owner_user_id: data.me.id },
+  ]));
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  expect(view.result.current.model).toBe("text-model");
+  expect(view.result.current.activeThread?.model_id).toBe("text-model");
+  expect(window.localStorage.getItem(`aperture-default-model-${data.me.id}`)).toBe("image-model");
+});
 
 function thread(messages: ChatMessage[]): ChatThread {
   return {

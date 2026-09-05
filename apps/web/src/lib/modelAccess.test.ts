@@ -5,6 +5,7 @@ import {
   agentProfileVisibleToUser,
   approvedWorkspaceModels,
   isModelUsable,
+  preferredModel,
   supportsReasoningEffort,
   usableModels,
   visibleAgentProfiles,
@@ -13,6 +14,43 @@ import {
 const connectedOpenRouterModel = sampleData.models.find((model) => model.id === "openrouter-openai-gpt-4o-mini")!;
 const owner = sampleData.users.find((user) => user.id === "user-owner")!;
 const regularUser = sampleData.users.find((user) => user.id === "user-jane")!;
+
+test("first-use model preference favors text output over image generation regardless of catalog order or family rank", () => {
+  const image: ModelConfig = {
+    ...connectedOpenRouterModel,
+    id: "image-specialist",
+    name: "Google: Gemini 2.5 Flash Image",
+    upstream_model_id: "google/gemini-2.5-flash-image",
+    capabilities: { input_modalities: ["text", "image"], output_modalities: ["text", "image"] },
+  };
+  const text: ModelConfig = {
+    ...connectedOpenRouterModel,
+    capabilities: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+  };
+
+  expect(preferredModel([image, text])?.id).toBe(text.id);
+  expect(preferredModel([text, image])?.id).toBe(text.id);
+  expect(preferredModel([image])?.id).toBe(image.id);
+});
+
+test("first-use model preference uses reported outputs instead of an image-like name and retains unreported models", () => {
+  const text: ModelConfig = {
+    ...connectedOpenRouterModel,
+    name: "Image research mini",
+    capabilities: { output_modalities: ["text"] },
+  };
+  const image: ModelConfig = {
+    ...connectedOpenRouterModel,
+    id: "gpt-5-specialist",
+    name: "Large model",
+    capabilities: { output_modalities: ["image"] },
+  };
+  const unreported = { ...text, id: "unreported", capabilities: null };
+
+  expect(preferredModel([image, text])?.id).toBe(text.id);
+  expect(preferredModel([image, unreported])?.id).toBe(unreported.id);
+  expect(preferredModel([])).toBeNull();
+});
 
 function withCatalogOnlyModel(me: BootstrapData["me"]) {
   const catalogOnlyModel: ModelConfig = {

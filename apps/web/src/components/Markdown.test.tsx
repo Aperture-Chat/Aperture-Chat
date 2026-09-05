@@ -513,3 +513,33 @@ test("hovering a box surfaces move and delete controls that commit instantly", a
   await waitFor(() => expect(onUpdateDiagram).toHaveBeenCalledTimes(1));
   expect(JSON.parse(onUpdateDiagram.mock.calls[0][1]).rows[0].map((card) => card.id)).toEqual(["b", "a"]);
 });
+
+test("artifact preview traps Tab, supports Escape, and restores its opener", () => {
+  render(<Markdown content={'```html\n<h1>Preview</h1>\n```'} />);
+  const opener = screen.getByRole("button", { name: "Preview" });
+  opener.focus();
+  fireEvent.click(opener);
+  const dialog = screen.getByRole("dialog", { name: "Artifact preview" });
+  const close = within(dialog).getByRole("button", { name: "Close artifact preview" });
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+  expect(within(dialog).getByRole("button", { name: "Done" })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+  expect(close).toHaveFocus();
+  fireEvent.keyDown(close, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Artifact preview" })).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
+});
+
+test("switching response versions replaces code and closes the previous version's preview", async () => {
+  const view = render(<Markdown content={'```html\n<h1>First version</h1>\n```'} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Editable html code" }), { target: { value: "<h1>Local edit</h1>" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+  expect(screen.getByRole("dialog", { name: "Artifact preview" })).toBeInTheDocument();
+  view.rerender(<Markdown content={'```html\n<h1>Second version</h1>\n```'} />);
+  expect(screen.queryByRole("dialog", { name: "Artifact preview" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: "Editable html code" })).not.toBeInTheDocument();
+  expect(screen.getByText("<h1>Second version</h1>")).toBeInTheDocument();
+  expect(screen.queryByText("<h1>Local edit</h1>")).not.toBeInTheDocument();
+});

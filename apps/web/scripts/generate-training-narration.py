@@ -18,6 +18,8 @@ Environment (one-time):
 Usage (from the repo root):
     tmp/tts/.venv/bin/python apps/web/scripts/generate-training-narration.py \
         [--decks user,admin,owner] [--videos personalization-memory] [--voice af_heart] [--dry-run]
+    # Unpublished manuscripts require an explicit opt-in:
+    # add --include-drafts --videos access-and-sign-in,account-security,account-mobile-help
 
 A manifest of every synthesized segment (text, durations, wav path) is written
 to tmp/tts/narration-manifest.json so a transcription QA pass can verify the
@@ -29,9 +31,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import re
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -41,33 +44,15 @@ PUBLIC_DIR = WEB_ROOT / "public"
 WORK_DIR = REPO_ROOT / "tmp" / "tts"
 SAMPLE_RATE = 24000
 
-AUDIO_SRC_RE = re.compile(r'audioSrc:\s*"([^"]+)"')
-SCENE_RE = re.compile(r'narration:\s*\n?\s*"([^"]+)",\s*\n\s*durationSeconds:\s*(\d+)')
-
-
-def parse_deck(path: Path):
-    """Yield videos as {audio_src, scenes: [{narration, duration, span}]}.
-
-    Scenes are attributed to the closest preceding audioSrc. The span covers
-    the durationSeconds integer so it can be rewritten in place.
-    """
+def parse_deck(path: Path, include_drafts=False):
+    """Parse explicit lesson objects, including lessons not yet given audio."""
     text = path.read_text()
-    videos = [{"audio_src": m.group(1), "start": m.start(), "scenes": []} for m in AUDIO_SRC_RE.finditer(text)]
-    if not videos:
-        raise SystemExit(f"no audioSrc entries found in {path}")
-    for m in SCENE_RE.finditer(text):
-        owner = None
-        for video in videos:
-            if video["start"] < m.start():
-                owner = video
-        if owner is None:
-            raise SystemExit(f"scene before first audioSrc in {path}: {m.group(1)[:40]!r}")
-        owner["scenes"].append(
-            {"narration": m.group(1), "duration": int(m.group(2)), "span": m.span(2)}
-        )
-    for video in videos:
-        if not video["scenes"]:
-            raise SystemExit(f"video {video['audio_src']} has no scenes in {path}")
+    result = subprocess.run(
+        ["node", str(WEB_ROOT / "scripts" / "training-catalog.cjs"), path.stem]
+        + (["--include-drafts"] if include_drafts else []),
+        check=True, capture_output=True, text=True,
+    )
+    videos = json.loads(result.stdout)
     return text, videos
 
 
@@ -81,6 +66,30 @@ def encode_mp3(wav_path: Path, mp3_path: Path):
     )
 
 
+def apply_replacements(text: str, replacements):
+    # Catalog spans arrive as JSON lists; new audio mappings use tuples.
+    # Compare numeric offsets so both can be applied in one reverse pass.
+    for (start, end), value in sorted(replacements, key=lambda item: item[0][0], reverse=True):
+        text = text[:start] + value + text[end:]
+    return text
+
+
+def merge_manifest(previous, current, selected_videos):
+    """Keep earlier QA evidence while replacing every segment of selected videos."""
+    retained = [row for row in previous if row["video"] not in selected_videos]
+    return sorted(retained + current, key=lambda row: (row["deck"], row["video"], row["scene"]))
+
+
+def write_deck_if_unchanged(path, original, replacements, audio_outputs=()):
+    # Synthesis may run while another contributor edits the same deck. Never
+    # overwrite those edits with the source snapshot taken at startup.
+    if path.read_text() != original:
+        raise RuntimeError(f"Training source changed during synthesis: {path.name}; re-run after edits settle")
+    path.write_text(apply_replacements(original, replacements))
+    for staged, destination in audio_outputs:
+        staged.replace(destination)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--decks", default="user,admin,owner")
@@ -91,8 +100,12 @@ def main():
     )
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--speed", type=float, default=1.0)
+    parser.add_argument("--threads", type=int, default=2, help="CPU synthesis threads (default: 2)")
     parser.add_argument("--dry-run", action="store_true", help="parse and report only, no synthesis")
+    parser.add_argument("--include-drafts", action="store_true", help="include unpublished draft manuscripts; does not publish them")
     args = parser.parse_args()
+    if args.threads < 1:
+        parser.error("--threads must be at least 1")
 
     deck_names = [name.strip() for name in args.decks.split(",") if name.strip()]
     video_names = {name.strip() for name in args.videos.split(",") if name.strip()}
@@ -101,7 +114,7 @@ def main():
         path = DECKS_DIR / f"{name}.tsx"
         if not path.exists():
             raise SystemExit(f"unknown deck: {name}")
-        text, videos = parse_deck(path)
+        text, videos = parse_deck(path, args.include_drafts)
         if video_names:
             videos = [video for video in videos if Path(video["audio_src"]).stem in video_names]
             if not videos:
@@ -111,8 +124,18 @@ def main():
     total_scenes = sum(len(v["scenes"]) for _, videos in decks.values() for v in videos)
     print(f"decks={deck_names} videos={sum(len(v) for _, v in decks.values())} scenes={total_scenes}")
     if args.dry_run:
+        for name, (_, videos) in decks.items():
+            for video in videos:
+                suffix = " (audio will be added after synthesis)" if video["audio_missing"] else ""
+                print(f"{name}/{video['id']}: {len(video['scenes'])} scenes -> {video['audio_src']}{suffix}")
         return
 
+    # Bound background synthesis so local UI review and tests remain responsive.
+    os.environ["OMP_NUM_THREADS"] = str(args.threads)
+    os.environ["MKL_NUM_THREADS"] = str(args.threads)
+    import torch
+    torch.set_num_threads(args.threads)
+    torch.set_num_interop_threads(args.threads)
     import numpy as np
     import soundfile as sf
     from kokoro import KPipeline
@@ -123,9 +146,14 @@ def main():
     segments_dir = WORK_DIR / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
     manifest = []
+    manifest_path = WORK_DIR / "narration-manifest.json"
+    previous_manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else []
+    completed_videos = set()
+    staging = tempfile.TemporaryDirectory(prefix="narration-", dir=WORK_DIR)
 
     for deck_name, (text, videos) in decks.items():
         replacements = []
+        audio_outputs = []
         for video in videos:
             parts = []
             for index, scene in enumerate(video["scenes"]):
@@ -144,6 +172,7 @@ def main():
                     {
                         "deck": deck_name,
                         "video": video["audio_src"],
+                        "publication": video["publication"],
                         "scene": index,
                         "narration": scene["narration"],
                         "speech_seconds": round(raw_seconds, 2),
@@ -160,18 +189,25 @@ def main():
             sf.write(video_wav, video_audio, SAMPLE_RATE)
             mp3_path = PUBLIC_DIR / video["audio_src"]
             mp3_path.parent.mkdir(parents=True, exist_ok=True)
-            encode_mp3(video_wav, mp3_path)
+            pending_mp3 = Path(staging.name) / f"{deck_name}-{video['id']}.mp3"
+            encode_mp3(video_wav, pending_mp3)
+            audio_outputs.append((pending_mp3, mp3_path))
             video_wav.unlink()
+            if video["audio_missing"]:
+                position = video["audio_insert"]
+                replacements.append(((position, position), f'audioSrc: "{video["audio_src"]}",\n    '))
             print(f"{video['audio_src']}: {len(video['scenes'])} scenes, {len(video_audio) / SAMPLE_RATE:.0f}s")
 
-        for (start, end), value in sorted(replacements, reverse=True):
-            text = text[:start] + value + text[end:]
-        (DECKS_DIR / f"{deck_name}.tsx").write_text(text)
+        write_deck_if_unchanged(DECKS_DIR / f"{deck_name}.tsx", text, replacements, audio_outputs)
+        completed_videos.update(video["audio_src"] for video in videos)
+        merged_manifest = merge_manifest(previous_manifest, manifest, completed_videos)
+        pending_manifest = manifest_path.with_suffix(".pending.json")
+        pending_manifest.write_text(json.dumps(merged_manifest, indent=1))
+        pending_manifest.replace(manifest_path)
         print(f"{deck_name}.tsx: {len(replacements)} durationSeconds updated")
 
-    manifest_path = WORK_DIR / "narration-manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=1))
-    print(f"manifest: {manifest_path} ({len(manifest)} segments)")
+    print(f"manifest: {manifest_path} ({len(merged_manifest)} total segments; {len(manifest)} synthesized)")
+    staging.cleanup()
 
 
 if __name__ == "__main__":

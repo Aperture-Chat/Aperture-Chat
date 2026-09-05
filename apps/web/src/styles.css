@@ -8920,7 +8920,8 @@ button:disabled {
   position: fixed;
   top: 10px;
   left: 10px;
-  z-index: 80;
+  /* The opened navigation and its backdrop cover their launch button. */
+  z-index: 50;
   width: 38px;
   height: 38px;
   display: inline-grid;
@@ -16945,7 +16946,7 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .user-management-table {
-  width: max(100%, 830px);
+  width: max(100%, 890px);
   min-width: 0;
   table-layout: fixed;
   font-size: 12.5px;
@@ -16992,7 +16993,8 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .user-table-actions-col {
-  width: 76px;
+  /* Reserve all three controls, their gaps, and the cell padding. */
+  width: 136px;
 }
 
 .user-management-table .person-cell {

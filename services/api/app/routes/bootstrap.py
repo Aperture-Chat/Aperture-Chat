@@ -97,10 +97,10 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
             record for record in store.prompt_templates.values() if record.tenant_id == actor.tenant_id
         ]
         if not is_tenant_admin(actor):
-            # The Connections tab switches are workspace kill switches: a
-            # disabled connector removes the capability from user payloads
-            # entirely — off is off, not merely hidden. Admins keep the
-            # records so they can manage and re-enable them.
+            # The owner console's connector switches are workspace kill
+            # switches: a disabled connector removes the capability from user
+            # payloads entirely — off is off, not merely hidden. Admins keep
+            # the records so their consoles stay coherent.
             if not _workspace_connector_enabled(store, "mcp"):
                 snapshot["toolConfigs"] = [
                     record for record in snapshot["toolConfigs"] if record.tool_type != "mcp"

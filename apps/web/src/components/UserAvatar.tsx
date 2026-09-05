@@ -18,7 +18,7 @@ export function UserAvatar({
   }, [avatarUrl]);
 
   return (
-    <span className={className} aria-hidden="true">
+    <span className={`${className} ${avatarUrl && !imageFailed ? "avatar-image" : "avatar-initials"}`} aria-hidden="true">
       {avatarUrl && !imageFailed ? (
         <img src={avatarUrl} alt="" onError={() => setImageFailed(true)} />
       ) : (

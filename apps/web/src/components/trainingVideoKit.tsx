@@ -24,7 +24,15 @@ export const TRAINING_HEIGHT = 855;
 
 export type FocusRect = { x: number; y: number; w: number; h: number };
 
-export type FocusRegion = { frame: string; rect: FocusRect; zoom?: number };
+export type FocusRegion = {
+  frame: string;
+  /** Composition pixels, including centered letterboxing when fit is contain.
+   * Capture importers normalize source-viewport bounds before storing them. */
+  rect: FocusRect;
+  zoom?: number;
+  /** Desktop captures retain their historical fill behavior by default. */
+  fit?: "fill" | "contain";
+};
 
 export type TrainingScene = {
   title: string;
@@ -63,12 +71,15 @@ type Vec = { x: number; y: number };
  * under-estimate keeps the root tucked under the real card no matter how the
  * text wraps. */
 const CARD_ESTIMATED_HEIGHT = 118;
+// The full-frame console content begins at x261. Keep policy narration in
+// the sidebar even when a long title or caption wraps onto additional lines.
+export const TRAINING_LEFT_RAIL_CARD = { x: 34, y: 392, w: 208 };
 const CARD_RECTS: Record<CalloutPlacement, FocusRect> = {
   "upper-left": { x: 292, y: 112, w: 470, h: CARD_ESTIMATED_HEIGHT },
   "upper-right": { x: TRAINING_WIDTH - 68 - 470, y: 112, w: 470, h: CARD_ESTIMATED_HEIGHT },
   "lower-left": { x: 292, y: TRAINING_HEIGHT - 96 - CARD_ESTIMATED_HEIGHT, w: 740, h: CARD_ESTIMATED_HEIGHT },
   "lower-right": { x: TRAINING_WIDTH - 72 - 520, y: TRAINING_HEIGHT - 96 - CARD_ESTIMATED_HEIGHT, w: 520, h: CARD_ESTIMATED_HEIGHT },
-  "left-rail": { x: 34, y: 392, w: 236, h: CARD_ESTIMATED_HEIGHT },
+  "left-rail": { ...TRAINING_LEFT_RAIL_CARD, h: CARD_ESTIMATED_HEIGHT },
   "right-mid": { x: TRAINING_WIDTH - 58 - 360, y: 362, w: 360, h: CARD_ESTIMATED_HEIGHT },
 };
 
@@ -220,7 +231,8 @@ export function TrainingComposition({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const sameImage = previousRegion !== null && previousRegion.frame === activeRegion.frame;
+  const sameImage = previousRegion !== null && previousRegion.frame === activeRegion.frame
+    && (previousRegion.fit ?? "fill") === (activeRegion.fit ?? "fill");
   const crossfading = previousRegion !== null && !sameImage && transition < 1;
   const highlightRect =
     sameImage && previousRegion && transition < 1
@@ -251,7 +263,12 @@ export function TrainingComposition({
           <Img
             className="training-recorded-image"
             src={staticFile(previousRegion.frame)}
-            style={{ transform: `scale(${previousRegion.zoom ?? 1})`, transformOrigin: "top left" }}
+            style={{
+              objectFit: previousRegion.fit ?? "fill",
+              objectPosition: "center",
+              transform: `scale(${previousRegion.zoom ?? 1})`,
+              transformOrigin: "top left",
+            }}
             alt=""
           />
         ) : null}
@@ -259,6 +276,8 @@ export function TrainingComposition({
           className="training-recorded-image"
           src={staticFile(activeRegion.frame)}
           style={{
+            objectFit: activeRegion.fit ?? "fill",
+            objectPosition: "center",
             opacity: crossfading ? transition : 1,
             transform: `scale(${activeRegion.zoom ?? 1})`,
             transformOrigin: "top left",
@@ -340,7 +359,15 @@ function TrainingSceneCallout({
       )}
       <div
         className={`training-title-card placement-${layout.placement}`}
-        style={{ opacity, transform: `translateY(${translateY}px)` }}
+        style={{
+          opacity,
+          transform: `translateY(${translateY}px)`,
+          ...(layout.placement === "left-rail" ? {
+            left: TRAINING_LEFT_RAIL_CARD.x,
+            top: TRAINING_LEFT_RAIL_CARD.y,
+            width: TRAINING_LEFT_RAIL_CARD.w,
+          } : {}),
+        }}
       >
         <span>{badge}</span>
         <strong>{scene.title}</strong>

@@ -5,6 +5,8 @@ import {
   isRecord,
   readApiError,
   ChatRequestError,
+  setSessionToken,
+  getSessionToken,
   type ApiMutationOptions,
 } from "./http";
 import { normalizeBootstrap } from "./bootstrap";
@@ -229,8 +231,7 @@ export async function confirmMfaEnrollment(
   };
 }
 
-/* Signed-session MFA management. Exported for completeness; no management UI
- * is wired in this pass. */
+/* Signed-session MFA management used by the account security controls. */
 
 export function loadMfaAccountStatus(
   userId: string,
@@ -360,6 +361,27 @@ export async function resumeSession(
   return { ...wire, bootstrap: normalizeBootstrap(wire.bootstrap) };
 }
 
+/** Revoke only the captured session family, even after local state is cleared. */
+export async function revokeSession(token: string): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${apiBase}/api/auth/logout`, {
+      method: "POST",
+      headers: { "x-aperture-session": token },
+      cache: "no-store",
+      keepalive: true,
+      signal: controller.signal,
+    });
+    // An expired or already revoked session has nothing left to revoke.
+    if (!response.ok && response.status !== 401) {
+      throw new ChatRequestError("The server could not confirm session revocation.", response.status);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function loadAuthOptions(options: ApiMutationOptions = {}): Promise<AuthOptionsResponse> {
   let response: Response;
   try {
@@ -458,16 +480,21 @@ export function markFirstRunGuideSeen(userId: string, options: ApiMutationOption
   });
 }
 
-export function updateAccountPassword(
+export async function updateAccountPassword(
   userId: string,
   payload: AccountPasswordUpdateRequest,
   options: ApiMutationOptions = {},
-): Promise<{ status: string }> {
-  return apiRequest<{ status: string }>(userId, "/api/auth/password", {
+): Promise<{ status: string; session?: AuthLoginResponse["session"] }> {
+  const previousToken = getSessionToken();
+  const result = await apiRequest<{ status: string; session?: AuthLoginResponse["session"] }>(userId, "/api/auth/password", {
     method: "POST",
     body: payload,
     signal: options.signal,
   });
+  // Password changes revoke old sessions. Install the replacement before a
+  // caller opens the workspace or makes its next authenticated request.
+  if (result.session?.token && getSessionToken() === previousToken) setSessionToken(result.session.token);
+  return result;
 }
 
 export function loadAccountApiKey(

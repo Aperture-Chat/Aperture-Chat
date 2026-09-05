@@ -706,159 +706,6 @@ export type AdminConsoleApi = {
   ) => Promise<Blob>;
 };
 
-type ConnectorFieldSpec = {
-  key: string;
-  label: string;
-  placeholder?: string;
-  hint?: string;
-  /** Limit to specific auth modes; omitted = always shown. */
-  modes?: string[];
-  required?: boolean;
-};
-
-type ConnectorFormProfile = {
-  authModes: Array<{ value: string; label: string }>;
-  fields: ConnectorFieldSpec[];
-  secretLabel: Record<string, string>;
-  /** Google-style OAuth consent flow available for this mode. */
-  oauthConnectMode?: string;
-  /** Second secret (service-account password) collected for these modes. */
-  passwordModes?: string[];
-  setupNote?: string;
-};
-
-// Field sets mirror the backend connector_auth requirements. Service
-// credentials can power background knowledge sync, while chat attachment
-// access uses delegated tokens stored for each signed-in user. iManage never
-// uses its service account in the chat picker.
-const CONNECTOR_FORM_PROFILES: Record<string, ConnectorFormProfile> = {
-  "google-drive": {
-    authModes: [
-      { value: "oauth-client", label: "Google OAuth (recommended)" },
-      { value: "manual-token", label: "Paste access token (testing only)" },
-    ],
-    fields: [
-      {
-        key: "client_id",
-        label: "OAuth client ID",
-        modes: ["oauth-client"],
-        required: true,
-        placeholder: "1234567890-abc.apps.googleusercontent.com",
-        hint: "Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 web client.",
-      },
-      {
-        key: "folder_id",
-        label: "Drive folder ID",
-        placeholder: "1AbCdEfGhIjKlMnOpQrStUvWxYz",
-        hint: "From the folder URL. Leave blank to index from the Drive root.",
-      },
-      { key: "source_label", label: "Source label", placeholder: "Policy Library" },
-    ],
-    secretLabel: { "oauth-client": "OAuth client secret", "manual-token": "Access token" },
-    oauthConnectMode: "oauth-client",
-    setupNote:
-      "Scope requested: drive.readonly. Add {API base}/api/connector-oauth/callback as an authorized redirect URI on the OAuth client. The Connect Google Drive button here authorizes the workspace account used for knowledge sync; chat users connect their own Google account from the attach menu and only see their own files.",
-  },
-  "microsoft-graph": {
-    authModes: [
-      { value: "client-credentials", label: "App-only (client credentials, recommended)" },
-      { value: "manual-token", label: "Paste access token (testing only)" },
-    ],
-    fields: [
-      {
-        key: "tenant_id",
-        label: "Directory (tenant) ID",
-        modes: ["client-credentials"],
-        required: true,
-        placeholder: "00000000-0000-0000-0000-000000000000",
-        hint: "Entra admin center → App registrations → Overview.",
-      },
-      {
-        key: "client_id",
-        label: "Application (client) ID",
-        modes: ["client-credentials"],
-        required: true,
-      },
-      { key: "site_id", label: "SharePoint site ID", hint: "Optional; for SharePoint libraries." },
-      { key: "drive_id", label: "Drive ID", hint: "Optional; for shared drives." },
-      { key: "drive_item_id", label: "Root folder / item ID", hint: "Optional; item to index from." },
-    ],
-    secretLabel: { "client-credentials": "Client secret", "manual-token": "Access token" },
-    setupNote:
-      "Grant the app Files.Read.All (and Sites.Read.All for SharePoint) as application permissions and click 'Grant admin consent' in Entra — these power knowledge sync. For chat attachments, users sign in with their own Microsoft account: also add the same scopes as delegated permissions and register {API base}/api/connector-oauth/callback as a Web redirect URI.",
-  },
-  box: {
-    authModes: [
-      { value: "client-credentials", label: "Client Credentials Grant (recommended)" },
-      { value: "developer-token", label: "Developer token (60-minute, testing only)" },
-    ],
-    fields: [
-      { key: "client_id", label: "Client ID", modes: ["client-credentials"], required: true },
-      {
-        key: "enterprise_id",
-        label: "Enterprise ID",
-        modes: ["client-credentials"],
-        required: true,
-        hint: "Admin Console → Account & Billing. A Box admin must authorize the app in Platform Apps Manager (and re-authorize after scope changes).",
-      },
-      { key: "folder_id", label: "Folder ID", placeholder: "12345", hint: "Numeric folder ID from the Box folder URL." },
-    ],
-    secretLabel: { "client-credentials": "Client secret", "developer-token": "Developer token" },
-    setupNote:
-      "Create a Platform App with Server Authentication (CCG) in the Box Developer Console with read access to files and folders — this powers knowledge sync. For chat attachments, users sign in with their own Box account: also enable OAuth 2.0 (Authorization Code) on the app with {API base}/api/connector-oauth/callback as the redirect URI.",
-  },
-  imanage: {
-    authModes: [
-      { value: "oauth-client", label: "Each user signs in (recommended)" },
-      { value: "password", label: "Service account for background sync" },
-    ],
-    fields: [
-      {
-        key: "base_url",
-        label: "Instance URL",
-        required: true,
-        placeholder: "https://cloudimanage.com",
-        hint: "Your iManage cloud or on-prem Work server URL.",
-      },
-      {
-        key: "client_id",
-        label: "API key (client ID)",
-        modes: ["oauth-client", "password"],
-        required: true,
-        hint: "iManage Control Center → Settings → Applications.",
-      },
-      {
-        key: "user_authorization_url",
-        label: "User authorization URL",
-        modes: ["oauth-client", "password"],
-        placeholder: "Derived from the instance URL",
-        hint: "Optional override for on-premises deployments. Default: {Instance URL}/auth/oauth2/authorize.",
-      },
-      {
-        key: "user_token_url",
-        label: "User token URL",
-        modes: ["oauth-client", "password"],
-        placeholder: "Derived from the instance URL",
-        hint: "Optional override for on-premises deployments. Default: {Instance URL}/auth/oauth2/token.",
-      },
-      { key: "customer_id", label: "Customer ID", placeholder: "100" },
-      { key: "library_id", label: "Library ID", placeholder: "ACTIVE" },
-      { key: "workspace_id", label: "Workspace ID", hint: "Optional; workspace to index." },
-      {
-        key: "service_username",
-        label: "Service account username",
-        modes: ["password"],
-        required: true,
-        hint: "A dedicated iManage user the connector signs in as.",
-      },
-    ],
-    secretLabel: { password: "API secret (client secret)", "oauth-client": "OAuth client secret" },
-    passwordModes: ["password"],
-    setupNote:
-      "Register the app in iManage Control Center, allow refresh tokens, and register {API base}/api/connector-oauth/callback as its redirect URI. Chat users sign in individually and iManage enforces their own library, group, workspace, and document permissions. The service-account option is only for background knowledge sync; chat still requires each user's OAuth sign-in.",
-  },
-};
-
 export function AdminConsole({
   data,
   onDataChange,
@@ -893,12 +740,11 @@ export function AdminConsole({
   const [openModelGroupId, setOpenModelGroupId] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [expandedConnectorId, setExpandedConnectorId] = useState<string | null>(null);
-  const [connectorTestResults, setConnectorTestResults] = useState<Record<string, ConnectorTestResult>>({});
   const [ssoTestResults, setSsoTestResults] = useState<Record<string, SsoTestResult>>({});
   const [showSsoCreate, setShowSsoCreate] = useState(false);
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<User | null>(null);
+  const [approvedAccessUser, setApprovedAccessUser] = useState<User | null>(null);
   const [filterModelId, setFilterModelId] = useState<string | null>(null);
   const [toolBuilder, setToolBuilder] = useState<{ open: boolean; tool: ToolConfig | null }>({
     open: false,
@@ -1620,15 +1466,6 @@ export function AdminConsole({
     }));
   }
 
-  function applyConnectorPatch(connectorId: string, patch: Partial<Connector>) {
-    onDataChange((current) => ({
-      ...current,
-      connectors: current.connectors.map((connector) =>
-        connector.id === connectorId ? { ...connector, ...patch } : connector,
-      ),
-    }));
-  }
-
   function applyToolPatch(toolId: string, patch: Partial<ToolConfig>) {
     onDataChange((current) => ({
       ...current,
@@ -1722,6 +1559,7 @@ export function AdminConsole({
             ? `${approved.display_name} was approved as a Temp User with Luna-only access and a 30,000-token grant.`
             : `${approved.display_name} was approved as ${ROLE_LABELS[role]}.`,
       });
+      setApprovedAccessUser(approved);
     } catch (error) {
       setActionStatus({ tone: "danger", message: `Access was not approved. ${errorMessage(error)}` });
     } finally {
@@ -1784,7 +1622,6 @@ export function AdminConsole({
       (user) => selectedUserIds.includes(user.id) && user.active && canModifyUser(data.me, user),
     );
     if (targetUsers.length === 0) return;
-    const selected = new Set(targetUsers.map((user) => user.id));
     const deactivateUser = adminApi?.deactivateUser;
 
     if (!deactivateUser) {
@@ -1795,23 +1632,35 @@ export function AdminConsole({
     setPendingAction("deactivate-users");
     setActionStatus({ tone: "info", message: "Deactivating selected users through the admin API..." });
     try {
-      const results = await Promise.all(targetUsers.map((user) => deactivateUser(data.me.id, user.id, mutationContext)));
-      const returnedUsers = results.filter((user): user is User => Boolean(user));
-      onDataChange((current) => ({
-        ...current,
-        users: current.users.map((user) => {
-          const remoteUser = returnedUsers.find((item) => item.id === user.id);
-          if (remoteUser) return { ...user, ...remoteUser };
-          return selected.has(user.id) ? { ...user, active: false } : user;
-        }),
-        visibleUsers: current.visibleUsers.map((user) => {
-          const remoteUser = returnedUsers.find((item) => item.id === user.id);
-          if (remoteUser) return { ...user, ...remoteUser };
-          return selected.has(user.id) ? { ...user, active: false } : user;
-        }),
-      }));
-      setSelectedUserIds([]);
-      setActionStatus({ tone: "success", message: "Selected users were deactivated through the admin API." });
+      // Each request commits independently; a rejected request cannot undo the
+      // other users' changes. Keep those successes visible and retry only failures.
+      const results = await Promise.allSettled(
+        targetUsers.map(async (user) => deactivateUser(data.me.id, user.id, mutationContext)),
+      );
+      const updates = new Map<string, Partial<User>>();
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        const user = targetUsers[index];
+        if (result.status === "fulfilled") {
+          updates.set(user.id, result.value ?? { active: false });
+        } else {
+          failures.push(`${user.display_name}: ${errorMessage(result.reason)}`);
+        }
+      });
+      if (updates.size) {
+        onDataChange((current) => ({
+          ...current,
+          users: current.users.map((user) => updates.has(user.id) ? { ...user, ...updates.get(user.id) } : user),
+          visibleUsers: current.visibleUsers.map((user) => updates.has(user.id) ? { ...user, ...updates.get(user.id) } : user),
+        }));
+        setSelectedUserIds((current) => current.filter((id) => !updates.has(id)));
+      }
+      setActionStatus({
+        tone: failures.length ? (updates.size ? "warning" : "danger") : "success",
+        message: failures.length
+          ? `Deactivated ${updates.size} of ${targetUsers.length} selected users. Could not deactivate ${failures.join("; ")} Failed users remain selected so you can retry.`
+          : `Deactivated ${updates.size} user${updates.size === 1 ? "" : "s"} through the admin API.`,
+      });
     } catch (error) {
       setActionStatus({
         tone: "danger",
@@ -2058,7 +1907,8 @@ export function AdminConsole({
   }
 
   async function importUsersToGroup(group: Group) {
-    const emails = parseBulkUserEmails(bulkUserText);
+    const submittedText = bulkUserText;
+    const emails = parseBulkUserEmails(submittedText);
     if (!emails.length) {
       setActionStatus({ tone: "warning", message: "Paste at least one user email before importing users into the group." });
       return;
@@ -2076,7 +1926,7 @@ export function AdminConsole({
       setActionStatus({
         tone: missingEmails.length ? "warning" : "info",
         message: missingEmails.length
-          ? `No matching platform users were found for ${missingEmails.join(", ")}.`
+          ? `No users were added to ${group.name}. No eligible platform users were found for ${missingEmails.join(", ")}.${matchingUsers.length ? " The other pasted users are already members." : ""}`
           : `All pasted users are already in ${group.name}.`,
       });
       return;
@@ -2092,16 +1942,27 @@ export function AdminConsole({
     setPendingAction(pendingKey);
     setActionStatus({ tone: "info", message: `Adding ${usersToAdd.length} user${usersToAdd.length === 1 ? "" : "s"} to ${group.name}...` });
     try {
-      const updatedUsers = await Promise.all(
-        usersToAdd.map((user) => {
+      const results = await Promise.allSettled(
+        usersToAdd.map(async (user) => {
           const groupIds = Array.from(new Set([...user.group_ids, group.id]));
-          return updateUserRecord(data.me.id, user.id, { group_ids: groupIds }, mutationContext).then(
-            (remoteUser) => remoteUser ?? { ...user, group_ids: groupIds },
-          );
+          const remoteUser = await updateUserRecord(data.me.id, user.id, { group_ids: groupIds }, mutationContext);
+          return remoteUser ?? { ...user, group_ids: groupIds };
         }),
       );
+      const updatedUsers: User[] = [];
+      const failedEmails: string[] = [];
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          updatedUsers.push(result.value);
+        } else {
+          const user = usersToAdd[index];
+          failedEmails.push(user.email.toLowerCase());
+          failures.push(`${user.email}: ${errorMessage(result.reason)}`);
+        }
+      });
       const updatedById = new Map(updatedUsers.map((user) => [user.id, user]));
-      onDataChange((current) => {
+      if (updatedUsers.length) onDataChange((current) => {
         const nextUsers = current.users.map((user) => {
           const updatedUser = updatedById.get(user.id);
           return updatedUser ? { ...user, ...updatedUser } : user;
@@ -2110,19 +1971,36 @@ export function AdminConsole({
           const updatedUser = updatedById.get(user.id);
           return updatedUser ? { ...user, ...updatedUser } : user;
         });
-        const memberCount = nextVisibleUsers.filter(
-          (user) => user.role !== "PLATFORM_OWNER" && user.group_ids.includes(group.id),
-        ).length;
+        // The visible directory may contain only part of the group. Apply the
+        // confirmed membership delta without replacing its server-reported total.
+        const memberDelta = updatedUsers.reduce((total, updatedUser) => {
+          const previousUser = current.visibleUsers.find((user) => user.id === updatedUser.id)
+            ?? current.users.find((user) => user.id === updatedUser.id);
+          return total + Number(updatedUser.group_ids.includes(group.id)) - Number(previousUser?.group_ids.includes(group.id) ?? false);
+        }, 0);
         return {
           ...current,
           users: nextUsers,
           visibleUsers: nextVisibleUsers,
-          groups: current.groups.map((item) => (item.id === group.id ? { ...item, user_count: memberCount } : item)),
+          groups: current.groups.map((item) => (item.id === group.id ? { ...item, user_count: Math.max(0, item.user_count + memberDelta) } : item)),
         };
       });
-      setBulkUserText("");
-      const skipped = missingEmails.length ? ` ${missingEmails.length} email${missingEmails.length === 1 ? " was" : "s were"} not found.` : "";
-      setActionStatus({ tone: "success", message: `Added ${updatedUsers.length} user${updatedUsers.length === 1 ? "" : "s"} to ${group.name}.${skipped}` });
+      const unresolvedEmails = new Set([...failedEmails, ...missingEmails]);
+      setBulkUserText((current) => {
+        const remaining = emails.filter((email) => unresolvedEmails.has(email.toLowerCase()));
+        if (current === submittedText) return remaining.join("\n");
+        // Keep edits made while importing and restore any failed targets that
+        // would otherwise disappear from the retry form.
+        const currentEmails = new Set(parseBulkUserEmails(current));
+        const retryEmails = remaining.filter((email) => !currentEmails.has(email));
+        return retryEmails.length ? [current.trimEnd(), ...retryEmails].filter(Boolean).join("\n") : current;
+      });
+      const skipped = missingEmails.length ? ` No eligible platform users found for ${missingEmails.join(", ")}.` : "";
+      const failed = failures.length ? ` Could not add ${failures.join("; ")} Failed emails remain in the form so you can retry.` : "";
+      setActionStatus({
+        tone: failures.length ? (updatedUsers.length ? "warning" : "danger") : missingEmails.length ? "warning" : "success",
+        message: `Added ${updatedUsers.length} user${updatedUsers.length === 1 ? "" : "s"} to ${group.name}.${failed}${skipped}`,
+      });
     } catch (error) {
       setActionStatus({ tone: "danger", message: `Users were not imported into ${group.name}. ${errorMessage(error)}` });
     } finally {
@@ -2251,126 +2129,6 @@ export function AdminConsole({
       setActionStatus({ tone: "success", message: `${tool.name} deleted.` });
     } catch (error) {
       setActionStatus({ tone: "danger", message: `${tool.name} could not be deleted. ${errorMessage(error)}` });
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  function toggleConnector(connector: Connector, next: boolean) {
-    const setConnectorEnabled = adminApi?.setConnectorEnabled;
-    void runAdminMutation<Partial<Connector>>({
-      pendingKey: `connector-${connector.id}`,
-      optimistic: () =>
-        applyConnectorPatch(connector.id, {
-          tenant_enabled: next,
-          sync_status: next ? connector.sync_status ?? "idle" : "idle",
-        }),
-      helper: setConnectorEnabled
-        ? () => setConnectorEnabled(data.me.id, connector.id, next, { ...mutationContext, connector })
-        : undefined,
-      reconcile: (remoteConnector) => applyConnectorPatch(connector.id, remoteConnector),
-      localMessage: `${connector.name} was not changed: the connector API is unavailable in this build.`,
-      syncMessage: `Syncing ${connector.name} connector state through the admin API...`,
-      successMessage: `${connector.name} connector state synced with the admin API.`,
-      failureMessage: `${connector.name} connector state could not sync.`,
-    });
-  }
-
-  async function saveConnectorConfiguration(
-    connector: Connector,
-    payload: AdminConnectorConfigUpdateRequest & { connector_id: string },
-  ) {
-    const saveConnectorConfig = adminApi?.saveConnectorConfig;
-    if (!saveConnectorConfig) {
-      setActionStatus({
-        tone: "warning",
-        message: `${connector.name} settings were not saved; the connector config API is not connected.`,
-      });
-      return;
-    }
-    setPendingAction(`connector-config-${connector.id}`);
-    setActionStatus({ tone: "info", message: `Saving ${connector.name} configuration...` });
-    try {
-      const result = await saveConnectorConfig(data.me.id, connector, payload, mutationContext);
-      if (result) {
-        applyConnectorPatch(connector.id, result.connector);
-        onDataChange((current) => {
-          const exists = current.connectorConfigs.some((record) => record.id === result.record.id);
-          return {
-            ...current,
-            connectorConfigs: exists
-              ? current.connectorConfigs.map((record) => (record.id === result.record.id ? result.record : record))
-              : [...current.connectorConfigs, result.record],
-          };
-        });
-      }
-      setActionStatus({ tone: "success", message: `${connector.name} configuration saved through the admin API.` });
-    } catch (error) {
-      setActionStatus({
-        tone: "danger",
-        message: `${connector.name} configuration was not saved: ${errorMessage(error)}`,
-      });
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function testConnectorConfiguration(connector: Connector) {
-    const testConnectorConfig = adminApi?.testConnectorConfig;
-    const configId = connector.tenant_config_id;
-    if (!testConnectorConfig || !configId) {
-      setActionStatus({
-        tone: "warning",
-        message: configId
-          ? "The connector test API is not connected in this session."
-          : `Save the ${connector.name} configuration first, then test the connection.`,
-      });
-      return;
-    }
-    setPendingAction(`connector-test-${connector.id}`);
-    setConnectorTestResults((current) => {
-      const next = { ...current };
-      delete next[connector.id];
-      return next;
-    });
-    try {
-      const result = await testConnectorConfig(data.me.id, configId, mutationContext);
-      if (result) {
-        setConnectorTestResults((current) => ({ ...current, [connector.id]: result }));
-        setActionStatus({
-          tone: result.status === "ok" ? "success" : result.status === "incomplete" ? "info" : "warning",
-          message: result.message,
-        });
-      }
-    } catch (error) {
-      setActionStatus({ tone: "danger", message: `${connector.name} connection test failed: ${errorMessage(error)}` });
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function startConnectorOAuth(connector: Connector) {
-    const connectorOAuthUrl = adminApi?.connectorOAuthUrl;
-    const configId = connector.tenant_config_id;
-    if (!connectorOAuthUrl || !configId) {
-      setActionStatus({
-        tone: "warning",
-        message: configId
-          ? "The connector OAuth API is not connected in this session."
-          : `Save the ${connector.name} configuration (client ID and secret) before connecting.`,
-      });
-      return;
-    }
-    setPendingAction(`connector-oauth-${connector.id}`);
-    try {
-      const url = await connectorOAuthUrl(data.me.id, configId);
-      if (url) {
-        window.location.assign(url);
-        return;
-      }
-      setActionStatus({ tone: "warning", message: "The OAuth consent URL could not be created." });
-    } catch (error) {
-      setActionStatus({ tone: "danger", message: `Could not start the OAuth flow: ${errorMessage(error)}` });
     } finally {
       setPendingAction(null);
     }
@@ -2718,6 +2476,7 @@ export function AdminConsole({
       {passwordTarget && (
         <PasswordResetDialog
           userName={passwordTarget.display_name}
+          userEmail={passwordTarget.email}
           onClose={() => setPasswordTarget(null)}
           onSubmit={(password, temporary) => resetPassword(passwordTarget, password, temporary)}
         />
@@ -2822,6 +2581,23 @@ export function AdminConsole({
               </>
             }
           >
+            {approvedAccessUser && (
+              <section className="access-handoff" aria-label="New account sign-in setup">
+                <div>
+                  <h3>Finish sign-in setup for {approvedAccessUser.display_name}</h3>
+                  <p>Access is approved. Share this workspace's sign-in address and confirm how they will sign in. No email has been sent.</p>
+                  <p><strong>Organization SSO:</strong> confirm this account exists with your identity provider. <strong>Email and password:</strong> set a temporary password and share it securely.</p>
+                </div>
+                <div className="access-handoff-actions">
+                  {passwordResetAllowed(approvedAccessUser) && adminApi?.resetUserPassword && (
+                    <button className="primary-button compact" type="button" onClick={() => setPasswordTarget(approvedAccessUser)}>
+                      <KeyRound size={15} /> Set temporary password
+                    </button>
+                  )}
+                  <button className="secondary-button compact" type="button" onClick={() => setApprovedAccessUser(null)}>Done</button>
+                </div>
+              </section>
+            )}
             {pendingAccessRequests.length > 0 && (
               <section className="access-request-queue" aria-labelledby="access-request-queue-title">
                 <header className="access-request-queue-header">
@@ -3196,15 +2972,20 @@ export function AdminConsole({
             }
           >
             <div className="model-access-toolbar model-access-summary-toolbar">
-              <span className="waterfall-step">
-                <strong>{adminVisibleModels.length}</strong> model{adminVisibleModels.length === 1 ? "" : "s"} synced to this tenant
-              </span>
-              <span className="waterfall-step">
-                <strong>{activeModelCount}</strong> visible to users
-              </span>
-              <span className="waterfall-step">
-                <strong>{data.groups.length}</strong> group{data.groups.length === 1 ? "" : "s"} available
-              </span>
+              <dl className="model-access-metrics">
+                <div>
+                  <dt>Synced models</dt>
+                  <dd>{adminVisibleModels.length}</dd>
+                </div>
+                <div>
+                  <dt>Visible to users</dt>
+                  <dd>{activeModelCount}</dd>
+                </div>
+                <div>
+                  <dt>Available groups</dt>
+                  <dd>{data.groups.length}</dd>
+                </div>
+              </dl>
               <label className="search-box model-access-search">
                 <Search size={16} />
                 <input
@@ -3446,95 +3227,6 @@ export function AdminConsole({
 
         <Tabs.Content value="tools" className="tab-content">
           <div className="admin-tools-stack">
-            <Panel
-              title="Connectors"
-              subtitle="Workspace-wide switches and credentials for platform-configured sources and tools. Off removes the capability from every user in this workspace — chat, pickers, and the tool library included."
-            >
-              {data.connectors.map((connector) => {
-                const profile = CONNECTOR_FORM_PROFILES[connector.id];
-                const isWebSearch = connector.id === "web";
-                const record = data.connectorConfigs.find(
-                  (config) => config.id === connector.tenant_config_id,
-                );
-                const expanded = expandedConnectorId === connector.id;
-                return (
-                  <div className="connector-config-block" key={connector.id}>
-                    <div className="permission-row">
-                      <span>
-                        <KeyRound size={15} />
-                        <strong className="connector-row-name">{connector.name}</strong>
-                        {profile && (
-                          <Pill tone={connector.auth_status === "configured" ? "success" : "warning"}>
-                            {connector.auth_status === "configured"
-                              ? "Credentials saved"
-                              : record?.secret_set
-                                ? "Saved · disabled"
-                                : "Needs credentials"}
-                          </Pill>
-                        )}
-                        {isWebSearch && (
-                          <Pill tone={webSearchEnginePill(record).tone}>{webSearchEnginePill(record).label}</Pill>
-                        )}
-                      </span>
-                      <span className="row-actions">
-                        {(profile || isWebSearch) && (
-                          <button
-                            className="secondary-button compact"
-                            type="button"
-                            aria-expanded={expanded}
-                            data-tooltip={
-                              expanded
-                                ? `Hide the ${connector.name} configuration form`
-                                : `Set up credentials and connection settings for ${connector.name}`
-                            }
-                            onClick={() =>
-                              setExpandedConnectorId((current) => (current === connector.id ? null : connector.id))
-                            }
-                          >
-                            <Wrench size={14} /> Configure
-                          </button>
-                        )}
-                        <Toggle
-                          checked={connector.tenant_enabled}
-                          disabled={!connector.platform_enabled}
-                          label={`Enable ${connector.name}`}
-                          tooltip={
-                            connector.tenant_enabled
-                              ? `Turn off ${connector.name} for this workspace`
-                              : `Turn on ${connector.name} as a source for this workspace`
-                          }
-                          onChange={(next) => toggleConnector(connector, next)}
-                        />
-                      </span>
-                    </div>
-                    {isWebSearch && expanded && (
-                      <WebSearchConfigForm
-                        connector={connector}
-                        record={record}
-                        saving={pendingAction === `connector-config-${connector.id}`}
-                        testing={pendingAction === `connector-test-${connector.id}`}
-                        testResult={connectorTestResults[connector.id] ?? null}
-                        onSave={(payload) => void saveConnectorConfiguration(connector, payload)}
-                        onTest={() => void testConnectorConfiguration(connector)}
-                      />
-                    )}
-                    {profile && expanded && (
-                      <ConnectorConfigForm
-                        connector={connector}
-                        profile={profile}
-                        record={record}
-                        saving={pendingAction === `connector-config-${connector.id}`}
-                        testing={pendingAction === `connector-test-${connector.id}`}
-                        testResult={connectorTestResults[connector.id] ?? null}
-                        onSave={(payload) => void saveConnectorConfiguration(connector, payload)}
-                        onTest={() => void testConnectorConfiguration(connector)}
-                        onOAuthConnect={() => void startConnectorOAuth(connector)}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </Panel>
             <Panel
               title="Chat output actions"
               subtitle="Add admin-approved buttons to assistant responses, like export, format, or handoff actions. This does not add MCP servers or model-callable tools."
@@ -6026,7 +5718,7 @@ function TenantDailyBudgetPanel({ userId }: { userId: string }) {
           <DatabaseZap size={18} /> Workspace Usage Budget
         </>
       }
-      subtitle="Read-only view of the owner-managed workspace ceiling and its current UTC accounting period."
+      subtitle="Read-only view of the service-managed workspace ceiling and its current UTC accounting period."
       defaultCollapsed
       actions={
         <button
@@ -6102,454 +5794,6 @@ function TenantDailyBudgetPanel({ userId }: { userId: string }) {
         </>
       )}
     </Panel>
-  );
-}
-
-function ConnectorConfigForm({
-  connector,
-  profile,
-  record,
-  saving,
-  testing,
-  testResult,
-  onSave,
-  onTest,
-  onOAuthConnect,
-}: {
-  connector: Connector;
-  profile: ConnectorFormProfile;
-  record?: ConnectorConfigRecord;
-  saving: boolean;
-  testing: boolean;
-  testResult: ConnectorTestResult | null;
-  onSave: (payload: AdminConnectorConfigUpdateRequest & { connector_id: string }) => void;
-  onTest: () => void;
-  onOAuthConnect: () => void;
-}) {
-  const settings = useMemo(() => record?.settings ?? {}, [record]);
-  const storedAuthMode =
-    typeof settings.auth_mode === "string" && profile.authModes.some((mode) => mode.value === settings.auth_mode)
-      ? (settings.auth_mode as string)
-      : null;
-  // Existing empty deployments were seeded with iManage's password grant.
-  // Present the safer delegated default until a real service credential exists.
-  const initialAuthMode =
-    connector.id === "imanage" && storedAuthMode === "password" && !record?.secret_set
-      ? profile.authModes[0].value
-      : storedAuthMode ?? profile.authModes[0].value;
-  const [authMode, setAuthMode] = useState(initialAuthMode);
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => readFieldValues(profile, settings));
-  const [secretValue, setSecretValue] = useState("");
-  const [servicePassword, setServicePassword] = useState("");
-  const [validationError, setValidationError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setFieldValues(readFieldValues(profile, settings));
-    setAuthMode(initialAuthMode);
-    setSecretValue("");
-    setServicePassword("");
-    setValidationError(null);
-  }, [profile, settings, initialAuthMode]);
-
-  const visibleFields = profile.fields.filter((field) => !field.modes || field.modes.includes(authMode));
-  const secretLabel = profile.secretLabel[authMode] ?? "Secret";
-  const needsPassword = profile.passwordModes?.includes(authMode) ?? false;
-  const oauthConnectAvailable = profile.oauthConnectMode === authMode;
-  const secretSaved = Boolean(record?.secret_set);
-  const oauthStatus = typeof settings.oauth_status === "string" ? settings.oauth_status : null;
-  const hasSavedConfiguration = Boolean(record ?? connector.tenant_config_id);
-  const visibleFieldsCleared = visibleFields.every((field) => !fieldValues[field.key]?.trim());
-  const clearPayload: AdminConnectorConfigUpdateRequest & { connector_id: string } = {
-    connector_id: connector.id,
-    enabled: false,
-    auth_type: authMode,
-    settings: {},
-    replace_settings: true,
-    clear_secret: true,
-    clear_oauth: true,
-    clear_service_password: true,
-  };
-
-  const clearFormValues = () => {
-    setFieldValues((current) => {
-      const next = { ...current };
-      for (const field of profile.fields) next[field.key] = "";
-      return next;
-    });
-    setSecretValue("");
-    setServicePassword("");
-    setValidationError(null);
-  };
-
-  const submit = () => {
-    if (hasSavedConfiguration && visibleFieldsCleared && !secretValue.trim() && !servicePassword.trim()) {
-      setValidationError(null);
-      onSave(clearPayload);
-      clearFormValues();
-      return;
-    }
-    const missing = visibleFields
-      .filter((field) => field.required && !fieldValues[field.key]?.trim())
-      .map((field) => field.label);
-    if (!secretSaved && !secretValue.trim()) missing.push(secretLabel);
-    if (missing.length > 0) {
-      setValidationError(`Fill in: ${missing.join(", ")}.`);
-      return;
-    }
-    setValidationError(null);
-    const nextSettings: Record<string, string> = { auth_mode: authMode };
-    for (const field of visibleFields) {
-      nextSettings[field.key] = fieldValues[field.key]?.trim() ?? "";
-    }
-    const payload: AdminConnectorConfigUpdateRequest & { connector_id: string } = {
-      connector_id: connector.id,
-      auth_type: authMode,
-      settings: nextSettings,
-    };
-    if (secretValue.trim()) payload.secret_value = secretValue.trim();
-    if (needsPassword && servicePassword.trim()) payload.service_password = servicePassword.trim();
-    onSave(payload);
-    setSecretValue("");
-    setServicePassword("");
-  };
-
-  const clearConfiguration = () => {
-    if (!hasSavedConfiguration) {
-      clearFormValues();
-      return;
-    }
-    onSave(clearPayload);
-    clearFormValues();
-  };
-
-  return (
-    <div className="connector-config-form" data-testid={`connector-config-${connector.id}`}>
-      <label className="connector-config-selector">
-        <span className="connector-field-label">Authentication method</span>
-        <SelectControl value={authMode} onChange={(event) => setAuthMode(event.target.value)}>
-          {profile.authModes.map((mode) => (
-            <option key={mode.value} value={mode.value}>
-              {mode.label}
-            </option>
-          ))}
-        </SelectControl>
-      </label>
-      <div className="connector-config-grid">
-        {visibleFields.map((field) => (
-          <label key={field.key}>
-            <span className="connector-field-label">
-              {field.label}
-              {field.required ? <span className="required-mark"> *</span> : null}
-            </span>
-            <input
-              value={fieldValues[field.key] ?? ""}
-              placeholder={field.placeholder}
-              onChange={(event) =>
-                setFieldValues((current) => ({ ...current, [field.key]: event.target.value }))
-              }
-            />
-            {field.hint && <small className="field-hint">{field.hint}</small>}
-          </label>
-        ))}
-        <label>
-          <span className="connector-field-label">
-            {secretLabel}
-            {!secretSaved ? <span className="required-mark"> *</span> : null}
-          </span>
-          <input
-            type="password"
-            value={secretValue}
-            placeholder={secretSaved ? "Saved — enter a new value to replace" : "Stored server-side only"}
-            onChange={(event) => setSecretValue(event.target.value)}
-          />
-        </label>
-        {needsPassword && (
-          <label>
-            <span className="connector-field-label">Service account password</span>
-            <input
-              type="password"
-              value={servicePassword}
-              placeholder="Stored server-side only"
-              onChange={(event) => setServicePassword(event.target.value)}
-            />
-          </label>
-        )}
-      </div>
-      {profile.setupNote && <p className="muted-note">{profile.setupNote}</p>}
-      {validationError && (
-        <p className="connector-config-error" role="alert">
-          {validationError}
-        </p>
-      )}
-      <div className="connector-config-actions">
-        <button
-          className="secondary-button compact"
-          type="button"
-          data-tooltip={`Save ${connector.name} settings and store the secret securely server-side`}
-          disabled={saving}
-          onClick={submit}
-        >
-          <CheckCircle2 size={14} />{" "}
-          <StableLabel
-            label={saving ? "Saving…" : "Save configuration"}
-            reserve={["Saving…", "Save configuration"]}
-          />
-        </button>
-        <button
-          className="secondary-button compact"
-          type="button"
-          disabled={testing || !connector.tenant_config_id}
-          data-tooltip={
-            connector.tenant_config_id
-              ? `Verify the saved ${connector.name} credentials with a live provider API call`
-              : "Save the configuration first, then test the connection"
-          }
-          onClick={onTest}
-        >
-          <RefreshCw size={14} /> {testing ? "Testing…" : "Test connection"}
-        </button>
-        {oauthConnectAvailable && (
-          <button
-            className="secondary-button compact"
-            type="button"
-            disabled={!connector.tenant_config_id || !secretSaved}
-            data-tooltip={
-              connector.tenant_config_id && secretSaved
-                ? `Open the ${connector.name} consent screen to grant access and store a refresh token`
-                : "Save the client ID and secret first, then connect"
-            }
-            onClick={onOAuthConnect}
-          >
-            <KeyRound size={14} /> Connect {connector.name}
-          </button>
-        )}
-        <button
-          className="secondary-button compact"
-          type="button"
-          disabled={saving}
-          data-tooltip={`Clear saved ${connector.name} fields and stored connector secrets`}
-          onClick={clearConfiguration}
-        >
-          <Trash2 size={14} /> Clear configuration
-        </button>
-        {oauthStatus === "connected" && <Pill tone="success">OAuth connected</Pill>}
-      </div>
-      {testResult && (
-        <div className={`sso-test-result sso-test-${testResult.status}`} role="status">
-          <span className="sso-test-headline">
-            {testResult.status === "ok" ? <ShieldCheck size={15} /> : <X size={15} />}
-            {testResult.message}
-          </span>
-          {testResult.checks?.map((check) => (
-            <span key={check.name} className={`sso-test-check sso-test-check-${check.status}`}>
-              <strong>{check.name}:</strong> {check.detail}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function readFieldValues(profile: ConnectorFormProfile, settings: Record<string, unknown>): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const field of profile.fields) {
-    const raw = settings[field.key];
-    values[field.key] = typeof raw === "string" ? raw : "";
-  }
-  return values;
-}
-
-const WEB_SEARCH_ENGINES = [
-  { value: "duckduckgo", label: "DuckDuckGo (keyless, works out of the box)" },
-  { value: "searxng", label: "SearXNG (self-hosted instance)" },
-  { value: "openai", label: "OpenAI web search (uses your OpenAI provider key)" },
-  { value: "anthropic", label: "Anthropic web search (uses your Anthropic provider key)" },
-  { value: "openrouter", label: "OpenRouter web search (uses your OpenRouter provider key)" },
-];
-
-const KEYED_WEB_SEARCH_LABELS: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  openrouter: "OpenRouter",
-};
-
-function webSearchEnginePill(record: ConnectorConfigRecord | undefined): {
-  tone: "success" | "warning";
-  label: string;
-} {
-  const settings = record?.settings ?? {};
-  const engine = typeof settings.engine === "string" ? settings.engine : "";
-  if (engine === "searxng") {
-    const baseUrl = typeof settings.searxng_base_url === "string" ? settings.searxng_base_url.trim() : "";
-    return baseUrl
-      ? { tone: "success", label: "SearXNG" }
-      : { tone: "warning", label: "SearXNG · URL missing" };
-  }
-  if (engine === "duckduckgo") return { tone: "success", label: "DuckDuckGo" };
-  if (KEYED_WEB_SEARCH_LABELS[engine]) return { tone: "success", label: KEYED_WEB_SEARCH_LABELS[engine] };
-  return { tone: "success", label: "DuckDuckGo · default" };
-}
-
-/** Web search needs an engine choice, not credentials, so it gets its own
- * form instead of the auth-mode/secret machinery the other connectors use. */
-function WebSearchConfigForm({
-  connector,
-  record,
-  saving,
-  testing,
-  testResult,
-  onSave,
-  onTest,
-}: {
-  connector: Connector;
-  record?: ConnectorConfigRecord;
-  saving: boolean;
-  testing: boolean;
-  testResult: ConnectorTestResult | null;
-  onSave: (payload: AdminConnectorConfigUpdateRequest & { connector_id: string }) => void;
-  onTest: () => void;
-}) {
-  const settings = useMemo(() => record?.settings ?? {}, [record]);
-  const initialEngine =
-    typeof settings.engine === "string" && WEB_SEARCH_ENGINES.some((option) => option.value === settings.engine)
-      ? (settings.engine as string)
-      : "duckduckgo";
-  const [engine, setEngine] = useState(initialEngine);
-  const [searxngBaseUrl, setSearxngBaseUrl] = useState(() =>
-    typeof settings.searxng_base_url === "string" ? settings.searxng_base_url : "",
-  );
-  const [maxResults, setMaxResults] = useState(() => {
-    const raw = settings.max_results;
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return String(Math.trunc(raw));
-    if (typeof raw === "string" && /^\d+$/.test(raw.trim())) return raw.trim();
-    return "5";
-  });
-  const [validationError, setValidationError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setEngine(initialEngine);
-    setSearxngBaseUrl(typeof settings.searxng_base_url === "string" ? settings.searxng_base_url : "");
-    setValidationError(null);
-  }, [settings, initialEngine]);
-
-  const submit = () => {
-    if (engine === "searxng" && !searxngBaseUrl.trim()) {
-      setValidationError("Set the SearXNG instance URL, or switch the engine to DuckDuckGo.");
-      return;
-    }
-    const parsedMax = Number.parseInt(maxResults, 10);
-    const boundedMax = Number.isFinite(parsedMax) ? Math.min(10, Math.max(1, parsedMax)) : 5;
-    setValidationError(null);
-    onSave({
-      connector_id: connector.id,
-      enabled: true,
-      settings: {
-        engine,
-        searxng_base_url: engine === "searxng" ? searxngBaseUrl.trim() : "",
-        max_results: boundedMax,
-      },
-    });
-  };
-
-  return (
-    <div className="connector-config-form" data-testid="connector-config-web">
-      <label>
-        Search engine
-        <SelectControl value={engine} onChange={(event) => setEngine(event.target.value)}>
-          {WEB_SEARCH_ENGINES.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </SelectControl>
-        {KEYED_WEB_SEARCH_LABELS[engine] && (
-          <small className="field-hint">
-            Runs a small {KEYED_WEB_SEARCH_LABELS[engine]}-hosted search per query using the{" "}
-            {KEYED_WEB_SEARCH_LABELS[engine]} provider key already saved for model routing — no extra credential
-            needed. Each search is billed to that account; use Test connection to verify the key works.
-          </small>
-        )}
-      </label>
-      <div className="connector-config-grid">
-        {engine === "searxng" && (
-          <label>
-            SearXNG instance URL
-            <span className="required-mark"> *</span>
-            <input
-              value={searxngBaseUrl}
-              placeholder="http://localhost:8888"
-              onChange={(event) => setSearxngBaseUrl(event.target.value)}
-            />
-            <small className="field-hint">
-              The instance must allow JSON output: search.formats must include json in the SearXNG settings.
-            </small>
-          </label>
-        )}
-        <label>
-          Results per search
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={maxResults}
-            onChange={(event) => setMaxResults(event.target.value)}
-          />
-          <small className="field-hint">Top results injected into the model prompt as cited context.</small>
-        </label>
-      </div>
-      <p className="muted-note">
-        Applies to models whose provider has no hosted web search of its own. OpenRouter-backed models always use
-        OpenRouter&apos;s built-in web search (native provider search where the model family supports it) regardless
-        of this engine choice. The enable toggle on this row turns web search on or off for the whole workspace.
-      </p>
-      {validationError && (
-        <p className="connector-config-error" role="alert">
-          {validationError}
-        </p>
-      )}
-      <div className="connector-config-actions">
-        <button
-          className="secondary-button compact"
-          type="button"
-          data-tooltip="Save the search engine choice and result limit for this workspace"
-          disabled={saving}
-          onClick={submit}
-        >
-          <CheckCircle2 size={14} />{" "}
-          <StableLabel
-            label={saving ? "Saving…" : "Save configuration"}
-            reserve={["Saving…", "Save configuration"]}
-          />
-        </button>
-        <button
-          className="secondary-button compact"
-          type="button"
-          disabled={testing || !connector.tenant_config_id}
-          data-tooltip={
-            connector.tenant_config_id
-              ? "Run a real search query to verify the configured engine works"
-              : "Save the configuration first, then test the connection"
-          }
-          onClick={onTest}
-        >
-          <RefreshCw size={14} /> {testing ? "Testing…" : "Test connection"}
-        </button>
-      </div>
-      {testResult && (
-        <div className={`sso-test-result sso-test-${testResult.status}`} role="status">
-          <span className="sso-test-headline">
-            {testResult.status === "ok" ? <ShieldCheck size={15} /> : <X size={15} />}
-            {testResult.message}
-          </span>
-          {testResult.checks?.map((check) => (
-            <span key={check.name} className={`sso-test-check sso-test-check-${check.status}`}>
-              <strong>{check.name}:</strong> {check.detail}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 

@@ -161,8 +161,17 @@ export function modelCapabilityRank(model: ModelConfig) {
   return base + contextBonus;
 }
 
+/** Candidates for an automatic text-workflow default. Image-output models
+ * remain selectable, but should not win a fresh chat or draft when another
+ * usable model exists. Missing metadata stays eligible; input image support
+ * does not imply image generation. */
+export function modelsForTextDefault(models: ModelConfig[]) {
+  const nonImageModels = models.filter((model) => !model.capabilities?.output_modalities?.includes("image"));
+  return nonImageModels.length > 0 ? nonImageModels : models;
+}
+
 export function preferredModel(models: ModelConfig[]) {
-  return [...models].sort((first, second) => modelCapabilityRank(second) - modelCapabilityRank(first))[0] ?? null;
+  return [...modelsForTextDefault(models)].sort((first, second) => modelCapabilityRank(second) - modelCapabilityRank(first))[0] ?? null;
 }
 
 /**
@@ -171,8 +180,8 @@ export function preferredModel(models: ModelConfig[]) {
  * the model family supports it), and all other providers get results from
  * the platform-hosted search engine (SearXNG, DuckDuckGo, or provider-hosted
  * OpenAI/Anthropic search) injected as context by the API. Governance:
- * - The Web Search connector (Admin → Connections) is the workspace on/off switch;
- *   the API enforces it too.
+ * - The Web Search connector (Platform → Org Settings → Connectors) is the
+ *   deployment-wide on/off switch; the API enforces it too.
  * - A `tool-web-search` tool config can additionally restrict web search to
  *   specific models; when absent, it is available everywhere.
  */

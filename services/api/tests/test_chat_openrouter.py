@@ -1605,13 +1605,13 @@ def test_web_search_respects_disabled_web_connector() -> None:
 
 
 def test_web_search_respects_disabled_web_connector_config_record() -> None:
-    """The Admin UI toggle writes a connector-config record; enabled=false blocks web search."""
+    """The owner UI toggle writes a connector-config record; enabled=false blocks web search."""
     _activate_provider("provider-openrouter")
 
     create = client.post(
         "/api/admin/connector-configs",
         json={"connector_id": "web", "enabled": False, "settings": {}},
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
     assert create.status_code == 201
 
@@ -1681,7 +1681,7 @@ def test_web_connector_config_settings_drive_platform_search(monkeypatch) -> Non
                 "max_results": 3,
             },
         },
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
     assert create.status_code == 201
 
@@ -1727,13 +1727,13 @@ def test_web_connector_admin_test_endpoint_reports_engine_and_live_query(monkeyp
             "enabled": True,
             "settings": {"engine": "searxng", "searxng_base_url": "http://searxng.local:8080"},
         },
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
     assert create.status_code == 201
     config_id = create.json()["id"]
 
     result = client.post(
-        f"/api/admin/connector-configs/{config_id}/test", headers=headers("user-admin")
+        f"/api/admin/connector-configs/{config_id}/test", headers=headers("user-owner")
     )
     assert result.status_code == 200
     body = result.json()
@@ -1752,13 +1752,13 @@ def test_web_connector_test_endpoint_is_incomplete_without_searxng_url() -> None
             "enabled": True,
             "settings": {"engine": "searxng"},
         },
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
     assert create.status_code == 201
     config_id = create.json()["id"]
 
     result = client.post(
-        f"/api/admin/connector-configs/{config_id}/test", headers=headers("user-admin")
+        f"/api/admin/connector-configs/{config_id}/test", headers=headers("user-owner")
     )
     assert result.status_code == 200
     body = result.json()

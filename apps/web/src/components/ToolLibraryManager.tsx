@@ -1,5 +1,5 @@
 import { FileText, Plus, Save, ServerCog, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   createAdminPromptTemplate,
   createAdminSkillFile,
@@ -9,6 +9,7 @@ import {
   updateAdminSkillFile,
 } from "../lib/api";
 import { preferredModel, usableModels } from "../lib/modelAccess";
+import { useModalFocus } from "../lib/useModalFocus";
 import type { BootstrapData, PromptTemplate, SkillFile } from "../lib/types";
 import { Pill, StableLabel } from "./Primitives";
 import { PromptEditorField } from "./PromptEditorField";
@@ -82,6 +83,7 @@ export function ToolLibraryManager({
 
     const pendingKey = `${editor.mode}:${editor.itemId ? "update" : "create"}`;
     setPendingAction(pendingKey);
+    setActionStatus(null);
     try {
       if (editor.mode === "template") {
         await saveTemplate(editor, name, content);
@@ -89,6 +91,11 @@ export function ToolLibraryManager({
         await saveSkill(editor, name, content);
       }
       setEditor(null);
+    } catch (error) {
+      setActionStatus({
+        tone: "warning",
+        message: `${editor.mode === "template" ? "Template" : "Skill file"} was not saved: ${error instanceof Error ? error.message : "unknown error"}. Your changes are still here; try again.`,
+      });
     } finally {
       setPendingAction(null);
     }
@@ -105,44 +112,37 @@ export function ToolLibraryManager({
       content,
       category: currentEditor.draft.category.trim() || "general",
       variables: extractVariables(content),
-      group_ids: [],
-      enabled: true,
     };
-    try {
-      if (currentEditor.itemId) {
-        const saved = await updateAdminPromptTemplate(
-          data.me.id,
-          currentEditor.itemId,
-          payload,
-        );
-        onDataChange((current) => ({
-          ...current,
-          promptTemplates: current.promptTemplates.map((template) =>
-            template.id === saved.id ? saved : template,
-          ),
-        }));
-        setActionStatus({
-          tone: "success",
-          message: `${saved.name} template updated.`,
-        });
-      } else {
-        const saved = await createAdminPromptTemplate(data.me.id, {
-          ...payload,
-          id: `template-${Date.now()}`,
-        });
-        onDataChange((current) => ({
-          ...current,
-          promptTemplates: [...current.promptTemplates, saved],
-        }));
-        setActionStatus({
-          tone: "success",
-          message: `${saved.name} saved to the prompt template library.`,
-        });
-      }
-    } catch (error) {
+    if (currentEditor.itemId) {
+      const saved = await updateAdminPromptTemplate(
+        data.me.id,
+        currentEditor.itemId,
+        payload,
+      );
+      onDataChange((current) => ({
+        ...current,
+        promptTemplates: current.promptTemplates.map((template) =>
+          template.id === saved.id ? saved : template,
+        ),
+      }));
       setActionStatus({
-        tone: "warning",
-        message: `Template was not saved: ${error instanceof Error ? error.message : "unknown error"}`,
+        tone: "success",
+        message: `${saved.name} template updated.`,
+      });
+    } else {
+      const saved = await createAdminPromptTemplate(data.me.id, {
+        ...payload,
+        group_ids: [],
+        enabled: true,
+        id: `template-${Date.now()}`,
+      });
+      onDataChange((current) => ({
+        ...current,
+        promptTemplates: [...current.promptTemplates, saved],
+      }));
+      setActionStatus({
+        tone: "success",
+        message: `${saved.name} saved to the prompt template library.`,
       });
     }
   }
@@ -157,46 +157,39 @@ export function ToolLibraryManager({
       description: currentEditor.draft.description.trim(),
       content,
       category: currentEditor.draft.category.trim() || "workflow",
-      format: "markdown",
-      version: "1.0.0",
-      group_ids: [],
-      enabled: true,
     };
-    try {
-      if (currentEditor.itemId) {
-        const saved = await updateAdminSkillFile(
-          data.me.id,
-          currentEditor.itemId,
-          payload,
-        );
-        onDataChange((current) => ({
-          ...current,
-          skillFiles: current.skillFiles.map((skill) =>
-            skill.id === saved.id ? saved : skill,
-          ),
-        }));
-        setActionStatus({
-          tone: "success",
-          message: `${saved.name} skill updated.`,
-        });
-      } else {
-        const saved = await createAdminSkillFile(data.me.id, {
-          ...payload,
-          id: `skill-${Date.now()}`,
-        });
-        onDataChange((current) => ({
-          ...current,
-          skillFiles: [...current.skillFiles, saved],
-        }));
-        setActionStatus({
-          tone: "success",
-          message: `${saved.name} saved to the skill file library.`,
-        });
-      }
-    } catch (error) {
+    if (currentEditor.itemId) {
+      const saved = await updateAdminSkillFile(
+        data.me.id,
+        currentEditor.itemId,
+        payload,
+      );
+      onDataChange((current) => ({
+        ...current,
+        skillFiles: current.skillFiles.map((skill) =>
+          skill.id === saved.id ? saved : skill,
+        ),
+      }));
       setActionStatus({
-        tone: "warning",
-        message: `Skill file was not saved: ${error instanceof Error ? error.message : "unknown error"}`,
+        tone: "success",
+        message: `${saved.name} skill updated.`,
+      });
+    } else {
+      const saved = await createAdminSkillFile(data.me.id, {
+        ...payload,
+        format: "markdown",
+        version: "1.0.0",
+        group_ids: [],
+        enabled: true,
+        id: `skill-${Date.now()}`,
+      });
+      onDataChange((current) => ({
+        ...current,
+        skillFiles: [...current.skillFiles, saved],
+      }));
+      setActionStatus({
+        tone: "success",
+        message: `${saved.name} saved to the skill file library.`,
       });
     }
   }
@@ -273,7 +266,7 @@ export function ToolLibraryManager({
 
   return (
     <div className="tool-library-section" aria-label="Reusable tool library">
-      {actionStatus && (
+      {actionStatus && !editor && (
         <div className="inline-warning tool-library-action-status" role="status">
           <Pill tone={actionStatus.tone}>
             {actionStatus.tone === "success" ? "Saved" : "Action"}
@@ -325,7 +318,8 @@ export function ToolLibraryManager({
           modelId={improvementModelId}
           onDraftChange={updateEditorDraft}
           onSave={() => void saveEditor()}
-          onClose={() => setEditor(null)}
+          error={actionStatus?.tone === "warning" ? actionStatus.message : null}
+          onClose={() => { if (!pendingAction) { setEditor(null); setActionStatus(null); } }}
         />
       )}
     </div>
@@ -418,6 +412,7 @@ function LibraryEditorModal({
   userId,
   modelId,
   onDraftChange,
+  error,
   onSave,
   onClose,
 }: {
@@ -426,9 +421,12 @@ function LibraryEditorModal({
   userId: string;
   modelId: string | null;
   onDraftChange: (patch: Partial<LibraryDraft>) => void;
+  error: string | null;
   onSave: () => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, true, onClose);
   const variables =
     editor.mode === "template" ? extractVariables(editor.draft.content) : [];
   const title = editor.itemId
@@ -447,6 +445,8 @@ function LibraryEditorModal({
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal tool-library-popout"
         role="dialog"
         aria-modal="true"
@@ -472,6 +472,7 @@ function LibraryEditorModal({
           <button
             className="icon-button"
             type="button"
+            disabled={pending}
             aria-label="Close editor"
             data-tooltip="Close the editor and discard any unsaved changes"
             onClick={onClose}
@@ -480,10 +481,12 @@ function LibraryEditorModal({
           </button>
         </div>
         <div className="modal-body">
+          {error && <p className="inline-warning" role="alert">{error}</p>}
           <div className="tool-library-editor-form">
             <label>
               Name
               <input
+                disabled={pending}
                 value={editor.draft.name}
                 onChange={(event) =>
                   onDraftChange({ name: event.target.value })
@@ -493,6 +496,7 @@ function LibraryEditorModal({
             <label>
               Category
               <input
+                disabled={pending}
                 value={editor.draft.category}
                 onChange={(event) =>
                   onDraftChange({ category: event.target.value })
@@ -502,6 +506,7 @@ function LibraryEditorModal({
             <label className="wide-field">
               Description
               <input
+                disabled={pending}
                 value={editor.draft.description}
                 onChange={(event) =>
                   onDraftChange({ description: event.target.value })
@@ -515,6 +520,7 @@ function LibraryEditorModal({
                 kind="template"
                 userId={userId}
                 modelId={modelId}
+                disabled={pending}
                 value={editor.draft.content}
                 onChange={(content) => onDraftChange({ content })}
               />
@@ -522,6 +528,7 @@ function LibraryEditorModal({
               <label className="tool-library-content-field">
                 Content
                 <textarea
+                  disabled={pending}
                   value={editor.draft.content}
                   onChange={(event) =>
                     onDraftChange({ content: event.target.value })
@@ -550,6 +557,7 @@ function LibraryEditorModal({
           <button
             className="secondary-button"
             type="button"
+            disabled={pending}
             data-tooltip="Discard your changes and return to the library list"
             onClick={onClose}
           >

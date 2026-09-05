@@ -212,6 +212,50 @@ test("tool library creates template variables and deletes library items through 
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
 });
 
+
+test.each(["template", "skill"] as const)("failed %s saves preserve draft content and allow retry", async (mode) => {
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: mode === "template" ? "New Prompt" : "New Skill" }));
+  const dialog = screen.getByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Keep my work" } });
+  fireEvent.change(within(dialog).getByLabelText("Content"), { target: { value: "Carefully written instructions {{topic}}" } });
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail: "Service unavailable" }), { status: 503 }));
+  fireEvent.click(within(dialog).getByRole("button", { name: mode === "template" ? "Save Prompt" : "Save Skill" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("Your changes are still here");
+  expect(within(dialog).getByLabelText("Name")).toHaveValue("Keep my work");
+  expect(within(dialog).getByLabelText("Content")).toHaveValue("Carefully written instructions {{topic}}");
+
+  fetchMock.mockImplementationOnce(async (_input, init) => new Response(JSON.stringify({
+    ...JSON.parse(String(init?.body)), tenant_id: "tenant-example", updated_at: "Just now",
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(within(dialog).getByRole("button", { name: mode === "template" ? "Save Prompt" : "Save Skill" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByRole("status")).toHaveTextContent("Keep my work saved");
+});
+
+test.each(["template", "skill"] as const)("editing %s content preserves access and release metadata", async (mode) => {
+  const original = mode === "template" ? currentData.promptTemplates[0] : currentData.skillFiles[0];
+  const restricted = { ...original, group_ids: ["group-restricted"], enabled: false, ...(mode === "skill" ? { version: "3.2.1", format: "text" } : {}) };
+  if (mode === "template") currentData = { ...currentData, promptTemplates: [restricted as BootstrapData["promptTemplates"][number]] };
+  else currentData = { ...currentData, skillFiles: [restricted as BootstrapData["skillFiles"][number]] };
+  fetchMock.mockImplementationOnce(async (_input, init) => new Response(JSON.stringify({
+    ...restricted, ...JSON.parse(String(init?.body)),
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: `Open ${original.name}` }));
+  fireEvent.change(screen.getByLabelText("Content"), { target: { value: "Updated instructions" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  const payload = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+  expect(payload).not.toHaveProperty("group_ids");
+  expect(payload).not.toHaveProperty("enabled");
+  expect(payload).not.toHaveProperty("version");
+  expect(payload).not.toHaveProperty("format");
+  const saved = mode === "template" ? currentData.promptTemplates[0] : currentData.skillFiles[0];
+  expect(saved).toMatchObject({ content: "Updated instructions", group_ids: ["group-restricted"], enabled: false });
+  if (mode === "skill") expect(saved).toMatchObject({ version: "3.2.1", format: "text" });
+});
+
 function renderToolLibrary(mode: "template" | "skill") {
   render(<ToolLibraryHarness mode={mode} />);
 }

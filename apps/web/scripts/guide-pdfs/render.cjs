@@ -4,6 +4,30 @@
  */
 
 const { GUIDES, partsForRole, sectionsForRole } = require("./content.cjs");
+const fs = require("node:fs");
+const path = require("node:path");
+
+// Orientation images share the reviewed training assets, so guides cannot
+// silently retain a separate set of screenshots after the interface changes.
+const SECTION_FIGURES = {
+  layout: ["user/chat-home.png", "The chat workspace: navigation on the left, model selection above, and the message composer in the main area."],
+  drafts: ["user/drafts.png", "Drafts combines the document editor with a separate assistant and document controls."],
+  "settings-account": ["user/account-security-overview.png", "Your account includes profile settings, password controls, and two-step verification."],
+  "admin-overview": ["admin/users.png", "The Admin console opens the workspace controls available to your administrator account."],
+  "owner-providers": ["owner/providers.png", "Provider cards show the actual connection and model-catalog state."],
+  "owner-connectors": ["owner/policies-callout-current.png", "Shared connector configuration is in the Platform Owner console under Org Settings."],
+};
+
+function renderSectionFigure(sectionId) {
+  const figure = SECTION_FIGURES[sectionId];
+  if (!figure) return "";
+  const [frame, caption] = figure;
+  const png = fs.readFileSync(path.join(__dirname, "../../public/training", frame));
+  if (!png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    throw new Error(`Guide figure is not a PNG: ${frame}`);
+  }
+  return `<figure class="ui-figure"><img src="data:image/png;base64,${png.toString("base64")}" alt="${escapeHtml(caption)}"><figcaption>${escapeHtml(caption)} <span>Example workspace with synthetic data.</span></figcaption></figure>`;
+}
 
 /* The aperture mark in one flat light teal — the owner wants the documents'
  * logo unified, with none of the light/dark blade split the app gradient has. */
@@ -65,7 +89,7 @@ const CSS = `
   .toc { page-break-after: always; }
   .toc h2 { font-size: 17pt; font-weight: 800; letter-spacing: -0.01em; color: var(--text-strong); margin-bottom: 16px; }
   .toc-part { margin: 14px 0 4px; font-size: 8.5pt; font-weight: 800; letter-spacing: 0.09em;
-    text-transform: uppercase; color: var(--teal-strong); }
+    text-transform: uppercase; color: var(--teal-strong); break-after: avoid; page-break-after: avoid; }
   .toc-row { display: flex; align-items: baseline; gap: 8px; padding: 3.5px 0; font-size: 10.2pt; }
   .toc-row .toc-num { color: var(--faint); min-width: 22px; font-variant-numeric: tabular-nums; }
   .toc-row .toc-title { font-weight: 600; color: var(--text); }
@@ -92,6 +116,11 @@ const CSS = `
   .doc-section h4 { font-size: 10.8pt; font-weight: 700; color: var(--text-strong); margin: 13px 0 5px;
     break-after: avoid; page-break-after: avoid; }
   .doc-section p { margin: 7px 0; }
+  .ui-figure { margin: 12px 0 16px; break-inside: avoid; page-break-inside: avoid; }
+  .ui-figure img { display: block; width: 100%; max-height: 3.8in; object-fit: contain;
+    border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-sunken); }
+  .ui-figure figcaption { margin-top: 6px; font-size: 8.4pt; line-height: 1.45; color: var(--muted); }
+  .ui-figure figcaption span { color: var(--faint); }
   ol.steps { list-style: none; counter-reset: step; margin: 8px 0; }
   ol.steps li { counter-increment: step; position: relative; padding: 0 0 8px 34px; break-inside: avoid; }
   ol.steps li::before { content: counter(step); position: absolute; left: 0; top: 1px; width: 21px; height: 21px;
@@ -266,7 +295,7 @@ function renderGuideHtml(role, pageMap = {}) {
         .map(
           (section) => `<section class="doc-section"><span class="sec-marker">[[s:${section.id}]]</span><h3><span class="sec-num">${numberOf.get(
             section.id,
-          )}.</span>${escapeHtml(section.title)}</h3><p class="doc-summary">${escapeHtml(section.summary)}</p>${section.blocks
+          )}.</span>${escapeHtml(section.title)}</h3><p class="doc-summary">${escapeHtml(section.summary)}</p>${renderSectionFigure(section.id)}${section.blocks
             .map(renderBlock)
             .join("")}</section>`,
         )

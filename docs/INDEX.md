@@ -9,8 +9,19 @@ for Aperture Chat.
 - [Contribution workflow](../CONTRIBUTING.md)
 - [Architecture](architecture.md)
 - [Docker deployment](DOCKER_RELEASE.md)
+- [Training coverage and regeneration](TRAINING.md)
 - [Security policy](../SECURITY.md)
 - [License](../LICENSE)
+
+## Role Guides
+
+- [User guide (PDF)](aperture-user-guide.pdf)
+- [Administrator guide (PDF)](aperture-admin-guide.pdf)
+- [Platform owner guide (PDF)](aperture-owner-guide.pdf)
+
+These are the same downloadable guides shipped in the application's Help and
+Documentation libraries. See [training publication](TRAINING.md) for their
+source files, narrated walkthroughs, and verification procedure.
 
 ## Repository Map
 
@@ -21,15 +32,17 @@ for Aperture Chat.
 | `infra/caddy` | Caddy reverse-proxy configuration for container deployments. |
 | `docs` | Public architecture, deployment, and product documentation. |
 | `docker-compose.yml` | Source-build Compose stack for local development. |
-| `docker-compose.release.yml` | Image-based Compose stack for tagged releases. |
+| `docker-compose.release.yml` | Image-based Compose stack for tagged releases, including the owner-driven updater. |
+| `infra/updater/updater.sh` | Updater sidecar: pulls releases, recreates API/web, verifies both services, and attempts rollback. |
 | `.env.example` | Non-secret environment template. |
 
 ## Roles
 
 - `PLATFORM_OWNER` manages platform-wide providers, model availability,
-  organization settings, tenant boundaries, audit controls, and branding.
-- `TENANT_ADMIN` manages tenant users, groups, connectors, knowledge bases,
-  tools, policies, analytics, and model access.
+  connector switches and credentials, organization settings, tenant boundaries,
+  audit controls, and branding.
+- `TENANT_ADMIN` manages tenant users, groups, knowledge bases, tools, response actions, policies,
+  analytics, and model access.
 - `USER` uses the models, knowledge, tools, and workflows assigned to them.
 
 Model access is layered through platform availability, tenant availability,

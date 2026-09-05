@@ -1,0 +1,29 @@
+.account-security { display: grid; gap: 14px; }
+.account-security-heading { display: flex; align-items: flex-start; gap: 10px; }
+.account-security-heading > div { flex: 1; min-width: 0; }
+.account-security-heading h3 { margin: 0; font-size: 14px; line-height: 1.5; }
+.account-security-heading p { margin: 3px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.account-security-icon { color: var(--teal); margin-top: 2px; }
+.account-security-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px; color: var(--muted); background: var(--surface-soft); }
+.account-security-badge.is-enabled { color: var(--teal-strong); background: var(--teal-soft); }
+.account-security-note { display: block; margin: 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.account-security-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-security button { min-height: 44px; }
+.account-security-form { display: grid; gap: 12px; }
+.account-security-form h4 { margin: 0; font-size: 14px; }
+.account-security-form > label:not(.account-security-check) { display: grid; gap: 7px; font-size: 13px; font-weight: 650; }
+.account-security-form input:not([type="checkbox"]) { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; font: inherit; font-size: 16px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); color: var(--text-strong); }
+.account-security-form input:focus-visible, .account-security button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.account-security-qr { justify-self: start; padding: 14px; border-radius: 10px; background: #fff; }
+.account-security-secret { display: block; padding: 10px 12px; border-radius: 9px; font-size: 13px; letter-spacing: .04em; background: var(--surface-soft); overflow-wrap: anywhere; user-select: all; }
+.account-security .account-security-check { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; font-size: 13px; line-height: 1.6; font-weight: 450; }
+.account-security .account-security-check input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; margin: 2px 0 0; padding: 0; flex: 0 0 18px; accent-color: var(--teal); }
+.account-security-codes { margin: 0; padding: 12px; list-style: none; display: grid; gap: 8px; background: var(--surface-soft); border-radius: 10px; }
+.account-security-codes li { font-family: monospace; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; user-select: all; }
+.account-security-section { display: grid; gap: 14px; }
+.account-security-section .account-password-heading-copy { display: grid; gap: 4px; }
+.account-security-section .account-password-heading-copy small { color: var(--muted); font-size: 12px; }
+.account-security-expanded { display: grid; gap: 12px; }
+.account-security-expanded > .account-security { border: 0; border-radius: 0; padding: 0; box-shadow: none; }
+.account-security-guard-note { margin: 0; padding: 10px 12px; border-radius: 9px; color: var(--teal-strong); background: var(--teal-soft); font-size: 12px; line-height: 1.6; }
+.account-drawer-list > [inert] { opacity: .55; }

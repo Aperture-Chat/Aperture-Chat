@@ -16,8 +16,8 @@ The web app owns the complete product shell:
 
 - Auth screen and session bootstrap.
 - Chat workspace, composer, model selector, attachments, and session detail drawer.
-- Tenant admin console for users, groups, model access, connectors, SSO, knowledge, tools, and analytics.
-- Platform owner console for providers, model catalog, API key vault, org settings, audit, and training content.
+- Tenant admin console for users, groups, model access, SSO, knowledge, tools, response actions, and analytics.
+- Platform owner console for providers, model catalog, API key vault, org settings (including connector switches and credentials), audit, and training content.
 - Agent workspace for run status, approvals, logs, exports, and source-aware workflows.
 
 The UI is expected to hold up across narrow, wide, short, and mobile viewports. Dense admin panels should use responsive grids, table scrollers, or card layouts instead of forcing page-level horizontal scrolling.

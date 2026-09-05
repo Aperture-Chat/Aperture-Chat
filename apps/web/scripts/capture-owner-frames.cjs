@@ -15,19 +15,21 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const OUT = path.join(__dirname, "..", "public", "training", "owner");
+const PUBLIC_OUT = path.join(__dirname, "..", "public", "training", "owner");
 const APP = process.env.CAPTURE_APP_URL || "http://localhost:5173";
 const USER = process.env.CAPTURE_USER_ID || "user-owner";
-const TOKEN = process.env.CAPTURE_SESSION_TOKEN || "";
-const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
+const CAPTURE_AUTH = require("./training-capture-run.cjs").captureCredentials();
+const TOKEN = CAPTURE_AUTH.token;
 
 (async () => {
-  if (CONFIRMATION !== "I_HAVE_REVIEWED_SYNTHETIC_DATA") {
-    throw new Error(
-      "Refusing to overwrite public training assets without synthetic-data confirmation.",
-    );
-  }
-  fs.mkdirSync(OUT, { recursive: true });
+  const { createCaptureRun } = require("./training-capture-run.cjs");
+  const capture = createCaptureRun({
+    scriptPath: __filename,
+    publicDirectory: PUBLIC_OUT,
+    appUrl: APP,
+    confirmation: process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "",
+  });
+  const OUT = capture.outputDirectory;
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1185, height: 855 }, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
@@ -36,7 +38,7 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
       localStorage.setItem("aperture-session-user-id", user);
       if (token) localStorage.setItem("aperture-session-token", token);
     },
-    { user: USER, token: TOKEN },
+    { user: CAPTURE_AUTH.user || USER, token: TOKEN },
   );
   const hideTooltips = () => page.addStyleTag({ content: ".apx-tooltip{display:none!important}" });
   await page.goto(APP);
@@ -51,38 +53,14 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
   await page.waitForTimeout(1200);
   await hideTooltips();
 
+  const { measureFrameFocus } = require("./training-focus-measurement.cjs");
   const measured = {};
-  const shot = async (name, rectSpecs = {}) => {
+  const shot = async (name) => {
     await page.waitForTimeout(600);
     await page.screenshot({ path: `${OUT}/${name}.png` });
-    /* Record viewport-space boxes for FOCUS_REGIONS (logical px — the
-     * screenshots are dsf2 but rects are declared in the 1185x855 space). */
-    for (const [key, selector] of Object.entries(rectSpecs)) {
-      const box = await page.evaluate((sel) => {
-        /* "union:" measures the bounding box across every match; "nth:<n>:"
-         * measures the n-th match (0-based). */
-        const union = sel.startsWith("union:");
-        const nth = sel.match(/^nth:(\d+):/);
-        const query = union ? sel.slice(6) : nth ? sel.slice(nth[0].length) : sel;
-        const matches = [...document.querySelectorAll(query)];
-        const candidates = union ? matches : nth ? [matches[Number(nth[1])]].filter(Boolean) : matches.slice(0, 1);
-        const els = candidates.filter((el) => {
-          const r = el.getBoundingClientRect();
-          return r.width > 0 && r.height > 0;
-        });
-        if (!els.length) return null;
-        let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-        for (const el of els) {
-          const r = el.getBoundingClientRect();
-          left = Math.min(left, r.left);
-          top = Math.min(top, r.top);
-          right = Math.max(right, r.right);
-          bottom = Math.max(bottom, r.bottom);
-        }
-        return { x: Math.round(left), y: Math.round(top), w: Math.round(right - left), h: Math.round(bottom - top) };
-      }, selector);
-      measured[key] = box ? { frame: `training/owner/${name}.png`, rect: box } : `MISSING ${selector}`;
-    }
+    Object.assign(measured, await measureFrameFocus(page, "owner", name));
+    // Keep completed-frame measurements even if a later capture fails.
+    fs.writeFileSync(path.join(OUT, "measured-rects.json"), JSON.stringify(measured, null, 2));
     console.log("captured", name);
   };
   const tab = async (label) => {
@@ -127,55 +105,30 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
   await shot("vault");
 
   await tab("Org Settings");
+  await shot("policies-current-collapsed");
   await expandSection("Role Boundary");
   await scrollToText("Role Boundary");
-  await shot("roles", {
-    rolesDisclosure: ".owner-control-panel .panel-header",
-    rolesCreateForm: ".owner-management-form",
-    rolesSetPassword: ".owner-user-list .owner-user-row button[aria-label^='Set a password']",
-    rolesUserRows: ".owner-user-list",
-  });
+  await shot("roles");
   await expandSection("Single Sign-On");
   await scrollToText("Single Sign-On");
-  await shot("sso", {
-    ssoIntro: ".sso-requirements-panel .panel-header",
-    ssoProtocol: ".sso-readiness-grid label:nth-of-type(2)",
-    ssoFields: ".sso-readiness-grid",
-    ssoRedirect: ".sso-redirect-uri",
-  });
+  await shot("sso");
   const testButton = page.getByRole("button", { name: /Test connection|Test SSO/i }).first();
   if (await testButton.count()) {
     await testButton.evaluate((el) => el.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(500);
-    await shot("sso-actions", {
-      ssoToggles: "union:.sso-requirements-panel .permission-row.owner-toggle-row",
-      ssoEnforce: "nth:1:.sso-requirements-panel .permission-row.owner-toggle-row",
-      ssoSaveTest: ".sso-action-row",
-    });
+    await shot("sso-actions");
   }
   await expandSection("Platform Branding");
   await scrollToText("Platform Branding");
-  await shot("branding", {
-    brandPreview: ".branding-preview",
-    brandFields: ".platform-branding-panel .owner-form-grid",
-    brandThemeColors: ".branding-theme-fields",
-    brandActions: ".branding-actions",
-  });
+  await shot("branding");
   await expandSection("Policy Controls");
   await scrollToText("Policy Controls");
-  await shot("policies-current", {
-    policyFloor: ".policy-toggle-stack .permission-row",
-  });
+  await shot("policies-current");
   await page.evaluate(() => {
     document.querySelector(".policy-toggle-stack")?.scrollIntoView({ block: "center" });
   });
   await page.waitForTimeout(500);
-  await shot("policies-toggles-current", {
-    policyToggles: ".policy-toggle-stack",
-  });
-  await shot("policies-callout-current", {
-    policyCallout: ".tenant-policy-panel .policy-callout",
-  });
+  await shot("policies-toggles-current");
   await page.evaluate(() => {
     const heading = [...document.querySelectorAll(".panel-header h2")].find(
       (candidate) => candidate.textContent.trim() === "Policy Controls",
@@ -183,14 +136,14 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
     heading?.closest(".panel")?.querySelector(".panel-header")?.click();
   });
   await page.waitForTimeout(500);
-  await shot("policies-current-collapsed", {
-    policyCollapsed: "union:[role='tabpanel'] .panel",
-  });
   await expandSection("Workspace Usage Budget");
   await scrollToText("Workspace Usage Budget");
-  await shot("policies-budget-current", {
-    budgetControls: ".budget-control-grid",
-  });
+  await shot("policies-budget-current");
+  // The final policy lesson now teaches owner-managed shared connectors.
+  // Keep the existing asset name while capturing its actual new target.
+  await expandSection("Connectors");
+  await scrollToText("Connectors");
+  await shot("policies-callout-current");
 
   await tab("Analytics");
   await page.waitForTimeout(1200);
@@ -203,55 +156,70 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
     document.querySelector(".analytics-console-grid")?.scrollIntoView({ block: "start" });
   });
   await page.waitForTimeout(400);
-  await shot("analytics", {
-    analyticsFilters: "[aria-label='Runtime events filter']",
-    runtimeScorecards: ".chat-feedback-panel .feedback-summary-grid",
-    runtimeRows: "[aria-label='Runtime clock events']",
-  });
+  await shot("analytics");
   await scrollToText("Model Activity");
-  await shot("analytics-activity", {
-    activityCharts: ".model-activity-panel .model-activity-chart-grid",
-  });
+  await shot("analytics-activity");
+  await tab("Audit");
+  await page.waitForTimeout(1200);
+  await shot("audit");
+  await expandSection("Security Alerts");
+  await scrollToText("Security Alerts");
+  await shot("audit-alerts");
+  await expandSection("Audit Trail");
+  await scrollToText("Audit Trail");
+  await shot("audit-trail");
+
+  await tab("Alerts");
+  await page.waitForTimeout(1000);
+  await shot("alerts");
+  await page.getByRole("list", { name: "Alert deliveries", exact: true }).waitFor();
+  // Keep the rule templates above the delivery list visible in their shared
+  // frame; centering the list alone scrolls those narrated controls away.
+  await page.getByText("Alert Rules", { exact: true }).evaluate((element) => element.closest(".panel").scrollIntoView({ block: "start" }));
+  await shot("alerts-deliveries");
+
+  // Retention captures inspect synthetic chats and confirmation UI only.
+  await tab("Org Settings");
+  await expandSection("Data Retention");
+  await page.getByText("Tag chats that use MCP connections", { exact: true }).scrollIntoViewIfNeeded();
+  await shot("retention-policy");
+  await tab("Audit");
+  await expandSection("User Prompt Activity");
+  await page.getByRole("button", { name: "Tags", exact: true }).click();
+  await page.locator(".retention-tags-toolbar").scrollIntoViewIfNeeded();
+  await page.locator(".retention-tagged-row").first().waitFor();
+  await shot("retention-tags");
+  await page.getByRole("button", { name: /^Preview the full conversation:/ }).first().click();
+  await page.getByRole("dialog", { name: "Tagged conversation" }).waitFor();
+  await page.getByRole("dialog", { name: "Tagged conversation" }).locator(".prompt-output-message").first().waitFor();
+  await shot("retention-preview");
+  await page.getByRole("button", { name: "Close conversation preview", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Select all listed chats", exact: true }).check();
+  await page.getByRole("button", { name: "Archive selected", exact: true }).click();
+  await page.locator(".retention-batch-bar").scrollIntoViewIfNeeded();
+  await shot("retention-batch");
+  await page.locator(".retention-batch-bar").getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Select all listed chats", exact: true }).uncheck();
+
+  // Usage needs actual reported provider activity; capture other pages first.
+  await tab("Analytics");
+  await expandSection("User Usage");
   await scrollToText("User Usage");
-  await shot("analytics-usage", {
-    usageScorecards: ".usage-summary-grid",
-    usageCharts: "nth:1:.model-activity-chart-grid",
-  });
+  await shot("analytics-usage");
   // The ranked per-user list sits below the charts; give it its own frame.
   await page.evaluate(() => {
     document.querySelector("[aria-label='Usage by user']")?.scrollIntoView({ block: "start" });
   });
   await page.waitForTimeout(600);
-  await shot("analytics-usage-users", {
-    usageByUser: "[aria-label='Usage by user']",
-  });
+  await shot("analytics-usage-users");
 
   await tab("Audit");
-  await page.waitForTimeout(1200);
-  await shot("audit", {
-    auditCriticalTile: ".audit-summary-card",
-    auditTileGrid: ".audit-summary-grid",
-  });
-  await expandSection("Security Alerts");
-  await scrollToText("Security Alerts");
-  await shot("audit-alerts", {
-    auditSecurityAlerts: "[aria-label='Security alert filter']",
-  });
-  await expandSection("Audit Trail");
-  await scrollToText("Audit Trail");
-  await shot("audit-trail", {
-    trailFilters: ".audit-filter-toolbar",
-    trailRows: ".audit-trail-list",
-  });
-
-  await tab("Alerts");
-  await page.waitForTimeout(1000);
-  await shot("alerts");
-
+  await expandSection("User Prompt Activity");
   fs.writeFileSync(path.join(OUT, "measured-rects.json"), JSON.stringify(measured, null, 2));
   console.log("wrote measured-rects.json");
 
   await browser.close();
+  capture.complete();
 })().catch((error) => {
   console.error(error);
   process.exit(1);

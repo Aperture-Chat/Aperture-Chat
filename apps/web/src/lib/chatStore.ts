@@ -428,13 +428,18 @@ export function isBlankNewChat(thread: ChatThread): boolean {
 }
 
 function createBlankThread(data: BootstrapData, modelId: string): ChatThread {
+  // Bootstrap can include other visible workspace groups. A saved personal
+  // chat must use the actor's membership, even for tenant administrators.
+  const group = data.me.role === "PLATFORM_OWNER"
+    ? data.groups[0]
+    : data.groups.find((item) => data.me.group_ids.includes(item.id));
   return {
     id: uid("local"),
     tenant_id: data.currentTenant?.id ?? "tenant-example",
     owner_user_id: data.me.id,
     title: "New chat",
     model_id: modelId,
-    group_id: data.groups[0]?.id ?? "",
+    group_id: group?.id ?? "",
     pinned: false,
     archived: false,
     folder_id: null,
@@ -593,7 +598,10 @@ function withBlankChat(
 ): { threads: ChatThread[]; activeId: string } {
   const existingBlank = threads.find(isBlankNewChat);
   if (existingBlank) {
-    if (fallbackModel && existingBlank.model_id !== fallbackModel) {
+    // Hydration must keep a usable choice already made in the unsent chat.
+    // Defaults apply to new chats or a selection that is no longer available.
+    const selectedModelUsable = usableModels(data).some((model) => model.id === existingBlank.model_id);
+    if (fallbackModel && !selectedModelUsable) {
       const updatedBlank = { ...existingBlank, model_id: fallbackModel };
       return {
         threads: threads.map((thread) => (thread.id === existingBlank.id ? updatedBlank : thread)),
@@ -2031,10 +2039,10 @@ export function useChatStore(
         sourceThread?.model_id && enabledModels.some((model) => model.id === sourceThread.model_id)
           ? sourceThread.model_id
           : fallbackModel;
-      const fresh = {
-        ...createBlankThread(data, sourceModel),
-        group_id: sourceThread?.group_id ?? data.groups[0]?.id ?? "",
-      };
+      const fresh = createBlankThread(data, sourceModel);
+      if (sourceThread && (data.me.role === "PLATFORM_OWNER" || data.me.group_ids.includes(sourceThread.group_id))) {
+        fresh.group_id = sourceThread.group_id;
+      }
       return startChatSend(fresh, content, attachments, runtime) ? fresh : null;
     },
     [data, enabledModels, fallbackModel, startChatSend],

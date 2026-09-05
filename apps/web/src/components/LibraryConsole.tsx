@@ -74,6 +74,14 @@ type KnowledgeCreateDraft = {
   ownerGroupId: string;
 };
 
+type KnowledgeSourceRetry = {
+  knowledgeBase: KnowledgeBase;
+  sourceType: string;
+  files: File[];
+  webDraft: KnowledgeSourceDraft;
+  apiDraft: KnowledgeSourceDraft;
+};
+
 type ToolDraft = {
   name: string;
   endpoint: string;
@@ -179,6 +187,7 @@ export function LibraryConsole({
   const [apiSourceDrafts, setApiSourceDrafts] = useState<
     Record<string, KnowledgeSourceDraft>
   >({});
+  const [knowledgeSourceRetries, setKnowledgeSourceRetries] = useState<Record<string, KnowledgeSourceRetry>>({});
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
   const [toolWorkspaceTab, setToolWorkspaceTab] = useState<
     "connections" | "prompts" | "skills"
@@ -379,6 +388,7 @@ export function LibraryConsole({
       delete next[item.id];
       return next;
     });
+    setKnowledgeSourceRetries((current) => omitRecordKey(current, item.id));
     setExpandedKnowledgeId(item.id);
     onDataChange((current) => replaceKnowledgeBase(current, item.id, saved));
   }
@@ -427,6 +437,95 @@ export function LibraryConsole({
             : current.name,
       };
     });
+  }
+
+  async function importCreatedKnowledgeSource(attempt: KnowledgeSourceRetry) {
+    const saved = attempt.knowledgeBase;
+    const source = knowledgeCreateSourceOption(attempt.sourceType);
+    let sourceResult: {
+      config: KnowledgeConfigRecord;
+      documents: KnowledgeDocument[];
+    } | null = null;
+    let sourceSuccessMessage = `${saved.name} data source was saved. Review its status below.`;
+    if (source.value === "upload") {
+      sourceResult = await uploadKnowledgeDocuments(
+        data.me.id,
+        saved.id,
+        attempt.files,
+      );
+      const chunkCount = totalKnowledgeChunks(sourceResult.documents);
+      sourceSuccessMessage = `${saved.name} indexed ${sourceResult.documents.length} document${
+        sourceResult.documents.length === 1 ? "" : "s"
+      } into ${chunkCount} searchable chunk${chunkCount === 1 ? "" : "s"}.`;
+    } else if (source.value === "web") {
+      sourceResult = await addKnowledgeWebSource(data.me.id, saved.id, {
+        name:
+          attempt.webDraft.name.trim() ||
+          attempt.webDraft.url.trim(),
+        url: attempt.webDraft.url.trim(),
+        text: attempt.webDraft.text.trim() || null,
+      });
+    } else if (source.value === "api") {
+      const draft = attempt.apiDraft;
+      const scopes = parseDelimitedList(draft.scopesText);
+      const isOAuthClient = draft.authType === "oauth-client";
+      sourceResult = await addKnowledgeApiSource(data.me.id, saved.id, {
+        name: draft.name.trim() || draft.url.trim(),
+        base_url: draft.url.trim(),
+        auth_type: draft.authType.trim() || "api-key",
+        secret_value: draft.secret.trim() || null,
+        description: draft.text.trim() || null,
+        source_label:
+          draft.sourceLabel.trim() || source.defaultSource || null,
+        resource_id: draft.resourceId.trim() || null,
+        request_method: draft.requestMethod.trim() || null,
+        header_notes: draft.headerNotes.trim() || null,
+        ...(draft.authType === "api-key"
+          ? {
+              credential_name: draft.apiKeyName.trim() || "X-API-Key",
+              credential_location:
+                draft.apiKeyPlacement.trim() || "header",
+            }
+          : {}),
+        ...(isOAuthClient
+          ? {
+              client_id: draft.clientId.trim() || null,
+              authorization_url:
+                draft.oauthAuthorizationUrl.trim() || null,
+              token_url: draft.oauthTokenUrl.trim() || null,
+              callback_url: knowledgeApiSourceOAuthCallbackUrl(saved.id),
+              scopes,
+              audience: draft.audience.trim() || null,
+            }
+          : {}),
+      });
+    }
+
+    if (sourceResult) {
+      applyKnowledgeSyncResult(saved, sourceResult);
+    }
+    setActionStatus({ tone: "success", message: sourceSuccessMessage });
+  }
+
+  async function retryCreatedKnowledgeSource(item: KnowledgeBase) {
+    const attempt = knowledgeSourceRetries[item.id];
+    if (!attempt) return;
+    const actionKey = `knowledge:${item.id}:source-retry`;
+    setPendingAction(actionKey);
+    try {
+      await importCreatedKnowledgeSource({
+        ...attempt,
+        webDraft: webSourceDrafts[item.id] ?? attempt.webDraft,
+        apiDraft: apiSourceDrafts[item.id] ?? attempt.apiDraft,
+      });
+    } catch (error) {
+      setActionStatus({
+        tone: "warning",
+        message: `${item.name} source import did not finish. The saved knowledge base and retry details are still available. ${formatAppError(error)}`,
+      });
+    } finally {
+      setPendingAction((current) => current === actionKey ? null : current);
+    }
   }
 
   async function createKnowledgeBase() {
@@ -515,80 +614,24 @@ export function LibraryConsole({
         [saved.id]: knowledgeDataTabForCreateSource(source),
       }));
 
+      const sourceAttempt: KnowledgeSourceRetry = {
+        knowledgeBase: saved,
+        sourceType: source.value,
+        files: [...knowledgeCreateFiles],
+        webDraft: { ...knowledgeCreateWebDraft },
+        apiDraft: { ...knowledgeCreateApiDraft },
+      };
       try {
-        let sourceResult: {
-          config: KnowledgeConfigRecord;
-          documents: KnowledgeDocument[];
-        } | null = null;
-        let sourceSuccessMessage = `${saved.name} was created with its data source ready.`;
-        if (source.value === "upload") {
-          sourceResult = await uploadKnowledgeDocuments(
-            data.me.id,
-            saved.id,
-            knowledgeCreateFiles,
-          );
-          const chunkCount = totalKnowledgeChunks(sourceResult.documents);
-          sourceSuccessMessage = `${saved.name} indexed ${sourceResult.documents.length} document${
-            sourceResult.documents.length === 1 ? "" : "s"
-          } into ${chunkCount} searchable chunk${chunkCount === 1 ? "" : "s"}.`;
-        } else if (source.value === "web") {
-          sourceResult = await addKnowledgeWebSource(data.me.id, saved.id, {
-            name:
-              knowledgeCreateWebDraft.name.trim() ||
-              knowledgeCreateWebDraft.url.trim(),
-            url: knowledgeCreateWebDraft.url.trim(),
-            text: knowledgeCreateWebDraft.text.trim() || null,
-          });
-        } else if (knowledgeCreateUsesApiInput) {
-          const draft = knowledgeCreateApiDraft;
-          const scopes = parseDelimitedList(draft.scopesText);
-          const isOAuthClient = draft.authType === "oauth-client";
-          sourceResult = await addKnowledgeApiSource(data.me.id, saved.id, {
-            name: draft.name.trim() || draft.url.trim(),
-            base_url: draft.url.trim(),
-            auth_type: draft.authType.trim() || "api-key",
-            secret_value: draft.secret.trim() || null,
-            description: draft.text.trim() || null,
-            source_label:
-              draft.sourceLabel.trim() || source.defaultSource || null,
-            resource_id: draft.resourceId.trim() || null,
-            request_method: draft.requestMethod.trim() || null,
-            header_notes: draft.headerNotes.trim() || null,
-            ...(draft.authType === "api-key"
-              ? {
-                  credential_name: draft.apiKeyName.trim() || "X-API-Key",
-                  credential_location:
-                    draft.apiKeyPlacement.trim() || "header",
-                }
-              : {}),
-            ...(isOAuthClient
-              ? {
-                  client_id: draft.clientId.trim() || null,
-                  authorization_url:
-                    draft.oauthAuthorizationUrl.trim() || null,
-                  token_url: draft.oauthTokenUrl.trim() || null,
-                  callback_url: knowledgeApiSourceOAuthCallbackUrl(saved.id),
-                  scopes,
-                  audience: draft.audience.trim() || null,
-                }
-              : {}),
-          });
-        }
-
-        if (sourceResult) {
-          applyKnowledgeSyncResult(saved, sourceResult);
-        }
-
+        await importCreatedKnowledgeSource(sourceAttempt);
         setShowKnowledgeCreate(false);
-        setActionStatus({
-          tone: "success",
-          message: sourceSuccessMessage,
-        });
       } catch (sourceError) {
+        setKnowledgeSourceRetries((current) => ({ ...current, [saved.id]: sourceAttempt }));
+        setWebSourceDrafts((current) => ({ ...current, [saved.id]: sourceAttempt.webDraft }));
+        setApiSourceDrafts((current) => ({ ...current, [saved.id]: sourceAttempt.apiDraft }));
         setShowKnowledgeCreate(false);
         setActionStatus({
           tone: "warning",
-          message: `${saved.name} was created, but its data source could not be added: ${formatAppError(sourceError)}`,
+          message: `${saved.name} was created, but its data source could not be added. Retry the source import below; no second knowledge base is needed. ${formatAppError(sourceError)}`,
         });
         return;
       }
@@ -649,18 +692,16 @@ export function LibraryConsole({
         ...current,
         tools: [...current.tools, saved],
       }));
+      setExpandedToolId(saved.id);
+      setToolDrafts((current) => ({ ...current, [saved.id]: toolDraftFromConfig(saved, data) }));
       setActionStatus({
         tone: "success",
-        message: `${saved.name} saved through the admin tool API.`,
+        message: `${saved.name} created. Configure its connection below, then test it before enabling.`,
       });
     } catch (error) {
-      onDataChange((current) => ({
-        ...current,
-        tools: [...current.tools, fallback],
-      }));
       setActionStatus({
         tone: "danger",
-        message: `Tool saved locally only. Backend create failed: ${formatAppError(error)}`,
+        message: `Tool was not created. Try Add Tool again. ${formatAppError(error)}`,
       });
     } finally {
       setPendingAction(null);
@@ -878,6 +919,7 @@ export function LibraryConsole({
       setDocumentErrors((current) => omitRecordKey(current, item.id));
       setWebSourceDrafts((current) => omitRecordKey(current, item.id));
       setApiSourceDrafts((current) => omitRecordKey(current, item.id));
+      setKnowledgeSourceRetries((current) => omitRecordKey(current, item.id));
       setActionStatus({
         tone: "success",
         message: `${item.name} deleted from the admin knowledge API.`,
@@ -948,6 +990,7 @@ export function LibraryConsole({
       setDocumentErrors((current) => omitRecordKeys(current, deletedIdSet));
       setWebSourceDrafts((current) => omitRecordKeys(current, deletedIdSet));
       setApiSourceDrafts((current) => omitRecordKeys(current, deletedIdSet));
+      setKnowledgeSourceRetries((current) => omitRecordKeys(current, deletedIdSet));
     }
 
     if (failures.length) {
@@ -1217,8 +1260,8 @@ export function LibraryConsole({
           <h1>Library</h1>
           <p>
             {isKnowledge
-              ? "Tenant-aware knowledge collections with source ACL enforcement."
-              : "Connector and MCP controls managed by workspace policy."}
+              ? "Organize the documents and sources your assistants can search. Access follows your workspace permissions."
+              : "Connect the tools your assistants can use, with access and approvals set by your workspace."}
           </p>
         </div>
         {sectionTabs}
@@ -1229,7 +1272,7 @@ export function LibraryConsole({
           role={actionStatus.tone === "danger" ? "alert" : "status"}
         >
           <Pill tone={actionStatus.tone}>
-            {actionStatus.tone === "success" ? "Synced" : "Local"}
+            {actionStatus.tone === "success" ? "Complete" : "Needs attention"}
           </Pill>
           <span>{actionStatus.message}</span>
           <button
@@ -1353,7 +1396,8 @@ export function LibraryConsole({
                 {!promptLibraryAvailable && (
                   <DismissibleNotice id="prompt-library-off-admin">
                     The Prompt Library is turned off for this workspace — users cannot see or use
-                    these prompts until it is re-enabled under Admin console → Connections.
+                    these prompts until it is re-enabled at the service level (Platform console → Org Settings →
+                    Connectors).
                   </DismissibleNotice>
                 )}
                 <ToolLibraryManager
@@ -1381,7 +1425,7 @@ export function LibraryConsole({
                 <DismissibleNotice id="mcp-connections-off">
                   MCP servers are turned off for this workspace
                   {canConfigure
-                    ? " — users cannot see or run these connections until they are re-enabled under Admin console → Connections."
+                    ? " — users cannot see or run these connections until they are re-enabled at the service level (Platform console → Org Settings → Connectors)."
                     : ", so MCP connections are unavailable."}
                 </DismissibleNotice>
               )}
@@ -2095,6 +2139,22 @@ export function LibraryConsole({
                             <tr className="knowledge-document-row">
                               <td colSpan={5}>
                                 <div className="knowledge-documents-panel">
+                                  {knowledgeSourceRetries[knowledgeItem.id] && (
+                                    <div className="inline-warning" role="status">
+                                      <span>
+                                        Source import needs attention. Your selected documents and source details are retained while this page stays open.
+                                        {knowledgeSourceRetries[knowledgeItem.id].files.length > 0 && ` Selected: ${knowledgeSourceRetries[knowledgeItem.id].files.map((file) => file.name).join(", ")}.`}
+                                      </span>
+                                      <button
+                                        className="secondary-button compact-button"
+                                        type="button"
+                                        disabled={pendingAction?.startsWith(`knowledge:${knowledgeItem.id}`)}
+                                        onClick={() => void retryCreatedKnowledgeSource(knowledgeItem)}
+                                      >
+                                        <FolderSync size={14} /> {pendingAction === `knowledge:${knowledgeItem.id}:source-retry` ? "Retrying..." : "Retry source import"}
+                                      </button>
+                                    </div>
+                                  )}
                                   {expandedKnowledgeId === knowledgeItem.id &&
                                     webDraft &&
                                     apiDraft && (
