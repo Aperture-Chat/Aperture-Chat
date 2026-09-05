@@ -24,6 +24,8 @@ export type DraftCacheScope = {
 
 /** Server-sync bookkeeping carried on each cached entry. */
 export type DraftSyncFields = {
+  archived?: boolean;
+  serverListedRevision?: number;
   /** Server-assigned draft id; missing/null means the entry is local only. */
   serverId?: string | null;
   /** The server revision that the cached `content` corresponds to. Used as the
@@ -179,12 +181,13 @@ export function mergeServerDraftsIntoCache<T extends CacheEntryBase>(
       // gain the DraftSyncFields updated here.
       merged.push({
         ...existing,
+        archived: doc.archived ?? false,
         title: existing.serverSavePending ? (existing as T & { title?: string }).title : doc.title,
         updatedAt: existing.serverSavePending ? existing.updatedAt : doc.updated_at,
         serverContentStale: true,
       } as T);
     } else {
-      merged.push({ ...existing, serverContentStale: false } as T);
+      merged.push({ ...existing, archived: doc.archived ?? false, serverContentStale: false } as T);
     }
   }
   const listedServerIds = new Set(server.map((doc) => doc.id));

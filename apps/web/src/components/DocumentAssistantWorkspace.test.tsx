@@ -4445,3 +4445,103 @@ test("a starred drafting model survives mounts where it is temporarily unavailab
     ).toHaveTextContent("OpenRouter: openai/gpt-4o-mini");
   });
 });
+
+test("history preview, archive, unarchive and confirmed deletion preserve the draft lifecycle", async () => {
+  window.localStorage.setItem(SCOPED_DRAFT_CACHE_KEY, JSON.stringify([{
+    id: 'history-audit', title: 'History audit', content: '<h1>History audit</h1><p>Preview passage.</p>',
+    summary: 'A saved test draft', sourceLabel: 'Local draft', updatedAt: new Date().toISOString(), status: 'complete',
+  }]));
+  const view = render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Document history' }));
+  const restore = screen.getByRole('button', { name: /Restore History audit from document history/ });
+  fireEvent.focus(restore);
+  await waitFor(() => expect(screen.getByRole('status', { name: 'Preview of History audit' })).toHaveTextContent('Preview passage.'));
+  fireEvent.click(screen.getByRole('button', { name: 'Archive History audit' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /Restore History audit from document history/ })).not.toBeInTheDocument());
+  view.unmount();
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Document history' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Archived', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Unarchive History audit' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Active', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete History audit' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete draft' })).getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByRole('button', { name: /Restore History audit from document history/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Delete History audit' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete draft' })).getByRole('button', { name: 'Delete draft' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /Restore History audit from document history/ })).not.toBeInTheDocument());
+  expect(JSON.parse(window.localStorage.getItem(SCOPED_DRAFT_CACHE_KEY)!)).toEqual([]);
+});
+
+test('mode notch supports keyboard navigation', () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Document', exact: true }), { key: 'ArrowRight' });
+  expect(screen.getByRole('button', { name: 'Deck', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('returning from deck mode retains unsaved document edits', () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  const body = documentBody();
+  body.innerHTML = '<h1>Working draft</h1><p>Unsaved passage retained.</p>';
+  fireEvent.input(body);
+  fireEvent.click(screen.getByRole('button', { name: 'Deck', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: "Convert into slides" }));
+  fireEvent.click(screen.getByRole('button', { name: 'Document', exact: true }));
+  expect(documentText()).toContain('Unsaved passage retained.');
+  expect(screen.getByRole('button', { name: 'Save version' })).toBeEnabled();
+});
+
+test('browser download remains available when a save picker is exposed', async () => {
+  const downloads = installDownloadSpy();
+  const picker = vi.fn();
+  Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: picker });
+  try {
+    render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    documentBody().innerHTML = '<h1>Download check</h1><p>Exported content.</p>';
+    fireEvent.input(documentBody());
+    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    openExportDialog();
+    fireEvent.change(screen.getByLabelText('Export destination'), { target: { value: 'download' } });
+    fireEvent.click(screen.getByRole('button', { name: /Word document/ }));
+    await waitFor(() => expect(downloads.downloads).toHaveLength(1));
+    expect(picker).not.toHaveBeenCalled();
+  } finally { downloads.restore(); }
+});
+
+test('MLA layout repairs a saved paper without a provider call and can be undone', () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  const editor = documentBody();
+  editor.innerHTML = '<p>The validator has repeated findings.</p><p>[Student Name]</p><p>Teacher</p><p>History</p><p>[Date]</p><h2>River Crossing</h2><p>Keep this exact historical passage.</p>';
+  fireEvent.input(editor);
+  fireEvent.click(screen.getByRole('button', { name: 'Assistant settings' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply MLA layout' }));
+  expect(documentText()).not.toContain('validator');
+  expect(documentText()).toContain('Keep this exact historical passage.');
+  expect(documentBody().querySelector('.document-mla-body')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Undo document edit' }));
+  expect(documentText()).toContain('The validator has repeated findings.');
+});
+
+test.each(['document', 'deck'] as const)('copy %s reports denied clipboard access and succeeds on retry', async (mode) => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('Permission denied')).mockResolvedValueOnce(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    documentBody().innerHTML = '<h1>Copy verification</h1><p>Preserved passage.</p>';
+    fireEvent.input(documentBody());
+    if (mode === 'deck') {
+      fireEvent.click(screen.getByRole('button', { name: 'Deck', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Convert into slides' }));
+    }
+    const button = screen.getByRole('button', { name: mode === 'deck' ? 'Copy deck outline' : 'Copy document' });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Could not access the clipboard.'));
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(`${mode === 'deck' ? 'Deck outline' : 'Document'} copied to clipboard.`));
+    expect(writeText.mock.calls[1][0]).toContain('Preserved passage.');
+  } finally {
+    if (previous) Object.defineProperty(navigator, 'clipboard', previous);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});

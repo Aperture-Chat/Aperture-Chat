@@ -139,6 +139,7 @@ export async function printSavedDraftVersion(options: {
     const normalizedTitle = title.replace(/\s+/g, " ").trim();
     // Avoid printing the title twice when the document already opens with it.
     if (
+      !pages.querySelector(".document-mla-text") &&
       normalizedTitle &&
       firstHeadingText(pages).toLowerCase() !== normalizedTitle.toLowerCase()
     ) {

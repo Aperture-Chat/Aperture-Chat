@@ -70,6 +70,7 @@ from app.core.directives import (
     directive_prompt_block,
     directive_results,
     extract_directives,
+    extract_draft_directives,
     word_count as _word_count,
 )
 from app.core.dlp import scan_prompt
@@ -4020,6 +4021,7 @@ def _revision_messages(
             f"Validation findings:\n{issue_lines}\n\n"
             "Revise now by producing the actual complete deliverable, not an explanation of how to write it. "
             "Keep useful completed material, expand shallow sections into full prose, and continue until the requested work is satisfied. "
+            "Return only the document body. Never mention validators, findings, drafting rules, or your revision process in the deliverable. "
             "When images are requested, include markdown image blocks (![caption](https://...)) only for direct image URLs you can verify from the provided web results or sources — never construct, guess, or pattern-match an image URL. "
             "If no verifiable image URL is available, deliver the answer without images and add one short line noting that no verifiable image could be sourced for this reply."
         )
@@ -4259,7 +4261,8 @@ def _resolve_runtime_context(
     if _draft_inline_edit_parts(request) is not None or _draft_revision_parts(request) is not None:
         directives: list[Directive] = []
     else:
-        directives = extract_directives(retrieval_query, memory_context["standing_instructions"])
+        extract = extract_draft_directives if request.surface == "draft" else extract_directives
+        directives = extract(retrieval_query, memory_context["standing_instructions"])
     return {
         "surface": request.surface if request.surface in {"chat", "draft"} else "chat",
         "thread_id": request.thread_id,

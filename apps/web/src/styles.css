@@ -24452,3 +24452,77 @@ button.feedback-event-row.is-clickable:focus-visible {
 .document-model-menu .select-button {
   min-height: 42px;
 }
+
+/* Academic formatting survives pagination and is shared with print. */
+.document-canvas .document-mla-text,
+.draft-print-root .document-mla-text {
+  font-family: "Times New Roman", serif;
+  font-size: 12pt;
+  line-height: 2;
+  margin: 0;
+  font-weight: normal;
+  letter-spacing: normal;
+}
+.document-mla-title { text-align: center; }
+.document-mla-body { text-indent: .5in; }
+.document-mla-reference { padding-left: .5in; text-indent: -.5in; }
+.document-canvas.is-paginated .document-page:has(.document-mla-text) { padding: 1in; }
+@media print {
+  @page draft-mla { size: letter; margin: 1in; }
+  .draft-print-root:has(.document-mla-text) { page: draft-mla; }
+  body.is-draft-printing .draft-print-root .document-page:has(.document-mla-text) { padding: 0; }
+}
+
+/* A tactile two-stop rail: the lit inset follows the selected workspace. */
+.document-assistant-page .deck-mode-switch {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  gap: 0;
+  border-radius: 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-strong);
+  box-shadow: inset 0 2px 5px #0003;
+  touch-action: pan-y;
+}
+.document-assistant-page .deck-mode-switch::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 4px auto 4px 4px;
+  width: calc(50% - 4px);
+  border-radius: 10px;
+  background: linear-gradient(160deg, var(--teal), color-mix(in srgb, var(--teal) 60%, #052e35));
+  border: 1px solid #ffffff35;
+  box-shadow: 0 2px 8px #0003, inset 0 1px #ffffff40;
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1);
+}
+.document-assistant-page .deck-mode-switch[data-mode="deck"]::before { transform: translateX(100%); }
+.document-assistant-page .deck-mode-switch button,
+.document-assistant-page .deck-mode-switch button.is-active {
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 10px;
+  min-height: 34px;
+  color: var(--muted);
+}
+.document-assistant-page .deck-mode-switch button.is-active { color: white; }
+.document-assistant-page .deck-mode-switch button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+.draft-history-entry { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: 0 0 auto; }
+.draft-history-entry .draft-history-document-card { border: 0; border-radius: 0; }
+.draft-history-actions, .draft-history-filter { display: flex; gap: 6px; padding: 6px 10px; }
+.draft-history-actions button, .draft-history-filter button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; font-size: 11px; color: var(--muted); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 7px; }
+.draft-history-filter button[aria-pressed="true"] { color: var(--text); border-color: var(--teal); }
+.draft-history-preview { position: fixed; z-index: 100; width: min(300px, calc(100vw - 40px)); pointer-events: none; border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 32px #0004; padding: 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.draft-history-preview p { font-family: Georgia, serif; font-size: 12px; line-height: 1.5; color: var(--text); margin: 6px 0 0; max-height: 150px; overflow: auto; white-space: pre-wrap; }
+@media (prefers-reduced-motion: reduce) {
+  .document-assistant-page .deck-mode-switch::before { transition: none; }
+}
+.document-export-destination { display: flex; align-items: center; gap: 10px; margin: 10px 0; color: var(--muted); font-size: 12px; }
+.document-export-destination select { flex: 1; min-width: 0; color: var(--text); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+/* Wrapped history cards must retain their content height in the scroll grid. */
+.draft-document-history-list { grid-auto-rows: max-content; align-content: start; }

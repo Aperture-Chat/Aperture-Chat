@@ -1,3 +1,5 @@
+import { DraftHistoryCard } from "./DraftHistoryCard";
+import { formatMlaDocument } from "../lib/draftMla";
 import { DictationControl } from "./DictationControl";
 import { DraftModelMenu } from "./DraftModelMenu";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
@@ -105,6 +107,8 @@ import {
   type RedlineRow,
 } from "../lib/draftRedline";
 import {
+  archiveDraft,
+  deleteDraft,
   createDraft,
   getDraft,
   isDraftConflictError,
@@ -1155,6 +1159,7 @@ export function DocumentAssistantWorkspace({
   const aiEditGlowTimerRef = useRef<number | null>(null);
   const [activeAssistantTool, setActiveAssistantTool] = useState<AssistantTool | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportDelivery, setExportDelivery] = useState<ExportDelivery>("picker");
   const [pendingSaveExportFormat, setPendingSaveExportFormat] = useState<ExportAction | null>(null);
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
   const [lastExport, setLastExport] = useState<ExportReceipt | null>(null);
@@ -1200,6 +1205,13 @@ export function DocumentAssistantWorkspace({
   const [documentHistory, setDocumentHistory] = useState<DraftDocumentHistoryItem[]>(
     () => markInterruptedDraftRuns(loadDraftDocumentHistory(draftScope)),
   );
+  const historyMutationGenerationRef = useRef(0);
+  const modeDragStartRef = useRef<number | null>(null);
+  const [showArchivedDrafts, setShowArchivedDrafts] = useState(false);
+  const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
+  const [historyDeleteTarget, setHistoryDeleteTarget] = useState<DraftDocumentHistoryItem | null>(null);
+  const historyDeleteRef = useRef<HTMLElement | null>(null);
+  useModalFocus(historyDeleteRef, historyDeleteTarget !== null, () => setHistoryDeleteTarget(null));
   // Quarantined read-only view of the pre-scoping browser history. These
   // entries may belong to someone else who used this browser; they are shown
   // separately and NEVER uploaded without an explicit per-entry confirmation.
@@ -1593,9 +1605,10 @@ export function DocumentAssistantWorkspace({
   // one; cache-only entries stay visible and are labelled "Local only".
   useEffect(() => {
     let active = true;
+    const generation = historyMutationGenerationRef.current;
     listDrafts(completionUserId, { tenantSlug: draftTenantSlug })
       .then((serverDrafts) => {
-        if (!active) return;
+        if (!active || generation !== historyMutationGenerationRef.current) return;
         const merged = mergeServerDraftsIntoCache(
           documentHistoryRef.current,
           serverDrafts,
@@ -3833,8 +3846,7 @@ export function DocumentAssistantWorkspace({
   function copyDeckOutline() {
     const deck = flushDeckTextEdits();
     if (!deck) return;
-    void navigator.clipboard?.writeText(markdownOutlineFromDeck(deck));
-    setStatus("Deck outline copied to clipboard.");
+    void copyToClipboard(markdownOutlineFromDeck(deck), "Deck outline");
   }
 
   function appendDeckVersion(deck: SlideDeck, summary: string) {
@@ -3881,7 +3893,7 @@ export function DocumentAssistantWorkspace({
   }
 
   function switchDraftMode(mode: "document" | "deck") {
-    if (mode === draftKind) return;
+    if (mode === draftKind || assistantWorking) return;
     setMobileFormattingExpanded(false);
     if (mode === "document") {
       endDeckEditSession();
@@ -3891,7 +3903,8 @@ export function DocumentAssistantWorkspace({
         .find((version) => version.format !== "deck" && !contentLooksLikeDeck(version.content));
       if (latestDocumentVersion && latestDocumentVersion.id !== selectedVersionId) {
         setSelectedVersionId(latestDocumentVersion.id);
-        setContent(latestDocumentVersion.content);
+        // Deck mode never changes the document buffer. Preserve unsaved edits
+        // instead of replacing them with the latest saved document version.
       }
       setStatus("Document editor active. Your deck is kept — switch back anytime.");
       return;
@@ -4447,6 +4460,55 @@ export function DocumentAssistantWorkspace({
     }
   }
 
+  async function previewHistoryItem(item: DraftDocumentHistoryItem) {
+    const html = item.serverId && (!item.content || item.serverContentStale)
+      ? (await getDraft(completionUserId, item.serverId, { tenantSlug: draftTenantSlug })).revision.content
+      : item.content;
+    const parsed = parseSlideDeck(html);
+    return parsed.ok ? markdownOutlineFromDeck(parsed.deck).slice(0, 700) : documentHtmlToText(sanitizeDocumentHtml(html)).slice(0, 700) || "This draft has no content yet.";
+  }
+
+  async function changeHistoryItem(item: DraftDocumentHistoryItem, remove: boolean) {
+    if (historyBusyId || item.status === "running" || item.serverSavePending || assistantWorking) return;
+    setHistoryBusyId(item.id);
+    try {
+      if (item.serverId) {
+        const revision = item.serverRevision ?? item.serverListedRevision;
+        if (!revision) throw new Error("Reopen the draft before changing history.");
+        if (remove) await deleteDraft(completionUserId, item.serverId, revision, { tenantSlug: draftTenantSlug });
+        else await archiveDraft(completionUserId, item.serverId, revision, !item.archived, { tenantSlug: draftTenantSlug });
+      }
+      const next = remove
+        ? documentHistoryRef.current.filter(entry => entry.id !== item.id && (!item.serverId || entry.serverId !== item.serverId))
+        : documentHistoryRef.current.map(entry => entry.id === item.id || (item.serverId && entry.serverId === item.serverId) ? { ...entry, archived: !item.archived } : entry);
+      if (!item.serverId && !saveScopedDraftCache(draftScope, next)) {
+        setStatus("Browser storage could not save the history change. Please retry.");
+        return;
+      }
+      historyMutationGenerationRef.current += 1;
+      if (!saveDraftDocumentHistory(draftScope, next)) {
+        setStatus(item.serverId ? "Account updated, but browser history could not be updated. Reload to refresh it." : "Browser storage could not save the history change. Please retry.");
+        return;
+      }
+      documentHistoryRef.current = next;
+      setDocumentHistory(next);
+      if (remove && serverDraftRef.current.historyId === item.id) {
+        serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
+        setActiveHistoryItemId(null);
+        setSavedDocumentTitle("");
+        setServerSaveState({ kind: "local-only", message: "The account draft was deleted. Save a version to keep this working copy as a new draft." });
+      }
+      if (remove && deckHistoryIdRef.current === item.id) {
+        deckHistoryIdRef.current = createDraftHistoryId();
+        setSavedDocumentTitle("");
+      }
+      setHistoryDeleteTarget(null);
+      setStatus(remove ? "Draft deleted from history. The open editor remains available as a working copy." : item.archived ? "Draft returned to history." : "Draft archived. Open Archived to restore it.");
+    } catch (error) {
+      setStatus(isDraftConflictError(error) ? "This draft changed elsewhere. Reopen it before changing its history." : "Could not update draft history. Your draft was kept; please retry.");
+    } finally { setHistoryBusyId(null); }
+  }
+
   /** Explicit, per-entry legacy import. Runs only after the user has seen the
    * quarantine scope copy and confirmed the exact account it uploads into. */
   async function importLegacyDraftToAccount(item: DraftDocumentHistoryItem) {
@@ -4873,7 +4935,7 @@ export function DocumentAssistantWorkspace({
         );
       }
       let nextContentHtml = paginateTransferredDocumentHtml(
-        documentHtmlFromMarkdown(markdownWithSources),
+        formatMlaDocument(documentHtmlFromMarkdown(markdownWithSources), requestText),
         `${requestText}\n\n${reply.content}`,
       );
       if (!isAutomatedTestMode()) {
@@ -5173,7 +5235,7 @@ export function DocumentAssistantWorkspace({
         revisionSnapshot.assets,
       );
       let revisedHtml = paginateTransferredDocumentHtml(
-        restoredRevisionHtml,
+        formatMlaDocument(restoredRevisionHtml, `${request} ${sourceHtml.includes("document-mla-text") ? "MLA" : ""}`),
         `${documentTitle}\n\n${reply.content}`,
       );
       if (!isAutomatedTestMode()) {
@@ -5489,14 +5551,14 @@ export function DocumentAssistantWorkspace({
     }
     const plainText = exportDeck
       ? markdownOutlineFromDeck(exportDeck)
-      : exportDocumentBody(documentTitle, documentHtmlToText(content));
+      : exportDocumentBody(content.includes("document-mla-text") ? "" : documentTitle, documentHtmlToText(content));
     const normalizedTitle = documentTitle.trim() || "Draft";
     const descriptor = exportFileDescriptor(format, { codeArtifact, normalizedTitle });
     if (!descriptor) {
       setStatus("No generated code file is available to export.");
       return;
     }
-    const preferredDelivery = delivery ?? (canUseFileSavePicker() ? "picker" : "download");
+    const preferredDelivery = delivery ?? (canUseFileSavePicker() ? exportDelivery : "download");
     const versionIdAtExport = selectedVersionId;
     const buildCurrentExport = async () => {
       let exportHtml = content;
@@ -5596,10 +5658,20 @@ export function DocumentAssistantWorkspace({
   }
 
   function copyDocument() {
-    void navigator.clipboard?.writeText(
-      exportDocumentBody(documentTitle, documentHtmlToText(content)),
+    void copyToClipboard(
+      exportDocumentBody(content.includes("document-mla-text") ? "" : documentTitle, documentHtmlToText(content)),
+      "Document",
     );
-    setStatus("Document copied to clipboard.");
+  }
+
+  async function copyToClipboard(text: string, label: string) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      setStatus(`${label} copied to clipboard.`);
+    } catch {
+      setStatus("Could not access the clipboard. Allow clipboard access or export the content instead.");
+    }
   }
 
   function triggerAttachFiles() {
@@ -5847,6 +5919,18 @@ export function DocumentAssistantWorkspace({
     setShowEdits(true);
     setStatus("Redo applied.");
     window.setTimeout(() => editorRef.current?.focus(), 0);
+  }
+
+  function applyMlaLayout() {
+    const original = editorRef.current?.innerHTML ?? content;
+    const root = document.createElement("template");
+    root.innerHTML = original;
+    mergeSplitContinuationBlocks(root.content);
+    root.content.querySelectorAll(".document-page-label").forEach(node => node.remove());
+    root.content.querySelectorAll("section.document-page").forEach(node => node.replaceWith(...Array.from(node.childNodes)));
+    recordUndoSnapshot(original);
+    setContent(paginateTransferredDocumentHtml(formatMlaDocument(sanitizeDocumentHtml(root.innerHTML), "MLA"), "MLA"));
+    setStatus("MLA layout applied: double spacing, 12-point Times New Roman, and a centered title. Save a version to keep it.");
   }
 
   function commitEditorHtml(label: string) {
@@ -6528,6 +6612,16 @@ export function DocumentAssistantWorkspace({
         railIsDrawer && railOpen ? "rail-drawer-open" : ""
       } ${draftKind === "deck" ? "is-deck-mode" : ""}`}
     >
+      {historyDeleteTarget && (
+        <div className="modal-backdrop">
+          <section className="modal confirm-dialog" tabIndex={-1} ref={historyDeleteRef} role="dialog" aria-modal="true" aria-label="Delete draft">
+            <h2>Delete {historyDeleteTarget.title}?</h2>
+            <p>This removes this draft and its saved revisions from {historyDeleteTarget.serverId ? "your account and this browser" : "this browser"}. This cannot be undone. Archive it to keep it for later.</p>
+            <button type="button" disabled={Boolean(historyBusyId)} onClick={() => setHistoryDeleteTarget(null)}>Cancel</button>
+            <button type="button" disabled={Boolean(historyBusyId)} onClick={() => void changeHistoryItem(historyDeleteTarget, true)}>Delete draft</button>
+          </section>
+        </div>
+      )}
       {pendingDraftNavigation && createPortal(
         <div className="modal-backdrop" role="presentation" onClick={() => setPendingDraftNavigation(null)}>
           <section
@@ -7007,6 +7101,12 @@ export function DocumentAssistantWorkspace({
 
               {activeAssistantTool === "settings" && (
                 <div className="draft-settings-panel" aria-label="Assistant drafting settings">
+                  {draftKind === "document" && (
+                    <button type="button" disabled={assistantWorking || !content.trim()} onClick={applyMlaLayout}
+                      data-tooltip="Apply MLA spacing and typography to this paper; keep its text and make the change undoable">
+                      Apply MLA layout
+                    </button>
+                  )}
                   <label className="draft-setting-field">
                     <span>Drafting agent</span>
                     <SelectControl
@@ -7047,44 +7147,31 @@ export function DocumentAssistantWorkspace({
                 <div className="draft-history-panel" aria-label="Draft history">
                   <div className="draft-history-section">
                     <strong className="draft-history-section-title">Document history</strong>
+                    <div className="draft-history-filter" role="group" aria-label="History filter">
+                      <button type="button" aria-pressed={!showArchivedDrafts} onClick={() => setShowArchivedDrafts(false)}>Active</button>
+                      <button type="button" aria-pressed={showArchivedDrafts} onClick={() => setShowArchivedDrafts(true)}>Archived</button>
+                    </div>
                     {serverListNotice && (
                       <p className="draft-history-empty" role="status">
                         {serverListNotice}
                       </p>
                     )}
-                    {documentHistory.length === 0 ? (
+                    {documentHistory.filter(item => Boolean(item.archived) === showArchivedDrafts).length === 0 ? (
                       <p className="draft-history-empty">
-                        Saved documents will appear here after you draft or save them.
+                        {showArchivedDrafts ? "No archived drafts." : "Saved documents will appear here after you draft or save them."}
                       </p>
                     ) : (
                       <div className="draft-document-history-list">
-                        {documentHistory.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={`draft-history-document-card is-${item.status ?? "complete"}`}
-                            aria-label={`Restore ${item.title} from document history (${draftHistoryStatusLabel(item)})`}
-                            data-tooltip={`Reopen ${item.title} in the editor to keep working on it`}
-                            onClick={() => void restoreDocumentHistoryItem(item)}
-                          >
-                            <span>
-                              <strong>{item.title}</strong>
-                              <small
-                                className={`draft-history-status is-${
-                                  item.status === "running" || item.status === "failed"
-                                    ? item.status
-                                    : item.serverId && !item.serverSavePending
-                                      ? "complete"
-                                      : "local-only"
-                                }`}
-                              >
-                                {draftHistoryStatusLabel(item)}
-                              </small>
-                              <small>{item.summary}</small>
-                              <small>{item.sourceLabel}</small>
-                            </span>
-                            <time>{formatHistoryTimestamp(item.updatedAt)}</time>
-                          </button>
+                        {documentHistory.filter(item => Boolean(item.archived) === showArchivedDrafts).map((item) => (
+                          <DraftHistoryCard key={`${item.id}:${item.updatedAt}:${item.serverContentStale}`}
+                            title={item.title} summary={item.summary} source={item.sourceLabel}
+                            time={formatHistoryTimestamp(item.updatedAt)} status={draftHistoryStatusLabel(item)}
+                            archived={Boolean(item.archived)}
+                            disabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverSavePending) || assistantWorking}
+                            onRestore={() => void restoreDocumentHistoryItem(item)}
+                            onArchive={() => void changeHistoryItem(item, false)}
+                            onDelete={() => setHistoryDeleteTarget(item)}
+                            loadPreview={() => previewHistoryItem(item)} />
                         ))}
                       </div>
                     )}
@@ -7435,12 +7522,26 @@ export function DocumentAssistantWorkspace({
               )}
               <div
                 className="segmented-control deck-mode-switch"
+                data-mode={draftKind}
+                onPointerDown={event => { modeDragStartRef.current = event.clientX; }}
+                onPointerUp={event => {
+                  const start = modeDragStartRef.current;
+                  modeDragStartRef.current = null;
+                  if (start !== null && Math.abs(event.clientX - start) > 24) switchDraftMode(event.clientX > start ? "deck" : "document");
+                }}
+                onPointerCancel={() => { modeDragStartRef.current = null; }}
+                onKeyDown={event => {
+                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                    event.preventDefault(); switchDraftMode(event.key === "ArrowRight" ? "deck" : "document");
+                  }
+                }}
                 role="group"
                 aria-label="Draft format"
               >
                 <button
                   type="button"
                   className={draftKind === "document" ? "is-active" : ""}
+                  disabled={assistantWorking}
                   aria-pressed={draftKind === "document"}
                   data-tooltip="Edit this draft as a written document"
                   onClick={() => switchDraftMode("document")}
@@ -7451,6 +7552,7 @@ export function DocumentAssistantWorkspace({
                 <button
                   type="button"
                   className={draftKind === "deck" ? "is-active" : ""}
+                  disabled={assistantWorking}
                   aria-pressed={draftKind === "deck"}
                   data-tooltip="Edit this draft as PowerPoint slides"
                   onClick={() => switchDraftMode("deck")}
@@ -7672,6 +7774,16 @@ export function DocumentAssistantWorkspace({
                       <X size={15} />
                     </button>
                   </div>
+                  {canChooseExportLocation && (
+                    <label className="document-export-destination">Save to
+                      <select aria-label="Export destination" value={exportDelivery}
+                        disabled={Boolean(exportingFormat)}
+                        onChange={event => setExportDelivery(event.target.value as ExportDelivery)}>
+                        <option value="picker">Choose a location</option>
+                        <option value="download">Browser downloads</option>
+                      </select>
+                    </label>
+                  )}
                   <div
                     className="document-export-options"
                     aria-label="Export formats"
@@ -9943,6 +10055,7 @@ function providerDraftPrompt(
       ? `Draft type: ${template.name}`
       : `Draft type: taken from the user request, not from a starter template. Ignore any unrelated document type you might infer from the workspace.`,
     `Drafting agent: ${context.agentName}`,
+    ...( /\bMLA\b/i.test(request) ? ["MLA format: start with the student name, instructor, course, and date on four lines. Use placeholders for missing details. Then a centered plain title, essay body, and Works Cited. No prefatory commentary or separate title page. Use author-page citations; do not add a second Sources appendix."] : []),
     "Write the complete requested document, not an outline or plan.",
     "Return only editable Markdown for the document body.",
     "Do not wrap the document in a code fence (```); output the Markdown directly.",
@@ -9997,6 +10110,7 @@ function providerRevisionPrompt(
     `Document title: ${documentTitle}`,
     `Revision request: ${request}`,
     `Drafting agent: ${context.agentName}`,
+    ...( /\bMLA\b/i.test(request) ? ["MLA format: start with the student name, instructor, course, and date on four lines. Use placeholders for missing details. Then a centered plain title, essay body, and Works Cited. No prefatory commentary or separate title page. Use author-page citations; do not add a second Sources appendix."] : []),
     "Revise the current document as the deliverable. Return only editable Markdown for the revised document body.",
     "Do not describe what should be changed; make the changes directly.",
     "This is an in-place transformation of a populated document, not permission to draft a substitute. Preserve every factual claim, supporting detail, quotation, citation, footnote, note, table, list, image, and hyperlink unless the user's request explicitly changes or removes that content.",
@@ -10072,6 +10186,7 @@ function escapeRegExp(value: string) {
 }
 
 function appendWebCitationList(content: string, citations: ChatCitation[]) {
+  if (/^#{0,3}\s*Works? Cited\s*$/im.test(content)) return content;
   const webCitations = citations.filter(
     (citation) => citation.source_type === "web" && citation.source_uri,
   );
@@ -10079,8 +10194,8 @@ function appendWebCitationList(content: string, citations: ChatCitation[]) {
   const sourceList = webCitations
     .slice(0, 10)
     .map((citation, index) => {
-      const sourceName = citation.source_name || citation.source_uri;
-      const snippet = citation.snippet ? ` - ${citation.snippet}` : "";
+      const sourceName = (citation.source_name || citation.source_uri || "Source").replace(/[|\[\]]/g, " ");
+      const snippet = citation.snippet ? ` - ${citation.snippet.replace(/\|/g, " ")}` : "";
       return `${index + 1}. [${sourceName}](${citation.source_uri})${snippet}`;
     })
     .join("\n");
@@ -10820,6 +10935,7 @@ function paginateTransferredDocumentHtml(
   const structuralMarkers =
     segments.length > 1 &&
     (options?.forceMarkerPages === true ||
+      html.includes("document-mla-text") ||
       segments.length > 2 ||
       requestedPages > 1 ||
       estimatedPages > 1);
@@ -11659,8 +11775,10 @@ function serverDraftHistoryStub(doc: ServerDraftDocument): DraftDocumentHistoryI
     updatedAt: doc.updated_at,
     createdAt: doc.created_at,
     status: "complete",
+    archived: doc.archived ?? false,
     serverId: doc.id,
     serverRevision: null,
+    serverListedRevision: doc.current_revision,
     serverContentStale: true,
   };
 }
@@ -11772,6 +11890,7 @@ function upsertDraftDocumentHistory(
   const nextItem: DraftDocumentHistoryItem = {
     id,
     title,
+    archived: existing?.archived ?? false,
     summary: snapshot.summary,
     sourceLabel: snapshot.sourceLabel,
     content: snapshot.content,
@@ -13670,7 +13789,7 @@ async function buildExportBlob(
     // The deck outline already opens with the deck title.
     return new Blob([plainText], { type: "text/markdown;charset=utf-8" });
   }
-  return new Blob([buildMarkdownExport(normalizedTitle, plainText)], {
+  return new Blob([buildMarkdownExport(contentHtml.includes("document-mla-text") ? "" : normalizedTitle, plainText)], {
     type: "text/markdown;charset=utf-8",
   });
 }

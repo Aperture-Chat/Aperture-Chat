@@ -235,7 +235,7 @@ test("global New chat navigation preserves an unsaved draft recovery copy", asyn
 
   fireEvent.click(screen.getByRole("button", { name: "Drafts" }));
   fireEvent.click((await screen.findAllByRole("button", { name: "Document history" }))[0]);
-  fireEvent.click(await screen.findByRole("button", { name: /Research notes \(unsaved copy\)/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Research notes \(unsaved copy\) from document history/ }));
   expect(await screen.findByRole("textbox", { name: "Document body" })).toHaveTextContent("Keep this draft when starting a chat.");
 });
 

@@ -1071,3 +1071,18 @@ def test_memories_follow_their_owner_across_tenant_moves() -> None:
     # Stranded rows would be invisible to both tenants' admins and would
     # hard-fail the SQLite-to-Postgres importer's cross-tenant check.
     assert store.user_memories[memory.id].tenant_id == "tenant-other"
+
+
+def test_mla_parentheticals_and_works_cited_satisfy_sources_without_urls():
+    directives = extract_directives("Cite sources in this MLA essay.")
+    assert directive_issues(directives, "The campaign changed (Fischer 42).\n\n## Works Cited\n\nFischer, David Hackett. Washington's Crossing. Oxford University Press, 2004.") == []
+    assert directive_issues(directives, "## Works Cited\n")
+
+
+def test_draft_rules_never_become_user_requirements():
+    from app.core.directives import extract_draft_directives
+    wrapped = "User request: Write an MLA essay on Washington crossing the Delaware.\n\nDraft type: Research paper\n\nInclude a code block only when asked for code. Use tables and images when appropriate. Cite sources."
+    assert extract_draft_directives(wrapped) == []
+    requested = wrapped.replace("Write an MLA essay", "Include images and write an MLA essay")
+    assert [d.id for d in extract_draft_directives(requested)] == ["images"]
+    assert extract_draft_directives("You are a presentation writer producing a slide deck as structured JSON. Include image slides.") == []

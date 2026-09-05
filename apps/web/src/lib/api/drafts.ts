@@ -35,6 +35,7 @@ export type DraftDocument = {
   matter_id: string | null;
   title: string;
   /** CAS token — send back as expected_revision on every update. */
+  archived?: boolean;
   current_revision: number;
   created_at: string;
   updated_at: string;
@@ -176,4 +177,16 @@ export function getDraftCapacity(
     `/api/drafts/${pathId(draftId)}/capacity`,
     { signal: options.signal, headers: draftHeaders(options) },
   );
+}
+
+export function archiveDraft(userId: string, draftId: string, revision: number, archived: boolean, options: DraftRequestOptions = {}) {
+  return apiRequest<DraftDocument>(userId, `/api/drafts/${pathId(draftId)}/archive?expected_revision=${revision}&archived=${archived}`, {
+    method: "PATCH", headers: draftHeaders(options), signal: options.signal,
+  });
+}
+
+export function deleteDraft(userId: string, draftId: string, revision: number, options: DraftRequestOptions = {}) {
+  return apiRequest<DraftDocument>(userId, `/api/drafts/${pathId(draftId)}?expected_revision=${revision}`, {
+    method: "DELETE", headers: draftHeaders(options), signal: options.signal,
+  });
 }
