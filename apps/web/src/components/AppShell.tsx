@@ -38,7 +38,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
 
@@ -65,10 +65,13 @@ import { getMyUsageBudget, type MyUsageBudget } from "../lib/api/auth";
 import { isBlankNewChat } from "../lib/chatStore";
 import { usableModels } from "../lib/modelAccess";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
+import { useModalFocus } from "../lib/useModalFocus";
 import { CommandPalette } from "./CommandPalette";
 import { ChatPreview } from "./ChatPreview";
+import { PlatformUpdateRow } from "./PlatformUpdateRow";
 import { Logo } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
+import { AccountSecurity } from "./AccountSecurity";
 import {
   isThreadUnread,
   loadReadState,
@@ -220,7 +223,13 @@ const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
  * uploads are downscaled before storing. 512px covers retina rendering. */
 const PROFILE_PHOTO_MAX_EDGE = 512;
 
-export function AppShell({
+export function AppShell(props: ComponentProps<typeof UserAppShell>) {
+  // A new identity gets fresh local state before persistence effects run.
+  // Otherwise the old user's folders/read markers can overwrite the new user's.
+  return <UserAppShell key={props.data.me.id} {...props} />;
+}
+
+function UserAppShell({
   data,
   actualRole,
   viewAsRole,
@@ -243,6 +252,7 @@ export function AppShell({
   onDeleteThread,
   onMoveThreadToFolder,
   onSignOut,
+  onRequestSignOut,
   onProfileUpdate,
   onPasswordUpdate,
   onApiKeyLoad,
@@ -277,6 +287,8 @@ export function AppShell({
   onDeleteThread: (id: string) => void;
   onMoveThreadToFolder: (id: string, folderId: string | null) => void;
   onSignOut?: () => void;
+  /** Voluntary sign-out may first preserve unfinished workspace edits. */
+  onRequestSignOut?: () => void;
   onProfileUpdate?: (payload: AccountProfileUpdateRequest) => void | User | Promise<User | void>;
   onPasswordUpdate?: (payload: AccountPasswordUpdateRequest) => void | Promise<void>;
   onApiKeyLoad?: () => Promise<AccountApiKeyStatus>;
@@ -301,6 +313,12 @@ export function AppShell({
   const [isResizing, setIsResizing] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [drawer, setDrawer] = useState<UtilityDrawerKey | null>(null);
+  const [securityCloseBlocked, setSecurityCloseBlocked] = useState(false);
+  const securityCloseBlockedRef = useRef(false);
+  const updateSecurityCloseGuard = (blocked: boolean) => {
+    securityCloseBlockedRef.current = blocked;
+    setSecurityCloseBlocked(blocked);
+  };
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [chatsExpanded, setChatsExpanded] = useState(false);
   const [foldersExpanded, setFoldersExpanded] = useState(false);
@@ -319,11 +337,13 @@ export function AppShell({
   const [folderMenuThreadId, setFolderMenuThreadId] = useState<string | null>(null);
   const [pendingFolderThreadId, setPendingFolderThreadId] = useState<string | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
 
   const width = useViewportWidth();
   const isDrawer = width <= BREAKPOINTS.drawer;
   const autoCollapsed = currentView === "drafts";
   const collapsed = (isRailCollapsed || autoCollapsed) && !isDrawer;
+  useModalFocus(sidebarRef, isDrawer && navOpen, () => setNavOpen(false));
 
   // The active blank "New chat" is the empty-state landing, not a list entry.
   const activeChats = threads.filter((session) => !isBlankNewChat(session) && !session.archived);
@@ -455,6 +475,7 @@ export function AppShell({
 
   useEffect(() => {
     if (!openHelpRequestKey) return;
+    if (securityCloseBlockedRef.current) return;
     setDrawer("help");
     setNavOpen(false);
   }, [openHelpRequestKey]);
@@ -462,8 +483,10 @@ export function AppShell({
   // Cmd/Ctrl+K toggles the global search palette from anywhere in the shell.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
       if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === "k" || event.key === "K")) {
         event.preventDefault();
+        if (securityCloseBlockedRef.current) return;
         setPaletteOpen((open) => !open);
         setDrawer(null);
         setNavOpen(false);
@@ -476,17 +499,20 @@ export function AppShell({
   const closeDrawer = () => setNavOpen(false);
 
   const openUtilityDrawer = (nextDrawer: UtilityDrawerKey) => {
+    if (securityCloseBlockedRef.current) return;
     setDrawer(nextDrawer);
     closeDrawer();
   };
 
   const handleSelectView = (view: ViewKey) => {
+    if (securityCloseBlockedRef.current) return;
     onViewChange(view);
     setDrawer(null);
     closeDrawer();
   };
 
   const handleOpenChat = (id: string) => {
+    if (securityCloseBlockedRef.current) return;
     const opened = threads.find((thread) => thread.id === id);
     if (opened) setChatReadState((current) => markThreadRead(current, opened));
     onOpenChat(id);
@@ -495,12 +521,14 @@ export function AppShell({
   };
 
   const handleNewChat = () => {
+    if (securityCloseBlockedRef.current) return;
     onNewChat();
     setDrawer(null);
     closeDrawer();
   };
 
   const openPalette = () => {
+    if (securityCloseBlockedRef.current) return;
     setPaletteOpen(true);
     setDrawer(null);
     closeDrawer();
@@ -513,6 +541,7 @@ export function AppShell({
    * honestly instead of faking a landing page.
    */
   const handlePaletteNavigate = (navigation: SearchNavigation): boolean => {
+    if (securityCloseBlockedRef.current) return false;
     const view = navigation.view;
     if (view === "chat") {
       const threadId = navigation.thread_id;
@@ -851,6 +880,7 @@ export function AppShell({
         } as CSSProperties
       }
     >
+      <a className="skip-link" href="#workspace-content">Skip to workspace</a>
       {isDrawer && (
         <button
           type="button"
@@ -858,6 +888,8 @@ export function AppShell({
           aria-label={navOpen ? "Close menu" : "Open menu"}
           data-tooltip={navOpen ? "Hide the navigation menu and return to your work" : "Open the menu to switch views and find your chats"}
           aria-expanded={navOpen}
+          aria-controls="workspace-navigation"
+          inert={Boolean(drawer || paletteOpen || memoryOpen)}
           onClick={() => setNavOpen((value) => !value)}
         >
           <Menu size={18} />
@@ -873,13 +905,27 @@ export function AppShell({
         />
       )}
 
-      <aside className={clsx("sidebar", darkRail && "sidebar-dark", collapsed && "is-collapsed")}>
+      <aside
+        id="workspace-navigation"
+        ref={sidebarRef}
+        className={clsx("sidebar", darkRail && "sidebar-dark", collapsed && "is-collapsed")}
+        role={isDrawer && navOpen ? "dialog" : undefined}
+        aria-modal={isDrawer && navOpen ? true : undefined}
+        aria-label={isDrawer && navOpen ? "Navigation" : undefined}
+        inert={Boolean((isDrawer && !navOpen) || drawer || paletteOpen || memoryOpen)}
+        tabIndex={-1}
+      >
         <div className="sidebar-top">
           <Logo
             compact={collapsed}
             brandName={data.currentTenant.chat_brand_name ?? "Aperture Chat"}
             logoUrl={data.currentTenant.icon_url || data.currentTenant.logo_url}
           />
+          {isDrawer && (
+            <button className="icon-button" type="button" aria-label="Close navigation" onClick={closeDrawer}>
+              <X size={18} />
+            </button>
+          )}
           {!isDrawer && !autoCollapsed && (
             <button
               className="icon-button sidebar-collapse-button"
@@ -903,6 +949,8 @@ export function AppShell({
               key={key}
               className={clsx("nav-item", currentView === key && "is-active")}
               type="button"
+              aria-label={label}
+              aria-current={currentView === key ? "page" : undefined}
               data-tooltip={NAV_TOOLTIPS[key]}
               onClick={() => (key === "chat" ? handleNewChat() : handleSelectView(key))}
             >
@@ -1086,9 +1134,11 @@ export function AppShell({
 
         <div className="sidebar-bottom">
           <div className="utility-rows">
+            <PlatformUpdateRow userId={data.me.id} enabled={data.me.role === "PLATFORM_OWNER"} />
             <button
               className="minor-row"
               type="button"
+              aria-label="Search"
               data-tooltip="Search previous chats, including archived, plus agents, drafts, and indexed documents (Ctrl/⌘ K)"
               onClick={openPalette}
             >
@@ -1098,6 +1148,7 @@ export function AppShell({
             <button
               className="minor-row"
               type="button"
+              aria-label="Help"
               data-tooltip="Get guidance on knowledge sources and agent workflows"
               onClick={() => openUtilityDrawer("help")}
             >
@@ -1107,6 +1158,7 @@ export function AppShell({
             <button
               className="minor-row"
               type="button"
+              aria-label={darkMode ? "Light mode" : "Dark mode"}
               data-tooltip="Switch between light and dark appearance"
               onClick={onToggleDarkMode}
             >
@@ -1117,6 +1169,7 @@ export function AppShell({
               <button
                 className="minor-row"
                 type="button"
+                aria-label="Install app"
                 data-tooltip="Add this workspace to your phone's home screen"
                 onClick={onOpenPwaInstall}
               >
@@ -1146,7 +1199,17 @@ export function AppShell({
           className="sidebar-resize-handle"
           type="button"
           aria-label="Resize sidebar"
-          data-tooltip="Drag to resize the sidebar, or double-click to collapse it"
+          data-tooltip="Drag or use arrow keys to resize. Double-click to collapse."
+          aria-description={`${visibleRailWidth} pixels wide. Use arrow keys to resize, Home for minimum width, or End for maximum width.`}
+          onKeyDown={(event) => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const nextWidth = event.key === "Home" ? MIN_RAIL_WIDTH : event.key === "End" ? MAX_RAIL_WIDTH :
+              Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, railWidth + (event.key === "ArrowRight" ? 16 : -16)));
+            setIsRailCollapsed(false);
+            setRailWidth(nextWidth);
+            saveRailWidth(nextWidth);
+          }}
           onDoubleClick={() => setIsRailCollapsed((value) => !value)}
           onMouseDown={(event) => {
             event.preventDefault();
@@ -1154,7 +1217,7 @@ export function AppShell({
           }}
         />
       </aside>
-      <main className="main-surface">{children}</main>
+      <main id="workspace-content" tabIndex={-1} className="main-surface" inert={Boolean((isDrawer && navOpen) || drawer || paletteOpen || memoryOpen)}>{children}</main>
       {paletteOpen && (
         <CommandPalette
           userId={data.me.id}
@@ -1187,7 +1250,9 @@ export function AppShell({
           folders={folders}
           darkMode={darkMode}
           onToggleDarkMode={onToggleDarkMode}
-          onClose={() => setDrawer(null)}
+          onClose={() => { if (!securityCloseBlockedRef.current) setDrawer(null); }}
+          securityCloseBlocked={securityCloseBlocked}
+          onSecurityCloseGuardChange={updateSecurityCloseGuard}
           onOpenChat={handleOpenChat}
           onTogglePin={onTogglePin}
           onArchiveThread={onArchiveThread}
@@ -1196,6 +1261,7 @@ export function AppShell({
             if (folderId) revealFolder(folderId);
           }}
           onStartFolderCreation={(threadId) => {
+            if (securityCloseBlockedRef.current) return;
             setPendingFolderThreadId(threadId);
             setChatsExpanded(true);
             setFoldersExpanded(true);
@@ -1205,6 +1271,11 @@ export function AppShell({
           onRestoreThread={onRestoreThread}
           onDeleteThread={onDeleteThread}
           onSignOut={onSignOut}
+          onRequestSignOut={() => {
+            if (securityCloseBlockedRef.current) return;
+            setDrawer(null);
+            (onRequestSignOut ?? onSignOut)?.();
+          }}
           onProfileUpdate={onProfileUpdate}
           onPasswordUpdate={onPasswordUpdate}
           onApiKeyLoad={onApiKeyLoad}
@@ -1217,6 +1288,7 @@ export function AppShell({
           onSelectView={handleSelectView}
           memoryAvailable={Boolean(memoryApi)}
           onOpenMemory={() => {
+            if (securityCloseBlockedRef.current) return;
             setDrawer(null);
             setMemoryOpen(true);
           }}
@@ -1244,6 +1316,8 @@ function UtilityDrawer({
   darkMode,
   onToggleDarkMode,
   onClose,
+  securityCloseBlocked,
+  onSecurityCloseGuardChange,
   onOpenChat,
   onTogglePin,
   onArchiveThread,
@@ -1252,6 +1326,7 @@ function UtilityDrawer({
   onRestoreThread,
   onDeleteThread,
   onSignOut,
+  onRequestSignOut,
   onProfileUpdate,
   onPasswordUpdate,
   onApiKeyLoad,
@@ -1275,6 +1350,8 @@ function UtilityDrawer({
   darkMode: boolean;
   onToggleDarkMode: () => void;
   onClose: () => void;
+  securityCloseBlocked: boolean;
+  onSecurityCloseGuardChange: (blocked: boolean) => void;
   onOpenChat: (id: string) => void;
   onTogglePin: (id: string) => void;
   onArchiveThread: (id: string) => void;
@@ -1283,6 +1360,7 @@ function UtilityDrawer({
   onRestoreThread: (id: string) => void;
   onDeleteThread: (id: string) => void;
   onSignOut?: () => void;
+  onRequestSignOut?: () => void;
   onProfileUpdate?: (payload: AccountProfileUpdateRequest) => void | User | Promise<User | void>;
   onPasswordUpdate?: (payload: AccountPasswordUpdateRequest) => void | Promise<void>;
   onApiKeyLoad?: () => Promise<AccountApiKeyStatus>;
@@ -1302,6 +1380,20 @@ function UtilityDrawer({
 }) {
   // Personal daily token caps (only finite ones are ever returned). Fetched
   // when the account drawer opens so the meter reflects today's usage.
+  const drawerRef = useRef<HTMLElement>(null);
+  useModalFocus(drawerRef, true, onClose);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const securityPanelId = useId();
+  // Keep the active security flow as the only interactive account section.
+  // Its recovery codes must survive navigation, profile/password changes,
+  // role previews, sign-out, and keyboard shortcuts until acknowledged.
+  useLayoutEffect(() => {
+    if (!securityCloseBlocked) return;
+    const siblings = Array.from(drawerRef.current?.querySelector(".account-drawer-list")?.children ?? [])
+      .filter((element): element is HTMLElement => element instanceof HTMLElement && !element.classList.contains("account-security-section"));
+    for (const element of siblings) element.setAttribute("inert", "");
+    return () => { for (const element of siblings) element.removeAttribute("inert"); };
+  }, [securityCloseBlocked]);
   const [myUsageBudget, setMyUsageBudget] = useState<MyUsageBudget | null>(null);
   useEffect(() => {
     if (drawer !== "account") return;
@@ -1765,12 +1857,21 @@ function UtilityDrawer({
         aria-label="Close drawer"
         data-tooltip="Close this panel and return to your workspace"
         onClick={onClose}
+        disabled={securityCloseBlocked}
       />
       <aside
+        ref={drawerRef}
+        tabIndex={-1}
         className={clsx("utility-drawer", drawer === "account" && "account-utility-drawer")}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        onClickCapture={(event) => {
+          if (securityCloseBlocked && !(event.target instanceof Element && event.target.closest(".account-security-section"))) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
       >
         <header>
           <h2>{title}</h2>
@@ -1780,6 +1881,7 @@ function UtilityDrawer({
             aria-label="Close"
             data-tooltip={`Close the ${title.toLowerCase()} panel and return to your workspace`}
             onClick={onClose}
+            disabled={securityCloseBlocked}
           >
             <X size={17} />
           </button>
@@ -1996,7 +2098,7 @@ function UtilityDrawer({
         )}
 
         {drawer === "account" && (
-          <div className="drawer-list">
+          <div className="drawer-list account-drawer-list">
             <button
               className="drawer-account drawer-account-button"
               type="button"
@@ -2313,6 +2415,23 @@ function UtilityDrawer({
                 </span>
               </button>
             )}
+            <section className="drawer-card account-security-section" aria-label="Account security">
+              <div className="account-card-heading">
+                <span className="account-password-heading-copy">
+                  <strong>Security</strong>
+                  <small>Authenticator and recovery codes</small>
+                </span>
+                <button className="secondary-button" type="button" aria-expanded={securityOpen}
+                  aria-controls={securityPanelId} disabled={securityCloseBlocked}
+                  onClick={() => setSecurityOpen((open) => !open)}>
+                  <ShieldCheck size={15} /> {securityOpen ? "Close security" : "Manage security"}
+                </button>
+              </div>
+              {securityOpen && <div id={securityPanelId} className="account-security-expanded">
+                {securityCloseBlocked && <p className="account-security-guard-note" role="status">Finish verification or save your recovery codes before leaving this panel.</p>}
+                <AccountSecurity user={data.me} onSignOut={onSignOut} onCloseGuardChange={onSecurityCloseGuardChange} />
+              </div>}
+            </section>
             <div
               className={`drawer-card account-password-card ${passwordEditing ? "is-editing" : "is-compact"}`}
             >
@@ -2566,7 +2685,7 @@ function UtilityDrawer({
                 className="drawer-row"
                 type="button"
                 data-tooltip={`Sign out of ${data.currentTenant.chat_brand_name?.trim() || "Aperture Chat"} and end this session`}
-                onClick={onSignOut}
+                onClick={onRequestSignOut ?? onSignOut}
               >
                 <LogOut size={16} />
                 <span>

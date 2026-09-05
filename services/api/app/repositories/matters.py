@@ -1466,6 +1466,29 @@ class MatterDraftRepository:
             now=now,
         )
 
+    def archive_draft(self, draft_id: str, *, tenant_id: str, owner_user_id: str,
+                      expected_revision: int, archived: bool) -> DraftDocument:
+        draft_id, tenant_id, owner_user_id = _scope(draft_id, tenant_id, owner_user_id)
+        expected_revision = _positive_bigint(expected_revision, "expected_revision")
+
+        def operation(session: Session) -> DraftDocument:
+            row = self._draft_document_for_owner(session, draft_id=draft_id,
+                tenant_id=tenant_id, owner_user_id=owner_user_id)
+            if row.matter_id is not None:
+                self._assert_matter_not_deleting(session, row.matter_id)
+            changed = session.execute(update(DraftDocumentRow).where(
+                DraftDocumentRow.id == draft_id,
+                DraftDocumentRow.tenant_id == tenant_id,
+                DraftDocumentRow.owner_user_id == owner_user_id,
+                DraftDocumentRow.current_revision == expected_revision,
+            ).values(archived=archived))
+            if changed.rowcount != 1:
+                raise DraftConflict("The draft changed before archiving completed.")
+            session.refresh(row)
+            return row.to_model()
+
+        return self._run_write(operation)
+
     def delete_draft(
         self,
         draft_id: str,

@@ -122,6 +122,7 @@ def test_m9_fresh_upgrade_has_exact_tables_links_and_metadata_parity(tmp_path: P
                 "last_error_stage",
             },
             "draft_documents": {
+                "archived",
                 "id",
                 "tenant_id",
                 "owner_user_id",

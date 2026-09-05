@@ -1,5 +1,6 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { Code2, LayoutList, Pencil, Plus, Trash2, TriangleAlert, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   parseStewardDiagram,
   renderStewardDiagramSvg,
@@ -46,6 +47,8 @@ export function StewardDiagramEditorModal({
   const [sourceText, setSourceText] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalFocus(dialogRef, true, onClose);
 
   // In source view the textarea is authoritative; in card view the model is.
   const sourceModel = sourceText !== null ? parseStewardDiagram(sourceText) : working;
@@ -126,6 +129,8 @@ export function StewardDiagramEditorModal({
     <div className="modal-backdrop diagram-editor-backdrop" role="presentation" onClick={onClose}>
       <section
         className="modal diagram-editor-modal"
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Edit diagram"

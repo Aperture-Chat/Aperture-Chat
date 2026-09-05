@@ -63,3 +63,19 @@ test("keeps authored field tooltip text ahead of generated fallback copy", () =>
     "Write the exact instruction the drafting assistant should apply.",
   );
 });
+
+test("focusing and typing in a field dismisses tooltip overlays, including delayed hover", () => {
+  vi.useFakeTimers();
+  render(<TooltipHarness />);
+  const input = screen.getByPlaceholderText("Matter knowledge base");
+  fireEvent.mouseOver(input);
+  act(() => vi.advanceTimersByTime(350));
+  expect(document.querySelector(".apx-tooltip")).toHaveClass("is-visible");
+  act(() => input.focus());
+  expect(document.querySelector(".apx-tooltip")).not.toHaveClass("is-visible");
+  fireEvent.mouseOver(input);
+  act(() => vi.advanceTimersByTime(350));
+  expect(document.querySelector(".apx-tooltip")).not.toHaveClass("is-visible");
+  fireEvent.keyDown(input, { key: "a" });
+  expect(document.querySelector(".apx-tooltip")).toHaveAttribute("aria-hidden", "true");
+});

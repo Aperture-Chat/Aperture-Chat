@@ -24,6 +24,8 @@ export type DraftCacheScope = {
 
 /** Server-sync bookkeeping carried on each cached entry. */
 export type DraftSyncFields = {
+  archived?: boolean;
+  serverListedRevision?: number;
   /** Server-assigned draft id; missing/null means the entry is local only. */
   serverId?: string | null;
   /** The server revision that the cached `content` corresponds to. Used as the
@@ -32,7 +34,22 @@ export type DraftSyncFields = {
   /** True when the server copy advanced past the cached content (edited from
    * another device/session); restoring must fetch the server copy first. */
   serverContentStale?: boolean;
+  /** The cached content has not yet been acknowledged by the server. */
+  serverSavePending?: boolean;
+  /** Identifies the browser session that owns unsent edits in shared storage. */
+  cacheWriterId?: string;
 };
+
+/** Evict only recoverable server copies. Local drafts (including decks) and
+ * unsent edits may have no other copy, so the cache window must not delete them. */
+export function limitDraftCacheEntries<T extends DraftSyncFields>(entries: T[]): T[] {
+  let recoverableCount = 0;
+  return entries.filter((entry) =>
+    !entry.serverId || entry.serverSavePending
+      ? true
+      : recoverableCount++ < SCOPED_DRAFT_CACHE_LIMIT,
+  );
+}
 
 type CacheEntryBase = DraftSyncFields & {
   id: string;
@@ -46,7 +63,7 @@ export function scopedDraftCacheKey(scope: DraftCacheScope): string {
 }
 
 /** Reads only the scoped cache; never falls back to the legacy unscoped key. */
-export function loadScopedDraftCache<T>(
+export function loadScopedDraftCache<T extends DraftSyncFields>(
   scope: DraftCacheScope,
   isEntry: (value: unknown) => value is T,
 ): T[] {
@@ -56,7 +73,7 @@ export function loadScopedDraftCache<T>(
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isEntry).slice(0, SCOPED_DRAFT_CACHE_LIMIT);
+    return limitDraftCacheEntries(parsed.filter(isEntry));
   } catch {
     return [];
   }
@@ -65,12 +82,12 @@ export function loadScopedDraftCache<T>(
 /** Returns false when the browser refused the write (private browsing, or a
  * quota exceeded by image-heavy decks) so callers can say so instead of
  * showing a "saved" state that never happened. */
-export function saveScopedDraftCache(scope: DraftCacheScope, entries: unknown[]): boolean {
+export function saveScopedDraftCache<T extends DraftSyncFields>(scope: DraftCacheScope, entries: T[]): boolean {
   if (typeof window === "undefined") return false;
   try {
     window.localStorage.setItem(
       scopedDraftCacheKey(scope),
-      JSON.stringify(entries.slice(0, SCOPED_DRAFT_CACHE_LIMIT)),
+      JSON.stringify(limitDraftCacheEntries(entries)),
     );
     return true;
   } catch {
@@ -142,7 +159,14 @@ export function mergeServerDraftsIntoCache<T extends CacheEntryBase>(
 ): T[] {
   const byServerId = new Map<string, T>();
   for (const entry of cached) {
-    if (entry.serverId) byServerId.set(entry.serverId, entry);
+    if (!entry.serverId) continue;
+    const previous = byServerId.get(entry.serverId);
+    if (!previous ||
+      (entry.serverSavePending && !previous.serverSavePending) ||
+      (Boolean(entry.serverSavePending) === Boolean(previous.serverSavePending) &&
+        Date.parse(entry.updatedAt ?? "") > Date.parse(previous.updatedAt ?? ""))) {
+      byServerId.set(entry.serverId, entry);
+    }
   }
   const merged: T[] = [];
   for (const doc of server) {
@@ -157,19 +181,22 @@ export function mergeServerDraftsIntoCache<T extends CacheEntryBase>(
       // gain the DraftSyncFields updated here.
       merged.push({
         ...existing,
-        title: doc.title,
-        updatedAt: doc.updated_at,
+        archived: doc.archived ?? false,
+        title: existing.serverSavePending ? (existing as T & { title?: string }).title : doc.title,
+        updatedAt: existing.serverSavePending ? existing.updatedAt : doc.updated_at,
         serverContentStale: true,
       } as T);
     } else {
-      merged.push({ ...existing, serverContentStale: false } as T);
+      merged.push({ ...existing, archived: doc.archived ?? false, serverContentStale: false } as T);
     }
   }
   const listedServerIds = new Set(server.map((doc) => doc.id));
+  const mergedIds = new Set(merged.map((entry) => entry.id));
   for (const entry of cached) {
-    if (!entry.serverId || !listedServerIds.has(entry.serverId)) merged.push(entry);
+    if (!entry.serverId || !listedServerIds.has(entry.serverId) ||
+      (entry.serverSavePending && !mergedIds.has(entry.id))) merged.push(entry);
   }
-  return merged
-    .sort((a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? ""))
-    .slice(0, SCOPED_DRAFT_CACHE_LIMIT);
+  return limitDraftCacheEntries(
+    merged.sort((a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? "")),
+  );
 }

@@ -209,3 +209,17 @@ test("a right-aligned amounts column exports right aligned to Word", async () =>
   expect(documentXml.match(/<w:jc w:val="right"\/>/g) ?? []).toHaveLength(2);
   expect(documentXml).toContain("$4,800.00");
 });
+
+test('MLA Word export starts with the student and preserves double spacing and indents', async () => {
+  const { formatMlaDocument } = await import('./draftMla');
+  const html = formatMlaDocument('<p>[Student Name]</p><p>Teacher</p><p>History</p><p>[Date]</p><h2>Crossing the River</h2><p>Body (Fischer 42).</p><h2>Works Cited</h2><p>Fischer. Washington’s Crossing. Oxford, 2004.</p>', 'MLA');
+  const xml = storedZipEntry(await buildDocxExportDocument('Internal draft filename', html), 'word/document.xml');
+  expectWellFormedXml(xml);
+  expect(xml).not.toContain('Internal draft filename');
+  expect(xml).toContain('w:line="480"');
+  expect(xml).toContain('w:ascii="Times New Roman"');
+  expect(xml).toContain('w:sz w:val="24"');
+  expect(xml).toContain('w:firstLine="720"');
+  expect(xml).toContain('w:hanging="720"');
+  expect(xml).toContain('w:top="1440"');
+});

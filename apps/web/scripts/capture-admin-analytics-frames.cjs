@@ -15,19 +15,21 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const OUT = path.join(__dirname, "..", "public", "training", "admin");
+const PUBLIC_OUT = path.join(__dirname, "..", "public", "training", "admin");
 const APP = process.env.CAPTURE_APP_URL || "http://localhost:5173";
 const USER = process.env.CAPTURE_USER_ID || "user-admin";
-const TOKEN = process.env.CAPTURE_SESSION_TOKEN || "";
-const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
+const CAPTURE_AUTH = require("./training-capture-run.cjs").captureCredentials();
+const TOKEN = CAPTURE_AUTH.token;
 
 (async () => {
-  if (CONFIRMATION !== "I_HAVE_REVIEWED_SYNTHETIC_DATA") {
-    throw new Error(
-      "Refusing to overwrite public training assets without synthetic-data confirmation.",
-    );
-  }
-  fs.mkdirSync(OUT, { recursive: true });
+  const { createCaptureRun } = require("./training-capture-run.cjs");
+  const capture = createCaptureRun({
+    scriptPath: __filename,
+    publicDirectory: PUBLIC_OUT,
+    appUrl: APP,
+    confirmation: process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "",
+  });
+  const OUT = capture.outputDirectory;
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1185, height: 855 }, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
@@ -36,7 +38,7 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
       localStorage.setItem("aperture-session-user-id", user);
       if (token) localStorage.setItem("aperture-session-token", token);
     },
-    { user: USER, token: TOKEN },
+    { user: CAPTURE_AUTH.user || USER, token: TOKEN },
   );
   const hideTooltips = () => page.addStyleTag({ content: ".apx-tooltip{display:none!important}" });
   await page.goto(APP);
@@ -50,19 +52,14 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
   await page.waitForTimeout(1200);
   await hideTooltips();
 
+  const { measureFrameFocus } = require("./training-focus-measurement.cjs");
   const measured = {};
-  const shot = async (name, rectSpecs = {}) => {
+  const shot = async (name) => {
     await page.waitForTimeout(600);
     await page.screenshot({ path: `${OUT}/${name}.png` });
-    for (const [key, selector] of Object.entries(rectSpecs)) {
-      const box = await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
-      }, selector);
-      measured[key] = box ? { frame: `training/admin/${name}.png`, rect: box } : `MISSING ${selector}`;
-    }
+    Object.assign(measured, await measureFrameFocus(page, "admin", name));
+    // Keep completed-frame measurements even if a later capture fails.
+    fs.writeFileSync(path.join(OUT, "measured-rects.json"), JSON.stringify(measured, null, 2));
     console.log("captured", name);
   };
   const scrollToText = async (text) => {
@@ -100,39 +97,27 @@ const CONFIRMATION = process.env.CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION || "";
     document.querySelector(".analytics-console-grid")?.scrollIntoView({ block: "start" });
   });
   await page.waitForTimeout(400);
-  await shot("analytics", {
-    anFilters: "[aria-label='Runtime events filter']",
-    anRuntime: ".chat-feedback-panel .feedback-summary-grid",
-  });
+  await shot("analytics");
   await scrollToText("Model Activity");
-  await shot("analytics-activity", {
-    anUsage: ".model-activity-chart-grid",
-  });
+  await shot("analytics-activity");
   await scrollToText("Workspace Usage Budget");
-  await shot("analytics-usage-budget", {
-    anBudget: ".tenant-budget-panel",
-  });
+  await shot("analytics-usage-budget");
 
   await page.getByRole("tab", { name: "Audit" }).click();
   await page.waitForTimeout(1500);
-  await shot("audit", {
-    auCards: ".audit-summary-grid",
-  });
+  await shot("audit");
   await expandSection("User Prompt Activity");
   await expandSection("Security Alerts");
   await scrollToText("User Prompt Activity");
-  await shot("audit-alerts", {
-    auPromptSelect: "[aria-label='Prompt activity filter']",
-  });
+  await shot("audit-alerts");
   await expandSection("Audit Trail");
   await scrollToText("Audit Trail");
-  await shot("audit-trail", {
-    auTrailFilters: ".audit-filter-toolbar",
-  });
+  await shot("audit-trail");
 
   fs.writeFileSync(path.join(OUT, "measured-rects.json"), JSON.stringify(measured, null, 2));
 
   await browser.close();
+  capture.complete();
 })().catch((e) => {
   console.error(e);
   process.exit(1);

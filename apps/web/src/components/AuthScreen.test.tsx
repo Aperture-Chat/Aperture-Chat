@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { AuthScreen } from "./AuthScreen";
+import { AuthScreen, ForcedPasswordScreen } from "./AuthScreen";
 import { sampleData } from "../data/sampleData";
 import { loginWithAuth, setSessionToken } from "../lib/api";
 import type { NormalizedLoginResponse } from "../lib/api";
@@ -133,7 +133,8 @@ test("sign-in card submits a first-name, last-name, and email access request the
   fireEvent.click(screen.getByRole("button", { name: /Submit access request/i }));
 
   expect(await screen.findByRole("heading", { name: "Request received" })).toBeInTheDocument();
-  expect(screen.getByText("Pending administrator review")).toBeInTheDocument();
+  expect(screen.getByText("Request submitted for jamie@example.com")).toBeInTheDocument();
+  expect(screen.getByText(/this form does not send an email or set a password/)).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
     expect.stringContaining("/api/auth/access-requests"),
     expect.objectContaining({
@@ -318,4 +319,65 @@ test("a failed code refreshes honest challenge state from the server", async () 
   // Attempts and surviving methods come from the server, not a local counter.
   expect(await screen.findByText("2 attempts remaining")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Use a recovery code instead" })).not.toBeInTheDocument();
+});
+
+test("invalid email shows an error without invoking the local login callback", () => {
+  const onLocalLogin = vi.fn();
+  render(<AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: true, providers: [] }} onLocalLogin={onLocalLogin} />);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter your email");
+  expect(onLocalLogin).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "invalid" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("valid email");
+  expect(onLocalLogin).not.toHaveBeenCalled();
+});
+
+test("email/password mode submits credentials on Enter while SSO keeps its own redirect", () => {
+  const onLocalLogin = vi.fn();
+  const onSsoRedirect = vi.fn();
+  render(<AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: true, providers: [{
+    id: "sso-test", name: "Organization identity", provider: "entra", protocol: "OIDC", tenant_id: "tenant-example", domains: [], enforced: false,
+  }] }} onLocalLogin={onLocalLogin} onSsoRedirect={onSsoRedirect} />);
+  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Email & password" }));
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "jane@local.invalid" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "my-valid-password" } });
+  fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form")!);
+  expect(onLocalLogin).toHaveBeenCalledWith(expect.objectContaining({ email: "jane@local.invalid", password: "my-valid-password", auth_method: "local" }));
+  expect(onSsoRedirect).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Organization SSO" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue with SSO" }));
+  expect(onSsoRedirect).toHaveBeenCalledTimes(1);
+});
+
+test("password visibility can be toggled without changing the value", () => {
+  render(<AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: true, providers: [] }} />);
+  const password = screen.getByLabelText("Password");
+  fireEvent.change(password, { target: { value: "retained-password" } });
+  fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+  expect(password).toHaveAttribute("type", "text");
+  expect(password).toHaveValue("retained-password");
+  fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+  expect(password).toHaveAttribute("type", "password");
+});
+
+test("sign-in configuration failure exposes a retry action", () => {
+  const onRetry = vi.fn();
+  render(<AuthScreen error="Could not reach sign-in configuration." onRetry={onRetry} />);
+  fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+  expect(onRetry).toHaveBeenCalledOnce();
+});
+
+test("password change cannot be cancelled while it is saving", async () => {
+  let finish!: () => void;
+  const onSubmit = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const onCancel = vi.fn();
+  render(<ForcedPasswordScreen displayName="Jane" onSubmit={onSubmit} onCancel={onCancel} />);
+  fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-valid-password" } });
+  fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "new-valid-password" } });
+  fireEvent.click(screen.getByRole("button", { name: "Set password and continue" }));
+  expect(screen.getByRole("button", { name: "Back to sign-in" })).toBeDisabled();
+  expect(onSubmit).toHaveBeenCalledOnce();
+  finish();
 });

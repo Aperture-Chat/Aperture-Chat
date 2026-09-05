@@ -90,7 +90,7 @@ def test_0010_fresh_schema_matches_orm_and_contains_no_cleanup_payloads(
     try:
         upgrade_database(engine)
         inspector = inspect(engine)
-        assert current_schema_revision(engine) == HEAD_REVISION == "20260820_0018"
+        assert current_schema_revision(engine) == HEAD_REVISION == "20260905_0019"
         assert {
             "identity_cleanup_jobs",
             "identity_cleanup_job_users",
@@ -228,7 +228,7 @@ def test_0010_down_up_preserves_0009_state_and_recreates_empty_coordination_tabl
             )
 
         upgrade_database(engine)
-        assert current_schema_revision(engine) == "20260820_0018"
+        assert current_schema_revision(engine) == "20260905_0019"
         with engine.connect() as connection:
             assert (
                 connection.execute(text("SELECT count(*) FROM identity_cleanup_jobs")).scalar_one()

@@ -1,4 +1,6 @@
 import { SelectControl } from "./SelectControl";
+import { ModelSelect } from "./ModelSelect";
+import { useModalFocus } from "../lib/useModalFocus";
 import {
   ReasoningSlider,
   REASONING_EFFORT_BY_LEVEL,
@@ -7,6 +9,7 @@ import {
   type ReasoningLevel,
 } from "./ReasoningSlider";
 import {
+  ArrowUpRight,
   BookOpen,
   Bot,
   Brain,
@@ -35,7 +38,6 @@ import {
   ShieldCheck,
   Split,
   Sparkles,
-  Star,
   TerminalSquare,
   ThumbsDown,
   ThumbsUp,
@@ -1037,14 +1039,22 @@ export function ChatWorkspace({
   const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [cloudPicker, setCloudPicker] = useState<CloudPickerState | null>(null);
   const [commandToken, setCommandToken] = useState<ComposerCommandToken | null>(null);
+  const [showComposerHelp, setShowComposerHelp] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [pendingAutomations, setPendingAutomations] = useState<Automation[]>([]);
   const [knowledgeDocs, setKnowledgeDocs] = useState<Record<string, KnowledgeDocument[]>>({});
   const [knowledgeDocsStatus, setKnowledgeDocsStatus] = useState<"idle" | "loading" | "loaded">("idle");
+  const [knowledgeDocsError, setKnowledgeDocsError] = useState(false);
+  const [knowledgeDocsReload, setKnowledgeDocsReload] = useState(0);
+  const commandListId = useId();
+  const dismissedCommandRef = useRef<{ value: string; caret: number } | null>(null);
   const [customToolRun, setCustomToolRun] = useState<CustomToolRunState | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const expandedComposerRef = useRef<HTMLFormElement | null>(null);
+  const inspectorRef = useRef<HTMLElement | null>(null);
+  useModalFocus(expandedComposerRef, isComposerExpanded, () => { if (!isImproving) setIsComposerExpanded(false); });
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachRef = useRef<HTMLDivElement | null>(null);
@@ -1086,15 +1096,11 @@ export function ChatWorkspace({
     if (!isComposerExpanded) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !isImproving) setIsComposerExpanded(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
+    textareaRef.current?.focus({ preventScroll: true });
     return () => {
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isComposerExpanded, isImproving]);
+  }, [isComposerExpanded]);
   const width = useViewportWidth();
   const inspectorOverlay = width <= BREAKPOINTS.inspectorOverlay;
 
@@ -1187,7 +1193,7 @@ export function ChatWorkspace({
     const target = conversationScrollerFrom(bottomRef.current);
     if (target) target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
     else bottomRef.current?.scrollIntoView?.({ block: "end", behavior: "smooth" });
-  }, [messages.length, hasMessages, isSending]);
+  }, [activeThread?.id, messages.length, hasMessages, isSending]);
 
   // While a reply streams in, keep the reader hard-pinned to the bottom
   // every frame so the text never runs past their view. Pausing is driven
@@ -1247,7 +1253,7 @@ export function ChatWorkspace({
       window.cancelAnimationFrame(frame);
       listenerTarget?.removeEventListener("scroll", handleScroll);
     };
-  }, [followStreaming]);
+  }, [activeThread?.id, followStreaming]);
 
   useEffect(() => {
     if (hasCitations) return;
@@ -1338,26 +1344,31 @@ export function ChatWorkspace({
     };
   }, [attachMenuOpen, sendMenuOpen]);
 
-  // Lazily load knowledge-base files the first time a "#" command opens, so
-  // the Files section lists real indexed documents.
+  // Stable scope values keep ordinary draft/status rerenders from cancelling
+  // their own request. Reopening # refreshes the list, and closing it or
+  // switching workspace aborts a stale response before it can replace results.
+  const knowledgeCommandOpen = commandToken?.symbol === "#";
+  const knowledgeBaseIdsKey = JSON.stringify(enabledKnowledgeBases.map((base) => base.id));
   useEffect(() => {
-    if (commandToken?.symbol !== "#" || knowledgeDocsStatus !== "idle") return;
-    let cancelled = false;
+    if (!knowledgeCommandOpen) return;
+    const controller = new AbortController();
+    const baseIds = JSON.parse(knowledgeBaseIdsKey) as string[];
+    setKnowledgeDocs({});
+    setKnowledgeDocsError(false);
     setKnowledgeDocsStatus("loading");
-    void Promise.all(
-      enabledKnowledgeBases.map(async (base) => {
-        const docs = await listKnowledgeDocuments(data.me.id, base.id).catch(() => [] as KnowledgeDocument[]);
-        return [base.id, docs] as const;
+    void Promise.allSettled(
+      baseIds.map(async (baseId) => {
+        const docs = await listKnowledgeDocuments(data.me.id, baseId, { signal: controller.signal });
+        return [baseId, docs] as const;
       }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setKnowledgeDocs(Object.fromEntries(entries));
+    ).then((results) => {
+      if (controller.signal.aborted) return;
+      setKnowledgeDocs(Object.fromEntries(results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])));
+      setKnowledgeDocsError(results.some((result) => result.status === "rejected"));
       setKnowledgeDocsStatus("loaded");
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [commandToken?.symbol, knowledgeDocsStatus, enabledKnowledgeBases, data.me.id]);
+    return () => controller.abort();
+  }, [knowledgeCommandOpen, knowledgeBaseIdsKey, data.me.id, data.currentTenant.id, knowledgeDocsReload]);
 
   const commandItems = useMemo<ComposerCommandItem[]>(() => {
     if (!commandToken) return [];
@@ -1378,9 +1389,10 @@ export function ChatWorkspace({
         ...rankCommandMatches(files, (entry) => entry.doc.name, query).map((entry) => ({
           kind: "knowledge-file" as const,
           id: `file-${entry.doc.id}`,
-          section: "Files",
+          section: "Files in knowledge sources",
           name: entry.doc.name,
-          detail: entry.base.name,
+          detail: `Searches ${entry.base.name}`,
+
           doc: entry.doc,
           base: entry.base,
         })),
@@ -1472,14 +1484,23 @@ export function ChatWorkspace({
     commandToken !== null &&
     (commandItems.length > 0 ||
       commandToken.query.trim() === "" ||
-      (commandToken.symbol === "#" && knowledgeDocsStatus === "loading"));
+      (commandToken.symbol === "#" && (knowledgeDocsStatus === "loading" || knowledgeDocsError)));
 
   // Keep the highlight on a real row as filtering narrows the list.
   useEffect(() => {
     setCommandIndex((current) => Math.min(current, Math.max(commandItems.length - 1, 0)));
   }, [commandItems.length]);
 
+  function dismissCommandMenu() {
+    const textarea = textareaRef.current;
+    dismissedCommandRef.current = textarea ? { value: textarea.value, caret: textarea.selectionStart } : null;
+    setCommandToken(null);
+  }
+
   function updateCommandTokenFromTextarea(target: HTMLTextAreaElement) {
+    const dismissed = dismissedCommandRef.current;
+    if (dismissed?.value === target.value && dismissed.caret === target.selectionStart) return;
+    dismissedCommandRef.current = null;
     const token = detectComposerCommandToken(target.value, target.selectionStart);
     setCommandToken((current) => {
       if (current?.symbol !== token?.symbol || current?.start !== token?.start || current?.query !== token?.query) {
@@ -1535,30 +1556,35 @@ export function ChatWorkspace({
    * the key was consumed so send-on-Enter doesn't also fire. */
   function handleCommandMenuKey(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
     if (!commandMenuVisible) return false;
-    if (event.key === "ArrowDown") {
+    if (event.key === "ArrowDown" && commandItems.length > 0) {
       event.preventDefault();
       setCommandIndex((current) => Math.min(current + 1, commandItems.length - 1));
       return true;
     }
-    if (event.key === "ArrowUp") {
+    if (event.key === "ArrowUp" && commandItems.length > 0) {
       event.preventDefault();
       setCommandIndex((current) => Math.max(current - 1, 0));
       return true;
     }
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && commandItems.length > 0) {
       event.preventDefault();
       const item = commandItems[commandIndex];
       if (item) applyCommandItem(item);
       return true;
     }
     if (event.key === "Tab") {
-      event.preventDefault();
-      if (commandItems.length === 1) applyCommandItem(commandItems[0]);
-      return true;
+      if (!event.shiftKey && commandItems.length === 1) {
+        event.preventDefault();
+        applyCommandItem(commandItems[0]);
+        return true;
+      }
+      // Multiple matches must not trap keyboard users in the textarea.
+      dismissCommandMenu();
+      return false;
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setCommandToken(null);
+      dismissCommandMenu();
       return true;
     }
     return false;
@@ -1609,7 +1635,7 @@ export function ChatWorkspace({
       for (const automation of queuedAutomations) {
         await chat.runAutomationNow(automation, text || undefined);
       }
-      setDraft("");
+      setDraft((current) => current === draft ? "" : current);
       setOriginalDraft(null);
       return;
     }
@@ -1685,24 +1711,30 @@ export function ChatWorkspace({
         await Promise.all(approvedRuntimeToolIds.map((toolId) => approveMcpTool(data.me.id, toolId).catch(() => null)))
       ).filter((token): token is string => Boolean(token));
       chat.sendMessage(text, uploadedAttachments, runtime);
-      setDraft("");
+      // Uploading can take long enough for the user to stage the next turn.
+      // Clear only the snapshot sent here, never edits or files added meanwhile.
+      const sentAttachmentIds = new Set(attachments.map((attachment) => attachment.localId));
+      const sentToolIds = new Set(selectedToolIds);
+      const sentUrls = new Set(fetchUrls);
+      setDraft((current) => current === draft ? "" : current);
       setOriginalDraft(null);
-      setAttachments([]);
-      setSelectedToolIds([]);
+      setAttachments((current) => current.filter((attachment) => !sentAttachmentIds.has(attachment.localId)));
+      setSelectedToolIds((current) => current.filter((id) => !sentToolIds.has(id)));
       setCommandToken(null);
-      setFetchUrls([]);
+      setFetchUrls((current) => current.filter((url) => !sentUrls.has(url)));
       setLinkComposerOpen(false);
-      setLinkDraft("");
+      setLinkDraft((current) => current === linkDraft ? "" : current);
       setLinkError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not upload the attachment.";
       setUploadError(message);
+      const failedAttachmentIds = new Set(attachments.map((attachment) => attachment.localId));
       setAttachments((prev) =>
-        prev.map((file) => ({
+        prev.map((file) => failedAttachmentIds.has(file.localId) ? {
           ...file,
           uploadStatus: "error",
           uploadError: message,
-        })),
+        } : file),
       );
     } finally {
       setIsUploadingAttachments(false);
@@ -1868,6 +1900,9 @@ export function ChatWorkspace({
   }
 
   async function openCloudPicker(source: ConnectorDef) {
+    // The menu item unmounts when the picker opens; retain a stable return
+    // target for the modal focus lifecycle.
+    attachRef.current?.querySelector<HTMLButtonElement>(".attach-trigger")?.focus({ preventScroll: true });
     setAttachMenuOpen(false);
     setUploadError(null);
     stopCloudConnectPolling();
@@ -2027,6 +2062,7 @@ export function ChatWorkspace({
     setCitationDetailsOpen(false);
     setFocusedCitationMessageId(null);
   };
+  useModalFocus(inspectorRef, isInspectorOpen && inspectorOverlay, closeInspector);
   const toggleInspector = () => {
     setCitationDetailsOpen(false);
     setFocusedCitationMessageId(null);
@@ -2114,6 +2150,8 @@ export function ChatWorkspace({
 
   const composerForm = (
     <form
+      ref={expandedComposerRef}
+      tabIndex={isComposerExpanded ? -1 : undefined}
       className={`composer ${hasMessages ? "" : "composer-empty"}${isImproving ? " is-improving" : ""}${isComposerExpanded ? " is-expanded" : ""}`}
       aria-busy={isImproving}
       role={isComposerExpanded ? "dialog" : undefined}
@@ -2319,9 +2357,18 @@ export function ChatWorkspace({
         </div>
       )}
 
+      {showComposerHelp && !commandMenuVisible && (
+        <div className="composer-command-menu" id={`${commandListId}-help`} role="note" aria-label="Composer shortcuts">
+          <span className="composer-command-section">Composer shortcuts</span>
+          <p className="composer-command-loading">Start a word with / for prompts and MCP tools, @ for agents, # for knowledge, $ for skills, or &gt; for automations.</p>
+          <p className="composer-command-hint">Enter sends · Shift + Enter adds a line</p>
+          <button type="button" className="link-button" onClick={() => setShowComposerHelp(false)}>Dismiss shortcuts</button>
+        </div>
+      )}
       {commandMenuVisible && commandToken && (
         <div
           className="composer-command-menu"
+          id={commandListId}
           role="listbox"
           aria-label={`${COMMAND_MENU_TITLES[commandToken.symbol]} commands`}
         >
@@ -2347,6 +2394,7 @@ export function ChatWorkspace({
                 return (
                   <button
                     key={item.id}
+                    id={`${commandListId}-${index}`}
                     type="button"
                     role="option"
                     aria-selected={index === commandIndex}
@@ -2365,10 +2413,26 @@ export function ChatWorkspace({
               })}
             </Fragment>
           ))}
+          {commandToken.symbol === "#" && commandItems.some((item) => item.kind === "knowledge-file") && (
+            <span className="composer-command-hint">Choosing a file references it in your prompt and searches its knowledge source.</span>
+          )}
           {commandToken.symbol === "#" && knowledgeDocsStatus === "loading" && (
             <span className="composer-command-loading">Loading files…</span>
           )}
-          {commandItems.length === 0 && knowledgeDocsStatus !== "loading" && (
+          {commandToken.symbol === "#" && knowledgeDocsError && (
+            <span className="composer-command-loading" role="status">
+              Some files could not be loaded.{' '}
+              <button
+                className="link-button"
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setKnowledgeDocsReload((current) => current + 1)}
+              >
+                Retry
+              </button>
+            </span>
+          )}
+          {commandItems.length === 0 && (!knowledgeCommandOpen || knowledgeDocsStatus !== "loading") && (!knowledgeCommandOpen || !knowledgeDocsError) && (
             <span className="composer-command-loading">
               {commandToken.symbol === "#"
                 ? "No knowledge bases are enabled yet — add one under Knowledge"
@@ -2396,14 +2460,9 @@ export function ChatWorkspace({
       <textarea
         ref={textareaRef}
         aria-label="Message"
-        data-tooltip={
-          "Symbol shortcuts — start a word with:\n" +
-          "/ prompts and MCP tools\n" +
-          "@ agent profiles\n" +
-          "# knowledge bases and files\n" +
-          "$ skill files\n" +
-          "> automations"
-        }
+        aria-autocomplete="list"
+        aria-controls={commandMenuVisible ? commandListId : undefined}
+        aria-activedescendant={commandMenuVisible && commandItems[commandIndex] ? `${commandListId}-${commandIndex}` : undefined}
         placeholder={chat.enabledModels.length ? "Ask anything..." : "Connect a model provider to start chatting..."}
         readOnly={isImproving}
         value={draft}
@@ -2414,6 +2473,8 @@ export function ChatWorkspace({
         onSelect={(event) => updateCommandTokenFromTextarea(event.currentTarget)}
         onBlur={() => setCommandToken(null)}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+          if (event.key === "Escape") setShowComposerHelp(false);
           if (handleCommandMenuKey(event)) return;
           if (event.key === "Enter" && !event.shiftKey && !isComposerExpanded) {
             event.preventDefault();
@@ -2423,6 +2484,17 @@ export function ChatWorkspace({
       />
       <div className="composer-toolbar">
         <div className="composer-tools">
+          <button
+            type="button"
+            className="attach-trigger"
+            aria-label="Composer shortcuts"
+            aria-expanded={showComposerHelp}
+            aria-controls={`${commandListId}-help`}
+            data-tooltip="Show message shortcuts"
+            onClick={() => setShowComposerHelp((current) => !current)}
+          >
+            <Info size={17} />
+          </button>
           <div className="attach" ref={attachRef}>
             <button
               type="button"
@@ -2486,6 +2558,7 @@ export function ChatWorkspace({
               </div>
             )}
           </div>
+          <div className="composer-context-tools">
           {activeToolSummaries.length > 0 && (
             <div
               className={`composer-tools-status is-on ${singleActiveTool ? "is-single" : "is-multiple"}`}
@@ -2560,6 +2633,7 @@ export function ChatWorkspace({
                 </button>
               </span>
             ))}
+          </div>
         </div>
         <div className="send-actions" ref={sendRef}>
           <div className={`composer-draft-actions${hasDraftText ? " has-text" : ""}`}>
@@ -2575,10 +2649,12 @@ export function ChatWorkspace({
                 textareaRef.current?.focus();
               }}
             />
-            {hasDraftText && !isComposerExpanded && (
+            {hasDraftText && (
               <button
                 type="button"
                 className="composer-expand-button"
+                hidden={isComposerExpanded}
+                style={isComposerExpanded ? { display: "none" } : undefined}
                 aria-label="Expand prompt editor"
                 data-tooltip="Open this draft in a larger editor for review"
                 disabled={isSending || isImproving}
@@ -2997,12 +3073,15 @@ export function ChatWorkspace({
           {!hasMessages && (
             <>
               <div className="empty-chat">
-                <div className="empty-mark">
-                  {assistantLogoUrl ? (
-                    <img className="empty-brand-logo" src={assistantLogoUrl} alt="" />
-                  ) : (
-                    <ApertureMark size={72} />
-                  )}
+                <div className="empty-brand-identity">
+                  <div className="empty-mark">
+                    {assistantLogoUrl ? (
+                      <img className="empty-brand-logo" src={assistantLogoUrl} alt="" />
+                    ) : (
+                      <ApertureMark size={72} />
+                    )}
+                  </div>
+                  <span>{assistantBrandName}</span>
                 </div>
                 <h2>{timeOfDayGreeting(new Date().getHours(), data.me.display_name)}</h2>
                 <p className="empty-tagline">
@@ -3078,6 +3157,30 @@ export function ChatWorkspace({
           ) : (
             <>
               {composerForm}
+              {!hasDraftText && !isImproving && (
+                <div className="chat-starters" role="group" aria-label="Start a conversation">
+                  {[
+                    { label: "Explore an idea", detail: "Think through a direction or a question.", prompt: "Help me explore this idea: ", Icon: Sparkles },
+                    { label: "Compare options", detail: "Weigh the trade-offs and find a next step.", prompt: "Help me compare these options: ", Icon: Split },
+                    { label: "Draft a message", detail: "Find the right words for your audience.", prompt: "Help me draft a message. Here is the audience, purpose, and context: ", Icon: Pencil },
+                  ].map(({ label, detail, prompt, Icon }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      aria-label={label}
+                      onClick={() => {
+                        setDraft(prompt);
+                        setShowComposerHelp(false);
+                        textareaRef.current?.focus();
+                      }}
+                    >
+                      <Icon size={18} aria-hidden="true" />
+                      <span className="chat-starter-copy"><strong>{label}</strong><small>{detail}</small></span>
+                      <ArrowUpRight size={15} className="chat-starter-arrow" aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              )}
               {disclaimer}
             </>
           )}
@@ -3088,6 +3191,7 @@ export function ChatWorkspace({
         <button
           type="button"
           className="inspector-backdrop"
+          tabIndex={-1}
           aria-label="Close session details"
           data-tooltip="Close the session details panel and return to the chat"
           onClick={closeInspector}
@@ -3095,7 +3199,14 @@ export function ChatWorkspace({
       )}
 
       {isInspectorOpen && (
-        <aside className="session-panel is-open">
+        <aside
+          className="session-panel is-open"
+          ref={inspectorRef}
+          tabIndex={inspectorOverlay ? -1 : undefined}
+          role={inspectorOverlay ? "dialog" : undefined}
+          aria-modal={inspectorOverlay ? true : undefined}
+          aria-label="Session details"
+        >
           <header>
             <h2>Session details</h2>
             <button
@@ -3148,6 +3259,8 @@ type CustomToolRunState = {
 
 function CustomToolRunModal({ run, onClose }: { run: CustomToolRunState; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalFocus(dialogRef, true, onClose);
   const result = run.result;
 
   async function copyOutput() {
@@ -3176,6 +3289,8 @@ function CustomToolRunModal({ run, onClose }: { run: CustomToolRunState; onClose
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section
         className="modal tool-run-modal"
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={`${run.tool.name} result`}
@@ -3297,19 +3412,18 @@ function CloudAttachmentPicker({
   const Icon = picker.source.icon;
   const attaching = picker.status === "importing";
   const attachDisabled = attaching || picker.status !== "ready" || picker.selectedIds.length === 0;
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  const activeItemId = picker.items.some((item) => item.id === focusedItemId) ? focusedItemId : picker.items[0]?.id;
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useModalFocus(dialogRef, true, onClose);
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal cloud-picker-modal"
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="cloud-picker-title"
@@ -3388,7 +3502,32 @@ function CloudAttachmentPicker({
                   <span>{picker.error}</span>
                 </div>
               )}
-              <div className="cloud-picker-list" role="listbox" aria-label={`${picker.source.label} files`}>
+              <div
+                className="cloud-picker-list"
+                role="listbox"
+                aria-multiselectable="true"
+                aria-label={`${picker.source.label} files`}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || attaching) return;
+                  const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+                  const index = options.indexOf(event.target as HTMLButtonElement);
+                  if (index < 0) return;
+                  let next: number | undefined;
+                  if (event.key === "ArrowDown") next = (index + 1) % options.length;
+                  else if (event.key === "ArrowUp") next = (index - 1 + options.length) % options.length;
+                  else if (event.key === "Home") next = 0;
+                  else if (event.key === "End") next = options.length - 1;
+                  else if (event.key === " " || event.key === "Enter") {
+                    event.preventDefault();
+                    options[index].click();
+                  }
+                  if (next !== undefined) {
+                    event.preventDefault();
+                    options[next].focus({ preventScroll: true });
+                    options[next].scrollIntoView?.({ block: "nearest" });
+                  }
+                }}
+              >
                 {picker.items.map((item) => {
                   const selected = picker.selectedIds.includes(item.id);
                   return (
@@ -3397,6 +3536,8 @@ function CloudAttachmentPicker({
                       type="button"
                       role="option"
                       aria-selected={selected}
+                      tabIndex={item.id === activeItemId ? 0 : -1}
+                      onFocus={() => setFocusedItemId(item.id)}
                       className={`cloud-picker-item ${selected ? "is-selected" : ""}`}
                       onClick={() => onToggle(item.id)}
                       disabled={attaching}
@@ -3825,6 +3966,7 @@ function MessageBubble({
                 setEditError(null);
               }}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   submitPromptEdit();
@@ -4713,105 +4855,6 @@ function SessionSourceGroup({
   );
 }
 
-function ModelSelect({ chat }: { chat: ChatStore }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const hasModels = chat.enabledModels.length > 0;
-
-  useEffect(() => {
-    if (!open || !hasModels) return;
-    function onPointerDown(event: PointerEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [hasModels, open]);
-
-  const selected = chat.enabledModels.find((model) => model.id === chat.model);
-  const label = selected?.name ?? chat.enabledModels[0]?.name;
-
-  return (
-    <div className="model-select" ref={rootRef}>
-      <button
-        className={`select-button ${hasModels ? "" : "is-unavailable"}`}
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={hasModels ? "Select model" : "No connected models"}
-        data-tooltip={
-          hasModels
-            ? "Choose which AI model answers your messages"
-            : "Ask your admin to connect a model provider to start chatting"
-        }
-        disabled={!hasModels}
-        onClick={() => hasModels && setOpen((value) => !value)}
-      >
-        <Sparkles size={17} />
-        <span className="model-select-label">
-          {hasModels ? (
-            <>
-              Model: <strong>{label}</strong>
-            </>
-          ) : (
-            <strong>No models connected</strong>
-          )}
-        </span>
-        {hasModels && <ChevronDown size={16} />}
-      </button>
-      {open && hasModels && (
-        <div className="model-menu" role="listbox" aria-label="Select model">
-          {chat.enabledModels.map((model) => (
-            <div className="model-option-row" key={model.id}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={model.id === chat.model}
-                className={`model-option ${model.id === chat.model ? "is-selected" : ""}`}
-                data-tooltip={`Switch this chat to ${model.name} for new responses`}
-                onClick={() => {
-                  chat.setModel(model.id);
-                  setOpen(false);
-                }}
-              >
-                <span>
-                  <strong>{model.name}</strong>
-                  <small>{model.provider_name}</small>
-                </span>
-                {model.id === chat.model && <Check size={16} />}
-              </button>
-              <button
-                type="button"
-                className={`model-default-button ${model.id === chat.defaultModelId ? "is-default" : ""}`}
-                aria-label={`Set ${model.name} as default model`}
-                aria-pressed={model.id === chat.defaultModelId}
-                data-tooltip={
-                  model.id === chat.defaultModelId
-                    ? `${model.name} is your default model for new chats`
-                    : `Make ${model.name} the default model for your new chats`
-                }
-                onClick={() => {
-                  chat.setDefaultModel(model.id);
-                  setOpen(false);
-                }}
-              >
-                <Star size={15} fill={model.id === chat.defaultModelId ? "currentColor" : "none"} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function modelName(chat: ChatStore) {
   return chat.enabledModels.find((model) => model.id === chat.model)?.name ?? "No connected model";

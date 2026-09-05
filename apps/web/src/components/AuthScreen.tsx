@@ -1,10 +1,14 @@
 import { SelectControl } from "./SelectControl";
+import "./auth-refresh.css";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowRight,
   CheckCircle2,
   Building2,
   Clock3,
+  Copy,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   LockKeyhole,
@@ -121,6 +125,7 @@ export type AuthScreenProps = {
   onBootstrapOwner?: BootstrapOwnerHandler;
   /** Navigates the browser to the IdP authorize URL. Overridable in tests. */
   onSsoRedirect?: (url: string) => void;
+  onRetry?: () => void;
 };
 
 export function AuthScreen({
@@ -139,6 +144,7 @@ export function AuthScreen({
   onLocalLogin,
   onBootstrapOwner,
   onSsoRedirect,
+  onRetry,
 }: AuthScreenProps) {
   const emailId = useId();
   const displayNameId = useId();
@@ -158,6 +164,10 @@ export function AuthScreen({
   const [email, setEmail] = useState(initialEmail);
   const [displayName, setDisplayName] = useState(initialDisplayName);
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [preferredMethod, setPreferredMethod] = useState<"sso" | "local">("sso");
+  const [signInHelp, setSignInHelp] = useState(false);
+  const [recoveryCopyStatus, setRecoveryCopyStatus] = useState<string | null>(null);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState(providers[0]?.id ?? "");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -393,7 +403,7 @@ export function AuthScreen({
   const canUsePassword = passwordAuthEnabled && !busy && !bootstrapRequired;
   const primaryAuthMethod = bootstrapRequired
     ? "bootstrap"
-    : hasConfiguredSso
+    : hasConfiguredSso && !(passwordAuthEnabled && preferredMethod === "local")
       ? "sso"
       : passwordAuthEnabled
         ? "local"
@@ -408,6 +418,8 @@ export function AuthScreen({
           : true;
   const primaryButtonLabel = bootstrapRequired
     ? "Create platform owner"
+    : busy && !resolvedOptions
+      ? "Loading sign-in…"
     : primaryAuthMethod === "sso"
       ? "Continue with SSO"
       : primaryAuthMethod === "local"
@@ -502,9 +514,11 @@ export function AuthScreen({
   };
 
   const submitLocal = () => {
+    const payload = buildPayload("local", true);
+    if (!payload) return;
     if (onLocalLogin) {
       setValidationError(null);
-      void onLocalLogin(buildPayload("local", false) ?? undefined);
+      void onLocalLogin(payload);
       return;
     }
 
@@ -513,14 +527,13 @@ export function AuthScreen({
       return;
     }
 
-    const payload = buildPayload("local", true);
-    if (!payload) return;
     setValidationError(null);
     void onSubmit(payload);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (primaryDisabled) return;
     if (bootstrapRequired) {
       submitBootstrapOwner();
       return;
@@ -534,6 +547,7 @@ export function AuthScreen({
 
   const submitAccessRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (accessPending) return;
     const firstName = accessDraft.firstName.trim();
     const lastName = accessDraft.lastName.trim();
     const requestEmail = accessDraft.email.trim();
@@ -598,6 +612,21 @@ export function AuthScreen({
                 <li key={recoveryCode}>{recoveryCode}</li>
               ))}
             </ul>
+            <button
+              type="button"
+              className="secondary-button auth-local-button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(state.recoveryCodes!.join("\n"));
+                  setRecoveryCopyStatus("Recovery codes copied. Store them somewhere safe.");
+                } catch {
+                  setRecoveryCopyStatus("Copy was unavailable. Select the codes above and copy them manually.");
+                }
+              }}
+            >
+              <Copy size={16} /> Copy recovery codes
+            </button>
+            {recoveryCopyStatus && <p className="auth-field-help" role="status">{recoveryCopyStatus}</p>}
             <label className="auth-mfa-ack">
               <input
                 type="checkbox"
@@ -878,9 +907,9 @@ export function AuthScreen({
   };
 
   return (
-    <main className="auth-screen">
+    <main className="auth-screen auth-refresh">
       <section className="auth-shell" aria-labelledby="auth-title">
-        <div className="auth-panel" aria-busy={mfa ? mfa.pending : busy}>
+        <div className="auth-panel" aria-busy={mfa ? mfa.pending : busy || accessPending}>
           <div className="auth-brand">
             {brandLogoUrl ? (
               <span className="auth-brand-mark">
@@ -891,7 +920,7 @@ export function AuthScreen({
             )}
             <div>
               <span>{brandName}</span>
-              <strong>{mfa ? "Two-step verification" : accessMode ? "Access request" : "Account sign-in"}</strong>
+              <strong>{mfa ? "Two-step verification" : accessMode ? "Access request" : bootstrapRequired ? "Workspace setup" : "Account sign-in"}</strong>
             </div>
           </div>
 
@@ -904,21 +933,26 @@ export function AuthScreen({
                 <h1 id="auth-title">{accessComplete ? "Request received" : "Ask to join"}</h1>
                 <p>
                   {accessComplete
-                    ? "Your request is pending. A workspace administrator will review the account and choose the right access level."
-                    : `Tell the ${brandName} administrators who you are. Submitting this form does not create a sign-in session.`}
+                    ? "If this email is new to the workspace, your request is now waiting for administrator review."
+                    : `Start with your name and work email. A ${brandName} administrator will review your request.`}
                 </p>
               </div>
               {accessComplete ? (
                 <div className="auth-access-success" role="status">
                   <span className="auth-access-success-mark"><CheckCircle2 size={22} /></span>
                   <div>
-                    <strong>Pending administrator review</strong>
-                    <span>You can return here to sign in after your request is approved.</span>
+                    <strong>Request submitted for {accessDraft.email.trim()}</strong>
+                    <span>Your administrator will arrange your sign-in method after approval. Contact them for an update; this form does not send an email or set a password.</span>
                   </div>
+                  <ol className="auth-next-steps">
+                    <li><span>1</span> Administrator reviews your access.</li>
+                    <li><span>2</span> Get your organization sign-in or temporary password.</li>
+                    <li><span>3</span> Return here and open your workspace.</li>
+                  </ol>
                   <button
                     className="secondary-button auth-local-button"
                     type="button"
-                    onClick={() => setAccessMode(false)}
+                    onClick={() => { setEmail(accessDraft.email.trim()); setAccessMode(false); }}
                   >
                     Back to sign in
                   </button>
@@ -932,6 +966,7 @@ export function AuthScreen({
                         <UserRound size={17} />
                         <input
                           id={accessFirstNameId}
+                          disabled={accessPending}
                           autoComplete="given-name"
                           value={accessDraft.firstName}
                           onChange={(event) => setAccessDraft((current) => ({ ...current, firstName: event.target.value }))}
@@ -947,6 +982,7 @@ export function AuthScreen({
                         <UserRound size={17} />
                         <input
                           id={accessLastNameId}
+                          disabled={accessPending}
                           autoComplete="family-name"
                           value={accessDraft.lastName}
                           onChange={(event) => setAccessDraft((current) => ({ ...current, lastName: event.target.value }))}
@@ -963,6 +999,7 @@ export function AuthScreen({
                       <Mail size={17} />
                       <input
                         id={accessEmailId}
+                        disabled={accessPending}
                         type="email"
                         inputMode="email"
                         autoComplete="email"
@@ -1005,21 +1042,37 @@ export function AuthScreen({
           ) : (
             <>
           <div className="auth-heading">
+            <span className="auth-eyebrow">{bootstrapRequired ? "First-time setup" : "Your workspace, ready when you are"}</span>
             <h1 id="auth-title">{bootstrapRequired ? "Create the first platform owner" : "Sign in to continue"}</h1>
             <p>
               {bootstrapRequired
-                ? "This first account becomes the platform owner and can invite other owners, admins, and users before SSO is enabled."
-                : `Use your work identity so ${brandName} can load your tenant role, groups, and enabled tools.`}
+                ? "Create your account to configure this installation. Next, connect a model provider and invite your team."
+                : primaryAuthMethod === "sso"
+                  ? "Continue with your organization's sign-in. Your identity provider will verify your account."
+                  : "Use your email and password to pick up where you left off."}
             </p>
           </div>
 
           <form className="auth-form" onSubmit={handleSubmit} noValidate>
+            {!bootstrapRequired && hasConfiguredSso && passwordAuthEnabled && (
+              <div className="auth-method-switch" aria-label="Sign-in method">
+                <button type="button" aria-pressed={primaryAuthMethod === "sso"} disabled={busy}
+                  onClick={() => { setPreferredMethod("sso"); setValidationError(null); }}>
+                  <Building2 size={16} /> Organization SSO
+                </button>
+                <button type="button" aria-pressed={primaryAuthMethod === "local"} disabled={busy}
+                  onClick={() => { setPreferredMethod("local"); setValidationError(null); }}>
+                  <Mail size={16} /> Email & password
+                </button>
+              </div>
+            )}
             <label className="auth-field" htmlFor={emailId}>
               <span>Email</span>
               <span className="auth-input-wrap">
                 <Mail size={17} />
                 <input
                   id={emailId}
+                  aria-label="Email"
                   type="email"
                   autoComplete="email"
                   inputMode="email"
@@ -1037,6 +1090,7 @@ export function AuthScreen({
                   required={bootstrapRequired || primaryAuthMethod === "local"}
                 />
               </span>
+              {primaryAuthMethod === "sso" && <small className="auth-field-help">Optional. Helps select your organization's sign-in provider.</small>}
             </label>
 
             {bootstrapRequired && (
@@ -1058,14 +1112,15 @@ export function AuthScreen({
               </label>
             )}
 
-            {(bootstrapRequired || passwordAuthEnabled) && (
+            {(bootstrapRequired || primaryAuthMethod === "local") && (
               <label className="auth-field" htmlFor={passwordId}>
                 <span>{bootstrapRequired ? "Create password" : "Password"}</span>
-                <span className="auth-input-wrap">
+                <span className="auth-input-wrap auth-password-wrap">
                   <LockKeyhole size={17} />
                   <input
                     id={passwordId}
-                    type="password"
+                    aria-label={bootstrapRequired ? "Create password" : "Password"}
+                    type={passwordVisible ? "text" : "password"}
                     autoComplete={bootstrapRequired ? "new-password" : "current-password"}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
@@ -1073,7 +1128,12 @@ export function AuthScreen({
                     aria-describedby={statusMessage ? errorId : undefined}
                     required={bootstrapRequired || passwordAuthEnabled}
                   />
+                  <button className="auth-reveal" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"}
+                    aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}>
+                    {passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
                 </span>
+                {bootstrapRequired && <small className="auth-field-help">At least 12 characters. A memorable passphrase works well.</small>}
               </label>
             )}
 
@@ -1096,7 +1156,7 @@ export function AuthScreen({
               </label>
             )}
 
-            {!bootstrapRequired && providers.length > 0 && (
+            {!bootstrapRequired && primaryAuthMethod === "sso" && providers.length > 1 && (
               <label className="auth-field" htmlFor={providerId}>
                 <span>SSO provider</span>
                 <span className="auth-select-wrap">
@@ -1116,7 +1176,7 @@ export function AuthScreen({
               </label>
             )}
 
-            {!bootstrapRequired && selectedProvider && (
+            {!bootstrapRequired && primaryAuthMethod === "sso" && selectedProvider && (
               <div className="auth-provider-status">
                 <ShieldCheck size={16} />
                 <span>{providerStatusText(selectedProvider)}</span>
@@ -1128,6 +1188,9 @@ export function AuthScreen({
                 <LockKeyhole size={16} />
                 <span>{statusMessage}</span>
               </div>
+            )}
+            {!resolvedOptions && !busy && onRetry && (
+              <button type="button" className="secondary-button auth-local-button" onClick={onRetry}>Retry connection</button>
             )}
 
             <div className="auth-actions">
@@ -1150,20 +1213,18 @@ export function AuthScreen({
                 {!busy && <ArrowRight size={16} />}
               </button>
 
-              {passwordAuthEnabled && hasConfiguredSso && !bootstrapRequired && (
-                <button
-                  className="secondary-button auth-local-button"
-                  type="button"
-                  disabled={!canUsePassword}
-                  data-tooltip="Skip SSO and sign in with your email and password"
-                  onClick={submitLocal}
-                >
-                  <LockKeyhole size={16} />
-                  <span>Continue with email and password</span>
-                </button>
-              )}
             </div>
             {!bootstrapRequired && (
+              <div className="auth-help-section">
+                <button className="link-button" type="button" aria-expanded={signInHelp} onClick={() => setSignInHelp((open) => !open)}>
+                  Trouble signing in?
+                </button>
+                {signInHelp && <p className="auth-field-help" role="status">
+                  For organization SSO, use your organization's password recovery. For an email-and-password account, ask your workspace administrator for a temporary password. After approval, your administrator must arrange your sign-in before you can enter.
+                </p>}
+              </div>
+            )}
+            {!bootstrapRequired && resolvedOptions && (
               <div className="auth-request-entry">
                 <span><Clock3 size={15} /> Need an account?</span>
                 <button
@@ -1185,19 +1246,24 @@ export function AuthScreen({
         </div>
 
         <aside className="auth-context" aria-label="Authentication requirements">
+          <div className="auth-context-intro">
+            <span className="auth-eyebrow">Made for focused work</span>
+            <h2>A clearer space<br />for your best work.</h2>
+            <p>Conversations, knowledge, and the tools your team needs. All in one workspace.</p>
+          </div>
           {mfa ? (
             <>
               <div className="auth-context-item">
                 <ShieldCheck size={18} />
-                <span>The second factor is checked by the server before any session is issued.</span>
+                <span>This extra step helps keep your account secure.</span>
               </div>
               <div className="auth-context-item">
                 <LockKeyhole size={18} />
-                <span>Codes, secrets, and recovery codes are never stored in this browser.</span>
+                <span>Keep your recovery codes somewhere safe in case you lose access to your authenticator.</span>
               </div>
               <div className="auth-context-item">
                 <Building2 size={18} />
-                <span>Your organization&apos;s tenant policy controls when verification is required.</span>
+                <span>Your organization chooses when two-step verification is required.</span>
               </div>
             </>
           ) : accessMode ? (
@@ -1208,30 +1274,32 @@ export function AuthScreen({
               </div>
               <div className="auth-context-item">
                 <ShieldCheck size={18} />
-                <span>Submitting this form never grants access or creates an authenticated session.</span>
+                <span>An administrator needs to approve your request before you can sign in.</span>
               </div>
               <div className="auth-context-item">
                 <UserPlus size={18} />
-                <span>Approved accounts receive the role and model access selected by the administrator.</span>
+                <span>Your administrator will arrange your sign-in method and workspace access.</span>
               </div>
             </>
           ) : (
             <>
               <div className="auth-context-item">
                 <ShieldCheck size={18} />
-                <span>Tenant roles and group access are loaded after authentication.</span>
+                <span>{bootstrapRequired ? "Your owner account manages this installation and its workspaces." : "Use the work email associated with your workspace."}</span>
               </div>
               <div className="auth-context-item">
                 <Building2 size={18} />
                 <span>
-                  {hasConfiguredSso
-                    ? "SSO provider policy controls the primary sign-in path."
-                    : "Password sign-in remains available until SSO is configured and enforced."}
+                  {bootstrapRequired
+                    ? "Keep your owner credentials somewhere secure."
+                    : hasConfiguredSso
+                    ? "Your organization manages sign-in and workspace access."
+                    : "Received a temporary password? Sign in, then choose a password of your own."}
                 </span>
               </div>
               <div className="auth-context-item">
                 <LockKeyhole size={18} />
-                <span>First-run owner setup appears only when no active platform owner exists.</span>
+                <span>{bootstrapRequired ? "After setup, connect a model provider and give your team access." : "New here? Request access and your workspace administrator will help you get started."}</span>
               </div>
             </>
           )}
@@ -1250,10 +1318,7 @@ function isEmailLike(value: string): boolean {
 }
 
 function providerStatusText(provider: AuthProviderOption): string {
-  const mfa = provider.mfa_methods?.length
-    ? ` · MFA: ${provider.mfa_methods.join(", ")}${provider.mfa_enforced ? " enforced" : ""}`
-    : "";
-  return `${provider.protocol.toUpperCase()} through ${provider.provider}${provider.enforced ? " · enforced" : ""}${mfa}`;
+  return `Sign in with ${provider.name}${provider.enforced ? " · Required by your organization" : ""}${provider.mfa_enforced ? " · Two-step verification required" : ""}`;
 }
 
 /* Shown after a successful sign-in with an admin-issued temporary password:
@@ -1270,6 +1335,7 @@ export function ForcedPasswordScreen({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pending, setPending] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const newPasswordId = useId();
   const confirmPasswordId = useId();
@@ -1277,6 +1343,7 @@ export function ForcedPasswordScreen({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (pending) return;
     if (newPassword.length < 12) {
       setError("Use a password with at least 12 characters.");
       return;
@@ -1296,10 +1363,11 @@ export function ForcedPasswordScreen({
   }
 
   return (
-    <main className="auth-screen">
+    <main className="auth-screen auth-refresh auth-refresh-single">
       <section className="auth-shell" aria-labelledby="forced-password-title">
         <div className="auth-panel" aria-busy={pending}>
           <div className="auth-heading">
+            <span className="auth-eyebrow">One last step</span>
             <h1 id="forced-password-title">Set a new password</h1>
             <p>
               Welcome, {displayName}. Your temporary password worked — choose your own password to finish signing
@@ -1309,11 +1377,11 @@ export function ForcedPasswordScreen({
           <form className="auth-form" onSubmit={handleSubmit} noValidate>
             <label className="auth-field" htmlFor={newPasswordId}>
               <span>New password</span>
-              <span className="auth-input-wrap">
+              <span className="auth-input-wrap auth-password-wrap">
                 <LockKeyhole size={17} />
                 <input
                   id={newPasswordId}
-                  type="password"
+                  type={passwordVisible ? "text" : "password"}
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
@@ -1321,6 +1389,10 @@ export function ForcedPasswordScreen({
                   aria-describedby={error ? errorId : undefined}
                   required
                 />
+                <button className="auth-reveal" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}>
+                  {passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
               </span>
             </label>
             <label className="auth-field" htmlFor={confirmPasswordId}>
@@ -1359,6 +1431,7 @@ export function ForcedPasswordScreen({
               <button
                 className="secondary-button"
                 type="button"
+                disabled={pending}
                 onClick={onCancel}
                 data-tooltip="Return to the sign-in screen without changing the password"
               >

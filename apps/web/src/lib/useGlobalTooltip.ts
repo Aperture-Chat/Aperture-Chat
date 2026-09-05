@@ -68,6 +68,9 @@ export function useGlobalTooltip(): void {
     }
 
     function show(target: HTMLElement) {
+      // Labels and field help already explain an active input. A floating
+      // tooltip here obscures the form, especially after composer autofocus.
+      if (isFieldTarget(target) && (target === document.activeElement || target.contains(document.activeElement))) return;
       const text = tooltipTextFor(target);
       if (!text || !target.isConnected) return;
       pendingTarget = null;
@@ -126,8 +129,8 @@ export function useGlobalTooltip(): void {
 
     function onFocusIn(event: FocusEvent) {
       const target = findTarget(event.target);
-      if (!target || !target.matches(":focus-visible")) return;
       hide();
+      if (!target || isFieldTarget(target) || !target.matches(":focus-visible")) return;
       show(target);
     }
 
@@ -137,7 +140,8 @@ export function useGlobalTooltip(): void {
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") hide();
+      const target = findTarget(event.target);
+      if (event.key === "Escape" || (target && isFieldTarget(target))) hide();
     }
 
     // jsdom (tests) has no matchMedia; treat that environment as hover-capable.

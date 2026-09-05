@@ -366,3 +366,29 @@ test("a failed search reports the real error instead of fake results", async () 
   ).toBeInTheDocument();
   expect(screen.queryAllByRole("option")).toHaveLength(0);
 });
+
+test("Tab wraps around usable palette controls while result options stay arrow-navigated", async () => {
+  mockedSearch.mockResolvedValue(searchResponse());
+  renderPalette();
+  const input = screen.getByRole("combobox");
+  fireEvent.change(input, { target: { value: "policy" } });
+  await screen.findByRole("option", { name: /Quarterly policy review/ });
+  input.focus();
+  fireEvent.keyDown(input, { key: "Tab" });
+  expect(screen.getByRole("button", { name: "Close search dialog" })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Tab", shiftKey: true });
+  expect(input).toHaveFocus();
+});
+
+test("search results from the previous workspace disappear before the next request completes", async () => {
+  mockedSearch.mockResolvedValueOnce(searchResponse());
+  const onClose = vi.fn();
+  const onNavigate = vi.fn();
+  const view = render(<CommandPalette userId="user-admin" tenantSlug="first-workspace" onClose={onClose} onNavigate={onNavigate} />);
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "policy" } });
+  await screen.findByRole("option", { name: /Quarterly policy review/ });
+  mockedSearch.mockReturnValueOnce(new Promise(() => {}));
+  view.rerender(<CommandPalette userId="user-admin" tenantSlug="second-workspace" onClose={onClose} onNavigate={onNavigate} />);
+  expect(screen.queryByRole("option", { name: /Quarterly policy review/ })).not.toBeInTheDocument();
+  expect(screen.getByText("Searching…")).toBeInTheDocument();
+});

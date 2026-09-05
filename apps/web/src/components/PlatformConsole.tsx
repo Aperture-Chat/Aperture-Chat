@@ -1,5 +1,6 @@
 import { SelectControl } from "./SelectControl";
 import { ProviderBrandLogo } from "./providerIcons";
+import { ConnectorsPanel, type ConnectorsPanelApi } from "./ConnectorsPanel";
 import * as Tabs from "@radix-ui/react-tabs";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -585,7 +586,7 @@ function validateEnrollmentQrValue(rawValue: string): EnrollmentQrValidation {
 }
 
 // Parent code can adapt future API helpers to these hooks without importing draft endpoints here.
-export type PlatformConsoleActions = {
+export type PlatformConsoleActions = ConnectorsPanelApi & {
   createProvider?: (provider: Provider) => Promise<Provider | void> | Provider | void;
   updateProvider?: (providerId: string, patch: Partial<Provider>) => Promise<Provider | void> | Provider | void;
   createProviderKey?: (payload: PlatformProviderKeyCreateRequest) => Promise<ProviderKey | void> | ProviderKey | void;
@@ -657,6 +658,7 @@ export function PlatformConsole({
   onDataChange,
   platformActions,
   openDocumentationRequestKey,
+  openProvidersRequestKey,
   onOpenAdminDocumentation,
   onOpenUserHelp,
 }: {
@@ -664,6 +666,7 @@ export function PlatformConsole({
   onDataChange: (updater: (current: BootstrapData) => BootstrapData) => void;
   platformActions?: PlatformConsoleActions;
   openDocumentationRequestKey?: number;
+  openProvidersRequestKey?: number;
   onOpenAdminDocumentation?: () => void;
   onOpenUserHelp?: () => void;
 }) {
@@ -739,6 +742,7 @@ export function PlatformConsole({
   const [ssoTestResult, setSsoTestResult] = useState<SsoTestResult | null>(null);
   // Honest default: disconnected until the backend reports configured env credentials.
   const [elasticStatus, setElasticStatus] = useState<ElasticStatus | null>(null);
+  const [activeSection, setActiveSection] = useState(openProvidersRequestKey ? "providers" : "org-settings");
   const [showProviderForm, setShowProviderForm] = useState(false);
   const [showKeyForm, setShowKeyForm] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -986,6 +990,12 @@ export function PlatformConsole({
     [promptUsageTrendRows],
   );
   const unacknowledgedSecurityAlerts = auditSecurityAlerts.filter((alert) => !alert.acknowledged);
+
+  useEffect(() => {
+    if (!openProvidersRequestKey) return;
+    setActiveSection("providers");
+    setShowDocumentation(false);
+  }, [openProvidersRequestKey]);
 
   useEffect(() => {
     if (!openDocumentationRequestKey) return;
@@ -1407,36 +1417,41 @@ export function PlatformConsole({
   }
 
   async function addProvider() {
-    const revertOptimistic = beginOptimisticChange();
     const name = providerDraft.name.trim();
     if (!name) return;
     const secret = providerDraft.secret_value.trim();
+    const createProvider = platformActions?.createProvider;
+    const createProviderKey = platformActions?.createProviderKey;
+    if (!createProvider || (secret && !createProviderKey)) {
+      setActionStatus({
+        tone: "warning",
+        message: "Provider was not added because the provider or key API is not connected. Your form is still available to retry.",
+      });
+      return;
+    }
     const kind = providerDraft.kind.trim() || "openai-compatible";
-    const metadata = providerAuthMetadata(providerDraft);
-    const runtimeSupported = isRuntimeSupportedProviderKind(kind);
     const nextProvider: Provider = {
       id: `provider-${Date.now()}`,
       name,
       kind,
       region: providerDraft.region.trim() || "Global",
-      connected: Boolean(secret),
+      connected: false,
       model_count: 0,
       enabled_model_count: 0,
-      last_sync: "Added now",
+      last_sync: "Not synced",
       base_url: providerDraft.base_url.trim() || undefined,
       auth_type: providerDraft.auth_type.trim() || defaultAuthTypeForKind(kind),
-      auth_metadata: metadata,
-      status_message: secret
-        ? runtimeSupported
-          ? "Provider key saved in the platform vault."
-          : "Provider key saved; runtime gateway adapter still needs implementation."
-        : "Provider metadata saved; add a key before routing live model calls.",
+      auth_metadata: providerAuthMetadata(providerDraft),
+      status_message: "Add a key and validate the connection before routing live model calls.",
     };
+    let createdProvider: Provider | undefined;
 
     setPendingAction("provider:create");
     try {
-      const savedProvider = await platformActions?.createProvider?.(nextProvider);
-      const provider = mergeProviderRuntimeStatus(savedProvider ?? nextProvider, nextProvider);
+      const savedProvider = await createProvider(nextProvider);
+      if (!savedProvider) throw new Error("The provider API did not return the saved provider. Refresh before retrying.");
+      createdProvider = mergeProviderRuntimeStatus(savedProvider, nextProvider);
+      const provider = createdProvider;
       let savedKey: ProviderKey | undefined;
       if (secret) {
         const keyPayload: PlatformProviderKeyCreateRequest = {
@@ -1446,102 +1461,103 @@ export function PlatformConsole({
           expires: providerDraft.key_expires.trim() || "Not set",
           secret_value: secret,
         };
-        savedKey =
-          (await platformActions?.createProviderKey?.(keyPayload)) ??
-          localProviderKey(provider, keyPayload);
+        const result = await createProviderKey!(keyPayload);
+        if (!result) throw new Error("The key API did not return the saved key. Refresh before retrying.");
+        savedKey = result;
       }
-      const providerWithKeyState = savedKey
-        ? {
-            ...provider,
-            connected: !platformActions?.createProviderKey,
-            last_sync: platformActions?.createProviderKey ? "Runtime validation pending" : "Key saved now",
-            status_message: platformActions?.createProviderKey
-              ? "Key saved; runtime validation must pass before chat can use this provider."
-              : "Provider key saved locally.",
-          }
-        : provider;
+      const providerWithKeyState = {
+        ...provider,
+        connected: false,
+        last_sync: savedKey ? "Runtime validation pending" : "Not synced",
+        status_message: savedKey
+          ? "Key saved; runtime validation must pass before chat can use this provider."
+          : "Provider saved; add a key before routing live model calls.",
+      };
       let syncResult: ProviderModelSyncResult | void = undefined;
       let syncError: unknown = undefined;
       if (savedKey && platformActions?.syncProviderModels) {
         try {
-          syncResult = await platformActions.syncProviderModels(providerWithKeyState.id);
+          syncResult = await platformActions.syncProviderModels(provider.id);
         } catch (error) {
           syncError = error;
         }
       }
-      const providerForState =
-        syncResult?.provider ??
-        (savedKey
-          ? {
-              ...providerWithKeyState,
-              connected: syncError ? false : providerWithKeyState.connected,
-              last_sync: syncError ? "Runtime test failed" : providerWithKeyState.last_sync,
-              status_message: syncError ? formatActionError(syncError) : providerWithKeyState.status_message,
-            }
-          : providerWithKeyState);
+      const providerForState = syncResult?.provider ?? {
+        ...providerWithKeyState,
+        last_sync: syncError ? "Runtime test failed" : providerWithKeyState.last_sync,
+        status_message: syncError ? formatActionError(syncError) : providerWithKeyState.status_message,
+      };
       onDataChange((current) => {
         const next = {
           ...current,
-          providers: [...current.providers, providerForState],
+          providers: [...current.providers.filter((item) => item.id !== provider.id), providerForState],
           providerKeys: savedKey ? upsertProviderKey(current.providerKeys, savedKey) : current.providerKeys,
         };
         return syncResult ? applyProviderModelSync(next, syncResult) : next;
       });
       setActionStatus({
-        tone: syncError ? "warning" : platformActions?.createProvider ? "success" : "info",
+        tone: syncError ? "warning" : "success",
         message: syncError
           ? `${provider.name} provider and key were saved, but model sync failed: ${formatActionError(syncError)}`
           : syncResult
             ? syncSummary(syncResult)
-            : secret
-              ? `${provider.name} provider and masked key metadata saved${platformActions?.createProvider ? " through the platform API" : " locally"}.`
-              : `${provider.name} provider saved${platformActions?.createProvider ? " through the platform API" : " locally"}; add a key before model calls can route live.`,
+            : savedKey
+              ? `${provider.name} provider and masked key metadata saved through the platform API. Validate the connection before chatting.`
+              : `${provider.name} provider saved through the platform API; add a key before model calls can route live.`,
       });
     } catch (error) {
-      revertOptimistic();
-      const localKey = secret
-        ? localProviderKey({ ...nextProvider, connected: true }, {
-            provider_id: nextProvider.id,
-            name: providerDraft.key_name.trim() || `${nextProvider.name} Primary`,
-            environment: providerDraft.key_environment.trim() || "Production",
-            expires: providerDraft.key_expires.trim() || "Not set",
-            secret_value: secret,
-          })
-        : undefined;
-      onDataChange((current) => ({
-        ...current,
-        providers: [
-          ...current.providers,
-          {
-            ...nextProvider,
-            connected: Boolean(localKey),
-            status_message: `Saved locally; backend create failed: ${formatActionError(error)}`,
-          },
-        ],
-        providerKeys: localKey ? upsertProviderKey(current.providerKeys, localKey) : current.providerKeys,
-      }));
-      setActionStatus({
-        tone: "warning",
-        message: `${nextProvider.name} was not added. ${formatActionError(error)}`,
-      });
+      if (createdProvider) {
+        // Registration and key storage are separate requests. Keep the real
+        // provider so retrying the key cannot create a duplicate provider.
+        const provider = {
+          ...createdProvider,
+          connected: false,
+          last_sync: "Key setup incomplete",
+          status_message: "Provider saved; key setup needs attention.",
+        };
+        onDataChange((current) => ({
+          ...current,
+          providers: [...current.providers.filter((item) => item.id !== provider.id), provider],
+        }));
+        setExpandedProviderKeyIds((current) => ({ ...current, [provider.id]: true }));
+        setKeyDraft({
+          provider_id: provider.id,
+          name: providerDraft.key_name.trim() || `${provider.name} Primary`,
+          environment: providerDraft.key_environment.trim() || "Production",
+          expires: providerDraft.key_expires.trim() || "Not set",
+          secret_value: secret,
+        });
+        setShowKeyForm(true);
+        setActionStatus({
+          tone: "warning",
+          message: `${provider.name} was created, but its key setup did not finish. Retry in API Keys below. ${formatActionError(error)}`,
+        });
+      } else {
+        setActionStatus({
+          tone: "warning",
+          message: `${name} was not added. Your form is still available to retry. ${formatActionError(error)}`,
+        });
+      }
     } finally {
       setPendingAction(null);
-      setProviderDraft({
-        name: "",
-        kind: "openai-compatible",
-        region: "Global",
-        base_url: "",
-        auth_type: "bearer",
-        header_name: "Authorization",
-        api_version: "",
-        deployment_id: "",
-        catalog_scope: defaultCatalogScopeForKind("openai-compatible"),
-        secret_value: "",
-        key_name: "",
-        key_environment: "Production",
-        key_expires: "Not set",
-      });
-      setShowProviderForm(false);
+      if (createdProvider) {
+        setProviderDraft({
+          name: "",
+          kind: "openai-compatible",
+          region: "Global",
+          base_url: "",
+          auth_type: "bearer",
+          header_name: "Authorization",
+          api_version: "",
+          deployment_id: "",
+          catalog_scope: defaultCatalogScopeForKind("openai-compatible"),
+          secret_value: "",
+          key_name: "",
+          key_environment: "Production",
+          key_expires: "Not set",
+        });
+        setShowProviderForm(false);
+      }
     }
   }
 
@@ -1559,7 +1575,9 @@ export function PlatformConsole({
 
     setPendingAction("key:create");
     try {
-      const savedKey = (await platformActions?.createProviderKey?.(keyPayload)) ?? localProviderKey(provider, keyPayload);
+      if (!platformActions?.createProviderKey) throw new Error("The provider key API is not connected.");
+      const savedKey = await platformActions.createProviderKey(keyPayload);
+      if (!savedKey) throw new Error("The key API did not return the saved key. Refresh before retrying.");
       let syncResult: ProviderModelSyncResult | void = undefined;
       let syncError: unknown = undefined;
       if (platformActions?.syncProviderModels) {
@@ -1571,7 +1589,6 @@ export function PlatformConsole({
       }
       onDataChange((current) => {
         const providerPatch = syncResult?.provider;
-        const savedKeyIsActive = providerKeyEffectiveStatus(savedKey).toLowerCase() === "active";
         const next = {
           ...current,
           providerKeys: upsertProviderKey(current.providerKeys, savedKey),
@@ -1579,7 +1596,7 @@ export function PlatformConsole({
             item.id === provider.id
               ? providerPatch ?? {
                   ...item,
-                  connected: !syncError && savedKeyIsActive && !platformActions?.syncProviderModels,
+                  connected: false,
                   last_sync: syncError ? "Runtime test failed" : "Runtime validation pending",
                   status_message: syncError
                     ? formatActionError(syncError)
@@ -1591,12 +1608,12 @@ export function PlatformConsole({
         return syncResult ? applyProviderModelSync(next, syncResult) : next;
       });
       setActionStatus({
-        tone: syncError ? "warning" : platformActions?.createProviderKey ? "success" : "info",
+        tone: syncError ? "warning" : "success",
         message: syncError
           ? `${provider.name} key was saved, but model sync failed: ${formatActionError(syncError)}`
           : syncResult
             ? syncSummary(syncResult)
-            : `${provider.name} key saved${platformActions?.createProviderKey ? " through the platform vault API" : " locally"}.`,
+            : `${provider.name} key saved through the platform vault API.`,
       });
       setShowKeyForm(false);
       setKeyDraft({ provider_id: provider.id, name: "", environment: "Production", expires: "Not set", secret_value: "" });
@@ -1613,8 +1630,6 @@ export function PlatformConsole({
   async function syncProvider(provider: Provider) {
     const actionKey = `provider:${provider.id}:sync`;
     const localPatch: Partial<Provider> = {
-      connected: true,
-      last_sync: "Sync requested now",
       status_message: "Refreshing provider model catalog...",
     };
 
@@ -1622,26 +1637,18 @@ export function PlatformConsole({
     onDataChange((current) => updateProvider(current, provider.id, localPatch));
 
     try {
-      if (platformActions?.syncProviderModels) {
-        const syncResult = await platformActions.syncProviderModels(provider.id);
-        if (syncResult) {
-          onDataChange((current) => applyProviderModelSync(current, syncResult));
-          setActionStatus({
-            tone: "success",
-            message: syncSummary(syncResult),
-          });
-          return;
-        }
+      if (!platformActions?.syncProviderModels) {
+        throw new Error("Model discovery is unavailable. Reconnect to the platform and try again.");
       }
-      const savedProvider = await platformActions?.updateProvider?.(provider.id, localPatch);
-      if (savedProvider) {
-        onDataChange((current) => updateProvider(current, provider.id, savedProvider));
+      const syncResult = await platformActions.syncProviderModels(provider.id);
+      if (!syncResult) {
+        throw new Error("The platform returned no model catalog. Try the sync again.");
       }
+      // Only a validated server result can change connection or catalog state.
+      onDataChange((current) => applyProviderModelSync(current, syncResult));
       setActionStatus({
-        tone: platformActions?.updateProvider ? "success" : "info",
-        message: platformActions?.updateProvider
-          ? `${provider.name} sync metadata saved through the platform API; model discovery helper is not connected yet.`
-          : `${provider.name} sync metadata saved locally; updateProvider helper is not connected yet.`,
+        tone: "success",
+        message: syncSummary(syncResult),
       });
     } catch (error) {
       onDataChange((current) =>
@@ -2420,47 +2427,6 @@ export function PlatformConsole({
     }
   }
 
-  async function toggleConnector(connectorId: string, platform_enabled: boolean) {
-    const revertOptimistic = beginOptimisticChange();
-    const connector = data.connectors.find((item) => item.id === connectorId);
-    const actionKey = `connector:${connectorId}:toggle`;
-    const patch = { platform_enabled };
-    setPendingAction(actionKey);
-    onDataChange((current) => ({
-      ...current,
-      connectors: current.connectors.map((connector) =>
-        connector.id === connectorId
-          ? {
-              ...connector,
-              platform_enabled,
-              tenant_enabled: platform_enabled ? connector.tenant_enabled : false,
-              auth_status: platform_enabled ? connector.auth_status ?? "configured" : "not-configured",
-            }
-          : connector,
-      ),
-    }));
-    try {
-      const savedConnector = await platformActions?.updateConnector?.(connectorId, patch);
-      if (savedConnector) {
-        onDataChange((current) => updateConnector(current, connectorId, savedConnector));
-      }
-      setActionStatus({
-        tone: platformActions?.updateConnector ? "success" : "info",
-        message: platformActions?.updateConnector
-          ? `${connector?.name ?? "Connector"} platform availability saved through the platform API.`
-          : `${connector?.name ?? "Connector"} availability saved locally; updateConnector helper is not connected yet.`,
-      });
-    } catch (error) {
-      revertOptimistic();
-      setActionStatus({
-        tone: "warning",
-        message: `${connector?.name ?? "Connector"} availability was not changed. ${formatActionError(error)}`,
-      });
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
   function toggleModelDetails(modelId: string) {
     const model = data.models.find((item) => item.id === modelId);
     setExpandedModelIds((current) => ({ ...current, [modelId]: !current[modelId] }));
@@ -2601,9 +2567,10 @@ export function PlatformConsole({
       )}
 
       <Tabs.Root
-        defaultValue="org-settings"
+        value={activeSection}
         className="tabs-root"
         onValueChange={(value) => {
+          setActiveSection(value);
           if (value === "audit") setAuditTrailRefreshToken((token) => token + 1);
         }}
       >
@@ -2897,6 +2864,7 @@ export function PlatformConsole({
 
         <Tabs.Content value="providers" className="tab-content">
           <Panel
+            key={`provider-connections-${openProvidersRequestKey ?? 0}`}
             className="provider-connections-panel"
             title="Provider Connections"
             subtitle="OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP (Gemini), Bedrock, Open WebUI, and OpenAI-compatible gateways can be registered here. Open API Keys on a provider to view, reveal, replace, or delete its vaulted credentials."
@@ -2910,13 +2878,27 @@ export function PlatformConsole({
                     : "Open a form to register a new AI provider connection"
                 }
                 onClick={() => setShowProviderForm((value) => !value)}
+                aria-expanded={showProviderForm}
+                aria-controls="provider-builder-form"
+                disabled={pendingAction === "provider:create"}
               >
-                <Plus size={16} /> Add Provider
+                <Plus size={16} /> {showProviderForm ? "Close form" : "Add Provider"}
               </button>
             }
           >
+            {data.providers.length === 0 && !showProviderForm && (
+              <div className="provider-setup-empty">
+                <h3>Connect your first model provider</h3>
+                <p>Add a provider and its credentials to make models available in this workspace.</p>
+                <ol>
+                  <li>Add the connection details supplied by your provider.</li>
+                  <li>Validate the connection, then sync its model catalog.</li>
+                  <li>Enable models and give the right groups access.</li>
+                </ol>
+              </div>
+            )}
             {showProviderForm && (
-              <div className="inline-form provider-builder-form">
+              <fieldset className="inline-form provider-builder-form" id="provider-builder-form" disabled={pendingAction === "provider:create"} aria-label="New provider">
                 <label>
                   Name
                   <input
@@ -3059,7 +3041,7 @@ export function PlatformConsole({
                     reserve={["Saving...", "Save Provider"]}
                   />
                 </button>
-              </div>
+              </fieldset>
             )}
             <div className="provider-grid provider-grid-wide">
               {data.providers.map((provider) => {
@@ -3082,7 +3064,7 @@ export function PlatformConsole({
                           ? isRuntimeSupportedProviderKind(provider.kind)
                             ? "Connected"
                             : "Adapter needed"
-                          : "Needs key"}
+                          : providerHasActiveKey(data.providerKeys, provider.id) ? "Needs validation" : "Needs key"}
                       </Pill>
                       <dl>
                         <div>
@@ -3478,31 +3460,13 @@ export function PlatformConsole({
               onPolicyChange={(key, next) => void updateTenantPolicy(key, next)}
             />
             <DeploymentBudgetPanel userId={data.me.id} tenantSlug={data.currentTenant.slug} />
-            <Panel
-              title="Platform Connectors"
-              subtitle="Platform-level availability for source and tool connectors."
+            <ConnectorsPanel
+              data={data}
+              onDataChange={onDataChange}
+              api={platformActions}
+              onStatus={setActionStatus}
               defaultCollapsed
-            >
-              {data.connectors.map((connector) => (
-                <div className="permission-row" key={connector.id}>
-                  <span>
-                    <Bot size={15} />
-                    {connector.name}
-                  </span>
-                  <Toggle
-                    checked={connector.platform_enabled}
-                    disabled={pendingAction === `connector:${connector.id}:toggle`}
-                    label={`Platform enable ${connector.name}`}
-                    tooltip={
-                      connector.platform_enabled
-                        ? `Disable ${connector.name} for every tenant on the platform`
-                        : `Enable ${connector.name} so tenants can turn it on for their users`
-                    }
-                    onChange={(next) => toggleConnector(connector.id, next)}
-                  />
-                </div>
-              ))}
-            </Panel>
+            />
             <ElasticPanel elasticStatus={elasticStatus} />
             <RetentionPanel
               policy={retentionPolicy}
@@ -6203,15 +6167,6 @@ function syncSummary(result: ProviderModelSyncResult): string {
   return changes.length ? `${result.message} ${changes.join(", ")}.` : result.message;
 }
 
-function updateConnector(current: BootstrapData, connectorId: string, patch: Partial<Connector>): BootstrapData {
-  return {
-    ...current,
-    connectors: current.connectors.map((connector) =>
-      connector.id === connectorId ? { ...connector, ...patch } : connector,
-    ),
-  };
-}
-
 function providerAuthMetadata(draft: ProviderDraftState): Record<string, unknown> {
   const metadata: Record<string, unknown> = {};
   const headerName = draft.header_name.trim();
@@ -6340,20 +6295,6 @@ function mergeProviderRuntimeStatus(provider: Provider, fallback: Provider): Pro
     ...provider,
     auth_metadata: provider.auth_metadata ?? fallback.auth_metadata,
     status_message: provider.status_message ?? fallback.status_message,
-  };
-}
-
-function localProviderKey(provider: Provider, payload: PlatformProviderKeyCreateRequest): ProviderKey {
-  return {
-    id: payload.id || `key-${Date.now()}`,
-    provider_id: provider.id,
-    provider_name: provider.name,
-    name: payload.name,
-    environment: payload.environment ?? "Production",
-    status: payload.status ?? "Active",
-    last_rotated: "Saved now",
-    expires: payload.expires ?? "Not set",
-    masked_value: maskSecret(payload.secret_value),
   };
 }
 
@@ -6668,13 +6609,6 @@ function providerSlugFromName(name: string) {
 
 function formatUserRole(role: Role) {
   return formatAuditRole(role);
-}
-
-function maskSecret(secret: string): string {
-  const trimmed = secret.trim();
-  if (!trimmed) return "••••••••••";
-  const prefix = trimmed.startsWith("sk-") ? "sk-" : trimmed.startsWith("az-") ? "az-" : "";
-  return `${prefix}••••••••${trimmed.slice(-4)}`;
 }
 
 function toggleSelection(values: string[], value: string, checked: boolean): string[] {

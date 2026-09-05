@@ -4989,6 +4989,108 @@ button:disabled {
   display: contents;
 }
 
+/* A quiet writing bar, with secondary tools in selection-preserving panels. */
+.document-toolbar-compact {
+  gap: 6px;
+  padding-block: 7px;
+}
+
+.document-toolbar-compact .document-toolbar-main {
+  flex-basis: auto;
+  gap: 3px;
+}
+
+.document-toolbar-compact .document-toolbar-actions {
+  margin-left: auto;
+  gap: 5px;
+}
+
+.document-tool-panel-control { display: inline-flex; }
+
+.document-toolbar .document-tool-panel-trigger,
+.document-toolbar-compact .document-insert-control > button {
+  width: auto;
+  gap: 5px;
+  padding-inline: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.document-tool-panel-trigger[aria-expanded="true"] {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
+.document-tool-panel {
+  position: fixed;
+  z-index: 80;
+  width: min(340px, calc(100vw - 24px));
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 14px 42px rgb(0 0 0 / 24%);
+}
+
+.document-tool-panel[hidden] { display: none; }
+
+.document-tool-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.document-tool-section + .document-tool-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.document-tool-section-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.document-tool-section-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.document-tool-panel .document-color-control { min-height: 32px; }
+.document-tool-panel .document-color-swatches { gap: 12px; }
+.document-tool-panel button[aria-pressed="true"]:not([style]) {
+  color: var(--teal-strong);
+  background: var(--teal-soft);
+}
+
+.document-toolbar .document-tool-actions button {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 9px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.document-tool-panel .document-word-count {
+  display: block;
+  margin-top: 12px;
+  padding: 10px 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 761px) {
+  .document-toolbar-compact { flex-wrap: nowrap; }
+}
+
 .document-toolbar .document-mobile-toolbar-toggle {
   display: none;
 }
@@ -5765,6 +5867,15 @@ button:disabled {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* Paper stays light even in dark mode, so browser-default link colors do not
+   provide reliable contrast here (including links already visited). */
+.document-canvas a[href],
+.draft-print-root a[href] {
+  color: #164e80;
+  text-decoration-line: underline;
+  text-underline-offset: .13em;
 }
 
 .document-canvas pre {
@@ -8920,7 +9031,8 @@ button:disabled {
   position: fixed;
   top: 10px;
   left: 10px;
-  z-index: 80;
+  /* The opened navigation and its backdrop cover their launch button. */
+  z-index: 50;
   width: 38px;
   height: 38px;
   display: inline-grid;
@@ -10544,38 +10656,67 @@ button.toggle {
   animation: apx-rise 380ms var(--ease) both;
 }
 
-/* Segmented switch for consoles that host multiple sections (Library,
-   Agents). Stable dimensions: active state changes color only. */
-.section-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-soft);
-}
-
+/* The console switches share the Drafts notch skin below. Equal cells keep
+   the track dimensions independent of which section is selected. */
+.section-switch { width: 240px; flex: 0 0 240px; }
 .section-switch-tab {
-  height: calc(var(--control-height-compact) - 6px);
-  padding: 0 var(--space-4);
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--muted);
+  padding: 0 14px;
   font-size: var(--control-font-size);
   font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
 }
 
-.section-switch-tab:hover {
-  color: var(--text-strong);
+/* Keep the Agents switch mounted outside the changing console. Its position
+   cannot depend on subtitle wrapping, action widths, or entrance animations. */
+.console-page.agent-workspace-shell {
+  display: grid;
+  align-content: start;
 }
-
-.section-switch-tab.is-active {
-  background: var(--surface);
-  color: var(--text-strong);
-  box-shadow: var(--shadow-sm);
+.console-section-controls {
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: end;
+  z-index: 2;
+}
+.console-page.agent-workspace-shell > .console-page {
+  grid-area: 1 / 1;
+  padding: 0;
+  min-height: 0;
+}
+.agent-workspace-shell > .console-page,
+.agent-workspace-shell > .console-page > .console-header { animation: none; }
+.agent-workspace-shell > .console-page > .console-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+.agent-workspace-shell > .console-page > .console-header > :first-child {
+  min-width: 0;
+  padding-right: 264px;
+}
+.agent-workspace-shell > .console-page > .console-header > .console-actions,
+.agent-workspace-shell > .console-page > .console-header > button {
+  justify-self: end;
+  width: auto;
+}
+.feature-console-page > .console-header:has(.section-switch) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  align-items: start;
+}
+@media (max-width: 600px) {
+  .console-section-controls {
+    grid-area: 1 / 1;
+    margin-bottom: 16px;
+  }
+  .console-page.agent-workspace-shell > .console-page { grid-area: 2 / 1; }
+  .agent-workspace-shell > .console-page > .console-header > :first-child { padding-right: 0; }
+  .feature-console-page > .console-header:has(.section-switch) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .feature-console-page > .console-header > .section-switch { grid-row: 1; justify-self: end; }
 }
 
 .tabs-root {
@@ -16945,7 +17086,7 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .user-management-table {
-  width: max(100%, 830px);
+  width: max(100%, 890px);
   min-width: 0;
   table-layout: fixed;
   font-size: 12.5px;
@@ -16992,7 +17133,8 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .user-table-actions-col {
-  width: 76px;
+  /* Reserve all three controls, their gaps, and the cell padding. */
+  width: 136px;
 }
 
 .user-management-table .person-cell {
@@ -24134,8 +24276,9 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .user-row-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
     width: 100%;
   }
@@ -24149,11 +24292,10 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .user-row-actions .icon-button {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+    flex: 0 0 44px;
     width: 44px;
     min-width: 44px;
-    height: 100%;
+    height: 44px;
     min-height: 44px;
   }
 
@@ -24449,4 +24591,171 @@ button.feedback-event-row.is-clickable:focus-visible {
 
 .document-model-menu .select-button {
   min-height: 42px;
+}
+
+/* Academic formatting survives pagination and is shared with print. */
+.document-canvas .document-mla-text,
+.draft-print-root .document-mla-text {
+  font-family: "Times New Roman", serif;
+  font-size: 12pt;
+  line-height: 2;
+  margin: 0;
+  font-weight: normal;
+  letter-spacing: normal;
+}
+.document-mla-title { text-align: center; }
+.document-mla-body { text-indent: .5in; }
+.document-mla-reference { padding-left: .5in; text-indent: -.5in; }
+/* Numbered references already have an outside list marker. A bibliography
+   paragraph's negative indent would pull its first line over that number. */
+.document-canvas li.document-mla-reference,
+.draft-print-root li.document-mla-reference {
+  padding-left: .25em;
+  text-indent: 0;
+}
+.document-canvas.is-paginated .document-page:has(.document-mla-text) { padding: 1in; }
+@media print {
+  @page draft-mla { size: letter; margin: 1in; }
+  .draft-print-root:has(.document-mla-text) { page: draft-mla; }
+  body.is-draft-printing .draft-print-root .document-page:has(.document-mla-text) { padding: 0; }
+}
+
+/* A tactile two-stop rail: the lit inset follows the selected workspace. */
+.document-assistant-page .deck-mode-switch,
+.section-switch {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  gap: 0;
+  border-radius: 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-strong);
+  box-shadow: inset 0 2px 5px #0003;
+  touch-action: pan-y;
+}
+.document-assistant-page .deck-mode-switch::before,
+.section-switch::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 4px auto 4px 4px;
+  width: calc(50% - 4px);
+  border-radius: 10px;
+  background: linear-gradient(160deg, var(--teal), color-mix(in srgb, var(--teal) 60%, #052e35));
+  border: 1px solid #ffffff35;
+  box-shadow: 0 2px 8px #0003, inset 0 1px #ffffff40;
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1);
+}
+.document-assistant-page .deck-mode-switch[data-mode="deck"]::before,
+.section-switch[data-active-index="1"]::before { transform: translateX(100%); }
+.document-assistant-page .deck-mode-switch button,
+.document-assistant-page .deck-mode-switch button.is-active,
+.section-switch button,
+.section-switch button.is-active {
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 10px;
+  min-height: 34px;
+  color: var(--muted);
+}
+.document-assistant-page .deck-mode-switch button.is-active,
+.section-switch button.is-active { color: white; }
+.document-assistant-page .deck-mode-switch button:focus-visible,
+.section-switch button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+.draft-history-entry { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: 0 0 auto; }
+.draft-history-entry .draft-history-document-card { border: 0; border-radius: 0; }
+.draft-history-actions, .draft-history-filter { display: flex; gap: 6px; padding: 6px 10px; }
+.draft-history-actions button, .draft-history-filter button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; font-size: 11px; color: var(--muted); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 7px; }
+.draft-history-filter button[aria-pressed="true"] { color: var(--text); border-color: var(--teal); }
+.draft-history-preview { position: fixed; z-index: 100; width: min(300px, calc(100vw - 40px)); pointer-events: none; border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 32px #0004; padding: 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.draft-history-preview p { font-family: Georgia, serif; font-size: 12px; line-height: 1.5; color: var(--text); margin: 6px 0 0; max-height: 150px; overflow: auto; white-space: pre-wrap; }
+@media (prefers-reduced-motion: reduce) {
+  .document-assistant-page .deck-mode-switch::before,
+  .section-switch::before { transition: none; }
+}
+.document-export-destination { display: flex; align-items: center; gap: 10px; margin: 10px 0; color: var(--muted); font-size: 12px; }
+.document-export-destination select { flex: 1; min-width: 0; color: var(--text); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+/* Wrapped history cards must retain their content height in the scroll grid. */
+.draft-document-history-list { grid-auto-rows: max-content; align-content: start; }
+
+/* Keep status text together when responsive tables turn cells into grids. */
+.table-status-value { display: inline-flex; align-items: center; gap: 8px; }
+.table-status-value .dot { flex: 0 0 9px; width: 9px; height: 9px; margin: 0; }
+
+/* Dialogs can originate inside animated page stacking contexts. */
+body:has(.attach-menu, .send-options-menu) .mobile-hamburger,
+body:has(.modal-backdrop) .mobile-hamburger,
+body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-events: none; }
+
+.owner-video-fullscreen-exit { display: none; }
+.owner-video-player-card.is-expanded,
+.owner-video-player-card:fullscreen {
+  position: fixed; inset: 0; z-index: 200; width: 100%; height: 100dvh;
+  max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0;
+  background: #000; aspect-ratio: auto;
+}
+/* Filters and transforms establish containing blocks for fixed descendants.
+   Remove them while the player covers the viewport, including in WebKit. */
+.modal-backdrop:has(.owner-video-player-card.is-expanded) {
+  backdrop-filter: none; animation: none; background: #000;
+}
+.modal:has(.owner-video-player-card.is-expanded) { animation: none; transform: none; overflow: visible; }
+.owner-video-player-card.is-expanded .owner-video-fullscreen-exit,
+.owner-video-player-card:fullscreen .owner-video-fullscreen-exit {
+  display: inline-flex; position: absolute; top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right)); z-index: 2;
+  color: #fff; background: #15232b; min-height: 44px;
+}
+
+@media (max-width: 700px) {
+  /* The touch target is 44px tall; the visible track remains a horizontal pill. */
+  button.toggle, button.toggle.is-on {
+    width: 44px; min-width: 44px; height: 44px; min-height: 44px;
+    max-height: 44px; padding: 0; background: transparent;
+  }
+  button.toggle::before {
+    content: ""; position: absolute; left: 0; top: 10px; width: 44px; height: 24px;
+    border-radius: 999px; background: var(--border-strong);
+  }
+  button.toggle.is-on::before { background: var(--teal); }
+  button.toggle > span { top: 13px; left: 3px; width: 18px; height: 18px; }
+  button.toggle.is-on > span { transform: translateX(20px); }
+  .tool-library-popout {
+    width: min(520px, 100%); max-height: calc(100dvh - 32px);
+    padding: 16px; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .tool-library-popout .modal-head, .tool-library-popout .modal-actions { flex: 0 0 auto; }
+  .tool-library-popout .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .tool-library-popout .modal-head { gap: 10px; }
+  .tool-library-popout .modal-head p { font-size: 12px; }
+  .tool-library-popout .modal-icon { width: 34px; height: 34px; }
+  .tool-library-popout .tool-library-editor-form { gap: 10px; }
+  .tool-library-popout .tool-library-content-field textarea { min-height: 150px; height: 22dvh; max-height: 260px; }
+  .tool-library-popout input, .tool-library-popout textarea { font-size: 16px; }
+  .model-list-controls .search-box { flex: 0 0 auto; width: 220px; max-width: 100%; height: 44px; min-height: 44px; max-height: 44px; padding: 0 10px; }
+  .model-list-controls .search-box input { font-size: 16px; line-height: 1.25; padding: 0; height: auto; min-height: 0; }
+  .model-list-controls .search-box svg { width: 16px; height: 16px; flex: 0 0 16px; }
+  .owner-video-controls { flex-wrap: wrap; }
+}
+
+.composer-context-tools { display: contents; }
+@media (max-width: 600px) {
+  .composer .composer-toolbar {
+    display: grid; grid-template-columns: 40px 40px minmax(0, 1fr);
+    align-items: center; gap: 6px; padding-top: 8px;
+  }
+  .composer .composer-tools { display: contents; }
+  .composer .composer-context-tools { grid-column: 1 / -1; grid-row: 1; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .composer .composer-context-tools:empty { display: none; }
+  .composer .composer-tools > .attach-trigger { grid-column: 1; grid-row: 2; }
+  .composer .composer-tools > .attach { grid-column: 2; grid-row: 2; }
+  .composer .composer-tools .attach-trigger { width: 40px; height: 44px; }
+  .composer .send-actions { grid-column: 3; grid-row: 2; justify-self: end; width: auto; min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+  .composer .composer-tools-status { min-height: 32px; max-width: 100%; padding: 0 8px; border-radius: 8px; background: var(--teal-soft); }
+  .composer .composer-tools-status.is-single span { max-width: none; }
+  .composer .composer-mcp-chip { max-width: 100%; overflow-wrap: anywhere; }
 }

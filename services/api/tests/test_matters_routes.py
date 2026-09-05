@@ -1034,3 +1034,21 @@ def test_owners_can_delete_their_own_drafts_with_a_revision_guard(matters_api) -
     assert removed.json()["id"] == draft_id
     assert client.get(f"/api/drafts/{draft_id}").status_code == 404
     assert client.get("/api/drafts").json() == []
+
+
+def test_draft_archive_is_private_durable_and_revision_guarded(matters_api) -> None:
+    client, actor, *_ = matters_api
+    actor["value"] = _user("user-one")
+    created = client.post("/api/drafts", json={"title": "Archive check", "content": "<p>Keep this.</p>"}).json()
+    draft_id = created["document"]["id"]
+    route = f"/api/drafts/{draft_id}/archive"
+    actor["value"] = _user("user-two")
+    assert client.patch(route, params={"archived": True, "expected_revision": 1}).status_code == 404
+    actor["value"] = _user("tenant-b-user", tenant_id="tenant-b")
+    assert client.patch(route, params={"archived": True, "expected_revision": 1}).status_code == 404
+    actor["value"] = _user("user-one")
+    assert client.patch(route, params={"archived": True, "expected_revision": 99}).status_code == 409
+    assert client.patch(route, params={"archived": True, "expected_revision": 1}).json()["archived"] is True
+    assert client.get("/api/drafts").json()[0]["archived"] is True
+    assert client.get(f"/api/drafts/{draft_id}").json()["revision"]["content"] == "<p>Keep this.</p>"
+    assert client.patch(route, params={"archived": False, "expected_revision": 1}).json()["archived"] is False

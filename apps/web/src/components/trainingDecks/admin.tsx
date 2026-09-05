@@ -18,8 +18,8 @@ export type AdminFocus =
   | "maSync"
   | "maColumns"
   | "maToggleScope"
-  | "connConnectors"
-  | "connConfigure"
+  | "responseOverview"
+  | "responseCreate"
   | "connResponseActions"
   | "ssoPreset"
   | "ssoFields"
@@ -46,53 +46,72 @@ export type AdminFocus =
   | "retentionTagsSwitch"
   | "retentionTagsExplorer"
   | "retentionPreview"
-  | "retentionBatch";
+  | "retentionBatch"
+  | "accessRequestsQueue"
+  | "accessSignInHandoff"
+  | "accessTemporaryPassword"
+  | "accessModelReadiness"
+  | "accessFirstReply"
+  | "feedbackOverview"
+  | "feedbackEntries"
+  | "feedbackConversation"
+  | "feedbackIssueReport";
 
 export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
-  usersTabs: { frame: "training/admin/users.png", rect: { x: 266, y: 88, w: 606, h: 42 } },
-  usersAdd: { frame: "training/admin/users.png", rect: { x: 840, y: 156, w: 116, h: 39 } },
-  usersTable: { frame: "training/admin/users.png", rect: { x: 279, y: 219, w: 854, h: 324 } },
-  usersActions: { frame: "training/admin/users.png", rect: { x: 1041, y: 265, w: 100, h: 276 } },
-  groupsCards: { frame: "training/admin/groups.png", rect: { x: 279, y: 235, w: 851, h: 347 } },
-  groupsEditor: { frame: "training/admin/groups.png", rect: { x: 280, y: 587, w: 850, h: 268 } },
-  groupsPermGrid: { frame: "training/admin/groups-permissions.png", rect: { x: 306, y: 299, w: 799, h: 477 } },
-  groupsAgentAuthoring: { frame: "training/admin/groups-permissions.png", rect: { x: 306, y: 696, w: 798, h: 74 } },
-  maSync: { frame: "training/admin/model-access.png", rect: { x: 676, y: 158, w: 408, h: 48 } },
-  maColumns: { frame: "training/admin/model-access.png", rect: { x: 282, y: 419, w: 861, h: 39 } },
-  maToggleScope: { frame: "training/admin/model-access.png", rect: { x: 672, y: 460, w: 308, h: 46 } },
-  connConnectors: { frame: "training/admin/connections.png", rect: { x: 279, y: 223, w: 848, h: 364 } },
-  connConfigure: { frame: "training/admin/connections.png", rect: { x: 955, y: 225, w: 117, h: 39 } },
-  connResponseActions: { frame: "training/admin/response-actions.png", rect: { x: 266, y: 388, w: 876, h: 423 } },
-  ssoPreset: { frame: "training/admin/sso-form.png", rect: { x: 279, y: 236, w: 307, h: 65 } },
-  ssoFields: { frame: "training/admin/sso-form.png", rect: { x: 279, y: 330, w: 853, h: 218 } },
-  ssoCreate: { frame: "training/admin/sso-form.png", rect: { x: 279, y: 556, w: 853, h: 130 } },
-  ssoPanel: { frame: "training/admin/sso-form.png", rect: { x: 264, y: 220, w: 882, h: 478 } },
-  anFilters: { frame: "training/admin/analytics.png", rect: { x: 278, y: 76, w: 856, h: 134 } },
-  anRuntime: { frame: "training/admin/analytics.png", rect: { x: 276, y: 225, w: 856, h: 95 } },
-  anUsage: { frame: "training/admin/analytics-activity.png", rect: { x: 268, y: 0, w: 875, h: 585 } },
-  anBudget: { frame: "training/admin/analytics-usage-budget.png", rect: { x: 267, y: 280, w: 877, h: 530 } },
+  usersTabs: { frame: "training/admin/users.png", rect: { x: 261, y: 163, w: 889, h: 54 } },
+  usersAdd: { frame: "training/admin/users.png", rect: { x: 836, y: 259, w: 116, h: 45 } },
+  usersTable: { frame: "training/admin/users.png", rect: { x: 282, y: 342, w: 867, h: 434 } },
+  usersActions: { frame: "training/admin/users-actions.png", rect: { x: 992, y: 393, w: 121, h: 375 } },
+  groupsCards: { frame: "training/admin/groups.png", rect: { x: 297, y: 427, w: 817, h: 88 } },
+  groupsEditor: { frame: "training/admin/groups.png", rect: { x: 282, y: 533, w: 847, h: 322 } },
+  groupsPermGrid: { frame: "training/admin/groups-permissions.png", rect: { x: 312, y: 107, w: 787, h: 671 } },
+  groupsAgentAuthoring: { frame: "training/admin/groups-permissions.png", rect: { x: 312, y: 506, w: 787, h: 70 } },
+  maSync: { frame: "training/admin/model-access.png", rect: { x: 668, y: 269, w: 413, h: 45 } },
+  maColumns: { frame: "training/admin/model-access.png", rect: { x: 282, y: 459, w: 867, h: 46 } },
+  maToggleScope: { frame: "training/admin/model-access.png", rect: { x: 1024, y: 510, w: 125, h: 30 } },
+  // Re-measure both targets when the reconciled Connections tab is captured.
+  responseOverview: { frame: "training/admin/connections.png", rect: { x: 261, y: 234, w: 889, h: 116 } },
+  responseCreate: { frame: "training/admin/connections.png", rect: { x: 892, y: 269, w: 189, h: 45 } },
+  connResponseActions: { frame: "training/admin/response-actions.png", rect: { x: 261, y: 234, w: 889, h: 116 } },
+  ssoPreset: { frame: "training/admin/sso-form.png", rect: { x: 283, y: 363, w: 307, h: 91 } },
+  ssoFields: { frame: "training/admin/sso-form.png", rect: { x: 283, y: 459, w: 845, h: 216 } },
+  ssoCreate: { frame: "training/admin/sso-form.png", rect: { x: 283, y: 739, w: 845, h: 74 } },
+  ssoPanel: { frame: "training/admin/sso-readonly.png", rect: { x: 261, y: 234, w: 889, h: 249 } },
+  anFilters: { frame: "training/admin/analytics.png", rect: { x: 276, y: 98, w: 859, h: 154 } },
+  anRuntime: { frame: "training/admin/analytics.png", rect: { x: 262, y: 245, w: 887, h: 141 } },
+  anUsage: { frame: "training/admin/analytics-activity.png", rect: { x: 262, y: 224, w: 887, h: 277 } },
+  anBudget: { frame: "training/admin/analytics-usage-budget.png", rect: { x: 261, y: 190, w: 889, h: 314 } },
   // These frames are captured at the native 1185 x 855 composition size, so
   // text stays legible and measured focus borders map one-to-one to the UI.
-  policyCollapsed: { frame: "training/admin/policies-collapsed.png", rect: { x: 267, y: 144, w: 877, h: 227 } },
-  policyServiceAvailability: { frame: "training/admin/policies-controls.png", rect: { x: 276, y: 218, w: 858, h: 291 } },
-  policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 276, y: 530, w: 858, h: 240 } },
-  policyMemory: { frame: "training/admin/policies-memory.png", rect: { x: 267, y: 225, w: 877, h: 362 } },
-  policyCounts: { frame: "training/admin/policies-counts.png", rect: { x: 267, y: 306, w: 877, h: 133 } },
-  auCards: { frame: "training/admin/audit.png", rect: { x: 276, y: 218, w: 856, h: 238 } },
-  auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 282, y: 154, w: 847, h: 131 } },
-  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 268, y: 518, w: 875, h: 222 } },
-  alEmail: { frame: "training/admin/alerts.png", rect: { x: 264, y: 141, w: 882, h: 152 } },
-  alRules: { frame: "training/admin/alerts.png", rect: { x: 264, y: 302, w: 882, h: 174 } },
-  alRuleForm: { frame: "training/admin/alerts-rule-form.png", rect: { x: 266, y: 380, w: 876, h: 433 } },
-  alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 264, y: 486, w: 882, h: 126 } },
+  policyCollapsed: { frame: "training/admin/policies-collapsed.png", rect: { x: 261, y: 234, w: 889, h: 427 } },
+  policyServiceAvailability: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 96, w: 887, h: 331 } },
+  policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 432, w: 887, h: 384 } },
+  policyMemory: { frame: "training/admin/policies-memory.png", rect: { x: 261, y: 338, w: 889, h: 440 } },
+  policyCounts: { frame: "training/admin/policies-counts.png", rect: { x: 261, y: 442, w: 889, h: 217 } },
+  auCards: { frame: "training/admin/audit.png", rect: { x: 262, y: 322, w: 887, h: 323 } },
+  auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 276, y: 175, w: 859, h: 154 } },
+  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 262, y: 244, w: 887, h: 85 } },
+  alEmail: { frame: "training/admin/alerts.png", rect: { x: 261, y: 234, w: 889, h: 181 } },
+  alRules: { frame: "training/admin/alerts.png", rect: { x: 261, y: 424, w: 889, h: 199 } },
+  alRuleForm: { frame: "training/admin/alerts-rule-form.png", rect: { x: 262, y: 204, w: 887, h: 447 } },
+  alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 261, y: 632, w: 889, h: 223 } },
   // Retention frames are local-stack captures with synthetic chats and tags;
   // rects were measured from the live DOM at capture time.
-  retentionPanel: { frame: "training/admin/retention-policy.png", rect: { x: 267, y: 306, w: 877, h: 268 } },
-  retentionToggles: { frame: "training/admin/retention-policy.png", rect: { x: 268, y: 387, w: 875, h: 186 } },
-  retentionTagsSwitch: { frame: "training/admin/retention-tags.png", rect: { x: 268, y: 81, w: 875, h: 66 } },
-  retentionTagsExplorer: { frame: "training/admin/retention-tags.png", rect: { x: 268, y: 159, w: 875, h: 556 } },
-  retentionPreview: { frame: "training/admin/retention-preview.png", rect: { x: 183, y: 215, w: 820, h: 424 } },
-  retentionBatch: { frame: "training/admin/retention-batch.png", rect: { x: 268, y: 356, w: 875, h: 143 } },
+  retentionPanel: { frame: "training/admin/retention-policy.png", rect: { x: 261, y: 546, w: 889, h: 309 } },
+  retentionToggles: { frame: "training/admin/retention-policy.png", rect: { x: 262, y: 654, w: 887, h: 201 } },
+  retentionTagsSwitch: { frame: "training/admin/retention-tags.png", rect: { x: 262, y: 385, w: 887, h: 85 } },
+  retentionTagsExplorer: { frame: "training/admin/retention-tags.png", rect: { x: 262, y: 475, w: 887, h: 380 } },
+  retentionPreview: { frame: "training/admin/retention-preview.png", rect: { x: 179, y: 98, w: 827, h: 659 } },
+  retentionBatch: { frame: "training/admin/retention-batch.png", rect: { x: 262, y: 599, w: 887, h: 87 } },
+  accessRequestsQueue: { frame: "training/admin/access-requests.png", rect: { x: 265, y: 322, w: 881, h: 170 } },
+  accessSignInHandoff: { frame: "training/admin/access-handoff.png", rect: { x: 265, y: 322, w: 881, h: 196 } },
+  accessTemporaryPassword: { frame: "training/admin/access-temporary-password.png", rect: { x: 362, y: 266, w: 461, h: 323 } },
+  accessModelReadiness: { frame: "training/admin/access-model-readiness.png", rect: { x: 264, y: 237, w: 883, h: 497 } },
+  accessFirstReply: { frame: "training/admin/access-first-reply.png", rect: { x: 315, y: 332, w: 839, h: 163 } },
+  feedbackOverview: { frame: "training/admin/support-issue-review.png", rect: { x: 265, y: 0, w: 881, h: 855 } },
+  feedbackEntries: { frame: "training/admin/feedback-entries.png", rect: { x: 266, y: 412, w: 879, h: 360 } },
+  feedbackConversation: { frame: "training/admin/feedback-response-preview.png", rect: { x: 183, y: 50, w: 820, h: 754 } },
+  feedbackIssueReport: { frame: "training/admin/support-issue-detail.png", rect: { x: 213, y: 18, w: 760, h: 820 } },
 };
 
 type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analytics" | "policies" | "audit" | "alerts" | "retention";
@@ -101,9 +120,74 @@ export type AdminTrainingVideo = TrainingVideoBase & { icon: AdminGuideIcon };
 
 export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
   {
+    id: "admin-access-onboarding",
+    audioSrc: "training/admin/admin-access-onboarding.mp3",
+    title: "Approve access and finish sign-in",
+    description: "Take an access request through account approval, sign-in instructions, and a verified first conversation.",
+    icon: "users",
+    outcomes: ["Request reviewed", "Sign-in arranged", "First reply verified"],
+    setupSteps: [
+      "Open Admin console from your account drawer's Management section, then select Users.",
+      "Confirm the requester and choose an available Approve as role. Approval changes account access; your team must still arrange sign-in.",
+      "In Finish sign-in setup, share the workspace sign-in address and confirm Organization SSO or Email & password. No approval email is sent automatically.",
+      "When local sign-in is allowed, set a temporary password and share it securely with the named recipient. They choose their own password during first sign-in and complete any required authenticator verification.",
+      "Check that the account is active, belongs to the intended platform group, and can use an enabled model assigned to that group in Model Access.",
+      "Without an available model, the person can still edit, import, save, and export in Drafts. AI drafting and a first chat response require working model access.",
+      "Ask the person to open a new chat, select the available model, send a short message, and confirm that its response arrives.",
+    ],
+    scenes: [
+      {
+        title: "Review the request",
+        caption: "Users shows Access requests with the person's name, email, request time, and Approve as role.",
+        narration:
+          "Start in Users and review the Access requests queue. Confirm the person's name and email, choose an appropriate role from Approve as, then approve the request or decline it. The available roles follow your organization's policy.",
+        durationSeconds: 16,
+        focus: "accessRequestsQueue",
+      },
+      {
+        title: "Arrange their sign-in",
+        caption: "Finish sign-in setup explains the manual handoff. Share the workspace address and agreed sign-in method.",
+        narration:
+          "Approval opens Finish sign-in setup. Share the workspace sign-in address and confirm how this person will authenticate. For Organization SSO, check their identity-provider account. For Email and password, arrange a temporary password. No email has been sent automatically.",
+        durationSeconds: 20,
+        focus: "accessSignInHandoff",
+      },
+      {
+        title: "Set a temporary password when needed",
+        caption: "Keep Temporary password on, save the password, and share it securely with its intended recipient.",
+        narration:
+          "When local sign-in is allowed, choose Set temporary password. Generate or enter a password, keep Temporary password on, and choose Set password. Share the saved password securely with the recipient. Their first sign-in requires a password of their own and any configured authenticator verification.",
+        durationSeconds: 21,
+        focus: "accessTemporaryPassword",
+      },
+      {
+        title: "Check account, group, and model access",
+        caption: "An active account needs a platform group and an enabled model assigned to that group.",
+        narration:
+          "Check the active account, its platform group, and the enabled model assigned in Model Access. Without an available model, Drafts still supports editing, importing, saving, and exporting. AI drafting and a chat response require working model access, so resolve that step before testing the first reply.",
+        durationSeconds: 21,
+        focus: "accessModelReadiness",
+      },
+      {
+        title: "Confirm the first real reply",
+        caption: "Have the new user select a model, send a fresh message, and confirm that a response arrives.",
+        narration:
+          "Have the person complete sign-in and open a new chat. They select an available model and send a short message. Confirm that the provider returns a response. This checks the complete path from the approved account through model access to a working conversation.",
+        durationSeconds: 18,
+        focus: "accessFirstReply",
+      },
+    ],
+  },
+  {
     id: "admin-users",
     audioSrc: "training/admin/admin-users.mp3",
     title: "Users and accounts",
+    setupSteps: [
+      "Review the Access requests queue on Users, select Approve as, and approve or decline the request.",
+      "After approval, complete Finish sign-in setup. Share the workspace sign-in address and confirm SSO or email-and-password access; no email is sent automatically.",
+      "For local access, choose Set temporary password, save the password, and share it securely with the named recipient. The password dialog shows the recipient and sign-in address.",
+      "Check group membership and model access, then verify that the person can complete their first sign-in and first message.",
+    ],
     description: "Create tenant accounts, manage passwords and status, and remove leavers safely.",
     icon: "users",
     outcomes: ["Account created", "Safety floor understood"],
@@ -146,7 +230,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-groups",
     audioSrc: "training/admin/admin-groups.mp3",
     title: "Groups and permissions",
-    description: "Create groups, assign users, and tune the seven-toggle permission grid.",
+    description: "Create groups, assign users, and configure runtime access and authoring permissions.",
     icon: "groups",
     outcomes: ["Group created", "Permissions tuned"],
     scenes: [
@@ -168,10 +252,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "The permission grid",
-        caption: "Seven toggles: chat, knowledge, agents, and tools start on; API, Hermes, and agent building start off.",
+        caption: "Control runtime access, private authoring, and memory; service policy still limits what groups can grant.",
         narration:
-          "The Permissions tab is a seven-toggle grid. Chat, knowledge, agents, and tools start on; Can use API, Can use Hermes companion, and Can build agents start off. API access is available only when the current service policy permits it.",
-        durationSeconds: 17,
+          "The Permissions tab controls chat, knowledge, agents, tools, API access, and Hermes. Separate switches grant private agent, knowledge-base, and tool authoring, plus memory access. Read each switch before changing it; service policy still limits what the group can grant.",
+        durationSeconds: 19,
         focus: "groupsPermGrid",
       },
       {
@@ -194,7 +278,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     scenes: [
       {
         title: "Sync the tenant catalog",
-        caption: "Sync models pulls the owner-enabled catalog; All, Enabled, and Disabled counters carry live totals.",
+        caption: "Sync models pulls the available catalog; All, Enabled, and Disabled counters carry live totals.",
         narration:
           "Model Access starts from the catalog available to your organization. Sync models refreshes it whenever service availability changes, and the All, Enabled, and Disabled counters carry live totals for the models you can govern.",
         durationSeconds: 16,
@@ -221,33 +305,33 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
   {
     id: "admin-tools",
     audioSrc: "training/admin/admin-tools.mp3",
-    title: "Connections and response actions",
-    description: "Enable sources with real credentials and manage response actions on assistant replies.",
+    title: "Response actions and connector responsibilities",
+    description: "Manage buttons on assistant replies and understand which connection settings need the service team.",
     icon: "tools",
-    outcomes: ["Connector configured", "Honest statuses read"],
+    outcomes: ["Response actions located", "Service handoff understood"],
     scenes: [
       {
-        title: "Tenant connectors",
-        caption: "Each connector wears an honest pill: Credentials saved, Saved · disabled, or Needs credentials.",
+        title: "Find Chat output actions",
+        caption: "The Admin console's Connections tab contains Chat output actions. The service team manages shared connector configuration.",
         narration:
-          "Connections lists the sources this tenant can attach in chat and drafts. Each connector wears an honest credential pill — Credentials saved, Saved but disabled, or Needs credentials — so the toggle never pretends a source works.",
-        durationSeconds: 16,
-        focus: "connConnectors",
+          "Open Connections in the Admin console to find Chat output actions. These are buttons on assistant replies. Shared connector settings and credentials are managed outside tenant administration. Ask your service team to configure or test a shared source connection.",
+        durationSeconds: 19,
+        focus: "responseOverview",
       },
       {
-        title: "Configure with vendor credentials",
-        caption: "Configure opens the vendor's real fields; save, then test the connection before relying on it.",
+        title: "Create a response action",
+        caption: "New response action opens the action builder; review its name, description, and script before saving.",
         narration:
-          "Configure opens the vendor-specific form. Service credentials can power background indexing, while Google Drive, Microsoft 365, Box, and iManage users connect their own account from chat. Save, then test the connection before you rely on it.",
-        durationSeconds: 15,
-        focus: "connConfigure",
+          "Choose New response action to open the builder. Give the action a clear name and description, review its script, and test it with suitable sample input before saving. Saved actions can be edited or removed from this panel. Review what an action does before making it available to your team.",
+        durationSeconds: 20,
+        focus: "responseCreate",
       },
       {
-        title: "Response actions, not MCP",
-        caption: "Chat output actions add admin-approved buttons to responses; MCP servers live in Knowledge/Tools → Tools.",
+        title: "Keep the connection types clear",
+        caption: "Knowledge/Tools manages model-callable tools. Personal attachment connections remain scoped to the signed-in user.",
         narration:
-          "Chat output actions add admin-approved buttons to assistant responses, like exports or formatters. This panel does not add MCP servers or model-callable tools — those live on the Tools tab, under Knowledge and Tools in the sidebar.",
-        durationSeconds: 17,
+          "Model-callable tools and MCP servers are managed under Knowledge and Tools according to your permissions. Shared connector credentials remain with the service team. People still connect their own cloud account from the attachment picker to access their own files; that personal authorization does not grant shared connector administration.",
+        durationSeconds: 23,
         focus: "connResponseActions",
       },
     ],
@@ -294,8 +378,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         focus: "ssoCreate",
       },
       {
-        title: "When owners hold the keys",
-        caption: "If organization policy restricts SSO management to owners, this tab is read-only for admins.",
+        title: "When SSO management is restricted",
+        caption: "When service policy restricts SSO management, this tab is read-only for admins.",
         narration:
           "When organization policy makes SSO management read-only, you can still review the configurations and enforcement state, but editing controls remain unavailable in this console.",
         durationSeconds: 13,
@@ -329,7 +413,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Model activity and user usage",
-        caption: "User Usage records durable per-user completions; token counts are provider-reported, owners excluded.",
+        caption: "User Usage records completions for workspace admins and users; token counts are provider-reported.",
         narration:
           "Model Activity charts saved prompt volume, and User Usage keeps a durable per-user record of real completions for this organization's admins and users across chat, drafts, agents, and the API. Token counts are provider-reported only — blank means the provider reported none.",
         durationSeconds: 21,
@@ -337,10 +421,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "The workspace budget and token caps",
-        caption: "The owner sets the workspace ceiling; admins add per-user and per-group caps — most restrictive wins.",
+        caption: "The workspace ceiling is read-only here; admins add user and group caps — most restrictive wins.",
         narration:
-          "The owner sets the workspace usage ceiling, shown here read-only. Below it, admins set per-user and per-group token caps with daily, weekly, or monthly UTC resets — and when several caps apply, the most restrictive one wins.",
-        durationSeconds: 17,
+          "The workspace usage ceiling is managed by the service team and shown here read-only. Below it, admins set per-user and per-group token caps with daily, weekly, or monthly UTC resets. When several caps apply, the most restrictive one wins.",
+        durationSeconds: 18,
         focus: "anBudget",
       },
     ],
@@ -373,10 +457,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Set Default Users downstream",
-        caption: "API, private-agent building, and memory switches apply to Default Users; locked grants stay saved.",
+        caption: "API, private agent, knowledge and tool authoring, and memory apply to Default Users; locked grants stay saved.",
         narration:
-          "The three downstream switches apply to the protected Default Users group: personal API keys, private-agent building, and personalization memory. If the owner turns a ceiling off, the matching switch locks while its saved group grant stays preserved for a later re-enable.",
-        durationSeconds: 19,
+          "These defaults apply to the protected Default Users group: personal API keys, private agent building, private knowledge-base and tool authoring, and personalization memory. When service policy makes a capability unavailable, its switch locks while the saved group grant stays preserved for a later re-enable.",
+        durationSeconds: 21,
         focus: "policyDefaults",
         calloutPlacement: "left-rail",
       },
@@ -391,7 +475,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Compliance sees counts, never content",
-        caption: "Memory by User shows content-free counts and purge controls; admins and owners cannot read another person's memory.",
+        caption: "Memory by User shows content-free counts and purge controls; administrators cannot read another person's memory.",
         narration:
           "Memory by User is a compliance surface, not a reading surface. Refresh it to see content-free counts and purge a person's memories when policy requires it. Administrators cannot read what another person's memory says.",
         durationSeconds: 16,
@@ -452,7 +536,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Tenant alert rules",
-        caption: "Start from the Suspicious-activity template or New rule; owner actions never match tenant rules.",
+        caption: "Start from the Suspicious-activity template or New rule; matches stay within your administrative scope.",
         narration:
           "Alert rules watch this organization's admin and user audit activity. Start from the Suspicious-activity template or build one with New rule, and every match stays scoped to the people you administer.",
         durationSeconds: 15,
@@ -531,6 +615,56 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "Select the chats that matter, or select them all, then choose Archive or Delete. A confirmation is always required before anything happens, and chats under an active legal hold are skipped and reported — a hold always wins.",
         durationSeconds: 16,
         focus: "retentionBatch",
+      },
+    ],
+  },
+  {
+    id: "admin-feedback-issues",
+    audioSrc: "training/admin/admin-feedback-issues.mp3",
+    title: "Review feedback and reported issues",
+    description: "Inspect response ratings, written notes, conversation context, and platform issue reports in Analytics.",
+    icon: "analytics",
+    outcomes: ["Feedback scoped", "Conversation reviewed", "Issue evidence inspected"],
+    setupSteps: [
+      "Open Admin console → Analytics and expand Chat Feedback.",
+      "Use the person and date controls to narrow the review. Response ratings and platform issues share this scope but have separate totals.",
+      "Platform issues come from Help → Report a problem. An empty review scope means there are no matching records to inspect.",
+      "Open a feedback row to read its note and the saved conversation. Wait for the conversation to load and locate the rated exchange.",
+      "Open a row under Reported platform issues to inspect its subject, report text, sender, timestamp, and any attached screenshot.",
+      "Use your team's support process to assign follow-up after reviewing the evidence. Close the preview to return to the list.",
+    ],
+    scenes: [
+      {
+        title: "Start with a clear review scope",
+        caption: "Analytics → Chat Feedback combines response ratings and reported platform issues with person and date filters.",
+        narration:
+          "Open Analytics and expand Chat Feedback. Choose a person and date range, or a date shortcut. The summary separates total response feedback, positive ratings, negative ratings, and platform issue reports. If the scope has no matching records, the list stays empty.",
+        durationSeconds: 19,
+        focus: "feedbackOverview",
+      },
+      {
+        title: "Read the rating and written note",
+        caption: "Each feedback row identifies the chat, model, user, rating, timestamp, and optional written comment.",
+        narration:
+          "Read the feedback row before opening it. It identifies the chat, model, user, rating, and time, with a response preview and any written comment. Positive and negative ratings describe the person's feedback; inspect the underlying exchange to understand what happened.",
+        durationSeconds: 19,
+        focus: "feedbackEntries",
+      },
+      {
+        title: "Inspect the conversation in context",
+        caption: "Feedback and conversation shows the saved exchanges, with the rated exchange highlighted when available.",
+        narration:
+          "Open the row to view Feedback and conversation. Read the user's note and the saved prompt and response around the highlighted rated exchange. If the conversation could not be loaded, the dialog says that only the saved response preview is available. Use the evidence that actually loaded.",
+        durationSeconds: 20,
+        focus: "feedbackConversation",
+      },
+      {
+        title: "Review the reported platform problem",
+        caption: "Reported platform issues opens the report text, sender, timestamp, and any attached screenshot.",
+        narration:
+          "Reports submitted through Help, Report a problem appear under Reported platform issues. Open an existing report and read its subject, description, sender, and timestamp. Inspect an attached screenshot when it loads. Use these details in your team's support process, then close the preview.",
+        durationSeconds: 20,
+        focus: "feedbackIssueReport",
       },
     ],
   },

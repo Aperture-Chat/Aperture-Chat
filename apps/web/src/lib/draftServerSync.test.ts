@@ -19,6 +19,7 @@ type Entry = {
   serverId?: string | null;
   serverRevision?: number | null;
   serverContentStale?: boolean;
+  serverSavePending?: boolean;
 };
 
 function isEntry(value: unknown): value is Entry {
@@ -77,6 +78,46 @@ describe("scoped draft cache", () => {
     );
     expect(loadScopedDraftCache(scopeA, isEntry)).toHaveLength(0);
   });
+
+  test.each(["save and reload", "load existing cache"])(
+    "%s preserves every local-only draft and pending save while bounding recoverable server copies",
+    (operation) => {
+      const synced: Entry[] = Array.from({ length: 30 }, (_, index) => ({
+        id: `synced-${index}`,
+        title: `Synced draft ${index}`,
+        content: `<p>Synced content ${index}</p>`,
+        updatedAt: "2026-07-20T10:00:00Z",
+        serverId: `server-${index}`,
+        serverRevision: 1,
+      }));
+      const localOnly: Entry[] = Array.from({ length: 27 }, (_, index) => ({
+        id: `local-${index}`,
+        title: `Local draft ${index}`,
+        content: `<p>Only copy of content ${index}</p>`,
+        updatedAt: "2026-07-19T10:00:00Z",
+      }));
+      const pending: Entry = {
+        id: "pending-draft",
+        title: "Unsynced edits",
+        content: "<p>Changes waiting for the server</p>",
+        updatedAt: "2026-07-18T10:00:00Z",
+        serverId: "pending-server-draft",
+        serverRevision: 2,
+        serverSavePending: true,
+      };
+      const entries = [...synced, ...localOnly, pending];
+      const expected = [...synced.slice(0, 24), ...localOnly, pending];
+
+      if (operation === "save and reload") {
+        expect(saveScopedDraftCache(scopeA, entries)).toBe(true);
+        expect(JSON.parse(window.localStorage.getItem(scopedDraftCacheKey(scopeA))!)).toEqual(expected);
+      } else {
+        window.localStorage.setItem(scopedDraftCacheKey(scopeA), JSON.stringify(entries));
+      }
+
+      expect(loadScopedDraftCache(scopeA, isEntry)).toEqual(expected);
+    },
+  );
 });
 
 describe("legacy quarantine", () => {
@@ -174,6 +215,78 @@ describe("mergeServerDraftsIntoCache", () => {
     const local = merged.find((entry) => entry.id === "local-only");
     expect(local?.serverId).toBeUndefined();
   });
+
+  test.each([false, true])(
+    "preserves every pending alias for one server draft (canonical alias first: %s)",
+    (canonicalFirst) => {
+      const pending: Entry[] = [
+        {
+          id: "local-alias-newer",
+          title: "Unsent rename from this workspace",
+          content: "<p>Newer edits not yet saved to the account.</p>",
+          updatedAt: "2026-07-21T10:00:00Z",
+          serverId: "draft-srv-1",
+          serverRevision: 1,
+          serverSavePending: true,
+        },
+        {
+          id: "local-alias-older",
+          title: "Separate unsent rename",
+          content: "<p>Other unsent edits that still need recovery.</p>",
+          updatedAt: "2026-07-20T10:00:00Z",
+          serverId: "draft-srv-1",
+          serverRevision: 1,
+          serverSavePending: true,
+        },
+      ];
+      const canonical: Entry = {
+        id: "server-draft-srv-1",
+        title: "Server Draft",
+        content: "<p>Recoverable account content.</p>",
+        updatedAt: "2026-07-19T10:00:00Z",
+        serverId: "draft-srv-1",
+        serverRevision: 2,
+      };
+      const cached = canonicalFirst ? [canonical, ...pending] : [...pending, canonical];
+
+      const merged = mergeServerDraftsIntoCache(cached, [serverDoc({ current_revision: 2 })], stub);
+
+      expect(merged.map((entry) => entry.id)).toEqual(pending.map((entry) => entry.id));
+      for (const entry of pending) {
+        expect(merged.find((item) => item.id === entry.id)).toMatchObject(entry);
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "preserves an older draft beyond the server cache window (server save pending: %s)",
+    (serverSavePending) => {
+      const cached: Entry = {
+        id: "older-draft",
+        title: "Older draft",
+        content: "<p>The only copy of these edits</p>",
+        updatedAt: "2026-01-01T00:00:00Z",
+        ...(serverSavePending
+          ? { serverId: "older-server-draft", serverRevision: 1, serverSavePending: true }
+          : {}),
+      };
+      const newerSummaries = Array.from({ length: 30 }, (_, index) =>
+        serverDoc({ id: `newer-server-${index}`, title: `Newer draft ${index}` }),
+      );
+      const summaries = serverSavePending
+        ? [
+            ...newerSummaries,
+            serverDoc({ id: "older-server-draft", title: cached.title, updated_at: cached.updatedAt }),
+          ]
+        : newerSummaries;
+
+      const merged = mergeServerDraftsIntoCache([cached], summaries, stub);
+
+      expect(merged).toHaveLength(25);
+      expect(merged.find((entry) => entry.id === cached.id)).toMatchObject(cached);
+      expect(merged.filter((entry) => entry.id.startsWith("server-newer-server-"))).toHaveLength(24);
+    },
+  );
 });
 
 test("utf8ByteLength counts multibyte characters", () => {

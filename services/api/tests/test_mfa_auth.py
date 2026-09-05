@@ -704,3 +704,21 @@ def test_mfa_validation_errors_redact_secret_input_and_never_cache() -> None:
     assert missing_email.headers["cache-control"] == "no-store"
     assert password not in missing_email.text
     assert missing_email.json()["detail"][0]["input"] == "[redacted]"
+
+
+def test_password_change_preserves_mfa_assurance_in_fresh_session_only() -> None:
+    _user, password = _local_user()
+    _secret, _codes, old_token, generation = _enroll_local_factor(password)
+    changed = client.post(
+        "/api/auth/password",
+        headers=_session_headers(old_token),
+        json={"current_password": password, "new_password": "replacement-mfa-password"},
+    )
+    assert changed.status_code == 200
+    replacement = changed.json()["session"]
+    assert replacement["mfa_assured"] is True
+    assert replacement["mfa_factor_generation"] == generation
+    assert replacement["token"] != old_token
+    assert client.get("/api/auth/session", headers=_session_headers(old_token)).status_code == 401
+    assert client.get("/api/auth/session", headers=_session_headers(replacement["token"])).status_code == 200
+    assert _login("replacement-mfa-password").status_code == 202

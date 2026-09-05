@@ -2661,13 +2661,13 @@ def test_config_records_are_seeded_and_mutations_redact_secrets() -> None:
             "settings": {"safe": "ok", "nested": {"api_key": "nested-secret"}},
             "secret_value": "super-secret-token",
         },
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
     assert create_response.status_code == 201
     assert create_response.json()["secret_set"] is True
     assert "super-secret-token" not in create_response.text
 
-    list_response = client.get("/api/admin/connector-configs", headers=headers("user-admin"))
+    list_response = client.get("/api/admin/connector-configs", headers=headers("user-owner"))
     assert list_response.status_code == 200
     assert any(record["id"] == "conncfg-test" for record in list_response.json())
 
@@ -2677,7 +2677,7 @@ def test_config_records_are_seeded_and_mutations_redact_secrets() -> None:
             "settings": {"client_secret": "nested-client-secret"},
             "secret_value": "rotated-secret-token",
         },
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
     assert update_response.status_code == 200
     assert "rotated-secret-token" not in update_response.text
@@ -2708,7 +2708,7 @@ def test_connector_config_clear_replaces_settings_and_deletes_stored_secrets() -
             "clear_oauth": True,
             "clear_service_password": True,
         },
-        headers=headers("user-admin"),
+        headers=headers("user-owner"),
     )
 
     assert response.status_code == 200

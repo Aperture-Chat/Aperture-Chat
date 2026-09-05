@@ -13,13 +13,61 @@ outside image layers.
 Never commit a populated `.env`, database, provider credential, session secret,
 or exported runtime volume.
 
+## Guided VPS installation
+
+Download and inspect the Docker bundle attached to a release that includes
+`scripts/install-release.py`, then extract it. Docker Engine with Compose v2
+and Python 3 must already be installed. Point a DNS hostname at the VPS and
+make ports 80/443 available to the bundled Caddy proxy.
+
+From the extracted bundle, prepare a new installation:
+
+```bash
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag vX.Y.Z --start
+```
+
+Replace the hostname and tag with your deployment and reviewed release. The
+script generates a private session secret and stable Compose project identity,
+configures HTTPS origins, and starts API, web, Caddy, and the updater. Complete
+the first-owner setup immediately. Omit `--start` to prepare and review the
+configuration before running Docker. Existing directories are refused so the
+installer cannot replace another installation's secrets or data configuration.
+
+Forks can add `--repository your-org/your-repo --registry ghcr.io/your-org`.
+Publish public stable `vX.Y.Z` releases and matching `aperture-chat-api` and
+`aperture-chat-web` image tags in that registry. Update `services/api/pyproject.toml` and the matching package versions for each
+release; persistent `APERTURE_RELEASE_VERSION` overrides no longer change the
+reported running version. Release checks derive their API endpoint from the
+selected repository unless `APERTURE_PLATFORM_UPDATE_RELEASES_URL` is explicitly
+configured. Private release APIs and registry authentication require additional
+operator configuration; the guided path assumes publicly readable artifacts.
+
+### Enable updates on an existing installation
+
+An older deployment without the sidecar cannot install that capability by
+clicking its existing version notice. First back up its application data and
+private configuration. Use a reviewed release containing updater support to
+update the existing deployment files and API/web images once, keeping the same
+Compose project name, volume names, secret, proxy configuration, and environment
+settings. Add `infra/updater/updater.sh` and the release Compose updater service,
+shared state volume, and API state-directory mount. Start the release stack
+from that same directory and confirm the owner update panel reports the updater
+ready. Do not run the fresh installer over an existing deployment or start a
+new Compose project against old data without a reviewed migration.
+
+Subsequent compatible API/web releases can be installed from the owner panel.
+Changes to Compose services, the updater itself, or release-specific migrations
+still require the steps in the release notes. Source-build installations keep
+their source deployment workflow; the panel does not promise automatic updates
+when no ready updater is connected.
+
 ## Build from Source
 
 ```bash
 cp .env.example .env
-docker compose build
-docker compose up -d
-docker compose ps
+docker compose --profile local build
+docker compose --profile local up -d
+docker compose --profile local ps
 ```
 
 Open the configured local URL and complete the first-owner bootstrap flow. Keep
@@ -27,18 +75,63 @@ the generated owner credentials and application secrets in a password manager.
 
 ## Run Published Images
 
-Set `APERTURE_IMAGE_TAG` to a published release tag, then start the release
-stack:
+Set `APERTURE_IMAGE_TAG` to a published release tag in the project's `.env`,
+then start the release stack from that project directory:
 
 ```bash
-export APERTURE_IMAGE_TAG=vX.Y.Z
-docker compose -f docker-compose.release.yml pull
-docker compose -f docker-compose.release.yml up -d
-docker compose -f docker-compose.release.yml ps
+# Set APERTURE_IMAGE_TAG=vX.Y.Z in .env first.
+docker compose -f docker-compose.release.yml --profile local pull
+docker compose -f docker-compose.release.yml --profile local up -d
+docker compose -f docker-compose.release.yml --profile local ps
 ```
+
+These examples select the `local` profile for the API and web services. Use
+`--profile vps` or `--profile prod` when the deployment also runs the bundled
+Caddy proxy. Keep the same profile for pull, start, upgrade, and status commands.
 
 If the container packages are private, authenticate Docker to GitHub Container
 Registry with a token that has package-read access before pulling.
+
+## Branch Images and Failed Publications
+
+The branch-image workflow publishes `dev`, `test`, and `main` images. It first
+builds both `<branch>-<full-commit-sha>` tags and verifies their build digests
+and `linux/amd64` / `linux/arm64` manifests. Only then does it update the moving
+branch aliases from those verified digests. A build or inspection failure
+before promotion leaves the branch aliases untouched.
+
+The job summary records both new image digests and the previous alias digests.
+Alias updates across the API and web repositories are not atomic. Runs for the
+same branch are serialized to avoid automatic cancellation between updates;
+manual cancellation, registry failures, or another publisher can still leave
+a mixed pair. On a promotion or final verification failure, the workflow
+attempts to restore each existing alias that still points to the digest it
+attempted to publish. Recovery is best effort: inspect both aliases and the
+recorded digests before deploying after a failed run. For a first publication
+there may be no previous alias, and the workflow does not delete manifests.
+
+If recovery requires manual intervention, restore both aliases from the prior
+digest pair recorded in the job summary, then inspect them again:
+
+```bash
+docker buildx imagetools create --tag ghcr.io/your-org/aperture-chat-api:dev ghcr.io/your-org/aperture-chat-api@sha256:PREVIOUS_API_DIGEST
+docker buildx imagetools create --tag ghcr.io/your-org/aperture-chat-web:dev ghcr.io/your-org/aperture-chat-web@sha256:PREVIOUS_WEB_DIGEST
+docker buildx imagetools inspect ghcr.io/your-org/aperture-chat-api:dev
+docker buildx imagetools inspect ghcr.io/your-org/aperture-chat-web:dev
+```
+
+Replace the organization, branch, and digest placeholders with the recorded
+values. Prefer the verified SHA tag pair for branch deployments; retain the
+digest pair for exact reproducibility because a workflow rerun can rebuild a
+SHA tag. The `test` to `main` promotion gate and release-only `latest` tags
+continue to use the existing release workflow.
+
+Version-qualified branch tags follow `v<version>-<branch>`, for example
+`v0.5.0-dev`, `v0.5.0-test`, and `v0.5.0-main`. Both the API and web package
+use these tags. They advance with subsequent commits carrying that version;
+use the recorded digest pair to pin an exact build. The workflow verifies the
+version-qualified pair before moving the plain branch aliases. Stable
+`v0.5.0` and `latest` remain exclusive to the tagged main release.
 
 ## Upgrade
 
@@ -49,25 +142,90 @@ Registry with a token that has package-read access before pulling.
 5. Verify health, sign-in, chat, and the relevant admin surfaces.
 
 ```bash
-docker compose -f docker-compose.release.yml pull
-docker compose -f docker-compose.release.yml up -d
-docker compose -f docker-compose.release.yml ps
+docker compose -f docker-compose.release.yml --profile local pull
+docker compose -f docker-compose.release.yml --profile local up -d
+docker compose -f docker-compose.release.yml --profile local ps
 ```
 
 Do not use `docker compose down -v` during a normal upgrade; `-v` deletes the
 persistent data volume.
 
+### Update from the Platform Owner Sidebar
+
+The release stack includes an `updater` sidecar. Platform owners can check for
+a newer tagged GitHub release, read its notes, and start the update from the
+sidebar. Tenant administrators and ordinary users cannot manage platform
+updates. The source-build stack uses the manual source deployment workflow.
+
+Start the release stack from its project directory so the updater's `${PWD}`
+mount preserves the host paths in Compose. Keep `APERTURE_IMAGE_TAG` in the
+project's writable `.env` file; a shell-only override cannot record the version
+for later restarts. Projects with multiple Compose environment files must use
+their operator's manual upgrade command to preserve all overrides.
+
+Before starting an update, back up application data and read the release's
+migration instructions. The updater records the running API and web image IDs,
+pulls the new pair, saves a private `.env.aperture-updater.bak`, and updates the
+tag atomically. It then recreates only API and web and checks both services.
+Slow pulls continue to report progress. If applying or checking the new pair
+fails, it attempts to restore the recorded image IDs and the previous tag.
+An unsuccessful rollback is reported as requiring manual attention. Image
+rollback does not undo database migrations or replace a data backup.
+
+The updater has the Docker socket and a writable project-directory mount,
+which grant it host-level control. The API has only the shared status/request
+volume and never receives the Docker socket. Keep the project directory and
+its environment-file backup private. Private registries also require Docker
+credentials to be available inside the updater; a host-only Docker login is
+not automatically shared with this container.
+
+To deploy without the updater, name the services explicitly:
+
+```bash
+docker compose -f docker-compose.release.yml --profile local up -d api web
+# Include caddy when using the vps or prod profile.
+```
+
+If the updater is already running, stop only that service before starting the
+explicit service list. Inspect progress and any failure with:
+
+```bash
+docker compose -f docker-compose.release.yml --profile local logs --tail=100 updater
+docker compose -f docker-compose.release.yml --profile local ps
+```
+
+Keep logs private: Docker output may contain deployment-specific details.
+After a successful update, reload the browser and verify sign-in and the
+provider-backed workflows used by your organization.
+
 ## Health and Logs
 
 ```bash
-docker compose ps
-docker compose logs --tail=200 aperture-api
-docker compose logs --tail=200 aperture-web
+docker compose -f docker-compose.release.yml --profile local ps
+docker compose -f docker-compose.release.yml --profile local logs --tail=200 api
+docker compose -f docker-compose.release.yml --profile local logs --tail=200 web
 ```
 
 Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
+
+## New Since v0.4.7
+
+- Version 0.5.0 brings the latest workspace, training, document, and slide-deck
+  changes into one release, including MLA layout, cleaner reference styling,
+  draft history preview/archive/delete, and compact formatting controls.
+- Section switches use a shared sliding indicator and stable positioning.
+  Mobile switches, status labels, user actions, model search, and prompt
+  dialogs now fit compact screens; chat tools have a dedicated chip row.
+- Training videos offer an explicit fullscreen control and expand when a
+  phone rotates to landscape, with an in-page fallback when native fullscreen
+  is unavailable.
+- Each release branch publishes version-qualified API and web image pairs:
+  `v0.5.0-dev`, `v0.5.0-test`, and `v0.5.0-main`. Stable `v0.5.0` and `latest`
+  are published only after the inspected test build reaches main.
+- Draft archive persistence includes migration `20260905_0019_draft_archive`.
+  Follow the normal backup and migration procedure when upgrading.
 
 ## New Since v0.4.6
 

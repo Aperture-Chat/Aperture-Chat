@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { Code2, LayoutList, LoaderCircle, Pencil, Plus, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -31,12 +32,16 @@ export function DiagramEditorModal({
   const [connectFromId, setConnectFromId] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalFocus(dialogRef, true, onClose);
   const [svg, setSvg] = useState<string | null>(null);
   const [renderFailed, setRenderFailed] = useState(false);
+  const [previewSource, setPreviewSource] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const workingModel = useMemo(() => parseDiagramModel(working), [working]);
   const dirty = working !== source;
+  const validating = previewSource !== working;
 
   // Live preview keeps edits honest: the reader sees exactly what will land in
   // the reply. A source that stops parsing blocks Save instead of saving a
@@ -45,10 +50,11 @@ export function DiagramEditorModal({
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void (async () => {
-        const rendered = await renderMermaidSvg(working, isDarkTheme());
+        const rendered = await renderMermaidSvg(working, isDarkTheme()).catch(() => null);
         if (cancelled) return;
-        if (rendered) setSvg(rendered);
+        setSvg(rendered);
         setRenderFailed(!rendered);
+        setPreviewSource(working);
       })();
     }, 250);
     return () => {
@@ -78,7 +84,7 @@ export function DiagramEditorModal({
   }
 
   async function save() {
-    if (saving || renderFailed) return;
+    if (saving || renderFailed || validating) return;
     setSaving(true);
     setSaveFailed(false);
     try {
@@ -99,6 +105,8 @@ export function DiagramEditorModal({
     <div className="modal-backdrop diagram-editor-backdrop" role="presentation" onClick={onClose}>
       <section
         className="modal diagram-editor-modal"
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Edit diagram"
@@ -208,8 +216,9 @@ export function DiagramEditorModal({
               </>
             )}
           </div>
-          <div className="diagram-editor-preview">
-            {renderFailed && (
+          <div className="diagram-editor-preview" aria-busy={validating}>
+            {validating && <p className="muted-note" role="status">Checking diagram…</p>}
+            {renderFailed && !validating && (
               <p className="diagram-editor-warning">
                 <TriangleAlert size={14} />
                 <span>The diagram no longer renders — undo the last change or fix the source before saving.</span>
@@ -235,7 +244,7 @@ export function DiagramEditorModal({
           <button
             className="primary-button compact"
             type="button"
-            disabled={!dirty || renderFailed || saving}
+            disabled={!dirty || renderFailed || validating || saving}
             onClick={() => void save()}
           >
             {saving ? "Saving…" : "Save diagram"}

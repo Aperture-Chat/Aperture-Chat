@@ -32,11 +32,24 @@ jobs:
       - name: Verify Node.js baseline
         run: npm run check:node-baseline
 
+      - name: Test branch image promotion recovery
+        run: node --test scripts/promote-branch-images.test.mjs
+
+      - name: Test release installer and updater recovery
+        run: |
+          python3 scripts/test_install_release.py
+          python3 scripts/test_updater.py
+
       - name: Install dependencies
         run: npm ci
 
       - name: Typecheck
         run: npm --workspace apps/web run typecheck
+
+      - name: Test training generators
+        run: |
+          node --test apps/web/scripts/*.test.cjs
+          python3 apps/web/scripts/test_training_narration.py
 
       - name: Test
         run: npm run test:web -- --run

@@ -2327,3 +2327,65 @@ class AutomationRunRequest(BaseModel):
     # chain's first-step input for this run only. The chat ">" shortcut sends
     # the user's typed message here; scheduled fires never set it.
     input: str | None = None
+
+
+# --- Platform updates (platform owner only) ----------------------------------
+
+
+class PlatformReleaseInfo(BaseModel):
+    """One published GitHub release newer than the running build."""
+
+    version: str
+    name: str
+    url: str
+    published_at: str | None = None
+    # Markdown of the release's "Highlights" section; the full body when the
+    # release has no such section.
+    highlights: str = ""
+    notes: str = ""
+
+
+class PlatformUpdaterRun(BaseModel):
+    """The most recent (or in-flight) upgrade the sidecar reported."""
+
+    id: str | None = None
+    # idle | requested | accepted | pulling | applying | verifying |
+    # succeeded | failed | rolled_back
+    phase: str = "idle"
+    target_version: str | None = None
+    previous_version: str | None = None
+    requested_by: str | None = None
+    message: str = ""
+    started_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+
+
+class PlatformUpdaterStatus(BaseModel):
+    # A state directory is configured (the sidecar volume is mounted).
+    configured: bool = False
+    # The sidecar wrote a fresh heartbeat and reports it can drive Compose.
+    connected: bool = False
+    last_heartbeat_at: str | None = None
+    project: str | None = None
+    problem: str | None = None
+    run: PlatformUpdaterRun = Field(default_factory=PlatformUpdaterRun)
+    log_tail: str = ""
+
+
+class PlatformUpdateStatus(BaseModel):
+    current_version: str
+    latest_version: str | None = None
+    update_available: bool = False
+    # Releases newer than the running build, newest first.
+    releases: list[PlatformReleaseInfo] = Field(default_factory=list)
+    checked_at: str | None = None
+    check_error: str | None = None
+    check_enabled: bool = True
+    repository: str
+    releases_page_url: str
+    updater: PlatformUpdaterStatus = Field(default_factory=PlatformUpdaterStatus)
+
+
+class PlatformUpdateApplyRequest(BaseModel):
+    target_version: str = Field(min_length=1, max_length=32)

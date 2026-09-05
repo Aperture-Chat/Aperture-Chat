@@ -744,6 +744,20 @@ def put_draft(
     raise AssertionError("unreachable")
 
 
+@router.patch("/api/drafts/{draft_id}/archive")
+def archive_draft(
+    draft_id: str,
+    archived: bool = Query(...),
+    expected_revision: int = Query(..., ge=1),
+    scope: MatterActorScope = Depends(current_matter_scope),
+    repository: MatterDraftRepository = Depends(get_matter_draft_repository),
+) -> DraftDocument:
+    with _repository_errors():
+        return repository.archive_draft(draft_id, tenant_id=scope.tenant_id,
+            owner_user_id=scope.actor.id, expected_revision=expected_revision, archived=archived)
+    raise AssertionError("unreachable")
+
+
 @router.delete("/api/drafts/{draft_id}")
 def delete_draft(
     draft_id: str,

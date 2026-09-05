@@ -2085,6 +2085,7 @@ class DraftDocumentRow(Base):
         ),
         nullable=True,
     )
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     title: Mapped[str] = mapped_column(Text, nullable=False)
     current_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
@@ -2100,6 +2101,7 @@ class DraftDocumentRow(Base):
             tenant_id=self.tenant_id,
             owner_user_id=self.owner_user_id,
             matter_id=self.matter_id,
+            archived=self.archived,
             title=self.title,
             current_revision=self.current_revision,
             created_at=self.created_at,

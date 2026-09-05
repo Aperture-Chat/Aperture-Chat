@@ -1,63 +1,64 @@
-import { Component, lazy, type ComponentType, type ReactNode } from "react";
+import { Component, createContext, createElement, lazy, useContext, type ComponentProps, type ComponentType, type LazyExoticComponent, type ReactNode } from "react";
 
-/* Lazy chunks are fetched by hashed filename, so a tab opened before a deploy
-   can request a chunk that no longer exists; the SPA fallback answers with
-   index.html and the import rejects ("unsupported MIME type"). Without
-   handling, that rejection unmounts the entire app into a white screen. */
+const ChunkRetryContext = createContext<object>({});
 
-/** Lazy-load a chunk; on a failed import, reload once to pick up the current
-    asset manifest. The once-per-chunk session flag prevents reload loops and
-    is cleared again on any successful load, so a later genuine failure can
-    still recover. If the retry also fails, the error propagates to the
-    nearest LazyChunkBoundary instead of blanking the page. */
+/** Optional panels can fail after a deploy replaces their hashed assets, or
+ * during a temporary network outage. Keep the workspace mounted so its
+ * unsent text and staged files survive. Each explicit boundary retry gets a
+ * fresh React.lazy instance because React otherwise caches an import failure.
+ * The existing export name remains compatible with the panel call sites. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors React.lazy's own signature
 export function lazyWithReload<T extends ComponentType<any>>(
   chunkName: string,
   importer: () => Promise<{ default: T }>,
 ) {
-  const flag = `aperture-chunk-reload:${chunkName}`;
-  return lazy(() =>
-    importer().then(
-      (module) => {
-        sessionStorage.removeItem(flag);
-        return module;
-      },
-      (error: unknown) => {
-        if (sessionStorage.getItem(flag) === null) {
-          sessionStorage.setItem(flag, new Date().toISOString());
-          window.location.reload();
-          // The page is reloading; keep Suspense's fallback up instead of
-          // throwing into a tree that is about to be torn down.
-          return new Promise<{ default: T }>(() => {});
-        }
-        throw error;
-      },
-    ),
-  );
+  // A stable token outside Suspense survives an initially suspended render;
+  // useMemo inside the suspended component would not guarantee that cache.
+  const attempts = new WeakMap<object, LazyExoticComponent<T>>();
+  function RecoverableChunk(props: ComponentProps<T>) {
+    const token = useContext(ChunkRetryContext);
+    let chunk = attempts.get(token);
+    if (!chunk) {
+      chunk = lazy(importer);
+      attempts.set(token, chunk);
+    }
+    return createElement(chunk as ComponentType<ComponentProps<T>>, props);
+  }
+  RecoverableChunk.displayName = `RecoverableChunk(${chunkName})`;
+  return RecoverableChunk;
 }
 
-/** Error boundary for lazy panels: a failed chunk (or any render error in the
-    wrapped subtree) collapses to an honest inline notice with a reload
-    action, never a blank page. */
+/** A failed optional panel never forces navigation or unmounts the surrounding
+ * workspace. Retry handles temporary failures; reload is an explicit choice
+ * when an older tab needs the current asset manifest. */
 export class LazyChunkBoundary extends Component<
   { label: string; children: ReactNode },
-  { failed: boolean }
+  { failed: boolean; retryToken: object }
 > {
-  state = { failed: false };
+  state = { failed: false, retryToken: {} };
 
   static getDerivedStateFromError() {
     return { failed: true };
   }
 
   render() {
-    if (!this.state.failed) return this.props.children;
+    if (!this.state.failed) {
+      return <ChunkRetryContext.Provider value={this.state.retryToken}>{this.props.children}</ChunkRetryContext.Provider>;
+    }
     return (
       <div className="drawer-card chunk-load-error" role="alert">
         <strong>{this.props.label} could not load</strong>
         <span>
-          This is usually a stale browser tab after an update. Reload to fetch
-          the current version.
+          You can keep working in the rest of the app. Try again, or reload if this tab was open during an update.
+          Save or copy unfinished work before reloading.
         </span>
+        <button
+          className="secondary-button compact"
+          type="button"
+          onClick={() => this.setState({ failed: false, retryToken: {} })}
+        >
+          Try again
+        </button>
         <button
           className="secondary-button compact"
           type="button"

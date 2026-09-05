@@ -15,6 +15,36 @@ import type { ConnectorConfigRecord } from "./lib/types";
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
 const DARK_MODE_STORAGE_KEY = "aperture-dark-mode";
 
+test("console switches retain their track and keyboard focus between sections", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    return url.includes("/api/bootstrap")
+      ? new Response(JSON.stringify(sampleData), { status: 200, headers: { "Content-Type": "application/json" } })
+      : new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  render(<App />);
+  const primary = await screen.findByRole("navigation", { name: "Primary" });
+  fireEvent.click(within(primary).getByRole("button", { name: "Agents/Automations" }));
+  const track = await screen.findByRole("group", { name: "Agent workspace sections" });
+  const agents = within(track).getByRole("button", { name: "Agents", exact: true });
+  fireEvent.keyDown(agents, { key: "ArrowRight" });
+  const automations = within(track).getByRole("button", { name: "Automations", exact: true });
+  expect(await screen.findByRole("button", { name: "New automation" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Agent workspace sections" })).toBe(track);
+  expect(automations).toHaveFocus();
+  expect(track).toHaveAttribute("data-active-index", "1");
+  fireEvent.keyDown(automations, { key: "Home" });
+  expect(await screen.findByRole("button", { name: "New Agent" })).toBeInTheDocument();
+  expect(agents).toHaveFocus();
+  expect(track).toHaveAttribute("data-active-index", "0");
+
+  fireEvent.click(within(primary).getByRole("button", { name: "Knowledge/Tools" }));
+  const library = await screen.findByRole("group", { name: "Library sections" });
+  fireEvent.keyDown(within(library).getByRole("button", { name: "Knowledge", exact: true }), { key: "End" });
+  expect(library).toHaveAttribute("data-active-index", "1");
+  expect(within(library).getByRole("button", { name: "Tools", exact: true })).toHaveFocus();
+});
+
 function fileListForInput(files: File[]): FileList {
   const fileList = {
     length: files.length,
@@ -191,13 +221,13 @@ test("opens the document assistant from the Drafts navigation item", async () =>
   ).toBeInTheDocument();
 });
 
-test("reopens Drafts navigation as a clean new draft unless history restores one", async () => {
+test("Drafts navigation keeps edits until the user explicitly discards them", async () => {
   render(<App />);
 
   const draftsButton = await screen.findByRole("button", { name: "Drafts" });
   fireEvent.click(draftsButton);
 
-  const editedText = "Manual draft text that should not persist by nav.";
+  const editedText = "Manual draft text that must survive accidental navigation.";
   const editor = await screen.findByRole("textbox", { name: "Document body" });
   editor.innerHTML = `<p>${editedText}</p>`;
   fireEvent.input(editor);
@@ -205,11 +235,157 @@ test("reopens Drafts navigation as a clean new draft unless history restores one
 
   fireEvent.click(draftsButton);
 
+  const confirmation = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
+  expect(editor.textContent).toBe(editedText);
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Keep editing" }));
+  expect(screen.getByRole("textbox", { name: "Document body" })).toHaveTextContent(editedText);
+  fireEvent.click(draftsButton);
+  fireEvent.click(within(await screen.findByRole("dialog", { name: "Unsaved draft edits" })).getByRole("button", { name: "Discard and continue" }));
+
   const freshEditor = await screen.findByRole("textbox", { name: "Document body" });
   expect(screen.getByLabelText("Document title")).toHaveValue("Untitled Draft");
   expect(freshEditor.textContent).toBe("");
   expect(freshEditor).not.toHaveTextContent(editedText);
   expect(screen.queryByText("Draft edited manually.")).not.toBeInTheDocument();
+});
+
+test("global New chat navigation preserves an unsaved draft recovery copy", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  const editor = await screen.findByRole("textbox", { name: "Document body" });
+  editor.innerHTML = "<p>Keep this draft when starting a chat.</p>";
+  fireEvent.input(editor);
+  fireEvent.change(screen.getByLabelText("Document title"), { target: { value: "Research notes" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "New chat", exact: true }));
+  const confirmation = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
+  expect(editor.textContent).toBe("Keep this draft when starting a chat.");
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Save copy and continue" }));
+  expect(await screen.findByRole("button", { name: "Select model" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Drafts" }));
+  fireEvent.click((await screen.findAllByRole("button", { name: "Document history" }))[0]);
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Research notes \(unsaved copy\) from document history/ }));
+  expect(await screen.findByRole("textbox", { name: "Document body" })).toHaveTextContent("Keep this draft when starting a chat.");
+});
+
+test("voluntary sign-out keeps a dirty draft open until confirmed", async () => {
+  const originalFetch = globalThis.fetch;
+  const logout = vi.fn(async () => new Response(JSON.stringify({ status: "logged_out" }), { status: 200 }));
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).includes("/api/auth/logout") ? logout() : originalFetch(input, init)));
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.change(await screen.findByLabelText("Document title"), { target: { value: "Unsaved title" } });
+  setSessionToken("draft-browser-session");
+  fireEvent.click(screen.getByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Sign out/ }));
+  const confirmation = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
+  expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBe("user-admin");
+  expect(logout).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog", { name: "Account" })).not.toBeInTheDocument();
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Keep editing" }));
+  expect(screen.getByLabelText("Document title")).toHaveValue("Unsaved title");
+  expect(logout).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Sign out/ }));
+  fireEvent.click(within(await screen.findByRole("dialog", { name: "Unsaved draft edits" })).getByRole("button", { name: "Discard and continue" }));
+  expect(await screen.findByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
+  expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  await waitFor(() => expect(logout).toHaveBeenCalledOnce());
+});
+
+test("opening a draft search result waits for recovery before replacing the editor", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.includes("/api/search?")) return json({ query: "policy", sections: [{
+      kind: "draft", title: "Drafts", results: [{ id: "draft-policy", kind: "draft", title: "Policy memo",
+        snippet: "Saved policy document", score: 1, metadata: {}, navigation: { view: "drafts", draft_id: "draft-policy" } }],
+    }] });
+    if (url.endsWith("/api/drafts/draft-policy")) return json({
+      document: { id: "draft-policy", tenant_id: sampleData.currentTenant.id, owner_user_id: "user-admin", matter_id: null,
+        title: "Policy memo", current_revision: 1, created_at: "2026-09-04T12:00:00Z", updated_at: "2026-09-04T12:00:00Z" },
+      revision: { draft_id: "draft-policy", tenant_id: sampleData.currentTenant.id, owner_user_id: "user-admin", revision: 1,
+        title: "Policy memo", content: "<p>Saved policy content.</p>", content_sha256: "synthetic", sanitizer_version: "sanitized-html-v1", created_at: "2026-09-04T12:00:00Z" },
+    });
+    return new Response("Unavailable", { status: 503 });
+  }));
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.change(await screen.findByLabelText("Document title"), { target: { value: "Unfinished research" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }));
+  fireEvent.change(within(screen.getByRole("dialog", { name: "Search past work" })).getByRole("combobox"), { target: { value: "policy" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Policy memo/ }));
+  const confirmation = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
+  expect(screen.getByLabelText("Document title")).toHaveValue("Unfinished research");
+  expect(screen.queryByRole("dialog", { name: "Search past work" })).not.toBeInTheDocument();
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Discard and continue" }));
+  await waitFor(() => expect(screen.getByLabelText("Document title")).toHaveValue("Policy memo"));
+  expect(screen.getByRole("textbox", { name: "Document body" })).toHaveTextContent("Saved policy content.");
+});
+
+test("transferring a chat response after opening a saved draft does not reopen that draft", async () => {
+  window.localStorage.setItem("aperture-chats-v2-user-admin", JSON.stringify([{
+    id: "thread-research", owner_user_id: "user-admin", title: "Research response",
+    model_id: "gpt-4o-mini", group_id: "group-litigation", pinned: false, used_agent: false,
+    updated_at: "12:00 PM", messages: [
+      { id: "response-research", role: "assistant", content: "New research to transfer into a separate draft.", createdAt: "12:00 PM", status: "ok" },
+    ],
+  }]));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.includes("/api/search?")) return json({ query: "policy", sections: [{
+      kind: "draft", title: "Drafts", results: [{ id: "draft-policy", kind: "draft", title: "Policy memo",
+        snippet: "Saved policy document", score: 1, metadata: {}, navigation: { view: "drafts", draft_id: "draft-policy" } }],
+    }] });
+    if (url.endsWith("/api/drafts/draft-policy")) return json({
+      document: { id: "draft-policy", tenant_id: sampleData.currentTenant.id, owner_user_id: "user-admin", matter_id: null,
+        title: "Policy memo", current_revision: 1, created_at: "2026-09-04T12:00:00Z", updated_at: "2026-09-04T12:00:00Z" },
+      revision: { draft_id: "draft-policy", tenant_id: sampleData.currentTenant.id, owner_user_id: "user-admin", revision: 1,
+        title: "Policy memo", content: "<p>Saved policy content.</p>", content_sha256: "synthetic", sanitizer_version: "sanitized-html-v1", created_at: "2026-09-04T12:00:00Z" },
+    });
+    return new Response("Unavailable", { status: 503 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Chats", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Recent", exact: true }));
+  fireEvent.click(await screen.findByRole("button", { name: "Research response", exact: true }));
+  expect(await screen.findByRole("button", { name: "Transfer response to Drafts" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }));
+  fireEvent.change(within(screen.getByRole("dialog", { name: "Search past work" })).getByRole("combobox"), { target: { value: "policy" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Policy memo/ }));
+  await waitFor(() => expect(screen.getByLabelText("Document title")).toHaveValue("Policy memo"));
+  fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Transfer response to Drafts" }));
+
+  const editor = await screen.findByRole("textbox", { name: "Document body" });
+  expect(screen.getByLabelText("Document title")).toHaveValue("Research response");
+  expect(editor).toHaveTextContent("New research to transfer into a separate draft.");
+  expect(editor).not.toHaveTextContent("Saved policy content.");
+  expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/drafts/draft-policy"))).toHaveLength(1);
+});
+
+test("the unsaved-draft confirmation keeps focus when the search shortcut is pressed", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.change(await screen.findByLabelText("Document title"), { target: { value: "Unfinished research" } });
+  fireEvent.click(screen.getByRole("button", { name: "New chat", exact: true }));
+  const confirmation = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
+  const keepEditing = within(confirmation).getByRole("button", { name: "Keep editing" });
+  keepEditing.focus();
+
+  for (const modifiers of [{ ctrlKey: true }, { metaKey: true }]) {
+    fireEvent.keyDown(keepEditing, { key: "k", ...modifiers });
+    expect(screen.queryByRole("dialog", { name: "Search past work" })).not.toBeInTheDocument();
+    expect(confirmation).toBeInTheDocument();
+    expect(keepEditing).toHaveFocus();
+  }
+  fireEvent.click(keepEditing);
+  expect(screen.getByLabelText("Document title")).toHaveValue("Unfinished research");
 });
 
 test("uses tenant branding for the empty chat workspace", async () => {
@@ -277,7 +453,7 @@ test("uses auth-options tenant branding on the sign-in screen", async () => {
 
   expect(await screen.findByText("Example AI")).toBeInTheDocument();
   expect(
-    screen.getByText("Use your work identity so Example AI can load your tenant role, groups, and enabled tools."),
+    screen.getByText("Use your email and password to pick up where you left off."),
   ).toBeInTheDocument();
   const authLogo = document.querySelector<HTMLImageElement>(".auth-brand-mark img");
   expect(authLogo).toHaveAttribute("src", "/example-icon.png");
@@ -406,6 +582,9 @@ test("returning from the SSO callback with a session token signs the user in", a
     expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBe(jane.id),
   );
   expect(await screen.findByLabelText("Message")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: /A good place to begin|Build your team's workspace/ })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/auth/first-run-guide/seen"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss welcome" }));
   await waitFor(() =>
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/auth/first-run-guide/seen"))).toBe(true),
   );
@@ -536,6 +715,9 @@ test("first admin sign-in lands on chat without auto-opened documentation", asyn
   render(<App />);
 
   expect(await screen.findByLabelText("Message")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: /A good place to begin|Build your team's workspace/ })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/auth/first-run-guide/seen"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss welcome" }));
   await waitFor(() =>
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/auth/first-run-guide/seen"))).toBe(true),
   );
@@ -679,7 +861,7 @@ test("signed-out owners can sign in locally before SSO is configured", async () 
     await screen.findByRole("heading", { name: "Sign in to continue" }),
   ).toBeInTheDocument();
   expect(
-    screen.getByText("Password sign-in remains available until SSO is configured and enforced."),
+    screen.getByText("Received a temporary password? Sign in, then choose a password of your own."),
   ).toBeInTheDocument();
   expect(screen.queryByLabelText("Display name")).not.toBeInTheDocument();
   expect(
@@ -698,6 +880,9 @@ test("signed-out owners can sign in locally before SSO is configured", async () 
     expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBe(owner.id),
   );
   expect(await screen.findByLabelText("Message")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: /A good place to begin|Build your team's workspace/ })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/auth/first-run-guide/seen"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss welcome" }));
   await waitFor(() =>
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/auth/first-run-guide/seen"))).toBe(true),
   );
@@ -873,6 +1058,111 @@ test("owner persona shortcut opens the platform owner workspace", async () => {
   expect(bootstrapCall?.[1]).toMatchObject({
     headers: { "x-aperture-user": "user-owner" },
   });
+});
+
+test.each([true, false])("owner connector partial saves preserve confirmed state when bootstrap reload succeeds=%s", async (reloadSucceeds) => {
+  vi.stubEnv("DEV", false);
+  vi.stubEnv("VITE_ENABLE_DEMO_FALLBACK", "false");
+  window.localStorage.setItem(SESSION_STORAGE_KEY, "user-owner");
+  const box = { ...sampleData.connectors.find((connector) => connector.id === "box")!,
+    platform_enabled: false, tenant_enabled: false, tenant_config_id: "conncfg-box-existing" };
+  const credential = { id: "conncfg-box-existing", tenant_id: "tenant-target", connector_id: "box",
+    enabled: false, auth_type: "developer-token", scopes: [], settings: {}, secret_set: true, masked_secret: "saved" };
+  const bootstrap = { ...sampleData, me: { ...sampleData.users.find((user) => user.id === "user-owner")!, first_run_guide_seen_at: "2026-09-04T12:00:00Z" },
+    currentTenant: { ...sampleData.currentTenant, id: "tenant-target" }, providers: [], models: [], providerKeys: [],
+    connectors: [box], connectorConfigs: [credential] };
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  let bootstrapRequests = 0;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/bootstrap")) {
+      bootstrapRequests += 1;
+      if (bootstrapRequests === 1) return json(bootstrap);
+      return reloadSucceeds
+        ? json({ ...bootstrap, connectors: [{ ...box, name: "Box from server", platform_enabled: true }] })
+        : json({ detail: "Bootstrap reload unavailable." }, 503);
+    }
+    if (url.endsWith("/api/platform/updates")) return json({ detail: "Updater unavailable in this synthetic test." }, 503);
+    if (url.endsWith("/api/platform/connectors/box") && init?.method === "PATCH") {
+      return json({ ...box, platform_enabled: true, tenant_enabled: true });
+    }
+    if (url.endsWith("/api/admin/connector-configs/conncfg-box-existing") && init?.method === "PATCH") {
+      return json({ detail: "Credential store unavailable." }, 503);
+    }
+    return json({ detail: "Unavailable in this synthetic test." }, 503);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByText("Management"));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Platform owner console/ }));
+  fireEvent.keyDown(await screen.findByRole("tab", { name: "Org Settings" }), { key: "Enter" });
+  const panel = (await screen.findByRole("heading", { name: "Connectors", exact: true })).closest(".panel") as HTMLElement;
+  fireEvent.click(within(panel).getByRole("button", { name: "Expand panel" }));
+  fireEvent.click(within(panel).getByRole("switch", { name: "Enable Box" }));
+
+  expect(await screen.findByText("Box availability was saved, but its credential settings could not be synchronized. Credential store unavailable.")).toBeInTheDocument();
+  expect(bootstrapRequests).toBe(2);
+  expect(within(panel).getByRole("switch", { name: reloadSucceeds ? "Enable Box from server" : "Enable Box" }))
+    .toHaveAttribute("aria-checked", reloadSucceeds ? "false" : "true");
+  expect(screen.queryByText(/Box was not changed/)).not.toBeInTheDocument();
+  const mutations = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH");
+  expect(mutations.map(([input]) => String(input))).toEqual([
+    expect.stringContaining("/api/platform/connectors/box"),
+    expect.stringContaining("/api/admin/connector-configs/conncfg-box-existing"),
+  ]);
+  expect(JSON.parse(String(mutations[0][1]?.body))).toEqual({ platform_enabled: true, tenant_enabled: true });
+  expect(mutations[0][1]?.headers).toMatchObject({ "x-aperture-user": "user-owner" });
+});
+
+test("owner connector creation uses the current tenant for switch and configuration saves", async () => {
+  vi.stubEnv("DEV", false);
+  vi.stubEnv("VITE_ENABLE_DEMO_FALLBACK", "false");
+  window.localStorage.setItem(SESSION_STORAGE_KEY, "user-owner");
+  const connectors = sampleData.connectors.filter((connector) => ["box", "google-drive"].includes(connector.id))
+    .map((connector) => ({ ...connector, platform_enabled: false, tenant_enabled: false, tenant_config_id: undefined }));
+  const bootstrap = { ...sampleData, me: { ...sampleData.users.find((user) => user.id === "user-owner")!, first_run_guide_seen_at: "2026-09-04T12:00:00Z" },
+    currentTenant: { ...sampleData.currentTenant, id: "tenant-target" }, providers: [], models: [], providerKeys: [], connectors, connectorConfigs: [] };
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/bootstrap")) return json(bootstrap);
+    if (url.endsWith("/api/platform/updates")) return json({ detail: "Updater unavailable in this synthetic test." }, 503);
+    if (url.endsWith("/api/platform/connectors/box") && init?.method === "PATCH") {
+      return json({ ...connectors.find((connector) => connector.id === "box"), platform_enabled: true, tenant_enabled: true });
+    }
+    if (url.endsWith("/api/admin/connector-configs") && init?.method === "POST") {
+      const payload = JSON.parse(String(init.body));
+      return json({ ...payload, id: `conncfg-${payload.connector_id}-created`, scopes: payload.scopes ?? [],
+        settings: payload.settings ?? {}, secret_set: Boolean(payload.secret_value), masked_secret: payload.secret_value ? "saved" : null }, 201);
+    }
+    return json({ detail: "Unavailable in this synthetic test." }, 503);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByText("Management"));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Platform owner console/ }));
+  fireEvent.keyDown(await screen.findByRole("tab", { name: "Org Settings" }), { key: "Enter" });
+  const panel = (await screen.findByRole("heading", { name: "Connectors", exact: true })).closest(".panel") as HTMLElement;
+  fireEvent.click(within(panel).getByRole("button", { name: "Expand panel" }));
+  fireEvent.click(within(panel).getByRole("switch", { name: "Enable Box" }));
+  await waitFor(() => expect(within(panel).getByRole("switch", { name: "Enable Box" })).not.toBeDisabled());
+  expect(within(panel).getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "true");
+
+  const drive = within(panel).getByText("Google Drive").closest(".connector-config-block") as HTMLElement;
+  fireEvent.click(within(drive).getByRole("button", { name: "Configure" }));
+  fireEvent.change(within(drive).getByLabelText(/OAuth client ID/), { target: { value: "synthetic-client" } });
+  fireEvent.change(within(drive).getByLabelText(/OAuth client secret/), { target: { value: "synthetic-secret" } });
+  fireEvent.click(within(drive).getByRole("button", { name: "Save configuration" }));
+  expect(await screen.findByText("Google Drive configuration saved.")).toBeInTheDocument();
+  const creates = fetchMock.mock.calls.filter(([input, init]) => String(input).endsWith("/api/admin/connector-configs") && init?.method === "POST");
+  expect(creates).toHaveLength(2);
+  expect(creates.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+    expect.objectContaining({ connector_id: "box", tenant_id: "tenant-target", enabled: true }),
+    expect.objectContaining({ connector_id: "google-drive", tenant_id: "tenant-target", secret_value: "synthetic-secret" }),
+  ]);
+  expect(creates.every(([, init]) => (init?.headers as Record<string, string>)["x-aperture-user"] === "user-owner")).toBe(true);
 });
 
 test("restoring a saved session never paints the sample placeholder account", async () => {
@@ -1482,7 +1772,7 @@ test("creates a knowledge base with its first web data source", async () => {
 
   expect(
     await screen.findByText(
-      "Outside Counsel Policy Library was created with its data source ready.",
+      "Outside Counsel Policy Library data source was saved. Review its status below.",
     ),
   ).toBeInTheDocument();
   expect(
@@ -2372,4 +2662,109 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
   expect(
     JSON.parse(String(saveRequest?.init?.body)).allowed_group_ids,
   ).toEqual(["group-litigation", "group-finance"]);
+});
+
+test("failed sign-in configuration can be retried without reloading the page", async () => {
+  window.localStorage.clear();
+  setSessionToken(null);
+  let attempts = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes("/api/auth/options")) {
+      attempts += 1;
+      return new Response(JSON.stringify(attempts === 1 ? { detail: "Sign-in service is temporarily unavailable." } : {
+        local_auth_enabled: true, password_auth_enabled: true, bootstrap_required: false, providers: [],
+      }), { status: attempts === 1 ? 503 : 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("unavailable", { status: 503 });
+  }));
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Retry connection" }));
+  expect(await screen.findByRole("button", { name: "Sign in" })).toBeEnabled();
+  expect(attempts).toBe(2);
+});
+
+test("temporary-password onboarding enters the workspace using the newly issued session", async () => {
+  window.localStorage.clear();
+  setSessionToken(null);
+  const user = { ...sampleData.users.find((candidate) => candidate.id === "user-jane")!, first_run_guide_seen_at: "2026-09-04T12:00:00Z" };
+  const wire = { ...sampleData, me: user };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/auth/options")) return new Response(JSON.stringify({ local_auth_enabled: true, password_auth_enabled: true, bootstrap_required: false, providers: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.includes("/api/auth/login")) return new Response(JSON.stringify({ user, bootstrap: wire, must_change_password: true, session: { user_id: user.id, auth_method: "local", token: "temporary-session" } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.includes("/api/auth/password")) return new Response(JSON.stringify({ status: "updated", session: { user_id: user.id, auth_method: "local", token: "fresh-password-session" } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.includes("/api/auth/session")) {
+      const token = new Headers(init?.headers).get("x-aperture-session");
+      return new Response(JSON.stringify(token === "fresh-password-session" ? { user, bootstrap: wire, session: { user_id: user.id, auth_method: "local", token: "fresh-password-session" } } : { detail: "Session is invalid or expired." }), { status: token === "fresh-password-session" ? 200 : 401, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "jane@local.invalid" } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "temporary-password-123" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByRole("heading", { name: "Set a new password" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("New password"), { target: { value: "personal-password-123" } });
+  fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "personal-password-123" } });
+  fireEvent.click(screen.getByRole("button", { name: "Set password and continue" }));
+  expect(await screen.findByLabelText("Message")).toBeInTheDocument();
+  await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/api/auth/session") && new Headers(init?.headers).get("x-aperture-session") === "fresh-password-session")).toBe(true));
+  expect(window.localStorage.getItem("aperture-session-token")).toBe("fresh-password-session");
+});
+
+test.each(["server", "network"])("sign-out clears this device immediately and honestly reports %s revocation failure", async (failure) => {
+  setSessionToken("signed-browser-session");
+  const user = sampleData.users.find((candidate) => candidate.id === "user-admin")!;
+  let finish!: (value: Response) => void;
+  let reject!: (reason: Error) => void;
+  const pending = new Promise<Response>((resolve, fail) => { finish = resolve; reject = fail; });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.endsWith("/api/auth/session")) return json({ user, bootstrap: { ...sampleData, me: user }, session: { token: "signed-browser-session" } });
+    if (url.endsWith("/api/auth/options")) return json({ local_auth_enabled: true, password_auth_enabled: true, bootstrap_required: false, providers: [] });
+    if (url.endsWith("/api/auth/logout")) return pending;
+    return json([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Sign out/ }));
+  expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  expect(window.localStorage.getItem("aperture-session-token")).toBeNull();
+  expect(await screen.findByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
+  const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/auth/logout"));
+  expect(call).toBeDefined();
+  if (failure === "server") finish(new Response("Unavailable", { status: 503 }));
+  else reject(new TypeError("Network unavailable"));
+  expect(await screen.findByText("Signed out on this device. The server could not confirm that the session was revoked.")).toBeInTheDocument();
+  expect(window.localStorage.getItem("aperture-session-token")).toBeNull();
+});
+
+test("a late failed logout cannot affect a newly signed-in session", async () => {
+  setSessionToken("ended-browser-session");
+  const user = { ...sampleData.users.find((candidate) => candidate.id === "user-admin")!, first_run_guide_seen_at: "2026-09-04T12:00:00Z" };
+  let reject!: (reason: Error) => void;
+  const pending = new Promise<Response>((_resolve, fail) => { reject = fail; });
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/auth/options")) return json({ local_auth_enabled: true, password_auth_enabled: true, bootstrap_required: false, providers: [] });
+    if (url.endsWith("/api/auth/logout")) return pending;
+    if (url.endsWith("/api/auth/session") || url.endsWith("/api/auth/login")) return json({ user, bootstrap: { ...sampleData, me: user }, session: { token: url.endsWith("/login") ? "new-browser-session" : new Headers(init?.headers).get("x-aperture-session") } });
+    return json([]);
+  }));
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Sign out/ }));
+  fireEvent.change(await screen.findByLabelText("Email"), { target: { value: user.email } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "synthetic-login-password" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in", exact: true }));
+  expect(await screen.findByRole("button", { name: /Account:/ })).toBeInTheDocument();
+  reject(new TypeError("Old logout unavailable"));
+  await waitFor(() => expect(window.localStorage.getItem("aperture-session-token")).toBe("new-browser-session"));
+  expect(screen.queryByText(/server could not confirm/)).not.toBeInTheDocument();
 });
