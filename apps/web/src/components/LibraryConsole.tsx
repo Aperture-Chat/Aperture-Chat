@@ -2020,10 +2020,13 @@ export function LibraryConsole({
                               </small>
                             </td>
                             <td>
-                              <span
-                                className={`dot ${item.status === "ready" || item.status === "synced" ? "green" : ""}`}
-                              />{" "}
-                              {item.status}
+                              <span className="table-status-value">
+                                <span
+                                  aria-hidden="true"
+                                  className={`dot ${item.status === "ready" || item.status === "synced" ? "green" : ""}`}
+                                />
+                                {item.status}
+                              </span>
                             </td>
                             <td>{securityLabel}</td>
                             <td>

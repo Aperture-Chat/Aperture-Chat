@@ -1,5 +1,6 @@
 import { FileText, Plus, Save, ServerCog, Trash2, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   createAdminPromptTemplate,
   createAdminSkillFile,
@@ -442,7 +443,7 @@ function LibraryEditorModal({
         ? "Save Prompt"
         : "Save Skill";
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         ref={dialogRef}
@@ -584,7 +585,8 @@ function LibraryEditorModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

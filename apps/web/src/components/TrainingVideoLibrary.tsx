@@ -1,7 +1,7 @@
 import { Player } from "@remotion/player";
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, CheckCircle2, ChevronLeft, FileVideo, ListChecks, Volume2, X } from "lucide-react";
-import { useCallback, useState, type ReactNode } from "react";
+import { BookOpen, CheckCircle2, ChevronLeft, FileVideo, ListChecks, Maximize2, Minimize2, Volume2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   GuidePdfDownload,
@@ -64,6 +64,41 @@ function TrainingVideoDetail({
   headEnd?: ReactNode;
 }) {
   const durationInFrames = getVideoDuration(video) * TRAINING_FPS;
+  const playerCard = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const closeFullscreen = useCallback(() => {
+    setExpanded(false);
+    if (document.fullscreenElement === playerCard.current) {
+      void document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
+  const openFullscreen = useCallback(() => {
+    setExpanded(true);
+    // Mobile browsers may require a tap for native fullscreen. The expanded
+    // viewport remains available when orientation changes lack user activation.
+    void playerCard.current?.requestFullscreen?.().catch(() => {});
+  }, []);
+  useEffect(() => {
+    const landscape = window.matchMedia?.("(orientation: landscape) and (max-width: 1000px) and (max-height: 500px)");
+    const rotate = () => landscape?.matches ? setExpanded(true) : closeFullscreen();
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") closeFullscreen(); };
+    const fullscreen = () => { if (!document.fullscreenElement) setExpanded(false); };
+    landscape?.addEventListener("change", rotate);
+    document.addEventListener("keydown", escape);
+    document.addEventListener("fullscreenchange", fullscreen);
+    rotate();
+    return () => {
+      landscape?.removeEventListener("change", rotate);
+      document.removeEventListener("keydown", escape);
+      document.removeEventListener("fullscreenchange", fullscreen);
+    };
+  }, [closeFullscreen]);
+  useEffect(() => {
+    if (!expanded) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [expanded]);
 
   return (
     <>
@@ -77,7 +112,10 @@ function TrainingVideoDetail({
         </div>
         {headEnd}
       </div>
-      <div className="owner-video-player-card">
+      <div ref={playerCard} className={`owner-video-player-card${expanded ? " is-expanded" : ""}`}>
+        <button type="button" className="secondary-button owner-video-fullscreen-exit" onClick={closeFullscreen}>
+          <Minimize2 size={16} /> Exit fullscreen
+        </button>
         <Player
           key={`${video.id}-${openKey}`}
           component={TrainingComposition}
@@ -97,6 +135,9 @@ function TrainingVideoDetail({
         />
       </div>
       <div className="owner-video-controls">
+        <button type="button" className="secondary-button" onClick={openFullscreen}>
+          <Maximize2 size={16} /> Fullscreen video
+        </button>
         <span className="owner-video-caption-note">
           <Volume2 size={15} />
           {video.audioSrc ? captionNoteWithAudio : captionNoteWithoutAudio}

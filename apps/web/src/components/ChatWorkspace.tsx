@@ -2558,6 +2558,7 @@ export function ChatWorkspace({
               </div>
             )}
           </div>
+          <div className="composer-context-tools">
           {activeToolSummaries.length > 0 && (
             <div
               className={`composer-tools-status is-on ${singleActiveTool ? "is-single" : "is-multiple"}`}
@@ -2632,6 +2633,7 @@ export function ChatWorkspace({
                 </button>
               </span>
             ))}
+          </div>
         </div>
         <div className="send-actions" ref={sendRef}>
           <div className={`composer-draft-actions${hasDraftText ? " has-text" : ""}`}>
