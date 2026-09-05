@@ -2,6 +2,8 @@
 
 The drafting workspace keeps model instructions outside the deliverable, preserves document edits when switching modes, and provides previews, archive/unarchive, and confirmed deletion in history.
 
+The document toolbar keeps undo/redo, block style, bold/italic/underline, and inline AI editing on the main row. **Text** holds font, size, advanced styles, color, and highlighting; **Paragraph** holds alignment, lists, and quotes; **More** holds copy, the AI edit trail, and word count. **Insert** includes links and citations alongside visual content. Secondary panels preserve text selection, open from the keyboard with Arrow Down, and dismiss with Escape, focus moving outside, or an outside click. On phones, the formatting row remains collapsible.
+
 ## Formatting and export
 
 MLA requests use double-spaced 12-point Times New Roman, a student heading before the title, a plain centered title, first-line body indents, hanging reference indents, and a new page for Works Cited. The editor, Word package, and print surface share the formatting markers. Word and PDF do not prepend the internal draft filename above the student heading. Markdown preserves the body without the filename prefix; typography is not represented by Markdown.

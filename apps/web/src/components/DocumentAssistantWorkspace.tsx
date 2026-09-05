@@ -1,3 +1,4 @@
+import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
 import { DraftHistoryCard } from "./DraftHistoryCard";
 import { formatMlaDocument } from "../lib/draftMla";
 import { DictationControl } from "./DictationControl";
@@ -1333,6 +1334,7 @@ export function DocumentAssistantWorkspace({
   const assistantRailRef = useRef<HTMLElement | null>(null);
   useModalFocus(assistantRailRef, railIsDrawer && railOpen, () => setRailOpen(false));
   const [mobileFormattingExpanded, setMobileFormattingExpanded] = useState(false);
+  const [documentToolPanel, setDocumentToolPanel] = useState<"text" | "paragraph" | "more" | null>(null);
   const assistantWorking = draftTrace !== null && !draftTrace.complete;
   const documentAiEditing = assistantWorking || inlineEditState.working;
   // Any deck AI at work — assistant drafting, the image pass, a selection
@@ -3895,6 +3897,7 @@ export function DocumentAssistantWorkspace({
   function switchDraftMode(mode: "document" | "deck") {
     if (mode === draftKind || assistantWorking) return;
     setMobileFormattingExpanded(false);
+    setDocumentToolPanel(null);
     if (mode === "document") {
       endDeckEditSession();
       setDraftKind("document");
@@ -7924,7 +7927,7 @@ export function DocumentAssistantWorkspace({
 
           {draftKind === "document" && (
           <div
-            className={`document-toolbar ${mobileFormattingExpanded ? "is-mobile-expanded" : ""}`}
+            className={`document-toolbar document-toolbar-compact ${mobileFormattingExpanded ? "is-mobile-expanded" : ""}`}
             aria-label="Document formatting"
           >
             <button
@@ -7981,6 +7984,37 @@ export function DocumentAssistantWorkspace({
                 <option value="h3">Subheading</option>
                 <option value="blockquote">Quote</option>
               </SelectControl>
+              <button
+                type="button"
+                aria-label="Bold"
+                aria-pressed={formatState.bold}
+                data-tooltip="Make the selected text bold for emphasis"
+                onClick={() => runEditorCommand("bold", "Bold formatting applied.")}
+              >
+                <Bold size={18} />
+              </button>
+              <button
+                type="button"
+                aria-label="Italic"
+                aria-pressed={formatState.italic}
+                data-tooltip="Set the selected text in italics for subtle emphasis"
+                onClick={() => runEditorCommand("italic", "Italic formatting applied.")}
+              >
+                <Italic size={18} />
+              </button>
+              <button
+                type="button"
+                aria-label="Underline"
+                aria-pressed={formatState.underline}
+                data-tooltip="Underline the selected text to call attention to it"
+                onClick={() => runEditorCommand("underline", "Underline formatting applied.")}
+              >
+                <Underline size={18} />
+              </button>
+              <DocumentToolbarPanel label="Text" title="Text formatting" open={documentToolPanel === "text"}
+                onToggle={() => { setInsertMenuOpen(false); setDocumentToolPanel(current => current === "text" ? null : "text"); }}
+                onClose={() => setDocumentToolPanel(null)}>
+                <section className="document-tool-section " aria-label="Font and size"><span className="document-tool-section-label">Font and size</span><div className="document-tool-section-controls">
               <SelectControl
                 className="document-font-select"
                 aria-label="Text font"
@@ -8012,34 +8046,8 @@ export function DocumentAssistantWorkspace({
                   ))}
                 </SelectControl>
               </span>
-              <span className="document-toolbar-divider" aria-hidden="true" />
-              <button
-                type="button"
-                aria-label="Bold"
-                aria-pressed={formatState.bold}
-                data-tooltip="Make the selected text bold for emphasis"
-                onClick={() => runEditorCommand("bold", "Bold formatting applied.")}
-              >
-                <Bold size={18} />
-              </button>
-              <button
-                type="button"
-                aria-label="Italic"
-                aria-pressed={formatState.italic}
-                data-tooltip="Set the selected text in italics for subtle emphasis"
-                onClick={() => runEditorCommand("italic", "Italic formatting applied.")}
-              >
-                <Italic size={18} />
-              </button>
-              <button
-                type="button"
-                aria-label="Underline"
-                aria-pressed={formatState.underline}
-                data-tooltip="Underline the selected text to call attention to it"
-                onClick={() => runEditorCommand("underline", "Underline formatting applied.")}
-              >
-                <Underline size={18} />
-              </button>
+                </div></section>
+                <section className="document-tool-section " aria-label="Advanced styles"><span className="document-tool-section-label">Advanced styles</span><div className="document-tool-section-controls">
               <button
                 type="button"
                 aria-label="Strikethrough"
@@ -8067,7 +8075,16 @@ export function DocumentAssistantWorkspace({
               >
                 <Subscript size={18} />
               </button>
-              <span className="document-toolbar-divider" aria-hidden="true" />
+              <button
+                type="button"
+                aria-label="Clear formatting"
+                data-tooltip="Remove bold, color, size, and other styling from the selected text"
+                onClick={clearInlineFormatting}
+              >
+                <RemoveFormatting size={18} />
+              </button>
+                </div></section>
+                <section className="document-tool-section " aria-label="Color and highlight"><span className="document-tool-section-label">Color and highlight</span><div className="document-tool-section-controls">
               <div className="document-color-control" aria-label="Text color control">
                 <input
                   type="color"
@@ -8120,7 +8137,13 @@ export function DocumentAssistantWorkspace({
                   </button>
                 </div>
               </div>
-              <span className="document-toolbar-divider" aria-hidden="true" />
+                </div></section>
+
+              </DocumentToolbarPanel>
+              <DocumentToolbarPanel label="Paragraph" title="Paragraph formatting" open={documentToolPanel === "paragraph"}
+                onToggle={() => { setInsertMenuOpen(false); setDocumentToolPanel(current => current === "paragraph" ? null : "paragraph"); }}
+                onClose={() => setDocumentToolPanel(null)}>
+                <section className="document-tool-section " aria-label="Alignment and lists"><span className="document-tool-section-label">Alignment and lists</span><div className="document-tool-section-controls">
               {ALIGNMENT_CONTROLS.map((control) => (
                 <button
                   key={control.value}
@@ -8133,7 +8156,6 @@ export function DocumentAssistantWorkspace({
                   <control.icon size={18} />
                 </button>
               ))}
-              <span className="document-toolbar-divider" aria-hidden="true" />
               <button
                 type="button"
                 aria-label="Bulleted list"
@@ -8158,42 +8180,9 @@ export function DocumentAssistantWorkspace({
               >
                 <Quote size={18} />
               </button>
-              <span className="document-toolbar-divider" aria-hidden="true" />
-              <button
-                type="button"
-                aria-label="Link"
-                aria-expanded={linkEditState.open}
-                data-tooltip="Link the selected text to a web address"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={openLinkEditor}
-              >
-                <Link size={18} />
-              </button>
-              <button
-                type="button"
-                aria-label="Add citation"
-                data-tooltip="Insert a numbered citation backed by your selected source"
-                onClick={insertCitation}
-              >
-                <BookOpen size={18} />
-              </button>
-              <button
-                type="button"
-                aria-label="Clear formatting"
-                data-tooltip="Remove bold, color, size, and other styling from the selected text"
-                onClick={clearInlineFormatting}
-              >
-                <RemoveFormatting size={18} />
-              </button>
-              <button
-                type="button"
-                aria-label="Copy document"
-                data-tooltip="Copy the whole document to your clipboard for pasting elsewhere"
-                onClick={copyDocument}
-              >
-                <Copy size={18} />
-              </button>
-              <span className="document-toolbar-divider" aria-hidden="true" />
+                </div></section>
+
+              </DocumentToolbarPanel>
               <button
                 type="button"
                 aria-label="Inline AI edit"
@@ -8203,6 +8192,18 @@ export function DocumentAssistantWorkspace({
                 onClick={openInlineAiEdit}
               >
                 <Sparkles size={18} />
+              </button>
+              <DocumentToolbarPanel label="More" title="Document tools" open={documentToolPanel === "more"}
+                onToggle={() => { setInsertMenuOpen(false); setDocumentToolPanel(current => current === "more" ? null : "more"); }}
+                onClose={() => setDocumentToolPanel(null)}>
+                <section className="document-tool-section document-tool-actions" aria-label="Tools"><span className="document-tool-section-label">Tools</span><div className="document-tool-section-controls">
+              <button
+                type="button"
+                aria-label="Copy document"
+                data-tooltip="Copy the whole document to your clipboard for pasting elsewhere"
+                onClick={copyDocument}
+              >
+                <Copy size={18} /><span>Copy document</span>
               </button>
               <button
                 type="button"
@@ -8217,6 +8218,7 @@ export function DocumentAssistantWorkspace({
                 }
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
+                  setDocumentToolPanel(null);
                   const next = !aiTrailOpen;
                   setAiTrailOpen(next);
                   setStatus(
@@ -8226,11 +8228,21 @@ export function DocumentAssistantWorkspace({
                   );
                 }}
               >
-                <History size={18} />
+                <History size={18} /><span>AI edit trail</span>
                 {aiEditTrail.length > 0 && (
                   <span className="document-ai-trail-count">{aiEditTrail.length}</span>
                 )}
               </button>
+                </div></section>
+              <span
+                className="document-word-count"
+                data-tooltip={`${wordCount.words.toLocaleString()} words, ${wordCount.characters.toLocaleString()} characters`}
+                aria-label={`${wordCount.words.toLocaleString()} words, ${wordCount.characters.toLocaleString()} characters`}
+              >
+                {wordCount.words.toLocaleString()} {wordCount.words === 1 ? "word" : "words"}
+              </span>
+
+              </DocumentToolbarPanel>
               {aiTrailOpen && aiEditTrail.length > 0 && (
                 <div
                   className="inline-ai-popover document-ai-trail-popover"
@@ -8437,13 +8449,6 @@ export function DocumentAssistantWorkspace({
               )}
             </div>
             <div className="document-toolbar-group document-toolbar-actions">
-              <span
-                className="document-word-count"
-                data-tooltip={`${wordCount.words.toLocaleString()} words, ${wordCount.characters.toLocaleString()} characters`}
-                aria-label={`${wordCount.words.toLocaleString()} words, ${wordCount.characters.toLocaleString()} characters`}
-              >
-                {wordCount.words.toLocaleString()} {wordCount.words === 1 ? "word" : "words"}
-              </span>
               <div className="document-insert-control">
                 <button
                   type="button"
@@ -8451,12 +8456,34 @@ export function DocumentAssistantWorkspace({
                   data-tooltip="Insert an image, chart, table, or page break into the document"
                   aria-expanded={insertMenuOpen}
                   aria-haspopup="menu"
-                  onClick={() => setInsertMenuOpen((value) => !value)}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => { setDocumentToolPanel(null); setInsertMenuOpen((value) => !value); }}
                 >
-                  <Plus size={18} />
+                  <Plus size={16} /><span>Insert</span>
                 </button>
                 {insertMenuOpen && (
                   <div className="document-insert-menu" role="menu" aria-label="Insert options">
+              <button
+                type="button"
+                role="menuitem"
+                aria-label="Link"
+                aria-expanded={linkEditState.open}
+                data-tooltip="Link the selected text to a web address"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => { setInsertMenuOpen(false); openLinkEditor(); }}
+              >
+                <Link size={18} /><span>Link</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                aria-label="Add citation"
+                data-tooltip="Insert a numbered citation backed by your selected source"
+                onClick={() => { setInsertMenuOpen(false); insertCitation(); }}
+              >
+                <BookOpen size={18} /><span>Citation</span>
+              </button>
+
                     <button
                       type="button"
                       role="menuitem"

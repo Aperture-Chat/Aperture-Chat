@@ -31,6 +31,11 @@ function resetOfflineFetch() {
   );
 }
 
+function openDocumentTools(label: "Text" | "Paragraph" | "More") {
+  const button = screen.getByRole("button", { name: `${label} options` });
+  if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+}
+
 function documentBody() {
   return screen.getByRole("textbox", { name: "Document body" });
 }
@@ -2536,6 +2541,7 @@ test("lets users edit the title and insert formatted document objects", async ()
   expect(title).toHaveValue("Custom Draft Title");
   expect(screen.queryByRole("button", { name: "Edit document title" })).not.toBeInTheDocument();
 
+  openDocumentTools("Text");
   fireEvent.click(screen.getByRole("button", { name: "Apply text color #0f766e" }));
   expect(screen.getByText(/Text color applied/)).toBeInTheDocument();
 
@@ -2579,7 +2585,8 @@ test("adds citations and applies inline AI edits only to highlighted text", asyn
   await waitFor(() => {
     expect(documentText()).toContain("The discovery deadline remains July 12, 2026.");
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add citation" }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add citation" }));
 
   expect(documentBody().innerHTML).toContain("document-citation");
   expect(screen.getByText(/Citation 1 inserted/)).toBeInTheDocument();
@@ -2980,6 +2987,7 @@ test("the AI edit trail lists recorded edits, re-lights them, and clears the mar
   );
 
   // Nothing recorded yet, so the tool is honestly unavailable.
+  openDocumentTools("More");
   expect(screen.getByRole("button", { name: "AI edit trail" })).toBeDisabled();
 
   selectEditorText("The original sentence is muddy.");
@@ -2993,6 +3001,7 @@ test("the AI edit trail lists recorded edits, re-lights them, and clears the mar
     expect(documentText()).toContain("The revised sentence reads clearly.");
   });
 
+  openDocumentTools("More");
   const trailToggle = screen.getByRole("button", { name: "AI edit trail" });
   expect(trailToggle).toBeEnabled();
   fireEvent.click(trailToggle);
@@ -3015,6 +3024,7 @@ test("the AI edit trail lists recorded edits, re-lights them, and clears the mar
   expect(documentBody().innerHTML).not.toContain("document-ai-suggestion");
   // The edited text stays exactly as it was.
   expect(documentText()).toContain("The revised sentence reads clearly.");
+  openDocumentTools("More");
   expect(screen.getByRole("button", { name: "AI edit trail" })).toBeDisabled();
 });
 
@@ -3771,24 +3781,29 @@ test("strikethrough, highlight, and font size apply real inline formatting", () 
   fireEvent.input(editor);
 
   selectEditorText("Formatting");
+  openDocumentTools("Text");
   fireEvent.click(screen.getByRole("button", { name: "Strikethrough" }));
   expect(editor.innerHTML).toContain("<s>Formatting</s>");
 
   selectEditorText("target");
+  openDocumentTools("Text");
   fireEvent.click(screen.getByRole("button", { name: "Highlight in amber" }));
   expect(editor.innerHTML).toMatch(/background-color:\s*(#fde68a|rgb\(253,\s*230,\s*138\))/);
 
   selectEditorText("text");
   // Sizes are labeled in Word points; 24pt renders as its preview-px twin.
+  openDocumentTools("Text");
   fireEvent.change(screen.getByLabelText("Text size"), { target: { value: "24" } });
   expect(editor.innerHTML).toContain("font-size: 35.4px");
 
   selectEditorText("text");
+  openDocumentTools("Text");
   fireEvent.change(screen.getByLabelText("Text font"), { target: { value: "georgia" } });
   expect(editor.innerHTML).toMatch(/font-family:\s*georgia/i);
 
   // Default resets the override instead of stacking another span.
   selectEditorText("text");
+  openDocumentTools("Text");
   fireEvent.change(screen.getByLabelText("Text font"), { target: { value: "default" } });
   expect(editor.innerHTML).not.toMatch(/font-family/i);
 });
@@ -3831,6 +3846,7 @@ test("paragraph alignment writes a real text-align the exports understand", () =
   fireEvent.input(editor);
 
   placeEditorCaretAtTextStart("Centered");
+  openDocumentTools("Paragraph");
   fireEvent.click(screen.getByRole("button", { name: "Align center" }));
   expect(editor.innerHTML).toContain('text-align: center');
   expect(screen.getByRole("button", { name: "Align center" })).toHaveAttribute(
@@ -3838,6 +3854,7 @@ test("paragraph alignment writes a real text-align the exports understand", () =
     "true",
   );
 
+  openDocumentTools("Paragraph");
   fireEvent.click(screen.getByRole("button", { name: "Align left" }));
   expect(editor.innerHTML).not.toContain("text-align");
 });
@@ -3849,7 +3866,8 @@ test("the link tool applies a validated web address to highlighted text", () => 
   fireEvent.input(editor);
 
   selectEditorText("annual report");
-  fireEvent.click(screen.getByRole("button", { name: "Link" }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Link" }));
   const dialog = screen.getByRole("dialog", { name: "Link editor" });
   const input = within(dialog).getByLabelText("Link address");
 
@@ -3871,7 +3889,8 @@ test("the link tool asks for a highlight instead of inventing a target", () => {
   fireEvent.input(editor);
   window.getSelection()?.removeAllRanges();
 
-  fireEvent.click(screen.getByRole("button", { name: "Link" }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Link" }));
   expect(
     screen.getByText("Highlight the text you want to link, then choose Link again."),
   ).toBeInTheDocument();
@@ -4534,6 +4553,7 @@ test.each(['document', 'deck'] as const)('copy %s reports denied clipboard acces
       fireEvent.click(screen.getByRole('button', { name: 'Deck', exact: true }));
       fireEvent.click(screen.getByRole('button', { name: 'Convert into slides' }));
     }
+    if (mode === 'document') openDocumentTools('More');
     const button = screen.getByRole('button', { name: mode === 'deck' ? 'Copy deck outline' : 'Copy document' });
     fireEvent.click(button);
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Could not access the clipboard.'));

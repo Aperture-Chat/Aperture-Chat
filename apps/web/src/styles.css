@@ -4989,6 +4989,108 @@ button:disabled {
   display: contents;
 }
 
+/* A quiet writing bar, with secondary tools in selection-preserving panels. */
+.document-toolbar-compact {
+  gap: 6px;
+  padding-block: 7px;
+}
+
+.document-toolbar-compact .document-toolbar-main {
+  flex-basis: auto;
+  gap: 3px;
+}
+
+.document-toolbar-compact .document-toolbar-actions {
+  margin-left: auto;
+  gap: 5px;
+}
+
+.document-tool-panel-control { display: inline-flex; }
+
+.document-toolbar .document-tool-panel-trigger,
+.document-toolbar-compact .document-insert-control > button {
+  width: auto;
+  gap: 5px;
+  padding-inline: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.document-tool-panel-trigger[aria-expanded="true"] {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
+.document-tool-panel {
+  position: fixed;
+  z-index: 80;
+  width: min(340px, calc(100vw - 24px));
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 14px 42px rgb(0 0 0 / 24%);
+}
+
+.document-tool-panel[hidden] { display: none; }
+
+.document-tool-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.document-tool-section + .document-tool-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.document-tool-section-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.document-tool-section-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.document-tool-panel .document-color-control { min-height: 32px; }
+.document-tool-panel .document-color-swatches { gap: 12px; }
+.document-tool-panel button[aria-pressed="true"]:not([style]) {
+  color: var(--teal-strong);
+  background: var(--teal-soft);
+}
+
+.document-toolbar .document-tool-actions button {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 9px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.document-tool-panel .document-word-count {
+  display: block;
+  margin-top: 12px;
+  padding: 10px 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 761px) {
+  .document-toolbar-compact { flex-wrap: nowrap; }
+}
+
 .document-toolbar .document-mobile-toolbar-toggle {
   display: none;
 }
