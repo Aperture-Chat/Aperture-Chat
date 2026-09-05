@@ -24698,7 +24698,12 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
   max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0;
   background: #000; aspect-ratio: auto;
 }
-.modal:has(.owner-video-player-card.is-expanded) { animation: none; transform: none; }
+/* Filters and transforms establish containing blocks for fixed descendants.
+   Remove them while the player covers the viewport, including in WebKit. */
+.modal-backdrop:has(.owner-video-player-card.is-expanded) {
+  backdrop-filter: none; animation: none; background: #000;
+}
+.modal:has(.owner-video-player-card.is-expanded) { animation: none; transform: none; overflow: visible; }
 .owner-video-player-card.is-expanded .owner-video-fullscreen-exit,
 .owner-video-player-card:fullscreen .owner-video-fullscreen-exit {
   display: inline-flex; position: absolute; top: max(12px, env(safe-area-inset-top));
