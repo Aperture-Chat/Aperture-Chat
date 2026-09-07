@@ -10,8 +10,9 @@ for Aperture Chat.
 - [Architecture](architecture.md)
 - [Docker deployment](DOCKER_RELEASE.md)
 - [Training coverage and regeneration](TRAINING.md)
+- [README images and capture maintenance](images/README.md)
 - [Security policy](../SECURITY.md)
-- [License](../LICENSE)
+- [License](../LICENSE.md)
 
 ## Role Guides
 
@@ -28,7 +29,8 @@ source files, narrated walkthroughs, and verification procedure.
 | Path | Purpose |
 | --- | --- |
 | `apps/web` | React and Vite frontend, tests, and static training media. |
-| `services/api` | FastAPI backend, persistence, policy logic, provider routing, and tests. |
+| `services/api` | FastAPI backend, SQL and local persistence, policy logic, provider routing, and tests. |
+| `services/api/app/db` | Relational models, migration integration, and explicit import/transfer tools. |
 | `infra/caddy` | Caddy reverse-proxy configuration for container deployments. |
 | `docs` | Public architecture, deployment, and product documentation. |
 | `docker-compose.yml` | Source-build Compose stack for local development. |
@@ -54,6 +56,7 @@ default and require platform-owner authorization to manage.
 With dependencies installed, run:
 
 ```bash
+git diff --check
 npm --workspace apps/web run typecheck
 npm --workspace apps/web run test -- --run
 npm run build:web
