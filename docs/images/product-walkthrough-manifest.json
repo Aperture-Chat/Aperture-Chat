@@ -1,0 +1,43 @@
+{
+  "sourceRepository": "https://github.com/Aperture-Chat/ApertureChat-Website",
+  "theme": "light",
+  "fps": 10,
+  "width": 960,
+  "chapters": [
+    {
+      "scene": "chat",
+      "file": "chat-v6-light.mp4",
+      "sha256": "d025665e1ad68f7b8aa3bb5f886e3dd5ede3f19e81e2acc49b23e30b2e58ab8d"
+    },
+    {
+      "scene": "followup",
+      "file": "followup-v6-light.mp4",
+      "sha256": "f24a2ce3fdbd7439b327511591430ce6c6b7ce5df94af14e7c5ffee618c85c04"
+    },
+    {
+      "scene": "draft",
+      "file": "draft-v6-light.mp4",
+      "sha256": "2510cde22567a85f201ce7a6b0558a9c779a015b370820799e06e5eec938f368"
+    },
+    {
+      "scene": "slides",
+      "file": "slides-v6-light.mp4",
+      "sha256": "22d4a6256b93cfadf1b626a2a880aec48923065eda392150e6b07f20242f24dc"
+    },
+    {
+      "scene": "team",
+      "file": "team-v6-light.mp4",
+      "sha256": "460370d43cb8ff9a9d5b1fd0776f9493e017f871dfd206ae70f7835bedd03a25"
+    },
+    {
+      "scene": "platform",
+      "file": "platform-v6-light.mp4",
+      "sha256": "fcce3b4fb894b743f371a4714ff9947697029973a5802e42fc959b2f2938993b"
+    }
+  ],
+  "output": {
+    "file": "product-walkthrough-light.gif",
+    "sha256": "edd0766a6f3eed38944ae96a28b4be6a46a71df6e81bead3487f3c21ce59c83d",
+    "bytes": 8054343
+  }
+}

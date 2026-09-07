@@ -1,8 +1,15 @@
 <div align="center">
 
-<img src="docs/images/sizzle-reel.svg" alt="Aperture Chat interface tour: chat, document drafting, slide decks, workspace navigation, and mobile chat, captured from a synthetic local workspace." width="100%">
+<a href="https://aperturechat.com/#demoPanel" aria-label="Watch the full Aperture Chat product walkthrough">
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-walkthrough-light.png">
+  <img src="docs/images/product-walkthrough-light.gif" alt="Light-mode product recording from ApertureChat.com: Ask, Research, Draft, Slides, Team, and Platform" width="100%">
+</picture>
+</a>
 
-<sub><em>September 2026 interface captures from the current checkout. Example content is synthetic and manually authored; these screenshots do not represent model-generated results.</em></sub>
+<sub><em>The light-mode product walkthrough from ApertureChat.com, using the same six recordings in order. Waiting time is shortened in the original recordings.</em></sub>
+
+**[Watch the full walkthrough with playback controls and fullscreen](https://aperturechat.com/#demoPanel)**
 
 <br><br>
 

@@ -1,71 +1,47 @@
-/* Build the README's self-contained animated screenshot tour.
- * Run only after reviewing the final synthetic README captures:
- *   node apps/web/scripts/generate-readme-tour.cjs --reviewed-captures
- * The animation moves between captured states; it never fabricates typing,
- * provider responses, tool execution, usage counters, or connection results.
+/* Transcode the reviewed website hero recordings for GitHub's README image surface.
+ * Source clips remain in the marketing repository; no product states are synthesized.
+ * node apps/web/scripts/generate-readme-tour.cjs --reviewed-captures --source-dir ../ApertureChat-Website
  */
-const fs = require("node:fs");
-const path = require("node:path");
-const crypto = require("node:crypto");
-
-const REPO = path.resolve(__dirname, "../../..");
-const CAPTURES = path.join(REPO, "docs/images");
-const SECONDS = 35;
-const SCENES = [
-  ["chat-light.png", "YOUR WORKSPACE", "Start with a clean, governed workspace."],
-  ["chat-dark.png", "CHAT", "Choose the appearance that suits your work."],
-  ["drafts-light.png", "DOCUMENTS", "Write and format a working document."],
-  ["deck-dark.png", "SLIDE DECKS", "Turn a document into editable slides."],
-  ["agents-dark.png", "AGENTS & AUTOMATIONS", "Configure assistants and scheduled workflows."],
-  ["library-dark.png", "KNOWLEDGE & TOOLS", "Organize sources and workspace tools."],
-  ["chat-mobile.png", "MOBILE", "A compact composer for smaller screens."],
-];
-const xml = (text) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-
-function buildTour({ reviewed = false } = {}) {
-  if (!reviewed) throw new Error("Review every synthetic capture, then pass --reviewed-captures.");
-  const evidence = [];
-  const sceneDuration = SECONDS / SCENES.length;
-  const scenes = SCENES.map(([frame, label, caption], index) => {
-    const png = fs.readFileSync(path.join(CAPTURES, frame));
-    if (!png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-      throw new Error(`Missing PNG capture: ${frame}`);
-    }
-    evidence.push({ frame, sha256: crypto.createHash("sha256").update(png).digest("hex"), label, caption });
-    const end = (100 / SCENES.length).toFixed(5);
-    // Every scene owns one five-second interval, with a short fade at either
-    // edge. The first image remains the fallback for reduced-motion readers.
-    return `<style>@keyframes scene${index}{0%,${(Number(end) - 0.45).toFixed(5)}%{opacity:1}${end}%,100%{opacity:0}}.s${index}{animation:scene${index} ${SECONDS}s linear ${index * sceneDuration}s infinite;opacity:${index === 0 ? 1 : 0}}</style>
-<g class="scene s${index}"><rect x="28" y="78" width="1544" height="780" rx="16" fill="#0b171d"/>
-<image x="28" y="78" width="1544" height="780" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${png.toString("base64")}"/>
-<text x="50" y="898" font-size="13" letter-spacing="2.2" font-weight="700" fill="#70d2d9">${xml(label)}</text>
-<text x="50" y="934" font-size="26" font-weight="600" fill="#f2f7f8">${xml(caption)}</text>
-<text x="1548" y="934" text-anchor="end" font-size="14" fill="#91a6af">${String(index + 1).padStart(2, "0")} / ${SCENES.length}</text></g>`;
-  }).join("\n");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 980" width="1600" height="980" role="img" aria-labelledby="tourTitle tourDesc">
-<title id="tourTitle">Aperture Chat — a ${SECONDS}-second tour of the current interface</title>
-<desc id="tourDesc">An animated sequence of current interface captures: chat, documents, slide decks, agents, knowledge, and mobile. The local workspace has no model provider connected. Document and slide content is manually authored and synthetic; no generated responses or configured integrations are implied. Screens are captured states, not a real-time recording.</desc>
-<rect width="1600" height="980" rx="22" fill="#06141c"/>
-<text x="42" y="47" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#f2f7f8">Aperture Chat</text>
-<text x="1556" y="45" text-anchor="end" font-family="Arial,sans-serif" font-size="13" letter-spacing="1.4" fill="#91a6af">ACTUAL INTERFACE · SYNTHETIC WORKSPACE</text>
-<g font-family="Arial,sans-serif">${scenes}</g>
-<style>@media(prefers-reduced-motion:reduce){.scene{animation:none!important;opacity:0!important}.s0{opacity:1!important}}</style>
-</svg>\n`;
-  const out = path.join(REPO, "docs/images/sizzle-reel.svg");
-  fs.writeFileSync(out, svg);
-  const evidenceDir = path.join(REPO, "tmp/training-captures");
-  fs.mkdirSync(evidenceDir, { recursive: true });
-  fs.writeFileSync(path.join(evidenceDir, "readme-tour-build.json"), JSON.stringify({ seconds: SECONDS, scenes: evidence }, null, 2));
-  return { frames: SCENES.length, seconds: SECONDS, bytes: Buffer.byteLength(svg) };
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
+const repo = path.resolve(__dirname, '../../..');
+const args = process.argv.slice(2);
+const sourceIndex = args.indexOf('--source-dir');
+if (!args.includes('--reviewed-captures') || sourceIndex < 0 || !args[sourceIndex + 1]) {
+  throw new Error('Review the website clips, then pass --reviewed-captures --source-dir <website-checkout>.');
 }
-
-module.exports = { buildTour, SCENES };
-if (require.main === module) {
-  try {
-    const result = buildTour({ reviewed: process.argv.includes("--reviewed-captures") });
-    console.log(`Built ${result.frames} captured scenes, ${result.seconds} seconds, ${result.bytes} bytes.`);
-  } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
-  }
+const source = path.resolve(args[sourceIndex + 1]);
+const scenes = ['chat', 'followup', 'draft', 'slides', 'team', 'platform'];
+const files = scenes.map(scene => path.join(source, 'assets/hero', `${scene}-v6-light.mp4`));
+const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const inputs = files.map((file, i) => ({ scene: scenes[i], file: path.basename(file), sha256: hash(file) }));
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'aperture-readme-tour-'));
+const output = path.join(repo, 'docs/images');
+try {
+  // Normalize the frame rate and dimensions before concatenating complete chapters.
+  // A modest palette and ordered dithering keep the full walkthrough lightweight.
+  files.forEach((file, i) => execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', file,
+    '-an', '-vf', 'fps=10,scale=960:-2:flags=lanczos,setsar=1', '-c:v', 'ffv1',
+    path.join(temporary, `${i}.mkv`)], { stdio: 'inherit' }));
+  fs.writeFileSync(path.join(temporary, 'clips.txt'), scenes.map((_, i) => `file '${i}.mkv'`).join('\n'));
+  const gif = path.join(temporary, 'product-walkthrough-light.gif');
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0',
+    '-i', path.join(temporary, 'clips.txt'), '-filter_complex',
+    '[0:v]split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle',
+    '-loop', '0', gif], { stdio: 'inherit' });
+  const poster = path.join(temporary, 'product-walkthrough-light.png');
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', files[0], '-frames:v', '1',
+    '-vf', 'scale=960:-2:flags=lanczos', poster], { stdio: 'inherit' });
+  fs.copyFileSync(gif, path.join(output, path.basename(gif)));
+  fs.copyFileSync(poster, path.join(output, path.basename(poster)));
+  const manifest = { sourceRepository: 'https://github.com/Aperture-Chat/ApertureChat-Website',
+    theme: 'light', fps: 10, width: 960, chapters: inputs,
+    output: { file: path.basename(gif), sha256: hash(gif), bytes: fs.statSync(gif).size } };
+  fs.writeFileSync(path.join(output, 'product-walkthrough-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  console.log(`Built six complete light-mode chapters: ${manifest.output.bytes} bytes.`);
+} finally {
+  fs.rmSync(temporary, { recursive: true, force: true });
 }
