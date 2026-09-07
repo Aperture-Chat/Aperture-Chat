@@ -1,5 +1,5 @@
 /* Build the README's self-contained animated screenshot tour.
- * Run only after reviewing the final synthetic training captures:
+ * Run only after reviewing the final synthetic README captures:
  *   node apps/web/scripts/generate-readme-tour.cjs --reviewed-captures
  * The animation moves between captured states; it never fabricates typing,
  * provider responses, tool execution, usage counters, or connection results.
@@ -9,24 +9,16 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 const REPO = path.resolve(__dirname, "../../..");
-const PUBLIC = path.resolve(__dirname, "../public");
-const SECONDS = 75;
+const CAPTURES = path.join(REPO, "docs/images");
+const SECONDS = 35;
 const SCENES = [
-  ["user/chat-home.png", "YOUR WORKSPACE", "Choose a model. Start a conversation."],
-  ["user/chat-response-actions.png", "CHAT", "Review the reply and choose your next step."],
-  ["user/chat-trace-expanded.png", "WORK TRACE", "Inspect what happened behind the answer."],
-  ["user/chat-images.png", "IMAGES", "Create with an image-capable model."],
-  ["user/chat-session-panel.png", "SESSION DETAILS", "Understand context and reported usage."],
-  ["user/drafts.png", "DRAFTS", "Develop the answer into a document."],
-  ["user/deck-ai-applied.png", "SLIDE DECKS", "Build slides and refine their visuals."],
-  ["user/agents.png", "AGENTS", "Keep purpose-built instructions together."],
-  ["user/knowledge.png", "KNOWLEDGE", "Find and reference your available sources."],
-  ["user/account-security-overview.png", "YOUR ACCOUNT", "Manage sign-in and recovery settings."],
-  ["user/mobile-navigation.png", "MOBILE", "Keep the workspace close at hand."],
-  ["user/help-library.png", "GUIDED LEARNING", "Follow the walkthroughs at your own pace."],
-  ["admin/users.png", "WORKSPACE ADMINISTRATION", "Manage people and their access."],
-  ["owner/providers.png", "PLATFORM OPERATIONS", "Connect providers and review readiness."],
-  ["owner/policies-callout-current.png", "SHARED CONNECTIONS", "Your models. Your keys. Your workspace."],
+  ["chat-light.png", "YOUR WORKSPACE", "Start with a clean, governed workspace."],
+  ["chat-dark.png", "CHAT", "Choose the appearance that suits your work."],
+  ["drafts-light.png", "DOCUMENTS", "Write and format a working document."],
+  ["deck-dark.png", "SLIDE DECKS", "Turn a document into editable slides."],
+  ["agents-dark.png", "AGENTS & AUTOMATIONS", "Configure assistants and scheduled workflows."],
+  ["library-dark.png", "KNOWLEDGE & TOOLS", "Organize sources and workspace tools."],
+  ["chat-mobile.png", "MOBILE", "A compact composer for smaller screens."],
 ];
 const xml = (text) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
@@ -35,7 +27,7 @@ function buildTour({ reviewed = false } = {}) {
   const evidence = [];
   const sceneDuration = SECONDS / SCENES.length;
   const scenes = SCENES.map(([frame, label, caption], index) => {
-    const png = fs.readFileSync(path.join(PUBLIC, "training", frame));
+    const png = fs.readFileSync(path.join(CAPTURES, frame));
     if (!png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
       throw new Error(`Missing PNG capture: ${frame}`);
     }
@@ -51,8 +43,8 @@ function buildTour({ reviewed = false } = {}) {
 <text x="1548" y="934" text-anchor="end" font-size="14" fill="#91a6af">${String(index + 1).padStart(2, "0")} / ${SCENES.length}</text></g>`;
   }).join("\n");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 980" width="1600" height="980" role="img" aria-labelledby="tourTitle tourDesc">
-<title id="tourTitle">Aperture Chat — a 75-second tour of the current interface</title>
-<desc id="tourDesc">An animated sequence of actual captures from a synthetic workspace: chat, runtime trace, a generated image, session details, Drafts, a slide deck, agents, knowledge, account security, mobile navigation, help, administration, providers, and shared connectors. Screens are captured states, not a real-time recording.</desc>
+<title id="tourTitle">Aperture Chat — a ${SECONDS}-second tour of the current interface</title>
+<desc id="tourDesc">An animated sequence of current interface captures: chat, documents, slide decks, agents, knowledge, and mobile. The local workspace has no model provider connected. Document and slide content is manually authored and synthetic; no generated responses or configured integrations are implied. Screens are captured states, not a real-time recording.</desc>
 <rect width="1600" height="980" rx="22" fill="#06141c"/>
 <text x="42" y="47" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#f2f7f8">Aperture Chat</text>
 <text x="1556" y="45" text-anchor="end" font-family="Arial,sans-serif" font-size="13" letter-spacing="1.4" fill="#91a6af">ACTUAL INTERFACE · SYNTHETIC WORKSPACE</text>

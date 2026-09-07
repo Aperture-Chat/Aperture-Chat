@@ -8,7 +8,8 @@ outside image layers.
 
 - Docker Engine with Compose v2
 - A writable Docker volume for application data
-- A non-secret copy of `.env.example` configured for the deployment
+- A private `.env` created from `.env.example`, with a unique, high-entropy `APERTURE_SECRET_KEY` of at least 32 characters
+- A reviewed `APERTURE_IMAGE_TAG` when using the image-based release stack
 
 Never commit a populated `.env`, database, provider credential, session secret,
 or exported runtime volume.
@@ -65,6 +66,7 @@ when no ready updater is connected.
 
 ```bash
 cp .env.example .env
+# Set APERTURE_SECRET_KEY in .env before starting Docker.
 docker compose --profile local build
 docker compose --profile local up -d
 docker compose --profile local ps
@@ -79,7 +81,9 @@ Set `APERTURE_IMAGE_TAG` to a published release tag in the project's `.env`,
 then start the release stack from that project directory:
 
 ```bash
-# Set APERTURE_IMAGE_TAG=vX.Y.Z in .env first.
+# From the extracted release bundle or repository root:
+# Copy .env.example to .env if it does not exist.
+# Set APERTURE_IMAGE_TAG=vX.Y.Z and a strong APERTURE_SECRET_KEY first.
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
 docker compose -f docker-compose.release.yml --profile local ps
@@ -133,11 +137,28 @@ use the recorded digest pair to pin an exact build. The workflow verifies the
 version-qualified pair before moving the plain branch aliases. Stable
 `v0.5.0` and `latest` remain exclusive to the tagged main release.
 
+## Persistent storage and backups
+
+Application state is split across a relational database (SQLite by default),
+remaining JSON state, and dedicated local stores. Preserve the full configured
+data volume, uploaded/generated files, signing secret, and private Compose
+configuration. Backing up only `runtime_state.json` is insufficient. Use a
+consistent database backup or stop writes during the backup; copying a live
+SQLite main file alone can omit WAL transactions.
+
+The optional `postgres` profile starts PostgreSQL but does not migrate data or
+switch the API. Review the dry-run/import procedures in
+`services/api/app/db/transfer_database.py`, then configure
+`APERTURE_DATABASE_URL` only after a verified transfer. Dedicated vector/Review
+Grid stores and process-local scheduling remain separate. Keep the application
+at its supported single-process deployment shape; adding PostgreSQL does not
+by itself enable multiple API replicas.
+
 ## Upgrade
 
 1. Back up the persistent application-data volume.
 2. Read the release notes for migrations or configuration changes.
-3. Set `APERTURE_IMAGE_TAG` to the new immutable tag.
+3. Set `APERTURE_IMAGE_TAG` to the reviewed release tag and record the API/web manifest digests.
 4. Pull and recreate the services without deleting volumes.
 5. Verify health, sign-in, chat, and the relevant admin surfaces.
 
