@@ -1040,6 +1040,30 @@ export function ChatWorkspace({
   const [cloudPicker, setCloudPicker] = useState<CloudPickerState | null>(null);
   const [commandToken, setCommandToken] = useState<ComposerCommandToken | null>(null);
   const [showComposerHelp, setShowComposerHelp] = useState(false);
+  const [shortcutQuery, setShortcutQuery] = useState("");
+  const [shortcutSection, setShortcutSection] = useState("");
+  const shortcutBrowserRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!showComposerHelp) return;
+    const position = () => {
+      const menu = shortcutBrowserRef.current;
+      if (!menu) return;
+      const composer = textareaRef.current?.closest(".composer");
+      if (!composer) return;
+      const rect = composer.getBoundingClientRect();
+      menu.style.left = `${Math.max(12, rect.left)}px`;
+      menu.style.width = `${Math.min(rect.width, window.innerWidth - 24)}px`;
+    };
+    position();
+    const dismissOutside = (event: PointerEvent) => {
+      const target = event.target as HTMLElement;
+      if (!shortcutBrowserRef.current?.contains(target) && !target.closest('button[aria-label="Composer shortcuts"]')) setShowComposerHelp(false);
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => { document.removeEventListener("pointerdown", dismissOutside); window.removeEventListener("resize", position); window.removeEventListener("scroll", position, true); };
+  }, [showComposerHelp, commandToken]);
   const [commandIndex, setCommandIndex] = useState(0);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [pendingAutomations, setPendingAutomations] = useState<Automation[]>([]);
@@ -1371,7 +1395,7 @@ export function ChatWorkspace({
   }, [knowledgeCommandOpen, knowledgeBaseIdsKey, data.me.id, data.currentTenant.id, knowledgeDocsReload]);
 
   const commandItems = useMemo<ComposerCommandItem[]>(() => {
-    if (!commandToken) return [];
+    function itemsForToken(commandToken: Pick<ComposerCommandToken, "symbol" | "query">): ComposerCommandItem[] {
     const query = commandToken.query;
     if (commandToken.symbol === "#") {
       const files = enabledKnowledgeBases.flatMap((base) =>
@@ -1457,7 +1481,15 @@ export function ChatWorkspace({
       detail: agent.notes?.trim() || agent.provider_name || "Agent profile",
       agent,
     }));
+    }
+    if (commandToken) return itemsForToken(commandToken);
+    if (!showComposerHelp) return [];
+    const typed = detectComposerCommandToken(shortcutQuery, shortcutQuery.length);
+    const symbols: ComposerCommandToken["symbol"][] = typed ? [typed.symbol] : ["/", "@", "#", "$", ">"];
+    return symbols.flatMap((symbol) => itemsForToken({ symbol, query: typed?.query ?? shortcutQuery }))
+      .filter((item) => !shortcutSection || item.section === shortcutSection);
   }, [
+    showComposerHelp, shortcutQuery, shortcutSection, data.connectors,
     commandToken,
     enabledKnowledgeBases,
     knowledgeDocs,
@@ -1481,10 +1513,7 @@ export function ChatWorkspace({
   // With a bare symbol (no query yet) the menu stays open even when the
   // library is empty, so the empty-state hint teaches what the symbol does.
   const commandMenuVisible =
-    commandToken !== null &&
-    (commandItems.length > 0 ||
-      commandToken.query.trim() === "" ||
-      (commandToken.symbol === "#" && (knowledgeDocsStatus === "loading" || knowledgeDocsError)));
+    commandToken !== null;
 
   // Keep the highlight on a real row as filtering narrows the list.
   useEffect(() => {
@@ -1514,7 +1543,6 @@ export function ChatWorkspace({
   }
 
   function applyCommandItem(item: ComposerCommandItem) {
-    if (!commandToken) return;
     let replacement = "";
     if (item.kind === "knowledge-base") {
       setComposerTools((current) => ({ ...current, Knowledge: true }));
@@ -1540,8 +1568,10 @@ export function ChatWorkspace({
       replacement = `@${item.name} `;
     }
     const caret = textareaRef.current?.selectionStart ?? draft.length;
-    const nextDraft = draft.slice(0, commandToken.start) + replacement + draft.slice(caret);
-    const nextCaret = commandToken.start + replacement.length;
+    const start = commandToken?.start ?? caret;
+    const nextDraft = draft.slice(0, start) + replacement + draft.slice(caret);
+    const nextCaret = start + replacement.length;
+    setShowComposerHelp(false);
     setDraft(nextDraft);
     setCommandToken(null);
     requestAnimationFrame(() => {
@@ -2357,13 +2387,28 @@ export function ChatWorkspace({
         </div>
       )}
 
-      {showComposerHelp && !commandMenuVisible && (
-        <div className="composer-command-menu" id={`${commandListId}-help`} role="note" aria-label="Composer shortcuts">
-          <span className="composer-command-section">Composer shortcuts</span>
-          <p className="composer-command-loading">Start a word with / for prompts and MCP tools, @ for agents, # for knowledge, $ for skills, or &gt; for automations.</p>
+      {showComposerHelp && !isComposerExpanded && !commandMenuVisible && createPortal(
+        <div ref={shortcutBrowserRef} className="composer-command-menu composer-shortcut-browser" id={`${commandListId}-help`} role="dialog" aria-label="Composer shortcuts"
+          onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setShowComposerHelp(false); textareaRef.current?.focus(); } }}>
+
+          <div className="composer-shortcut-heading"><span className="composer-command-section">Composer shortcuts</span>
+            <button type="button" className="icon-button" aria-label="Dismiss shortcuts" onClick={() => { setShowComposerHelp(false); textareaRef.current?.focus(); }}><X size={16} /></button></div>
+          <input autoFocus aria-label="Find a shortcut" placeholder="Search, or type # knowledge, / tools, @ agents, $ skills, > automations"
+            value={shortcutQuery} onChange={(event) => { setShortcutQuery(event.target.value); setShortcutSection(""); }} />
+          <div className="composer-shortcut-filters" aria-label="Shortcut categories">
+            {["", "Knowledge bases", "MCP connections", "Prompts", "Agents", "Skill files", "Automations"].map((section) => (
+              <button type="button" key={section} aria-pressed={shortcutSection === section}
+                onClick={() => setShortcutSection(section)}>{section || "All"}</button>
+            ))}
+          </div>
+          {commandSections.map((section) => <div key={section.title}>
+            <span className="composer-command-section">{section.title}</span>
+            {section.items.map((item) => <button type="button" className="composer-command-item" key={item.id}
+              onClick={() => applyCommandItem(item)}><span><strong>{item.name}</strong><small>{item.detail}</small></span></button>)}
+          </div>)}
+          {commandItems.length === 0 && <p role="status">No matching shortcuts available.</p>}
           <p className="composer-command-hint">Enter sends · Shift + Enter adds a line</p>
-          <button type="button" className="link-button" onClick={() => setShowComposerHelp(false)}>Dismiss shortcuts</button>
-        </div>
+        </div>, document.body
       )}
       {commandMenuVisible && commandToken && (
         <div
@@ -2434,7 +2479,7 @@ export function ChatWorkspace({
           )}
           {commandItems.length === 0 && (!knowledgeCommandOpen || knowledgeDocsStatus !== "loading") && (!knowledgeCommandOpen || !knowledgeDocsError) && (
             <span className="composer-command-loading">
-              {commandToken.symbol === "#"
+              {commandToken.query.trim() ? "No matching commands. Try another name." : commandToken.symbol === "#"
                 ? "No knowledge bases are enabled yet — add one under Knowledge"
                 : commandToken.symbol === "/"
                   ? !connectorEnabled(data.connectors, "prompt-library") && !connectorEnabled(data.connectors, "mcp")
@@ -2484,7 +2529,7 @@ export function ChatWorkspace({
       />
       <div className="composer-toolbar">
         <div className="composer-tools">
-          <button
+          {!isComposerExpanded && <button
             type="button"
             className="attach-trigger"
             aria-label="Composer shortcuts"
@@ -2494,7 +2539,7 @@ export function ChatWorkspace({
             onClick={() => setShowComposerHelp((current) => !current)}
           >
             <Info size={17} />
-          </button>
+          </button>}
           <div className="attach" ref={attachRef}>
             <button
               type="button"
@@ -2695,6 +2740,7 @@ export function ChatWorkspace({
           {chat.enabledModels.length > 0 && (
             <ContextWindowIndicator status={contextWindowStatus} onOpenDetails={() => setIsInspectorOpen(true)} />
           )}
+          {!isComposerExpanded && <>
           <button
             className="send-button"
             type="submit"
@@ -2720,7 +2766,8 @@ export function ChatWorkspace({
           >
             <ChevronDown size={16} />
           </button>
-          {sendMenuOpen && (
+          </>}
+          {!isComposerExpanded && sendMenuOpen && (
             <div className="send-options-menu" role="menu" aria-label="Send options" ref={revealComposerMenu}>
               <button
                 type="button"

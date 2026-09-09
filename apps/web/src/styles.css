@@ -24759,3 +24759,44 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
   .composer .composer-tools-status.is-single span { max-width: none; }
   .composer .composer-mcp-chip { max-width: 100%; overflow-wrap: anywhere; }
 }
+
+/* Keep composer discovery and native file controls in the workspace palette. */
+.composer-shortcut-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+.composer-shortcut-filters button {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); padding: 7px 10px;
+}
+.composer-shortcut-filters button[aria-pressed="true"] { background: var(--teal-soft); color: var(--teal); border-color: var(--teal); }
+.composer-command-menu > input { width: calc(100% - 16px); margin: 8px; min-height: 40px; }
+.issue-report-attachment input[type="file"] { max-width: 100%; color: var(--muted); font: inherit; }
+.issue-report-attachment input::file-selector-button {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 9px 12px; margin-right: 12px; background: var(--teal-soft);
+  color: var(--teal); font: inherit; font-weight: 600; cursor: pointer;
+}
+.issue-report-attachment input::file-selector-button:hover { background: var(--surface); border-color: var(--teal); }
+.palette-option .search-snippet strong { display: inline; font-size: inherit; font-weight: 700; }
+.model-option-row { grid-template-columns: minmax(0, 1fr) 44px; }
+.model-default-button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* A feathered reveal travels from the right edge to the left in both themes. */
+::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) {
+  z-index: 1; mix-blend-mode: normal;
+  mask-image: linear-gradient(to right, #000 33.333%, transparent 66.667%);
+  mask-size: 300% 100%;
+  animation: theme-sweep 850ms cubic-bezier(.22, .61, .36, 1) both;
+}
+@keyframes theme-sweep { from { mask-position: 0% 0; } to { mask-position: 100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
+.composer-shortcut-browser {
+  position: fixed; top: max(80px, calc((100dvh - 520px) / 2)); bottom: auto; right: auto;
+  max-height: min(520px, calc(100dvh - 100px)); z-index: 80;
+}
+.composer-shortcut-browser > input {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.composer-shortcut-heading { display: flex; align-items: center; justify-content: space-between; }

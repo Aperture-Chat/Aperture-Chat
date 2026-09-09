@@ -2555,7 +2555,9 @@ test("prompt improver stays hidden until there is a draft, then rewrites in plac
   const expandButton = screen.getByRole("button", { name: "Expand prompt editor" });
   fireEvent.click(expandButton);
   expect(screen.getByText("Expanded prompt")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  for (const name of ["Send message", "Send options", "Composer shortcuts"]) {
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  }
   fireEvent.keyDown(textarea, { key: "Enter" });
   expect(chatRequests).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Collapse prompt editor" }));
@@ -2661,9 +2663,19 @@ test("composer shortcuts are discoverable without an autofocus tooltip", async (
   await renderApp();
   expect(await screen.findByLabelText("Message")).not.toHaveAttribute("data-tooltip");
   fireEvent.click(screen.getByRole("button", { name: "Composer shortcuts" }));
-  expect(screen.getByRole("note", { name: "Composer shortcuts" })).toHaveTextContent("Shift + Enter adds a line");
+  expect(screen.getByRole("dialog", { name: "Composer shortcuts" })).toHaveTextContent("Shift + Enter adds a line");
+  const search = screen.getByRole("textbox", { name: "Find a shortcut" });
+  fireEvent.change(search, { target: { value: "#" } });
+  const menu = screen.getByRole("dialog", { name: "Composer shortcuts" });
+  expect(within(menu).getByText(sampleData.knowledgeBases[0].name)).toBeInTheDocument();
+  fireEvent.change(search, { target: { value: "#no-such-knowledge-base" } });
+  expect(within(menu).getByRole("status")).toHaveTextContent("No matching shortcuts");
+  fireEvent.change(search, { target: { value: "#" } });
+  fireEvent.click(within(menu).getByText(sampleData.knowledgeBases[0].name));
+  expect(screen.getByLabelText("Message")).toHaveValue(`#${sampleData.knowledgeBases[0].name} `);
+  fireEvent.click(screen.getByRole("button", { name: "Composer shortcuts" }));
   fireEvent.click(screen.getByRole("button", { name: "Dismiss shortcuts" }));
-  expect(screen.queryByRole("note", { name: "Composer shortcuts" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Composer shortcuts" })).not.toBeInTheDocument();
 });
 
 test("attachment send preserves the next prompt and files staged while an upload is in flight", async () => {

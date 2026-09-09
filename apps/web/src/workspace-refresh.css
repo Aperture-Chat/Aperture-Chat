@@ -82,15 +82,15 @@
 .primary-nav { position: relative; border-left: 0; padding-left: 12px; margin-left: 5px; }
 /* The rail and diamonds share one center, including at fractional browser zoom. */
 .primary-nav::before { content: ""; position: absolute; inset-block: 0; left: 0; width: 1px; background: var(--brand-edge); transform: translateX(-50%); }
-.primary-nav .nav-item::before { content: ""; position: absolute; left: -12px; top: 50%; box-sizing: border-box; width: 7px; height: 7px; border: 1px solid var(--border-strong); border-radius: 1px; background: var(--rail); transform: translate(-50%, -50%) rotate(45deg); }
-.primary-nav .nav-item.is-active::before { display: block; background: var(--teal-2); border-color: var(--teal-2); box-shadow: 0 0 0 3px var(--brand-wash); }
+.primary-nav .nav-item::before { content: ""; position: absolute; left: -12px; top: 50%; box-sizing: border-box; width: 7px; height: 7px; border: 1px solid var(--border-strong); border-radius: 1px; background: var(--primary-nav-node-fill, var(--rail)); transform: translate(-50%, -50%) rotate(45deg); }
+.primary-nav .nav-item.is-active::before { display: block; background: var(--primary-nav-node-fill, var(--rail)); border-color: var(--teal-2); box-shadow: 0 0 0 3px var(--brand-wash); }
 .rail-collapsed .primary-nav { border-left: 0; padding-left: 0; margin-left: 0; }
 .rail-collapsed .primary-nav::before, .rail-collapsed .primary-nav .nav-item::before { display: none; }
 .sidebar-dark .nav-item.is-active { background: rgb(255 255 255 / 12%); color: white; }
 .sidebar-dark .nav-item.is-active > svg { color: inherit; }
 .sidebar-dark .nav-item { color: #bfd0d4; }
 .sidebar-dark .nav-item:hover { color: white; }
-.sidebar-dark { background: var(--sidebar-gradient, var(--rail-dark)); }
+.sidebar-dark { --primary-nav-node-fill: var(--rail-dark); background: var(--sidebar-gradient, var(--rail-dark)); }
 .account-card { box-shadow: none; border-color: transparent; background: transparent; }
 .account-card:hover { border-color: var(--border); background: var(--surface); }
 span.avatar.avatar-initials,

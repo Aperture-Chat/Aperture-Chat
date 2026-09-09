@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, type ViewKey } from "./components/AppShell";
 import { AdminConsole, type AdminConsoleApi } from "./components/AdminConsole";
@@ -589,11 +590,14 @@ export function App() {
   }, [handleSignOut, requestWorkspaceNavigation]);
 
   const handleToggleDarkMode = useCallback(() => {
-    setDarkMode((current) => {
+    const update = () => flushSync(() => setDarkMode((current) => {
       const next = !current;
       persistBooleanPreference(DARK_MODE_STORAGE_KEY, next);
       return next;
-    });
+    }));
+    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.startViewTransition(update);
+    } else update();
   }, []);
 
   const handleAccountProfileUpdate = useCallback(
