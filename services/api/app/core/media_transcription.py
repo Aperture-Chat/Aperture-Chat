@@ -97,6 +97,7 @@ def resolve_transcription_model(
     store: SeedStore,
     *,
     tenant_id: str | None,
+    prefer_fast: bool = False,
 ) -> tuple[ModelConfig, ModelGatewayRoute] | None:
     """Pick a Gemini Flash catalog model for transcription and stills.
 
@@ -105,13 +106,23 @@ def resolve_transcription_model(
     as a last-resort audio-capable fallback when no Gemini Flash is configured.
     Dictation and file uploads do not need the model to be user-enabled for
     chat, but a candidate only qualifies when the gateway can resolve a
-    configured credential for this exact request tenant.
+    configured credential for this exact request tenant. Dictation can prefer
+    Flash Lite for lower latency; file and video uploads keep the default ranking.
     """
     flash = [
         model
         for model in store.models.values()
         if is_gemini_flash_upstream(model.upstream_model_id)
     ]
+    if prefer_fast:
+        # Batch routes are unsuitable for an interactive microphone control.
+        flash = [model for model in flash if ":batch" not in (model.upstream_model_id or "")]
+        fast = [model for model in flash if "lite" in (model.upstream_model_id or "")]
+        selection = _configured_selection(
+            store, fast, tenant_id=tenant_id, rank_key=_gemini_flash_rank
+        )
+        if selection is not None:
+            return selection
     selection = _configured_selection(
         store, flash, tenant_id=tenant_id, rank_key=_gemini_flash_rank
     )
@@ -166,8 +177,14 @@ def transcribe_audio_bytes(
         },
     ]
     completion_id = new_accounting_id()
+    options: dict[str, Any] = {"temperature": 0}
+    if route.provider_kind.strip().lower() == "openrouter" and is_gemini_flash_upstream(route.upstream_model):
+        # Verbatim speech does not need the default reasoning budget. Gemini
+        # 3+ still requires thinking, so request minimal rather than disabling it.
+        options["reasoning"] = {"effort": "minimal"}
+        options["provider"] = {"sort": "latency"}
     payload = gateway.complete(
-        route=route, messages=messages, max_tokens=2048, options={"temperature": 0}
+        route=route, messages=messages, max_tokens=2048, options=options
     )
     usage_context.settle_provider_child(
         completion_id=completion_id,
@@ -455,18 +472,18 @@ def _configured_selection(
     tenant_id: str | None,
     rank_key=None,
 ) -> tuple[ModelConfig, ModelGatewayRoute] | None:
-    configured: list[tuple[ModelConfig, ModelGatewayRoute]] = []
-    for model in candidates:
+    # Resolve credentials only until the highest-ranked usable model is found.
+    # Sorting is stable, preserving the old first-candidate tie behavior without
+    # decrypting credentials for every lower-ranked model on each recording.
+    key = rank_key or (lambda item: item.upstream_model_id or "")
+    for model in sorted(candidates, key=key, reverse=True):
         try:
             route = resolve_model_route(store, model, tenant_id=tenant_id)
         except ModelGatewayConfigurationError:
             continue
         if route.configured:
-            configured.append((model, route))
-    if not configured:
-        return None
-    key = rank_key or (lambda item: item.upstream_model_id or "")
-    return max(configured, key=lambda pair: key(pair[0]))
+            return model, route
+    return None
 
 
 def _model_accepts_images(model: ModelConfig) -> bool:

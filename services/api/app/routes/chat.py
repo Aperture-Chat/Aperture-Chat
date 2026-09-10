@@ -2949,7 +2949,7 @@ async def transcribe_dictation(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Dictation audio was empty."
         )
     gateway_tenant_id = _gateway_tenant_id(store, actor, tenant_slug)
-    selection = resolve_transcription_model(store, tenant_id=gateway_tenant_id)
+    selection = resolve_transcription_model(store, tenant_id=gateway_tenant_id, prefer_fast=True)
     if selection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

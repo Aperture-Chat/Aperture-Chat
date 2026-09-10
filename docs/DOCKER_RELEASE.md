@@ -131,11 +131,11 @@ SHA tag. The `test` to `main` promotion gate and release-only `latest` tags
 continue to use the existing release workflow.
 
 Version-qualified branch tags follow `v<version>-<branch>`, for example
-`v0.5.0-dev`, `v0.5.0-test`, and `v0.5.0-main`. Both the API and web package
+`v0.5.1-dev`, `v0.5.1-test`, and `v0.5.1-main`. Both the API and web package
 use these tags. They advance with subsequent commits carrying that version;
 use the recorded digest pair to pin an exact build. The workflow verifies the
 version-qualified pair before moving the plain branch aliases. Stable
-`v0.5.0` and `latest` remain exclusive to the tagged main release.
+`v0.5.1` and `latest` remain exclusive to the tagged main release.
 
 ## Persistent storage and backups
 
@@ -230,6 +230,25 @@ docker compose -f docker-compose.release.yml --profile local logs --tail=200 web
 Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
+
+## New Since v0.5.0
+
+- Optional theme schedules switch between light and dark mode at the times
+  chosen by each user. The schedule control shares the existing theme row.
+- Dictation uses a faster transcription path and avoids repeated model discovery
+  on each recording, reducing the delay after stopping.
+- Send options brings reply settings and searchable resources into one compact
+  menu. MCP connections have one selection state and one summary, with clear
+  in-chat shortcut guidance and layouts that fit phone screens and keyboards.
+- The mobile composer places attachment and active-tool controls together,
+  keeping the full toolbar on one row when space permits.
+- Model favorites stay available on each row, search previews render safe
+  Markdown, and theme changes honor reduced-motion preferences.
+- Access and sign-in guidance is available before login without discarding the
+  access request form. The signed-in Help playlist begins with chat guidance.
+- API and web images are published as `v0.5.1-dev`, `v0.5.1-test`, and
+  `v0.5.1-main`; stable `v0.5.1` promotes the inspected test image pair.
+- No new database migrations are introduced in this patch release.
 
 ## New Since v0.4.7
 
