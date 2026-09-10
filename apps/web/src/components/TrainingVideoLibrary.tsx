@@ -1,7 +1,7 @@
 import { Player } from "@remotion/player";
 import type { LucideIcon } from "lucide-react";
 import { BookOpen, CheckCircle2, ChevronLeft, FileVideo, ListChecks, Maximize2, Minimize2, Volume2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   GuidePdfDownload,
@@ -32,6 +32,46 @@ export type TrainingDeck = {
   /** The printable role guide paired with this deck. */
   pdf: { href: string; title: string; description: string; tooltip: string };
 };
+
+/** Native modality keeps sign-in fields out of the keyboard focus order. */
+export function TrainingAccessVideo({ video, deck, onClose }: {
+  video: TrainingDeckVideo;
+  deck: TrainingDeck;
+  onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    const trigger = document.activeElement as HTMLElement | null;
+    element?.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      element?.close();
+      document.body.style.overflow = previousOverflow;
+      trigger?.focus();
+    };
+  }, []);
+
+  return createPortal(
+    <dialog ref={dialog} className="modal owner-doc-modal owner-video-modal auth-video-dialog"
+      aria-labelledby="access-video-title" onCancel={(event) => {
+        event.preventDefault();
+        if (!dialog.current?.querySelector(".is-expanded")) onClose();
+      }}>
+      <TrainingVideoDetail
+        video={video} deck={deck} openKey={0} titleId="access-video-title"
+        heading={video.title}
+        subtitleRest="walkthrough with narration, captions, and sign-in guidance."
+        captionNoteWithAudio="Voiceover, captions, and title cards share the same timeline."
+        captionNoteWithoutAudio="The transcript below has the full narration."
+        setupSummary="Access and sign-in steps"
+        setupSummaryTooltip="Show or hide the access and sign-in instructions"
+        headStart={<button type="button" className="icon-button" aria-label="Close access walkthrough" onClick={onClose}><X size={17} /></button>}
+      />
+    </dialog>, document.body,
+  );
+}
 
 /** Detail view shared by all three surfaces: head, Remotion player, caption
  * note, outcomes, transcript, and the optional setup/quick-reference list.

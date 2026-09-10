@@ -21,6 +21,7 @@ import {
   Menu,
   MessageSquare,
   Moon,
+  Ellipsis,
   Paperclip,
   Pin,
   PinOff,
@@ -68,6 +69,8 @@ import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { useModalFocus } from "../lib/useModalFocus";
 import { CommandPalette } from "./CommandPalette";
 import { ChatPreview } from "./ChatPreview";
+import { ThemeScheduleDialog } from "./ThemeScheduleDialog";
+import { DEFAULT_THEME_SCHEDULE, type ThemeSchedule } from "../lib/useThemeSchedule";
 import { PlatformUpdateRow } from "./PlatformUpdateRow";
 import { Logo } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
@@ -239,6 +242,8 @@ function UserAppShell({
   openHelpRequestKey,
   darkMode,
   onToggleDarkMode,
+  themeSchedule = DEFAULT_THEME_SCHEDULE,
+  onSaveThemeSchedule,
   pwaInstallTarget,
   onOpenPwaInstall,
   threads,
@@ -271,6 +276,8 @@ function UserAppShell({
   openHelpRequestKey?: number;
   darkMode: boolean;
   onToggleDarkMode: () => void;
+  themeSchedule?: ThemeSchedule;
+  onSaveThemeSchedule?: (schedule: ThemeSchedule) => void;
   /* Set only in mobile browser tabs (iOS/Android, not already installed);
    * gates the persistent "Install app" sidebar entry point. */
   pwaInstallTarget?: "ios" | "android" | null;
@@ -304,6 +311,7 @@ function UserAppShell({
 }) {
   // A tenant brand gradient turns every rail into the dark treatment so the
   // gradient (set via --sidebar-gradient) shows with legible light text.
+  const [themeScheduleOpen, setThemeScheduleOpen] = useState(false);
   const brandedRail = Boolean(
     data.currentTenant.gradient_start?.trim() && data.currentTenant.gradient_end?.trim(),
   );
@@ -1155,6 +1163,7 @@ function UserAppShell({
               <CircleHelp size={16} />
               <span>Help</span>
             </button>
+            <div className="theme-mode-row">
             <button
               className="minor-row"
               type="button"
@@ -1165,6 +1174,12 @@ function UserAppShell({
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
               <span>{darkMode ? "Light mode" : "Dark mode"}</span>
             </button>
+            <button type="button" className={clsx("theme-schedule-button", themeSchedule.enabled && "is-active")}
+              aria-label="Theme schedule" data-tooltip="Schedule light and dark mode" aria-haspopup="dialog"
+              onClick={() => setThemeScheduleOpen(true)}><Ellipsis size={18} /></button>
+            </div>
+            {themeScheduleOpen && <ThemeScheduleDialog schedule={themeSchedule}
+              onSave={(next) => onSaveThemeSchedule?.(next)} onClose={() => setThemeScheduleOpen(false)} />}
             {pwaInstallTarget && onOpenPwaInstall && (
               <button
                 className="minor-row"

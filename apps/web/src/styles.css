@@ -24745,17 +24745,104 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 .composer-context-tools { display: contents; }
 @media (max-width: 600px) {
   .composer .composer-toolbar {
-    display: grid; grid-template-columns: 40px 40px minmax(0, 1fr);
-    align-items: center; gap: 6px; padding-top: 8px;
+    display: flex; flex-wrap: wrap;
+    align-items: center; gap: 4px; padding-top: 8px;
   }
   .composer .composer-tools { display: contents; }
-  .composer .composer-context-tools { grid-column: 1 / -1; grid-row: 1; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .composer .composer-context-tools { display: flex; flex: 1 1 124px; min-width: 0; }
   .composer .composer-context-tools:empty { display: none; }
-  .composer .composer-tools > .attach-trigger { grid-column: 1; grid-row: 2; }
-  .composer .composer-tools > .attach { grid-column: 2; grid-row: 2; }
-  .composer .composer-tools .attach-trigger { width: 40px; height: 44px; }
-  .composer .send-actions { grid-column: 3; grid-row: 2; justify-self: end; width: auto; min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
-  .composer .composer-tools-status { min-height: 32px; max-width: 100%; padding: 0 8px; border-radius: 8px; background: var(--teal-soft); }
-  .composer .composer-tools-status.is-single span { max-width: none; }
+  .composer .composer-tools > .attach { flex: 0 0 36px; }
+  .composer .composer-tools .attach-trigger { width: 36px; height: 44px; }
+  .composer .send-actions { width: auto; min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 0; }
+  .composer .composer-tools-status { min-width: 0; min-height: 32px; max-width: 100%; gap: 4px; padding: 0 4px; border-radius: 8px; background: var(--teal-soft); }
+  .composer .composer-tools-status > svg, .composer .composer-tools-clear { flex-shrink: 0; }
+  .composer .composer-tools-status.is-single span { min-width: 0; max-width: none; }
   .composer .composer-mcp-chip { max-width: 100%; overflow-wrap: anywhere; }
+}
+
+/* Keep composer discovery and native file controls in the workspace palette. */
+.composer-shortcut-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+.composer-shortcut-filters button {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); padding: 7px 10px;
+}
+.composer-shortcut-filters button[aria-pressed="true"] { background: var(--teal-soft); color: var(--teal); border-color: var(--teal); }
+.composer-command-menu > input { width: calc(100% - 16px); margin: 8px; min-height: 40px; }
+.issue-report-attachment input[type="file"] { max-width: 100%; color: var(--muted); font: inherit; }
+.issue-report-attachment input::file-selector-button {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 9px 12px; margin-right: 12px; background: var(--teal-soft);
+  color: var(--teal); font: inherit; font-weight: 600; cursor: pointer;
+}
+.issue-report-attachment input::file-selector-button:hover { background: var(--surface); border-color: var(--teal); }
+.palette-option .search-snippet strong { display: inline; font-size: inherit; font-weight: 700; }
+.model-option-row { grid-template-columns: minmax(0, 1fr) 44px; }
+.model-default-button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* A feathered reveal travels from the right edge to the left in both themes. */
+::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) {
+  z-index: 1; mix-blend-mode: normal;
+  mask-image: linear-gradient(to right, #000 33.333%, transparent 66.667%);
+  mask-size: 300% 100%;
+  animation: theme-sweep 850ms cubic-bezier(.22, .61, .36, 1) both;
+}
+@keyframes theme-sweep { from { mask-position: 0% 0; } to { mask-position: 100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
+.composer-shortcut-browser {
+  position: fixed; top: max(80px, calc((100dvh - 520px) / 2)); bottom: auto; right: auto;
+  max-height: min(520px, calc(100dvh - 100px)); z-index: 80;
+}
+.composer-shortcut-browser > input {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.composer-shortcut-heading { display: flex; align-items: center; justify-content: space-between; }
+
+/* One composer entry point for reply settings and resource discovery. */
+.send-options-menu.composer-options-panel {
+  position: fixed; inset: auto; top: 12px; left: 12px;
+  width: min(456px, calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px); padding: 10px; z-index: 90; gap: 6px;
+  align-content: start; scroll-padding: 10px;
+}
+.composer-options-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.composer-options-heading > div { display: grid; gap: 4px; }
+.composer-options-heading strong { font-size: 16px; color: var(--text-strong); }
+.composer-options-heading .icon-button { width: 32px; height: 32px; min-height: 32px; }
+.composer-options-heading small, .composer-options-footer { color: var(--muted); font-size: 12px; }
+.composer-options-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); }
+.composer-options-tabs button { flex: 0 0 auto; min-height: 32px; padding: 5px 2px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; }
+.composer-options-tabs button[aria-pressed="true"] { color: var(--teal); border-bottom-color: var(--teal); }
+.composer-options-panel .send-option { min-height: 44px; padding: 5px 6px; }
+.composer-options-panel .send-option small { line-height: 1.5; }
+.composer-browse-resources { margin-top: 8px; border-top: 1px solid var(--border); border-radius: 0; }
+.composer-options-resources { min-width: 0; }
+.composer-options-resources > input { box-sizing: border-box; width: 100%; min-height: 42px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.composer-options-panel .composer-shortcut-filters { padding: 6px 0; gap: 5px; }
+.composer-options-panel .composer-shortcut-filters button { font-size: 12px; padding: 6px 9px; }
+.composer-resource-results { max-height: min(320px, 45dvh); overflow-y: auto; overscroll-behavior: contain; min-width: 0; }
+.composer-resource-results .composer-command-section { margin: 0; font-size: 11px; }
+.composer-resource-results .composer-command-item { min-height: 48px; }
+.composer-resource-results .composer-command-item[aria-pressed="true"] { background: var(--teal-soft); color: var(--teal); }
+.composer-resource-results .composer-command-item > span { min-width: 0; }
+.composer-resource-results .composer-command-item strong, .composer-resource-results .composer-command-item small { white-space: normal; overflow-wrap: anywhere; }
+.composer-resource-results > p { padding: 12px 8px; color: var(--muted); font-size: 13px; }
+.composer-options-footer { margin: 0; border-top: 1px solid var(--border); padding-top: 8px; }
+.composer-shortcut-guide { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.composer-shortcut-guide p { margin: 0; }
+.composer-shortcut-guide dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin: 6px 0; }
+.composer-shortcut-guide dl > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.composer-shortcut-guide dt { flex: 0 0 24px; text-align: center; }
+.composer-shortcut-guide dt code { display: block; border-radius: 4px; background: var(--teal-soft); color: var(--teal); font-size: 13px; }
+.composer-shortcut-guide dd { margin: 0; overflow-wrap: anywhere; }
+.composer-shortcut-example code { color: var(--teal); }
+@media (max-width: 600px) {
+  .composer-options-tabs button, .composer-options-heading .icon-button { min-height: 44px; }
+  .composer-options-heading .icon-button { min-width: 44px; }
+  .composer-options-panel .composer-shortcut-filters button { min-height: 44px; }
+  .composer-options-resources > input { font-size: 16px; min-height: 44px; }
+  .composer-resource-results { max-height: none; overflow: visible; }
 }

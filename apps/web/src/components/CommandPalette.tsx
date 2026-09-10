@@ -1,3 +1,4 @@
+import { SearchSnippet } from "./SearchSnippet";
 import {
   Archive,
   ArchiveRestore,
@@ -400,7 +401,7 @@ export function CommandPalette({
         <Icon size={16} aria-hidden="true" />
         <span>
           <strong>{hit.title}</strong>
-          {detailForHit(hit) && <small>{detailForHit(hit)}</small>}
+          {detailForHit(hit) && <small className="search-snippet"><SearchSnippet text={detailForHit(hit)!} /></small>}
         </span>
       </button>
     );

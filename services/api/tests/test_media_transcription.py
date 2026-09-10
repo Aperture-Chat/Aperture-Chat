@@ -370,3 +370,42 @@ def test_chat_silent_video_without_visual_notes_fails(monkeypatch: pytest.Monkey
     )
     assert response.status_code == 400
     assert "no visual notes" in response.json()["detail"]
+
+
+def test_dictation_prefers_configured_lite_but_file_uploads_keep_full_flash() -> None:
+    full = _audio_model()
+    _activate_openrouter_with_model(full)
+    store = get_store()
+    lite = full.model_copy(update={"id": "model-flash-lite", "upstream_model_id": "google/gemini-3.1-flash-lite"})
+    batch = full.model_copy(update={"id": "model-flash-lite-batch", "upstream_model_id": "google/gemini-9-flash-lite:batch"})
+    store.models[lite.id] = lite
+    store.models[batch.id] = batch
+    assert resolve_transcription_model(store, tenant_id="tenant-example", prefer_fast=True)[0].id == lite.id
+    del store.models[batch.id]
+    assert resolve_transcription_model(store, tenant_id="tenant-example")[0].id == full.id
+    del store.models[lite.id]
+    assert resolve_transcription_model(store, tenant_id="tenant-example", prefer_fast=True)[0].id == full.id
+
+
+def test_transcription_stops_resolving_after_best_configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core import media_transcription
+    from app.core.model_gateway import ModelGatewayConfigurationError
+
+    model = _audio_model().model_copy(update={"upstream_model_id": "google/gemini-3.5-flash-lite"})
+    _activate_openrouter_with_model(model)
+    store = get_store()
+    store.models["new-unconfigured"] = model.model_copy(update={"id": "new-unconfigured", "upstream_model_id": "google/gemini-3.7-flash-lite"})
+    store.models["older-configured"] = model.model_copy(update={"id": "older-configured", "upstream_model_id": "google/gemini-3.1-flash-lite"})
+    original = media_transcription.resolve_model_route
+    checked = []
+
+    def resolve(store, candidate, *, tenant_id):
+        checked.append((candidate.id, tenant_id))
+        if candidate.id == "new-unconfigured":
+            raise ModelGatewayConfigurationError("No configured route")
+        return original(store, candidate, tenant_id=tenant_id)
+
+    monkeypatch.setattr(media_transcription, "resolve_model_route", resolve)
+    selection = resolve_transcription_model(store, tenant_id="tenant-example", prefer_fast=True)
+    assert selection[0].id == model.id
+    assert checked == [("new-unconfigured", "tenant-example"), (model.id, "tenant-example")]
