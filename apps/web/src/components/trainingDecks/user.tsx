@@ -16,7 +16,7 @@ import {
   Send,
   Wrench,
 } from "lucide-react";
-import { TrainingGuidePlaylist, type TrainingDeck } from "../TrainingVideoLibrary";
+import { TrainingAccessVideo, TrainingGuidePlaylist, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
 /* Frames are real captures of the current user workspace, taken as a standard
@@ -1163,7 +1163,7 @@ const GUIDE_ICONS = {
 const USER_DECK: TrainingDeck = {
   badge: "User guide",
   regions: USER_FOCUS_REGIONS,
-  videos: USER_TRAINING_VIDEOS,
+  videos: USER_TRAINING_VIDEOS.filter((video) => video.id !== "access-and-sign-in"),
   icons: GUIDE_ICONS,
   pdf: {
     href: "docs/aperture-user-guide.pdf",
@@ -1172,6 +1172,11 @@ const USER_DECK: TrainingDeck = {
     tooltip: "Download the step-by-step user guide to keep, print, or share",
   },
 };
+
+export function AccessGuideVideo({ onClose }: { onClose: () => void }) {
+  const video = USER_TRAINING_VIDEOS.find((entry) => entry.id === "access-and-sign-in")!;
+  return <TrainingAccessVideo video={video} deck={USER_DECK} onClose={onClose} />;
+}
 
 export function UserGuidePlaylist({ brandName }: { brandName?: string | null }) {
   return (

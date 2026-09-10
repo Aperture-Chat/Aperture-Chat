@@ -45,17 +45,20 @@ test("typeahead matches model names and repeated letters cycle matching choices"
   expect(setModel).toHaveBeenCalledExactlyOnceWith("gemini");
 });
 
-test("the default-model action is outside listbox options and applies the highlighted model", () => {
+test("each model has a stable favorite action independent of the highlighted model", () => {
   const { trigger, setModel, setDefaultModel } = renderPicker();
   fireEvent.click(trigger);
   fireEvent.keyDown(document.activeElement!, { key: "End" });
   const action = screen.getByRole("button", { name: "Set Gemini as default model" });
-  expect(within(screen.getByRole("listbox")).queryByRole("button")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("listbox")).getAllByRole("button")).toHaveLength(4);
+  fireEvent.mouseEnter(screen.getByRole("option", { name: /Alpha/ }));
+  expect(action).toHaveAccessibleName("Set Gemini as default model");
   action.focus();
   fireEvent.click(action);
   expect(setDefaultModel).toHaveBeenCalledExactlyOnceWith("gemini");
   expect(setModel).not.toHaveBeenCalled();
-  expect(trigger).toHaveFocus();
+  expect(action).toHaveFocus();
+  expect(screen.getByRole("listbox")).toBeInTheDocument();
 });
 
 test("Escape restores the trigger and tabbing out closes without changing the model", () => {

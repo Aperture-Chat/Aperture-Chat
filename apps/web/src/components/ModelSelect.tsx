@@ -6,8 +6,7 @@ import "./model-select.css";
 type ModelSelection = Pick<ChatStore, "enabledModels" | "model" | "defaultModelId" | "setModel" | "setDefaultModel">;
 
 /** Focus previews a choice; selection happens only on click or Enter/Space.
- * The default action is separate from the listbox so it remains a real button
- * instead of an interactive descendant flattened by an option's ARIA role. */
+ * Each favorite action is a sibling of its option, never nested inside it. */
 export function ModelSelect({ chat }: { chat: ModelSelection }) {
   const [open, setOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -66,6 +65,7 @@ export function ModelSelect({ chat }: { chat: ModelSelection }) {
   }, [open, hasModels]);
 
   function onListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest(".model-default-button")) return;
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return;
     const index = Math.max(0, chat.enabledModels.findIndex((model) => model.id === active?.id));
     let next: number | undefined;
@@ -138,6 +138,7 @@ export function ModelSelect({ chat }: { chat: ModelSelection }) {
         <div className="model-menu">
           <div id={listId} role="listbox" aria-label="Select model" onKeyDown={onListKeyDown}>
             {chat.enabledModels.map((model) => (
+              <div className="model-option-row" key={model.id}>
               <button
                 ref={(node) => { if (node) optionRefs.current.set(model.id, node); else optionRefs.current.delete(model.id); }}
                 key={model.id}
@@ -153,24 +154,18 @@ export function ModelSelect({ chat }: { chat: ModelSelection }) {
               >
                 <span><strong>{model.name}</strong><small>{model.provider_name}</small></span>
                 <span className="model-option-indicators" aria-hidden="true">
-                  {model.id === chat.defaultModelId && <Star size={13} fill="currentColor" />}
                   {model.id === chat.model && <Check size={16} />}
                 </span>
               </button>
+              <button type="button" className={`model-default-button ${model.id === chat.defaultModelId ? "is-default" : ""}`}
+                aria-label={`Set ${model.name} as default model`}
+                aria-pressed={model.id === chat.defaultModelId}
+                onClick={() => chat.setDefaultModel(model.id)}>
+                <Star size={16} fill={model.id === chat.defaultModelId ? "currentColor" : "none"} aria-hidden="true" />
+              </button>
+              </div>
             ))}
           </div>
-          {active && (
-            <button
-              type="button"
-              className={`model-default-action ${active.id === chat.defaultModelId ? "is-default" : ""}`}
-              aria-label={`Set ${active.name} as default model`}
-              aria-pressed={active.id === chat.defaultModelId}
-              onClick={() => { chat.setDefaultModel(active.id); close(); }}
-            >
-              <Star size={14} fill={active.id === chat.defaultModelId ? "currentColor" : "none"} aria-hidden="true" />
-              <span>{active.id === chat.defaultModelId ? "Default for new chats" : "Use as default for new chats"}<small>{active.name}</small></span>
-            </button>
-          )}
         </div>
       )}
     </div>

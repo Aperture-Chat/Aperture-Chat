@@ -13,11 +13,12 @@ import {
   Loader2,
   LockKeyhole,
   Mail,
+  PlayCircle,
   ShieldCheck,
   UserRound,
   UserPlus,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   ChatRequestError,
   MfaRequestError,
@@ -40,6 +41,8 @@ import type {
   AuthProviderOption,
 } from "../lib/types";
 import { ApertureMark } from "./Primitives";
+
+const AccessGuideVideo = lazy(() => import("./trainingDecks/user").then((module) => ({ default: module.AccessGuideVideo })));
 
 type AuthLoginHandler = (payload: AuthLoginRequest) => void | Promise<void>;
 type LocalAuthHandler = (payload?: AuthLoginRequest) => void | Promise<void>;
@@ -173,6 +176,7 @@ export function AuthScreen({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [mfa, setMfa] = useState<MfaFlowUiState | null>(null);
   const [accessMode, setAccessMode] = useState(false);
+  const [accessVideoOpen, setAccessVideoOpen] = useState(false);
   const [accessDraft, setAccessDraft] = useState({ firstName: "", lastName: "", email: initialEmail });
   const [accessPending, setAccessPending] = useState(false);
   const [accessComplete, setAccessComplete] = useState(false);
@@ -1243,8 +1247,22 @@ export function AuthScreen({
           </form>
             </>
           )}
+          {!bootstrapRequired && !mfa && (
+            <div className="auth-video-help">
+              <strong>Need help getting started?</strong>
+              <p>See how to request access, get administrator approval, and sign in.</p>
+              <button className="link-button" type="button" onClick={() => setAccessVideoOpen(true)}>
+                <PlayCircle size={18} /> Watch the access &amp; sign-in video
+              </button>
+            </div>
+          )}
         </div>
 
+        {accessVideoOpen && !bootstrapRequired && !mfa && (
+          <Suspense fallback={<div role="status">Loading access walkthrough…</div>}>
+            <AccessGuideVideo onClose={() => setAccessVideoOpen(false)} />
+          </Suspense>
+        )}
         <aside className="auth-context" aria-label="Authentication requirements">
           <div className="auth-context-intro">
             <span className="auth-eyebrow">Made for focused work</span>

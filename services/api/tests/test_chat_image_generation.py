@@ -400,6 +400,8 @@ def test_dictation_transcription_routes_audio_to_model(monkeypatch) -> None:
     sent = captured["body"]
     assert sent["model"] == "google/gemini-3.5-flash"
     assert sent["temperature"] == 0
+    assert sent["reasoning"] == {"effort": "minimal"}
+    assert sent["provider"] == {"sort": "latency"}
     audio_part = sent["messages"][-1]["content"][0]
     assert audio_part["type"] == "input_audio"
     assert audio_part["input_audio"]["format"] == "wav"
