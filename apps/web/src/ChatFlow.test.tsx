@@ -963,7 +963,7 @@ test("session summary tools row reflects the chat's active tools", async () => {
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Agent Use enabled tools for this reply.",
     }),
   );
@@ -1395,7 +1395,7 @@ test("google drive picker imports selected files into the chat composer", async 
 
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Add attachment" }));
-  fireEvent.click(within(composer).getByRole("menuitem", { name: "Google Drive" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Google Drive" }));
 
   const dialog = await screen.findByRole("dialog", {
     name: "Choose from Google Drive",
@@ -1556,7 +1556,7 @@ test("denying approval-required MCP tools prevents the chat API call", async () 
   const composerShell = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composerShell).getByRole("button", { name: "Send options" }));
   fireEvent.click(
-    within(composerShell).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Agent Use enabled tools for this reply.",
     }),
   );
@@ -1584,18 +1584,18 @@ test("composer runtime toggles are sent to the chat API", async () => {
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Knowledge Use connected workspace sources.",
     }),
   );
   // Web search defaults on for OpenRouter-backed models that support it.
-  const webOption = within(composer).getByRole("menuitemcheckbox", {
+  const webOption = screen.getByRole("menuitemcheckbox", {
     name: "Web Use public web search for this reply.",
   });
   expect(webOption).toBeEnabled();
   expect(webOption).toHaveAttribute("aria-checked", "true");
   fireEvent.click(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Agent Use enabled tools for this reply.",
     }),
   );
@@ -1632,7 +1632,7 @@ test("turning web search off lasts only for the current chat", async () => {
   fireEvent.click(within(composer).getByRole("button", { name: "Turn off active tools" }));
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   expect(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Web Search current public web sources.",
     }),
   ).toHaveAttribute("aria-checked", "false");
@@ -1643,7 +1643,7 @@ test("turning web search off lasts only for the current chat", async () => {
   const freshComposer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(freshComposer).getByRole("button", { name: "Send options" }));
   expect(
-    within(freshComposer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Web Use public web search for this reply.",
     }),
   ).toHaveAttribute("aria-checked", "true");
@@ -1662,13 +1662,13 @@ test("pending assistant response shows an activity trace for enabled tools", asy
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Knowledge Use connected workspace sources.",
     }),
   );
   // Web search is already on by default for this OpenRouter-backed model.
   expect(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Web Use public web search for this reply.",
     }),
   ).toHaveAttribute("aria-checked", "true");
@@ -1791,13 +1791,13 @@ test("send options dropdown can toggle runtime tools and send", async () => {
 
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Knowledge Use connected workspace sources.",
     }),
   );
-  expect(within(composer).getByRole("group", { name: "Knowledge source" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Knowledge source" })).toBeInTheDocument();
   fireEvent.click(
-    within(composer).getByRole("menuitemradio", {
+    screen.getByRole("menuitemradio", {
       name: /Box Matter Knowledge/,
     }),
   );
@@ -1806,12 +1806,12 @@ test("send options dropdown can toggle runtime tools and send", async () => {
   fireEvent.click(within(composer).getByRole("button", { name: "Turn off active tools" }));
   expect(composer.querySelector(".composer-tools-status")).not.toBeInTheDocument();
   fireEvent.click(
-    within(composer).getByRole("menuitemcheckbox", {
+    screen.getByRole("menuitemcheckbox", {
       name: "Web Search current public web sources.",
     }),
   );
   fireEvent.click(
-    within(composer).getByRole("menuitem", {
+    screen.getByRole("menuitem", {
       name: "Send now Use the current composer settings.",
     }),
   );
@@ -2421,7 +2421,7 @@ test("composer web links ride as fetch_urls and surface returned web citations",
 
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Add attachment" }));
-  fireEvent.click(within(composer).getByRole("menuitem", { name: /Web page by link/ }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Web page by link/ }));
   fireEvent.change(within(composer).getByRole("textbox", { name: "Web page address" }), {
     target: { value: "https://example.com/page" },
   });
@@ -2452,7 +2452,7 @@ test("the composer rejects invalid links and more than three links with honest c
 
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Add attachment" }));
-  fireEvent.click(within(composer).getByRole("menuitem", { name: /Web page by link/ }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Web page by link/ }));
 
   const addLink = (value: string) => {
     fireEvent.change(within(composer).getByRole("textbox", { name: "Web page address" }), {
@@ -2494,7 +2494,7 @@ test("a blocked ad-hoc URL surfaces the backend error with no success state", as
 
   const composer = document.querySelector(".composer") as HTMLElement;
   fireEvent.click(within(composer).getByRole("button", { name: "Add attachment" }));
-  fireEvent.click(within(composer).getByRole("menuitem", { name: /Web page by link/ }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Web page by link/ }));
   fireEvent.change(within(composer).getByRole("textbox", { name: "Web page address" }), {
     target: { value: "https://blocked.example.com/page" },
   });
@@ -2555,7 +2555,7 @@ test("prompt improver stays hidden until there is a draft, then rewrites in plac
   const expandButton = screen.getByRole("button", { name: "Expand prompt editor" });
   fireEvent.click(expandButton);
   expect(screen.getByText("Expanded prompt")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
   fireEvent.keyDown(textarea, { key: "Enter" });
   expect(chatRequests).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Collapse prompt editor" }));
@@ -2657,13 +2657,110 @@ test("composer shortcut lists do not trap Tab and expose the highlighted choice"
   expect(screen.queryByRole("listbox", { name: "Knowledge commands" })).not.toBeInTheDocument();
 });
 
-test("composer shortcuts are discoverable without an autofocus tooltip", async () => {
+test("send options consolidates settings and searchable resources", async () => {
   await renderApp();
   expect(await screen.findByLabelText("Message")).not.toHaveAttribute("data-tooltip");
-  fireEvent.click(screen.getByRole("button", { name: "Composer shortcuts" }));
-  expect(screen.getByRole("note", { name: "Composer shortcuts" })).toHaveTextContent("Shift + Enter adds a line");
-  fireEvent.click(screen.getByRole("button", { name: "Dismiss shortcuts" }));
-  expect(screen.queryByRole("note", { name: "Composer shortcuts" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Composer shortcuts" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  const panel = screen.getByRole("dialog", { name: "Send options" });
+  expect(within(panel).getByRole("checkbox", { name: "Stream replies" })).toBeInTheDocument();
+  expect(within(panel).getByRole("group", { name: "Reasoning level" })).toBeInTheDocument();
+  fireEvent.click(within(panel).getByRole("button", { name: "Resources", exact: true }));
+  expect(within(panel).getByRole("textbox", { name: "Find a resource" })).toBeInTheDocument();
+  for (const name of ["MCP connections", "Prompts", "Agents", "Knowledge bases", "Skill files", "Automations"]) {
+    expect(within(panel).getByRole("button", { name, exact: true })).toBeInTheDocument();
+  }
+  expect(panel).toHaveTextContent("Shift + Enter adds a line");
+  const guide = within(panel).getByRole("group", { name: "Type shortcuts in chat" });
+  expect(guide).toHaveTextContent("Type a symbol directly in the chat message box");
+  for (const [symbol, label] of [["/", "Prompts & MCP connections"], ["@", "Agents"], ["#", "Knowledge bases & files"], ["$", "Skill files"], [">", "Automations"]]) {
+    const description = within(guide).getByText(label).closest("div")!;
+    expect(description.querySelector("dt")).toHaveTextContent(symbol);
+  }
+  fireEvent.click(within(panel).getByRole("button", { name: "Close send options" }));
+  expect(screen.queryByRole("dialog", { name: "Send options" })).not.toBeInTheDocument();
+});
+
+test("send options follows the visible viewport when the phone keyboard opens", async () => {
+  const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, offsetLeft: 0 });
+  vi.stubGlobal("visualViewport", viewport);
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  const panel = screen.getByRole("dialog", { name: "Send options" });
+  expect(panel.style.maxWidth).toBe("366px");
+  viewport.height = 360;
+  viewport.offsetTop = 100;
+  fireEvent(viewport, new Event("resize"));
+  expect(panel.style.maxHeight).toBe("336px");
+  expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(112);
+  expect(Number.parseFloat(panel.style.top)).toBeLessThanOrEqual(448);
+  fireEvent.click(screen.getByRole("button", { name: "Close send options" }));
+  viewport.height = 844;
+  fireEvent(viewport, new Event("resize"));
+  expect(panel.style.maxHeight).toBe("336px");
+});
+
+test("resource search inserts a prompt while preserving the existing draft", async () => {
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message") as HTMLTextAreaElement;
+  fireEvent.change(textarea, { target: { value: "Keep this draft." } });
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("button", { name: "Resources", exact: true }));
+  const search = screen.getByRole("textbox", { name: "Find a resource" });
+  fireEvent.change(search, { target: { value: "Approval Email" } });
+  fireEvent.keyDown(search, { key: "Enter" });
+  expect(chatRequests).toHaveLength(0);
+  expect(screen.queryByRole("button", { name: /^Hermes Agent MCP/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^Approval Email/ }));
+  expect(textarea.value).toMatch(/^Keep this draft\. Before any external send/);
+  expect(screen.queryByRole("dialog", { name: "Send options" })).not.toBeInTheDocument();
+});
+
+test("MCP picked through commands and resources has one summary and one request entry", async () => {
+  window.localStorage.setItem("aperture-default-model-user-admin", "openrouter-openai-gpt-4o-mini");
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Agent / }));
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Agent / }));
+  fireEvent.click(screen.getByRole("button", { name: "Close send options" }));
+  fireEvent.change(textarea, { target: { value: "/Hermes" } });
+  fireEvent.click(screen.getByRole("option", { name: /Hermes Agent MCP/ }));
+  fireEvent.change(textarea, { target: { value: "/Hermes" } });
+  fireEvent.click(screen.getByRole("option", { name: /Hermes Agent MCP/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("button", { name: "Resources", exact: true }));
+  const panel = screen.getByRole("dialog", { name: "Send options" });
+  const connection = within(panel).getByRole("button", { name: /^Hermes Agent MCP/ });
+  expect(connection).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(connection);
+  expect(connection).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(connection);
+  expect(connection).toHaveAttribute("aria-pressed", "true");
+  expect(document.querySelectorAll(".composer-mcp-chip")).toHaveLength(0);
+  expect(document.querySelectorAll(".composer-tools-status")).toHaveLength(1);
+  expect(document.querySelector(".composer-tools-status b")).toHaveTextContent("2"); // Web + one connection.
+  fireEvent.click(within(panel).getByRole("button", { name: "Close send options" }));
+  fireEvent.change(textarea, { target: { value: "Find the project notes." } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  const approval = (await screen.findByText("Approve MCP tool run?")).closest(".composer-approval-request") as HTMLElement;
+  fireEvent.click(within(approval).getByRole("button", { name: "Approve" }));
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chatRequests[0].tool_config_ids).toEqual(["tool-hermes-agent-mcp"]);
+  expect(chatRequests[0].agent_profile_id).toBeNull();
+});
+
+test("clearing the single summary removes connections selected in resources", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("button", { name: "Resources", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: /^Hermes Agent MCP/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Close send options" }));
+  fireEvent.click(screen.getByRole("button", { name: "Turn off active tools" }));
+  expect(document.querySelector(".composer-tools-status")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  expect(screen.getByRole("button", { name: /^Hermes Agent MCP/ })).toHaveAttribute("aria-pressed", "false");
 });
 
 test("attachment send preserves the next prompt and files staged while an upload is in flight", async () => {

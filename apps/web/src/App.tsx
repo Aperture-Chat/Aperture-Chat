@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useThemeSchedule } from "./lib/useThemeSchedule";
 import { AppShell, type ViewKey } from "./components/AppShell";
 import { AdminConsole, type AdminConsoleApi } from "./components/AdminConsole";
 import { AgentWorkspaceConsole } from "./components/AgentWorkspaceConsole";
@@ -166,7 +167,6 @@ import type { DraftNavigationGuard } from "./lib/draftNavigation";
 import { sampleData } from "./data/sampleData";
 
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
-const DARK_MODE_STORAGE_KEY = "aperture-dark-mode";
 const PWA_INSTALL_DISMISSED_KEY = "aperture-pwa-install-dismissed";
 const DEFAULT_FAVICON_HREF = "/favicon.svg";
 const PERSONA_ALIASES: Record<string, string> = {
@@ -219,9 +219,7 @@ export function App() {
     isRunningStandalone() ? null : detectMobilePlatform(),
   );
   const [viewAsRole, setViewAsRole] = useState<Role | null>(null);
-  const [darkMode, setDarkMode] = useState(() =>
-    readBooleanPreference(DARK_MODE_STORAGE_KEY, false),
-  );
+  const { darkMode, schedule, saveSchedule, toggleDarkMode: handleToggleDarkMode } = useThemeSchedule();
   const [loading, setLoading] = useState(false);
   /* True once the signed-in account's real bootstrap data is in `data`. Until
    * then `data` still holds the bundled sample workspace, whose placeholder
@@ -587,14 +585,6 @@ export function App() {
   const requestSignOut = useCallback(() => {
     requestWorkspaceNavigation("sign out", handleSignOut);
   }, [handleSignOut, requestWorkspaceNavigation]);
-
-  const handleToggleDarkMode = useCallback(() => {
-    setDarkMode((current) => {
-      const next = !current;
-      persistBooleanPreference(DARK_MODE_STORAGE_KEY, next);
-      return next;
-    });
-  }, []);
 
   const handleAccountProfileUpdate = useCallback(
     async (payload: AccountProfileUpdateRequest) => {
@@ -1345,6 +1335,8 @@ export function App() {
       openHelpRequestKey={helpDrawerRequestKey}
       darkMode={darkMode}
       onToggleDarkMode={handleToggleDarkMode}
+      themeSchedule={schedule}
+      onSaveThemeSchedule={saveSchedule}
       pwaInstallTarget={mobileInstallTarget}
       onOpenPwaInstall={openPwaInstallPrompt}
       threads={chat.threads}

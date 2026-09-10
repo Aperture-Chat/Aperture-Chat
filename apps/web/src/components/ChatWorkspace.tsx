@@ -147,9 +147,9 @@ type ConnectorDef = {
   icon: ConnectorIcon;
   blurb: string;
 };
-type ComposerTools = { Knowledge: boolean; Web: boolean; Agent: boolean; Mcp: boolean };
+type ComposerTools = { Knowledge: boolean; Web: boolean; Agent: boolean };
 type ComposerToolSummary = {
-  key: keyof ComposerTools;
+  key: string;
   label: string;
   title: string;
   icon: typeof BookOpen;
@@ -778,22 +778,16 @@ function runtimeOptionsFromState(
   reasoningEffort: "minimal" | "high" | null = null,
 ): ChatRuntimeOptions {
   const knowledgeEnabled = composerTools.Knowledge;
-  const selectedAgent = selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
+  const selectedAgent = composerTools.Agent && selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
   const agentKnowledgeIds = selectedAgent ? modelKnowledgeIds(selectedAgent) : [];
   const agentToolIds = selectedAgent ? modelToolIds(selectedAgent) : [];
   const enabledKnowledgeBases = data.knowledgeBases.filter((knowledge) => knowledge.enabled);
   const selectedKnowledgeBase =
     enabledKnowledgeBases.find((knowledge) => knowledge.id === selectedKnowledgeBaseId) ?? enabledKnowledgeBases[0];
   const selectedKnowledgeIds = selectedKnowledgeBase ? [selectedKnowledgeBase.id] : [];
-  const requestedToolIds = selectedToolIds.filter((id) => data.tools.some((tool) => tool.id === id && tool.enabled));
-  // The MCP switch attaches every enabled MCP server for this reply. MCP tools
-  // only run inside the agent runtime, so turning it on turns that on too —
-  // otherwise the server would silently drop them and the model would report
-  // having no MCP connection.
-  const mcpToolIds = composerTools.Mcp
-    ? data.tools.filter((tool) => tool.enabled && isMcpRuntimeTool(tool)).map((tool) => tool.id)
-    : [];
-  const agentEnabled = composerTools.Agent || requestedToolIds.length > 0 || mcpToolIds.length > 0;
+  const requestedToolIds = selectedToolIds.filter((id) => data.tools.some((tool) => tool.id === id && tool.enabled
+    && (!isMcpRuntimeTool(tool) || connectorEnabled(data.connectors, "mcp"))));
+  const agentEnabled = composerTools.Agent || requestedToolIds.length > 0;
   const baseToolIds =
     composerTools.Agent && selectedAgent
       ? agentToolIds
@@ -805,7 +799,7 @@ function runtimeOptionsFromState(
     modelOverride: agentEnabled && selectedAgent ? selectedAgent.id : null,
     knowledgeConfigIds:
       agentEnabled && selectedAgent ? agentKnowledgeIds : knowledgeEnabled ? selectedKnowledgeIds : [],
-    toolConfigIds: [...new Set([...baseToolIds, ...requestedToolIds, ...mcpToolIds])],
+    toolConfigIds: [...new Set([...baseToolIds, ...requestedToolIds])],
     webEnabled: composerTools.Web,
     agentEnabled,
     citationsEnabled: true,
@@ -845,13 +839,13 @@ function pendingMcpApprovalFromState(
   // act on.
   const activeModel = activeModelId ? data.models.find((model) => model.id === activeModelId) : undefined;
   const profileToolIds =
-    !selectedAgentId && runtime.agentEnabled && activeModel ? modelToolIds(activeModel) : [];
+    !runtime.agentProfileId && runtime.agentEnabled && activeModel ? modelToolIds(activeModel) : [];
   const approvalTools = [...new Set([...(runtime.toolConfigIds ?? []), ...profileToolIds])]
     .map((id) => data.tools.find((tool) => tool.id === id))
     .filter((tool): tool is ToolConfig => Boolean(tool))
     .filter((tool) => tool.enabled && tool.approval_required && isMcpRuntimeTool(tool));
   if (approvalTools.length === 0) return null;
-  const selectedAgent = selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
+  const selectedAgent = composerTools.Agent && selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
   return {
     toolIds: [...new Set(approvalTools.map((tool) => tool.id))],
     toolNames: approvalTools.map((tool) => tool.name),
@@ -1007,7 +1001,6 @@ export function ChatWorkspace({
       chat.enabledModels.find((model) => model.id === chat.model),
     ),
     Agent: false,
-    Mcp: false,
   }));
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string | null>(null);
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
@@ -1039,7 +1032,10 @@ export function ChatWorkspace({
   const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [cloudPicker, setCloudPicker] = useState<CloudPickerState | null>(null);
   const [commandToken, setCommandToken] = useState<ComposerCommandToken | null>(null);
-  const [showComposerHelp, setShowComposerHelp] = useState(false);
+  const [sendMenuTab, setSendMenuTab] = useState<"settings" | "resources">("settings");
+  const resourceBrowserOpen = sendMenuOpen && sendMenuTab === "resources";
+  const [shortcutQuery, setShortcutQuery] = useState("");
+  const [shortcutSection, setShortcutSection] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [pendingAutomations, setPendingAutomations] = useState<Automation[]>([]);
@@ -1059,6 +1055,45 @@ export function ChatWorkspace({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachRef = useRef<HTMLDivElement | null>(null);
   const sendRef = useRef<HTMLDivElement | null>(null);
+  const sendMenuRef = useRef<HTMLDivElement | null>(null);
+  useModalFocus(sendMenuRef, sendMenuOpen, () => setSendMenuOpen(false));
+  useLayoutEffect(() => {
+    if (!sendMenuOpen) return;
+    const viewport = window.visualViewport;
+    const position = () => {
+      const menu = sendMenuRef.current;
+      const composer = textareaRef.current?.closest(".composer");
+      if (!menu || !composer) return;
+      // The on-screen keyboard shrinks the visual viewport on phones.
+      const width = viewport?.width ?? innerWidth;
+      const availableHeight = viewport?.height ?? innerHeight;
+      const leftEdge = viewport?.offsetLeft ?? 0;
+      const topEdge = viewport?.offsetTop ?? 0;
+      menu.style.maxHeight = `${Math.max(0, availableHeight - 24)}px`;
+      menu.style.maxWidth = `${Math.max(0, width - 24)}px`;
+      const rect = composer.getBoundingClientRect();
+      const height = menu.offsetHeight;
+      const top = rect.top - topEdge >= height + 20 ? rect.top - height - 8
+        : rect.bottom + height + 20 <= topEdge + availableHeight ? rect.bottom + 8
+        : topEdge + Math.max(12, (availableHeight - height) / 2);
+      menu.style.left = `${Math.max(leftEdge + 12, Math.min(rect.right - menu.offsetWidth, leftEdge + width - menu.offsetWidth - 12))}px`;
+      menu.style.top = `${Math.max(topEdge + 12, Math.min(top, topEdge + availableHeight - height - 12))}px`;
+    };
+    position();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(position) : null;
+    if (sendMenuRef.current) observer?.observe(sendMenuRef.current);
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+    };
+  }, [sendMenuOpen]);
   const cloudConnectPollRef = useRef<number | null>(null);
 
   useEffect(
@@ -1162,6 +1197,11 @@ export function ChatWorkspace({
     ? enabledKnowledgeBases.find((knowledge) => knowledge.id === selectedKnowledgeBaseId)
     : undefined;
   const selectedToolKey = selectedToolIds.join("|");
+  const availableMcpKey = JSON.stringify(availableMcpServers.map((tool) => tool.id));
+  useEffect(() => {
+    const available = new Set<string>(JSON.parse(availableMcpKey));
+    setSelectedToolIds((current) => current.every((id) => available.has(id)) ? current : current.filter((id) => available.has(id)));
+  }, [availableMcpKey]);
 
   // Focus the composer when a new chat is started or a thread is opened.
   useEffect(() => {
@@ -1326,7 +1366,7 @@ export function ChatWorkspace({
       if (attachMenuOpen && attachRef.current && !attachRef.current.contains(target)) {
         setAttachMenuOpen(false);
       }
-      if (sendMenuOpen && sendRef.current && !sendRef.current.contains(target)) {
+      if (sendMenuOpen && sendRef.current && !sendRef.current.contains(target) && !sendMenuRef.current?.contains(target)) {
         setSendMenuOpen(false);
       }
     }
@@ -1347,7 +1387,7 @@ export function ChatWorkspace({
   // Stable scope values keep ordinary draft/status rerenders from cancelling
   // their own request. Reopening # refreshes the list, and closing it or
   // switching workspace aborts a stale response before it can replace results.
-  const knowledgeCommandOpen = commandToken?.symbol === "#";
+  const knowledgeCommandOpen = commandToken?.symbol === "#" || (resourceBrowserOpen && (!shortcutSection || shortcutSection === "Knowledge bases" || shortcutSection === "Files in knowledge sources"));
   const knowledgeBaseIdsKey = JSON.stringify(enabledKnowledgeBases.map((base) => base.id));
   useEffect(() => {
     if (!knowledgeCommandOpen) return;
@@ -1371,7 +1411,7 @@ export function ChatWorkspace({
   }, [knowledgeCommandOpen, knowledgeBaseIdsKey, data.me.id, data.currentTenant.id, knowledgeDocsReload]);
 
   const commandItems = useMemo<ComposerCommandItem[]>(() => {
-    if (!commandToken) return [];
+    function itemsForToken(commandToken: Pick<ComposerCommandToken, "symbol" | "query">): ComposerCommandItem[] {
     const query = commandToken.query;
     if (commandToken.symbol === "#") {
       const files = enabledKnowledgeBases.flatMap((base) =>
@@ -1405,7 +1445,7 @@ export function ChatWorkspace({
         ? data.promptTemplates.filter((prompt) => prompt.enabled)
         : [];
       const mcpTools = connectorEnabled(data.connectors, "mcp")
-        ? data.tools.filter((tool) => tool.type === "mcp" && tool.enabled)
+        ? data.tools.filter((tool) => isMcpRuntimeTool(tool) && tool.enabled)
         : [];
       return [
         ...rankCommandMatches(prompts, (prompt) => prompt.name, query).map((prompt) => ({
@@ -1457,7 +1497,15 @@ export function ChatWorkspace({
       detail: agent.notes?.trim() || agent.provider_name || "Agent profile",
       agent,
     }));
+    }
+    if (commandToken) return itemsForToken(commandToken);
+    if (!resourceBrowserOpen) return [];
+    const typed = detectComposerCommandToken(shortcutQuery, shortcutQuery.length);
+    const symbols: ComposerCommandToken["symbol"][] = typed ? [typed.symbol] : ["/", "@", "#", "$", ">"];
+    return symbols.flatMap((symbol) => itemsForToken({ symbol, query: typed?.query ?? shortcutQuery }))
+      .filter((item) => !shortcutSection || item.section === shortcutSection);
   }, [
+    resourceBrowserOpen, shortcutQuery, shortcutSection, data.connectors,
     commandToken,
     enabledKnowledgeBases,
     knowledgeDocs,
@@ -1481,10 +1529,7 @@ export function ChatWorkspace({
   // With a bare symbol (no query yet) the menu stays open even when the
   // library is empty, so the empty-state hint teaches what the symbol does.
   const commandMenuVisible =
-    commandToken !== null &&
-    (commandItems.length > 0 ||
-      commandToken.query.trim() === "" ||
-      (commandToken.symbol === "#" && (knowledgeDocsStatus === "loading" || knowledgeDocsError)));
+    commandToken !== null;
 
   // Keep the highlight on a real row as filtering narrows the list.
   useEffect(() => {
@@ -1514,7 +1559,6 @@ export function ChatWorkspace({
   }
 
   function applyCommandItem(item: ComposerCommandItem) {
-    if (!commandToken) return;
     let replacement = "";
     if (item.kind === "knowledge-base") {
       setComposerTools((current) => ({ ...current, Knowledge: true }));
@@ -1540,14 +1584,19 @@ export function ChatWorkspace({
       replacement = `@${item.name} `;
     }
     const caret = textareaRef.current?.selectionStart ?? draft.length;
-    const nextDraft = draft.slice(0, commandToken.start) + replacement + draft.slice(caret);
-    const nextCaret = commandToken.start + replacement.length;
+    const start = commandToken?.start ?? caret;
+    if (!commandToken && replacement && start > 0 && !/\s/.test(draft[start - 1])) {
+      replacement = ` ${replacement}`;
+    }
+    const nextDraft = draft.slice(0, start) + replacement + draft.slice(caret);
+    const nextCaret = start + replacement.length;
+    if (item.kind !== "mcp-tool" && item.kind !== "automation") setSendMenuOpen(false);
     setDraft(nextDraft);
     setCommandToken(null);
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
-      textarea.focus();
+      if (!resourceBrowserOpen || (item.kind !== "mcp-tool" && item.kind !== "automation")) textarea.focus();
       textarea.setSelectionRange(nextCaret, nextCaret);
     });
   }
@@ -1756,11 +1805,10 @@ export function ChatWorkspace({
     setIsImproving(true);
     try {
       const knowledgeBase = composerTools.Knowledge ? selectedKnowledgeBase : undefined;
-      const mcpNames = composerTools.Mcp ? availableMcpServers.map((tool) => tool.name) : [];
       const pickedToolNames = selectedToolIds
         .map((id) => data.tools.find((tool) => tool.id === id && tool.enabled)?.name)
         .filter((name): name is string => Boolean(name));
-      const toolNames = [...new Set([...pickedToolNames, ...mcpNames])];
+      const toolNames = [...new Set(pickedToolNames)];
       const contextLines = [
         knowledgeBase
           ? `Knowledge base "${knowledgeBase.name}" is attached, and retrieved excerpts from it are part of this request — use them so the prompt references the right documents, names, and specifics.`
@@ -2095,24 +2143,17 @@ export function ChatWorkspace({
     });
     return true;
   };
-  const activeToolSummaries = composerToolSummaries(composerTools, {
+  const activeToolSummaries: ComposerToolSummary[] = [...composerToolSummaries(composerTools, {
     selectedKnowledgeBaseName: selectedKnowledgeBase?.name,
     selectedAgentName: selectedAgent?.name,
-    mcpServerNames: availableMcpServers.map((tool) => tool.name),
-  });
-  const activeToolCount = Object.values(composerTools).filter(Boolean).length;
+  }), ...availableMcpServers.filter((tool) => selectedToolIds.includes(tool.id)).map((tool) => ({
+    key: tool.id, label: tool.name, title: tool.name, icon: Plug,
+  })), ...pendingAutomations.map((automation) => ({ key: automation.id, label: automation.name, title: `${automation.name} runs when you send`, icon: Play }))];
+  const activeToolCount = activeToolSummaries.length;
   const singleActiveTool = activeToolSummaries.length === 1 ? activeToolSummaries[0] : null;
   const SingleActiveToolIcon = singleActiveTool?.icon;
-  const activeToolsTitle = singleActiveTool?.title ?? `${activeToolCount} tools on`;
-  // Everything acting as a tool for the next message: composer toggles plus
-  // any automations and MCP connections chipped into the composer.
-  const sessionToolNames = [
-    ...activeToolSummaries.map((summary) => summary.label),
-    ...pendingAutomations.map((automation) => automation.name),
-    ...selectedToolIds
-      .map((id) => data.tools.find((tool) => tool.id === id)?.name)
-      .filter((name): name is string => Boolean(name)),
-  ];
+  const activeToolsTitle = activeToolSummaries.map((summary) => summary.title).join(" · ");
+  const sessionToolNames = [...new Set(activeToolSummaries.map((summary) => summary.label))];
   const canSend =
     chat.enabledModels.length > 0 &&
     (draft.trim().length > 0 || attachments.length > 0 || pendingAutomations.length > 0) &&
@@ -2144,8 +2185,10 @@ export function ChatWorkspace({
   }
 
   function clearComposerTools() {
-    setComposerTools({ Knowledge: false, Web: false, Agent: false, Mcp: false });
+    setComposerTools({ Knowledge: false, Web: false, Agent: false });
     setKnowledgePickerOpen(false);
+    setSelectedToolIds([]);
+    setPendingAutomations([]);
   }
 
   const composerForm = (
@@ -2357,14 +2400,6 @@ export function ChatWorkspace({
         </div>
       )}
 
-      {showComposerHelp && !commandMenuVisible && (
-        <div className="composer-command-menu" id={`${commandListId}-help`} role="note" aria-label="Composer shortcuts">
-          <span className="composer-command-section">Composer shortcuts</span>
-          <p className="composer-command-loading">Start a word with / for prompts and MCP tools, @ for agents, # for knowledge, $ for skills, or &gt; for automations.</p>
-          <p className="composer-command-hint">Enter sends · Shift + Enter adds a line</p>
-          <button type="button" className="link-button" onClick={() => setShowComposerHelp(false)}>Dismiss shortcuts</button>
-        </div>
-      )}
       {commandMenuVisible && commandToken && (
         <div
           className="composer-command-menu"
@@ -2434,7 +2469,7 @@ export function ChatWorkspace({
           )}
           {commandItems.length === 0 && (!knowledgeCommandOpen || knowledgeDocsStatus !== "loading") && (!knowledgeCommandOpen || !knowledgeDocsError) && (
             <span className="composer-command-loading">
-              {commandToken.symbol === "#"
+              {commandToken.query.trim() ? "No matching commands. Try another name." : commandToken.symbol === "#"
                 ? "No knowledge bases are enabled yet — add one under Knowledge"
                 : commandToken.symbol === "/"
                   ? !connectorEnabled(data.connectors, "prompt-library") && !connectorEnabled(data.connectors, "mcp")
@@ -2474,7 +2509,7 @@ export function ChatWorkspace({
         onBlur={() => setCommandToken(null)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-          if (event.key === "Escape") setShowComposerHelp(false);
+          if (event.key === "Escape") setSendMenuOpen(false);
           if (handleCommandMenuKey(event)) return;
           if (event.key === "Enter" && !event.shiftKey && !isComposerExpanded) {
             event.preventDefault();
@@ -2484,17 +2519,6 @@ export function ChatWorkspace({
       />
       <div className="composer-toolbar">
         <div className="composer-tools">
-          <button
-            type="button"
-            className="attach-trigger"
-            aria-label="Composer shortcuts"
-            aria-expanded={showComposerHelp}
-            aria-controls={`${commandListId}-help`}
-            data-tooltip="Show message shortcuts"
-            onClick={() => setShowComposerHelp((current) => !current)}
-          >
-            <Info size={17} />
-          </button>
           <div className="attach" ref={attachRef}>
             <button
               type="button"
@@ -2581,58 +2605,13 @@ export function ChatWorkspace({
                 type="button"
                 className="composer-tools-clear"
                 aria-label="Turn off active tools"
-                data-tooltip="Turn off Knowledge, Web, and Agent for your next message"
+                data-tooltip="Clear the tools and resources selected for this message"
                 onClick={clearComposerTools}
               >
                 <X size={13} />
               </button>
             </div>
           )}
-          {pendingAutomations.map((automation) => (
-            <span
-              key={automation.id}
-              className="composer-mcp-chip is-automation"
-              data-tooltip={`“${automation.name}” runs immediately when you press send`}
-            >
-              <Play size={13} />
-              {automation.name}
-              <button
-                type="button"
-                aria-label={`Remove ${automation.name}`}
-                data-tooltip={`Remove ${automation.name} so it stays on its normal schedule`}
-                onClick={() =>
-                  setPendingAutomations((current) => current.filter((entry) => entry.id !== automation.id))
-                }
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-          {selectedToolIds
-            .map((id) => data.tools.find((tool) => tool.id === id))
-            .filter((tool): tool is ToolConfig => Boolean(tool))
-            .map((tool) => (
-              <span
-                key={tool.id}
-                className="composer-mcp-chip"
-                data-tooltip={
-                  tool.approval_required
-                    ? `${tool.name} requires approval before it can run for this message`
-                    : `${tool.name} will be available to the model for this message`
-                }
-              >
-                <Plug size={13} />
-                {tool.name}
-                <button
-                  type="button"
-                  aria-label={`Remove ${tool.name}`}
-                  data-tooltip={`Remove ${tool.name} from this message`}
-                  onClick={() => setSelectedToolIds((current) => current.filter((id) => id !== tool.id))}
-                >
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
           </div>
         </div>
         <div className="send-actions" ref={sendRef}>
@@ -2695,6 +2674,7 @@ export function ChatWorkspace({
           {chat.enabledModels.length > 0 && (
             <ContextWindowIndicator status={contextWindowStatus} onOpenDetails={() => setIsInspectorOpen(true)} />
           )}
+          {!isComposerExpanded && <>
           <button
             className="send-button"
             type="submit"
@@ -2712,16 +2692,24 @@ export function ChatWorkspace({
             className="send-options-button"
             type="button"
             aria-label="Send options"
-            data-tooltip="Open sending options like Knowledge, Web search, Agent mode, and reasoning level"
-            aria-haspopup="menu"
+            data-tooltip="Choose tools, resources, and reply settings"
+            aria-haspopup="dialog"
             aria-expanded={sendMenuOpen}
             disabled={!canOpenSendOptions}
-            onClick={() => setSendMenuOpen((open) => !open)}
+            onClick={() => { setCommandToken(null); setSendMenuOpen((open) => !open); }}
           >
             <ChevronDown size={16} />
           </button>
-          {sendMenuOpen && (
-            <div className="send-options-menu" role="menu" aria-label="Send options" ref={revealComposerMenu}>
+          </>}
+          {!isComposerExpanded && sendMenuOpen && createPortal(
+            <div className="send-options-menu composer-options-panel" role="dialog" aria-label="Send options" tabIndex={-1} ref={sendMenuRef}>
+              <div className="composer-options-heading"><strong>Send options</strong>
+                <button type="button" className="icon-button" aria-label="Close send options" onClick={() => setSendMenuOpen(false)}><X size={16} /></button></div>
+              <div className="composer-options-tabs" role="group" aria-label="Options sections">
+                <button type="button" aria-pressed={sendMenuTab === "settings"} onClick={() => setSendMenuTab("settings")}>Reply settings</button>
+                <button type="button" aria-pressed={sendMenuTab === "resources"} onClick={() => setSendMenuTab("resources")}>Resources</button>
+              </div>
+              {sendMenuTab === "settings" ? <div role="menu" aria-label="Reply settings">
               <button
                 type="button"
                 role="menuitem"
@@ -2810,33 +2798,6 @@ export function ChatWorkspace({
                   <small>{selectedAgent ? selectedAgent.name : "Use enabled tools for this reply."}</small>
                 </span>
               </button>
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={composerTools.Mcp}
-                className="send-option"
-                disabled={availableMcpServers.length === 0}
-                data-tooltip={
-                  availableMcpServers.length === 0
-                    ? "No MCP servers are available for this workspace"
-                    : composerTools.Mcp
-                      ? "Stop using MCP servers for this reply"
-                      : "Use the workspace's MCP servers for this reply"
-                }
-                onClick={() => toggleComposerTool("Mcp")}
-              >
-                {composerTools.Mcp ? <Check size={16} /> : <Plug size={16} />}
-                <span>
-                  <strong>MCP</strong>
-                  <small>
-                    {availableMcpServers.length === 0
-                      ? "No MCP servers available."
-                      : `${availableMcpServers.length} server${availableMcpServers.length === 1 ? "" : "s"}: ${availableMcpServers
-                          .map((tool) => tool.name)
-                          .join(", ")}`}
-                  </small>
-                </span>
-              </button>
               {composerTools.Agent && (
                 <div className="agent-profile-picker" role="group" aria-label="Agent profile">
                   <label>
@@ -2890,7 +2851,55 @@ export function ChatWorkspace({
                 />
                 <span>Stream replies</span>
               </label>
-            </div>
+              <button type="button" className="send-option composer-browse-resources" onClick={() => { setSendMenuTab("resources"); setShortcutSection("MCP connections"); }}>
+                <Plug size={16} /><span><strong>MCP connections and resources</strong><small>Choose individual connections, prompts, agents, knowledge, skills, and automations.</small></span><ChevronRight size={16} />
+              </button>
+              </div> : <div className="composer-options-resources">
+                <input aria-label="Find a resource" placeholder="Search resources by name…" value={shortcutQuery}
+                  onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
+                  onChange={(event) => { setShortcutQuery(event.target.value); setShortcutSection(""); }} />
+                <div className="composer-shortcut-filters" aria-label="Resource categories">
+                  {["", "Knowledge bases", "Files in knowledge sources", "MCP connections", "Prompts", "Agents", "Skill files", "Automations"].map((section) => (
+                    <button type="button" key={section} aria-pressed={shortcutSection === section} onClick={() => setShortcutSection(section)}>{section || "All"}</button>
+                  ))}
+                </div>
+                <div className="composer-resource-results">
+                  {commandSections.map((section) => <section key={section.title} aria-label={section.title}>
+                    <h3 className="composer-command-section">{section.title}</h3>
+                    {section.items.map((item) => {
+                      const selected = item.kind === "mcp-tool" ? selectedToolIds.includes(item.tool.id)
+                        : item.kind === "automation" ? pendingAutomations.some((entry) => entry.id === item.automation.id)
+                        : item.kind === "agent" ? composerTools.Agent && selectedAgentId === item.agent.id
+                        : item.kind === "knowledge-base" ? composerTools.Knowledge && selectedKnowledgeBaseId === item.base.id : false;
+                      const toggleable = item.kind === "mcp-tool" || item.kind === "automation";
+                      return <button type="button" className="composer-command-item" key={item.id}
+                        aria-pressed={toggleable || item.kind === "agent" || item.kind === "knowledge-base" ? selected : undefined}
+                        onClick={() => {
+                          if (selected && item.kind === "mcp-tool") setSelectedToolIds((ids) => ids.filter((id) => id !== item.tool.id));
+                          else if (selected && item.kind === "automation") setPendingAutomations((entries) => entries.filter((entry) => entry.id !== item.automation.id));
+                          else applyCommandItem(item);
+                        }}>
+                        {selected ? <Check size={16} /> : item.kind === "mcp-tool" ? <Plug size={16} /> : item.kind === "agent" ? <Bot size={16} /> : <BookOpen size={16} />}
+                        <span><strong>{item.name}</strong><small>{item.detail}</small></span>
+                      </button>;
+                    })}
+                  </section>)}
+                  {knowledgeCommandOpen && knowledgeDocsStatus === "loading" && <p role="status">Loading knowledge files…</p>}
+                  {knowledgeCommandOpen && knowledgeDocsError && <button type="button" className="link-button" onClick={() => setKnowledgeDocsReload((value) => value + 1)}>Retry loading knowledge files</button>}
+                  {commandItems.length === 0 && <p role="status">No matching resources available.</p>}
+                </div>
+                <div className="composer-shortcut-guide" role="group" aria-label="Type shortcuts in chat">
+                  <p>Type a symbol directly in the chat message box, then choose a resource. Add its name to narrow the list.</p>
+                  <dl>
+                    {[["/", "Prompts & MCP connections"], ["@", "Agents"], ["#", "Knowledge bases & files"], ["$", "Skill files"], [">", "Automations"]].map(([symbol, label]) => (
+                      <div key={symbol}><dt><code>{symbol}</code></dt><dd>{label}</dd></div>
+                    ))}
+                  </dl>
+                  <p className="composer-shortcut-example">For example, type <code>@</code> in chat to find an agent.</p>
+                </div>
+              </div>}
+              <p className="composer-options-footer">Enter sends · Shift + Enter adds a line</p>
+            </div>, document.body
           )}
         </div>
       </div>
@@ -3170,7 +3179,7 @@ export function ChatWorkspace({
                       aria-label={label}
                       onClick={() => {
                         setDraft(prompt);
-                        setShowComposerHelp(false);
+                        setSendMenuOpen(false);
                         textareaRef.current?.focus();
                       }}
                     >
@@ -4458,7 +4467,6 @@ function composerToolSummaries(
   options: {
     selectedKnowledgeBaseName?: string;
     selectedAgentName?: string;
-    mcpServerNames?: string[];
   },
 ): ComposerToolSummary[] {
   const summaries: ComposerToolSummary[] = [];
@@ -4486,16 +4494,6 @@ function composerToolSummaries(
       label: "Agent",
       title: options.selectedAgentName ? `Agent: ${options.selectedAgentName}` : "Agent tools enabled",
       icon: Bot,
-    });
-  }
-  if (composerTools.Mcp) {
-    summaries.push({
-      key: "Mcp",
-      label: "MCP",
-      title: options.mcpServerNames?.length
-        ? `MCP servers: ${options.mcpServerNames.join(", ")}`
-        : "MCP servers enabled",
-      icon: Plug,
     });
   }
   return summaries;

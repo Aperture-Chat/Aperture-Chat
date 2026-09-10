@@ -50,6 +50,14 @@
 .auth-refresh .auth-help-section > button { min-height: 36px; font-size: 13px; }
 .auth-refresh .auth-request-entry { padding-top: 20px; font-size: 13px; font-weight: 500; }
 .auth-refresh .auth-request-button { min-height: 44px; }
+.auth-refresh .auth-video-help { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.auth-refresh .auth-video-help strong { color: var(--text-strong); font-size: 14px; }
+.auth-refresh .auth-video-help p { margin: 8px 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.auth-refresh .auth-video-help button { display: flex; align-items: center; gap: 8px; min-height: 44px; text-align: left; }
+.auth-refresh .auth-video-help button svg { flex-shrink: 0; }
+.auth-video-dialog { margin: auto; color: var(--text); }
+.auth-video-dialog::backdrop { background: rgba(4, 16, 24, 0.65); }
+.auth-video-dialog:has(.owner-video-player-card.is-expanded) { transform: none; animation: none; overflow: visible; }
 .auth-refresh .auth-context { gap: 24px; }
 .auth-refresh .auth-context-intro { margin-bottom: 16px; }
 .auth-refresh .auth-context-intro h2 {
