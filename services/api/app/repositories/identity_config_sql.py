@@ -96,6 +96,7 @@ from app.models.schemas import (
     EmailSettings,
     Group,
     PlatformSettings,
+    Provider,
     TenantRetentionPolicy,
     ToolConfig,
     User,
@@ -1999,6 +2000,24 @@ def _model_from_payload(
         # authority. Accept only this exact legacy omission; the feature
         # defaults off, so the backfill cannot widen a deployment's surface.
         canonical_payload["memory_enabled"] = False
+    if model_type is PlatformSettings and "users_can_browse_model_catalog" not in canonical_payload:
+        # The explainable model catalog shipped after the identity/config SQL
+        # authority. Accept only this exact legacy omission. The default is on:
+        # it exposes only the names of platform-enabled models already in the
+        # person's tenant scope plus the policy reason, never prompts or
+        # secrets, and the owner can switch it off in Org Settings.
+        canonical_payload["users_can_browse_model_catalog"] = True
+    if model_type is Provider:
+        # Validation and sync timestamps shipped after the SQL authority; rows
+        # written before them carry only the display strings. Backfill the
+        # inert "unknown" value so those providers stay loadable.
+        for field_name in (
+            "last_validated_at",
+            "last_validation_status",
+            "last_validation_model_id",
+            "last_synced_at",
+        ):
+            canonical_payload.setdefault(field_name, None)
     if model_type is TenantRetentionPolicy:
         # Tagging capabilities ship incrementally, after the first retention
         # policies were saved. Accept only these exact legacy omissions; every

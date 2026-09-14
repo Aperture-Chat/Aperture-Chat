@@ -59,6 +59,17 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
         "knowledge_enabled": knowledge_authoring_allowed(actor, store.groups),
         "tools_enabled": tool_authoring_allowed(actor, store.groups),
     }
+    if actor.role in {Role.PLATFORM_OWNER, Role.TENANT_ADMIN}:
+        # Pending per-model access requests the actor may review; users never
+        # receive this count. Owners see the whole deployment.
+        try:
+            snapshot["modelAccessRequestCount"] = (
+                store.model_access_request_repository.count_pending(
+                    tenant_id=None if is_platform_owner(actor) else actor.tenant_id
+                )
+            )
+        except Exception:  # noqa: BLE001 - a badge must never block sign-in
+            snapshot["modelAccessRequestCount"] = None
     if actor.role != Role.PLATFORM_OWNER:
         tenant = store.tenants.get(actor.tenant_id or "")
         snapshot["tenants"] = [tenant] if tenant is not None else []

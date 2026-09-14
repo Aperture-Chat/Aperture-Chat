@@ -54,6 +54,7 @@ from app.db.orm import (
     ChatThreadRow,
     ChatThreadTagRow,
     IssueReportRow,
+    SearchIndexEntryRow,
     MatterRow,
     MfaPreauthChallengeRow,
     RetentionHoldRow,
@@ -69,6 +70,8 @@ from app.db.orm import (
     UserSessionWatermarkRow,
     UserTotpFactorRow,
 )
+from app.core.search_index import entry_for_thread
+from app.repositories.search_index import remove_entry, write_entry
 from app.models.schemas import (
     AlertNotification,
     AuditEvent,
@@ -1283,7 +1286,10 @@ class ApplicationStateRepository:
             session.add(row)
             session.flush()
             self._link_thread_attachments(session, row.id, row.messages)
-            return _freeze_chat_thread(row.to_model())
+            saved = _freeze_chat_thread(row.to_model())
+            # Same transaction as the thread: the index can never half-apply.
+            write_entry(session, entry_for_thread(saved, updated_at=now))
+            return saved
 
         return self.run_transaction(operation)
 
@@ -1433,6 +1439,7 @@ class ApplicationStateRepository:
                 )
             )
             session.delete(row)
+            remove_entry(session, "chat", thread_id)
             return thread
 
         thread = self.run_transaction(operation)
@@ -3840,6 +3847,9 @@ class ApplicationStateRepository:
                 ).rowcount
                 or 0
             )
+            session.execute(
+                delete(SearchIndexEntryRow).where(SearchIndexEntryRow.owner_user_id == user_id)
+            )
             removed_folders = (
                 session.execute(
                     delete(ChatFolderRow).where(ChatFolderRow.owner_user_id == user_id)
@@ -4001,6 +4011,11 @@ class ApplicationStateRepository:
                     )
                 ).rowcount
                 or 0
+            )
+            session.execute(
+                delete(SearchIndexEntryRow).where(
+                    owned_or_tenant(SearchIndexEntryRow.tenant_id, SearchIndexEntryRow.owner_user_id)
+                )
             )
             removed_folders = (
                 session.execute(

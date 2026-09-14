@@ -41,7 +41,10 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import type { AppRoute, PlatformSection } from "../lib/appRoute";
+import { PlatformSetupWizard } from "./PlatformSetupWizard";
+import { SearchIndexCard } from "./SearchIndexCard";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
 import type {
@@ -358,6 +361,7 @@ type TenantPolicyState = {
   tenantAdminsCanCreateAdmins: boolean;
   defaultUserGroupEnabled: boolean;
   memoryEnabled: boolean;
+  usersCanBrowseModelCatalog: boolean;
 };
 
 const POLICY_FIELD_BY_KEY: Record<keyof TenantPolicyState, keyof PlatformSettings> = {
@@ -368,6 +372,7 @@ const POLICY_FIELD_BY_KEY: Record<keyof TenantPolicyState, keyof PlatformSetting
   tenantAdminsCanCreateAdmins: "tenant_admins_can_create_admins",
   defaultUserGroupEnabled: "default_user_group_enabled",
   memoryEnabled: "memory_enabled",
+  usersCanBrowseModelCatalog: "users_can_browse_model_catalog",
 };
 
 type OwnerUserDraftState = {
@@ -498,6 +503,7 @@ const OPENROUTER_CATALOG_SCOPE_OPTIONS = [
 ];
 
 const TAB_TOOLTIPS: Record<string, string> = {
+  setup: "Walk through provider, credential, validation, catalog, enablement, and group grants with live status",
   models: "Review and control which models this workspace is allowed to use",
   providers: "Register providers and manage their connections and API keys",
   "org-settings": "Manage roles, SSO, branding, policies, budgets, and platform connectors",
@@ -659,6 +665,9 @@ export function PlatformConsole({
   platformActions,
   openDocumentationRequestKey,
   openProvidersRequestKey,
+  section,
+  onSectionChange,
+  onNavigate,
   onOpenAdminDocumentation,
   onOpenUserHelp,
 }: {
@@ -667,6 +676,11 @@ export function PlatformConsole({
   platformActions?: PlatformConsoleActions;
   openDocumentationRequestKey?: number;
   openProvidersRequestKey?: number;
+  /** Route-driven section; when provided the tabs are controlled by the URL. */
+  section?: PlatformSection;
+  onSectionChange?: (section: PlatformSection) => void;
+  /** Cross-console navigation used by the Setup wizard (e.g. Admin › Model Access). */
+  onNavigate?: (route: AppRoute) => void;
   onOpenAdminDocumentation?: () => void;
   onOpenUserHelp?: () => void;
 }) {
@@ -680,6 +694,7 @@ export function PlatformConsole({
     tenantAdminsCanCreateAdmins: false,
     defaultUserGroupEnabled: true,
     memoryEnabled: false,
+    usersCanBrowseModelCatalog: true,
   });
   const [ownerUserDraft, setOwnerUserDraft] = useState<OwnerUserDraftState>({
     display_name: "",
@@ -742,7 +757,17 @@ export function PlatformConsole({
   const [ssoTestResult, setSsoTestResult] = useState<SsoTestResult | null>(null);
   // Honest default: disconnected until the backend reports configured env credentials.
   const [elasticStatus, setElasticStatus] = useState<ElasticStatus | null>(null);
-  const [activeSection, setActiveSection] = useState(openProvidersRequestKey ? "providers" : "org-settings");
+  const [localSection, setLocalSection] = useState<PlatformSection>(
+    section ?? (openProvidersRequestKey ? "providers" : "org-settings"),
+  );
+  const activeSection: PlatformSection = section ?? localSection;
+  const setActiveSection = useCallback(
+    (next: PlatformSection) => {
+      setLocalSection(next);
+      onSectionChange?.(next);
+    },
+    [onSectionChange],
+  );
   const [showProviderForm, setShowProviderForm] = useState(false);
   const [showKeyForm, setShowKeyForm] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -995,6 +1020,7 @@ export function PlatformConsole({
     if (!openProvidersRequestKey) return;
     setActiveSection("providers");
     setShowDocumentation(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openProvidersRequestKey]);
 
   useEffect(() => {
@@ -1250,6 +1276,7 @@ export function PlatformConsole({
           tenantAdminsCanCreateAdmins: Boolean(settings.tenant_admins_can_create_admins),
           defaultUserGroupEnabled: settings.default_user_group_enabled,
           memoryEnabled: Boolean(settings.memory_enabled),
+          usersCanBrowseModelCatalog: settings.users_can_browse_model_catalog !== false,
         });
       })
       .catch(() => {
@@ -1877,6 +1904,7 @@ export function PlatformConsole({
           tenantAdminsCanCreateAdmins: Boolean(saved.tenant_admins_can_create_admins),
           defaultUserGroupEnabled: saved.default_user_group_enabled,
           memoryEnabled: Boolean(saved.memory_enabled),
+          usersCanBrowseModelCatalog: saved.users_can_browse_model_catalog !== false,
         });
         onDataChange((current) => ({ ...current, platformSettings: saved }));
       }
@@ -1911,6 +1939,10 @@ export function PlatformConsole({
                     ? next
                       ? "Tenant admins can now enable personalization memory for their organization."
                       : "Personalization memory is off platform-wide; tenant memory policies are inert."
+                  : key === "usersCanBrowseModelCatalog"
+                    ? next
+                      ? "Users can see every enabled model in their organization, why it is unavailable, and request access."
+                      : "Users see only the models they can already use; access requests are disabled."
                 : "Policy saved.",
       });
     } catch (error) {
@@ -2570,12 +2602,13 @@ export function PlatformConsole({
         value={activeSection}
         className="tabs-root"
         onValueChange={(value) => {
-          setActiveSection(value);
+          setActiveSection(value as PlatformSection);
           if (value === "audit") setAuditTrailRefreshToken((token) => token + 1);
         }}
       >
         <Tabs.List className="tabs-list management-console-tabs" aria-label="Platform owner sections">
           {[
+            ["Setup", "setup"],
             ["Org Settings", "org-settings"],
             ["Models", "models"],
             ["Providers", "providers"],
@@ -2589,6 +2622,28 @@ export function PlatformConsole({
           ))}
         </Tabs.List>
 
+        <Tabs.Content value="setup" className="tab-content">
+          <PlatformSetupWizard
+            actorUserId={data.me.id}
+            onNavigate={(route) => {
+              if (route.kind === "platform") {
+                setActiveSection(route.section);
+                return;
+              }
+              onNavigate?.(route);
+            }}
+            onSyncProvider={
+              platformActions?.syncProviderModels
+                ? async (providerId) => {
+                    const result = await platformActions.syncProviderModels!(providerId);
+                    if (!result) throw new Error("The sync API did not return a result.");
+                    onDataChange((current) => applyProviderModelSync(current, result));
+                    return result;
+                  }
+                : undefined
+            }
+          />
+        </Tabs.Content>
         <Tabs.Content value="models" className="tab-content">
           <div className="console-main-col">
             <Panel
@@ -3424,6 +3479,7 @@ export function PlatformConsole({
 
         <Tabs.Content value="org-settings" className="tab-content">
           <div className="org-settings-stack">
+            <SearchIndexCard actorUserId={data.me.id} />
             <RoleBoundaryPanel
               data={data}
               userDraft={ownerUserDraft}
@@ -5592,6 +5648,18 @@ function TenantPolicyPanel({
           disabled={pendingAction === "policy:memoryEnabled"}
           label="Personalization memory"
           onChange={(next) => onPolicyChange("memoryEnabled", next)}
+        />
+        <PolicyToggleRow
+          title="Users can browse the model catalog"
+          detail={
+            policies.usersCanBrowseModelCatalog
+              ? "Users see every model enabled for their organization with the reason it is or is not available, and can send an access request to their administrators. Prompts and notes stay hidden."
+              : "Users see only the models they can already use. \"Why isn't a model listed?\" shows nothing extra and access requests are refused."
+          }
+          checked={policies.usersCanBrowseModelCatalog}
+          disabled={pendingAction === "policy:usersCanBrowseModelCatalog"}
+          label="Users can browse the model catalog"
+          onChange={(next) => onPolicyChange("usersCanBrowseModelCatalog", next)}
         />
       </div>
       <div className="policy-callout">

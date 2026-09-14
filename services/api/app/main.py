@@ -32,6 +32,7 @@ from app.routes import (
     knowledge,
     matters,
     memory,
+    model_access,
     platform,
     platform_updates,
     pwa,
@@ -227,6 +228,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(bootstrap.router)
+app.include_router(model_access.router)
 app.include_router(platform.router)
 app.include_router(platform_updates.router)
 app.include_router(admin.router)

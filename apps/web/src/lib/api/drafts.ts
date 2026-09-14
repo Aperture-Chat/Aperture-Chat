@@ -19,6 +19,7 @@
  * without it); tenant-scoped users may omit it.
  */
 import { apiRequest, pathId, ChatRequestError } from "./http";
+import { DECK_SANITIZER_VERSION, MAX_DECK_CONTENT_BYTES } from "../deck/deckModel";
 
 /** Server-enforced limits (app/models/matters.py). */
 export const MAX_DRAFT_TITLE_CHARS = 240;
@@ -26,6 +27,14 @@ export const MAX_DRAFT_CONTENT_BYTES = 2_000_000;
 export const MAX_DRAFT_REVISIONS = 200;
 export const MAX_DRAFT_LIST_LIMIT = 200;
 export const DRAFT_SANITIZER_VERSION = "sanitized-html-v1";
+export { DECK_SANITIZER_VERSION, MAX_DECK_CONTENT_BYTES };
+
+/** A draft is either sanitized HTML or canonical deck JSON; the kind is fixed at creation. */
+export type DraftKind = "document" | "deck";
+
+export function maxDraftContentBytes(kind: DraftKind): number {
+  return kind === "deck" ? MAX_DECK_CONTENT_BYTES : MAX_DRAFT_CONTENT_BYTES;
+}
 
 export type DraftDocument = {
   id: string;
@@ -36,6 +45,8 @@ export type DraftDocument = {
   title: string;
   /** CAS token — send back as expected_revision on every update. */
   archived?: boolean;
+  /** Absent on responses from servers that predate deck sync; treat as "document". */
+  kind?: DraftKind;
   current_revision: number;
   created_at: string;
   updated_at: string;
@@ -69,6 +80,8 @@ export type DraftCreatePayload = {
   title: string;
   content: string;
   matter_id?: string | null;
+  /** Defaults to "document" server-side. */
+  kind?: DraftKind;
 };
 
 /**
@@ -95,6 +108,7 @@ export type DraftRequestOptions = {
 
 export type DraftListOptions = DraftRequestOptions & {
   matterId?: string;
+  kind?: DraftKind;
   limit?: number;
   offset?: number;
 };
@@ -117,6 +131,7 @@ export function listDrafts(
 ): Promise<DraftDocument[]> {
   const query = new URLSearchParams();
   if (options.matterId) query.set("matter_id", options.matterId);
+  if (options.kind) query.set("kind", options.kind);
   if (options.limit !== undefined) query.set("limit", String(options.limit));
   if (options.offset !== undefined) query.set("offset", String(options.offset));
   const encoded = query.toString();

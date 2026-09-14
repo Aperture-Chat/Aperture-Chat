@@ -794,6 +794,9 @@ export type ChatStore = {
   /** Threads whose newest messages exist only in this browser (last save failed). */
   unsyncedThreadCount: number;
   retryUnsyncedThreads: () => Promise<void>;
+  /** True once the first server thread list has resolved or failed, so deep
+   * links can wait instead of misreporting a thread as missing. */
+  hydrated: boolean;
   model: string;
   enabledModels: ModelConfig[];
   /** True only when the currently open thread has a model request in flight. */
@@ -872,6 +875,7 @@ export function useChatStore(
   const [activeId, setActiveId] = useState<string>(initialState.current.activeId);
   const [sendingThreadIds, setSendingThreadIds] = useState<string[]>([]);
   const [composerFocusToken, setComposerFocusToken] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
   const hydratedPersona = useRef(persona);
   const hydrationRequest = useRef(0);
   const sendingThreadIdsRef = useRef<Set<string>>(new Set());
@@ -919,9 +923,15 @@ export function useChatStore(
       .then((serverThreads) => {
         if (!active || hydrationRequest.current !== requestId) return;
         const current = threadsRef.current;
+        const serverIds = new Set(serverThreads.map((thread) => thread.id));
         const merged = mergeServerThreads(current, serverThreads, persona).map((thread) => {
           const local = current.find((item) => item.id === thread.id);
-          return local ? preservePendingTraceState(local, thread) : thread;
+          const reconciled = local ? preservePendingTraceState(local, thread) : thread;
+          // A thread the server returned is on the server; keep the flag only
+          // for local-only threads whose last save failed.
+          return serverIds.has(thread.id)
+            ? { ...reconciled, syncPending: false }
+            : { ...reconciled, syncPending: local?.syncPending ?? reconciled.syncPending };
         });
         const next = withBlankChat(merged, data, fallbackModel);
         const activeThread = current.find((thread) => thread.id === activeIdRef.current);
@@ -930,6 +940,9 @@ export function useChatStore(
       })
       .catch(() => {
         // Offline mode keeps the localStorage-backed cache as the source of truth.
+      })
+      .finally(() => {
+        if (active && hydrationRequest.current === requestId) setHydrated(true);
       });
     return () => {
       active = false;
@@ -2228,6 +2241,7 @@ export function useChatStore(
     threads,
     activeId,
     activeThread,
+    hydrated,
     unsyncedThreadCount,
     retryUnsyncedThreads,
     model,

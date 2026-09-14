@@ -162,6 +162,9 @@ class Settings(BaseSettings):
     # debugging (schedules then only run via "Run now").
     scheduler_enabled: bool = True
     scheduler_interval_seconds: float = 30.0
+    # Relational search index (search_index_entries). Off restores the
+    # per-request Python scans in routes/search.py without a schema change.
+    search_index_enabled: bool = True
 
     # OpenRouter is configured with conventional, non-prefixed env names. The
     # explicit validation_alias bypasses env_prefix="APERTURE_" so these resolve

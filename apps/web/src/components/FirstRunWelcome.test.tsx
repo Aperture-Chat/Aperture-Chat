@@ -14,7 +14,7 @@ test("a fresh owner is directed to provider setup without claiming any models wo
   expect(screen.getByText("Connect your first model")).toBeInTheDocument();
   expect(dismiss).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /Set up models/ }));
-  expect(navigate).toHaveBeenCalledWith("platform");
+  expect(navigate).toHaveBeenCalledWith({ kind: "platform", section: "setup" });
 });
 
 test("regular users see their own access guidance and no management actions", () => {

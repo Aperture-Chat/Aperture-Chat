@@ -21,6 +21,31 @@ relational database is available.
 - Platform-owner controls for providers, credentials, organizations, model availability, connectors, audit, branding, and release updates.
 - Role-specific training and downloadable guides; access/sign-in guidance is available before authentication.
 
+### Routes and deep links
+
+The web application is a single-page app served with a history fallback, so
+every path below resolves to `index.html` (nginx `try_files`, Vite dev server,
+and Caddy `reverse_proxy` need no per-route configuration). Only `/api`, `/v1`,
+`/scim/v2`, and `/health` are reserved for the API and edge.
+
+| Path | Screen | Gate |
+| --- | --- | --- |
+| `/`, `/chat` | Chat (open conversation) | any signed-in role |
+| `/chat/<threadId>` | A specific chat thread | must be in the actor's own thread list |
+| `/drafts`, `/drafts/<draftId>` | Drafts workspace, optionally loading one server draft | owner-scoped by the API |
+| `/agents`, `/automations` | Agents / Automations | any |
+| `/library/knowledge`, `/library/tools` | Knowledge / Tools | any |
+| `/admin/<section>` | Admin console tab (`users`, `groups`, `model-access`, `tools`, `sso`, `analytics`, `policies`, `audit`, `alerts`) | platform owner or tenant admin |
+| `/platform/<section>` | Platform console tab (`setup`, `org-settings`, `models`, `providers`, `analytics`, `audit`, `alerts`) | platform owner |
+
+The URL is a selector, never an authorization: a route outside the account's
+role is replaced with the role's landing screen and an honest notice, thread
+and draft ids are resolved through the actor's own scoped API calls, unknown
+paths fall back to chat, and a deep link opened while signed out is restored
+after sign-in only as a parsed route (never a raw redirect string). SSO
+fragments and the development `?persona=` selector are consumed before routing
+and are never written back into history.
+
 ## API and access boundaries
 
 Application routes handle identity, administration, chat, drafting, knowledge,
@@ -32,12 +57,35 @@ Tenant-owned resources are scoped before repository access. Platform-owner
 operations that select a tenant must provide the required tenant context.
 Private drafts remain scoped to their owner and tenant; updates use an expected
 revision to reject conflicting writes rather than silently overwriting them.
+A draft is either a sanitized HTML document or a slide deck stored as canonical
+deck JSON (`draft_documents.kind`); the kind is fixed at creation and the
+server canonicalizer (`app/models/deck_document.py`) is the authority for what
+deck content may be persisted.
 Tenant-admin prompt activity does not include platform-owner prompts merely
 because the administrator has access to analytics.
 
 Model access combines provider readiness, platform/tenant availability,
 group or user grants, and explicit denials. Administrative catalog visibility
 is separate from permission to execute a model.
+
+### Search
+
+Global search (`GET /api/search`, the Ctrl/⌘ K palette) narrows candidates
+through a relational index inside the application database
+(`search_index_entries`, per-tenant state in `search_index_state`). Chat
+threads and drafts write their index row in the same transaction as the
+record; agent profiles, automations, and matters are re-derived on every
+scheduler tick, and a per-tenant backfill runs in the API process until the
+tenant is marked ready. The index is never an authority: every candidate is
+loaded again through the actor's own owner-scoped repository call and passed
+through the same policy checks as the scan path, and the response reports
+`index_state` (`ready`, `backfilling`, or `disabled` via
+`APERTURE_SEARCH_INDEX_ENABLED=false`, which restores per-request scans).
+Text matching currently uses a portable LIKE mode over pre-lowercased text on
+both SQLite and Postgres; FTS5/tsvector acceleration is a follow-up. Platform
+owners can inspect and rebuild the index under Org Settings. The palette also
+offers role-gated commands (type `>`) and recently opened items kept in
+`sessionStorage`.
 
 ## Providers and external services
 

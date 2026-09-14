@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Sparkles, Star } from "lucide-react";
+import { Check, ChevronDown, HelpCircle, Sparkles, Star } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatStore } from "../lib/chatStore";
 import "./model-select.css";
@@ -7,7 +7,14 @@ type ModelSelection = Pick<ChatStore, "enabledModels" | "model" | "defaultModelI
 
 /** Focus previews a choice; selection happens only on click or Enter/Space.
  * Each favorite action is a sibling of its option, never nested inside it. */
-export function ModelSelect({ chat }: { chat: ModelSelection }) {
+export function ModelSelect({
+  chat,
+  onExplainAccess,
+}: {
+  chat: ModelSelection;
+  /** Opens "Models in your organization"; the picker only lists usable models. */
+  onExplainAccess?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +108,27 @@ export function ModelSelect({ chat }: { chat: ModelSelection }) {
     }
   }
 
+  if (!hasModels && onExplainAccess) {
+    // A real action instead of a dead control: the person can see which
+    // models exist in the organization and ask for one.
+    return (
+      <div className="model-select" ref={rootRef}>
+        <button
+          ref={triggerRef}
+          className="select-button is-unavailable"
+          type="button"
+          aria-label="No connected models. Why isn't a model available?"
+          data-tooltip="See which models your organization has and request access"
+          onClick={onExplainAccess}
+        >
+          <Sparkles size={17} aria-hidden="true" />
+          <span className="model-select-label"><strong>No models available</strong></span>
+          <HelpCircle size={16} aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       className="model-select"
@@ -166,6 +194,19 @@ export function ModelSelect({ chat }: { chat: ModelSelection }) {
               </div>
             ))}
           </div>
+          {onExplainAccess && (
+            <button
+              type="button"
+              className="model-menu-footer"
+              data-tooltip="See every model your organization has and why some are not listed here"
+              onClick={() => {
+                close(false);
+                onExplainAccess();
+              }}
+            >
+              <HelpCircle size={14} aria-hidden="true" /> Why isn't a model listed?
+            </button>
+          )}
         </div>
       )}
     </div>

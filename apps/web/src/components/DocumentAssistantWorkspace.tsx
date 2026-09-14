@@ -1,3 +1,4 @@
+import { draftHtmlForAccount, removeDraftPageLabels } from "../lib/draftPageLayout";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
 import { DraftHistoryCard } from "./DraftHistoryCard";
 import { formatMlaDocument } from "../lib/draftMla";
@@ -115,8 +116,9 @@ import {
   isDraftConflictError,
   listDrafts,
   updateDraft,
-  MAX_DRAFT_CONTENT_BYTES,
+  maxDraftContentBytes,
   type DraftDocument as ServerDraftDocument,
+  type DraftKind as ServerDraftKind,
 } from "../lib/api/drafts";
 import {
   loadLegacyDraftHistory,
@@ -269,6 +271,8 @@ type DraftServerSyncSnapshot = {
   content: string;
   summary: string;
   sourceLabel: string;
+  /** Decks are canonical JSON validated by the server's deck canonicalizer. */
+  kind?: ServerDraftKind;
   storedLocally?: boolean;
 };
 
@@ -1357,6 +1361,13 @@ export function DocumentAssistantWorkspace({
     historyId: createDraftHistoryId(),
   });
   const deckHistoryIdRef = useRef(createDraftHistoryId());
+  // Decks bind to their own server draft (kind "deck"); the document binding
+  // above is never reused for deck JSON, so the two can never overwrite each other.
+  const deckServerRef = useRef<DraftServerBinding>({
+    id: null,
+    revision: null,
+    historyId: deckHistoryIdRef.current,
+  });
   const lastDraftHistoryWriteSucceededRef = useRef(true);
   const documentHistoryRef = useRef(documentHistory);
   documentHistoryRef.current = documentHistory;
@@ -1443,7 +1454,7 @@ export function DocumentAssistantWorkspace({
     const text = documentHtmlToText(content).trim();
     const words = text ? text.split(/\s+/).length : 0;
     return { words, characters: text.replace(/\s+/g, " ").length };
-  }, [content]);
+  }, [content, draftKind]);
 
   /** First image-output model the user can genuinely invoke (enabled,
    * connected provider, group access) — the AI image button only claims to
@@ -1638,7 +1649,7 @@ export function DocumentAssistantWorkspace({
       : "Current version is saved.";
   const documentPageCount = countDocumentPages(content);
   const isPaginatedDocument = documentPageCount > 0;
-  const renderedPageCount = Math.max(pageCount, documentPageCount || 1);
+  const renderedPageCount = documentPageCount || pageCount || 1;
   const activeSourceLabel =
     sourceSummary.activeKnowledge.length === 1
       ? sourceSummary.activeKnowledge[0].name
@@ -1710,13 +1721,15 @@ export function DocumentAssistantWorkspace({
    * and image measurements. Manual typing is left alone until editor blur so
    * the caret never jumps in the middle of a sentence. */
   function scheduleSheetOverflowHeal(sourceHtml: string) {
-    if (isAutomatedTestMode() || !countDocumentPages(sourceHtml)) return;
+    if (isAutomatedTestMode() || !sourceHtml.trim()) return;
     const runId = ++sheetHealRunRef.current;
     const versionIdAtSchedule = selectedVersionId;
     window.setTimeout(() => {
       void (async () => {
         if (sheetHealRunRef.current !== runId) return;
-        const healed = await repaginateOverfullDocumentPages(sourceHtml);
+        const prepared = paginateTransferredDocumentHtml(sourceHtml, "", { forceMarkerPages: true });
+        const measured = await repaginateOverfullDocumentPages(prepared);
+        const healed = measured ?? (prepared !== sourceHtml ? prepared : null);
         if (sheetHealRunRef.current !== runId) return;
         if (!healed) {
           if (editorRef.current?.innerHTML === sourceHtml) {
@@ -2070,7 +2083,9 @@ export function DocumentAssistantWorkspace({
       return;
     }
     setSelectedVersionId(version.id);
-    setContent(version.content);
+    const restoredContent = paginateTransferredDocumentHtml(sanitizeDocumentHtml(version.content), "", { forceMarkerPages: true });
+    setContent(restoredContent);
+    setVersions(current => current.map(item => item.id === version.id ? { ...item, content: restoredContent } : item));
     clearEditHistory();
     setDraftKind("document");
     setStatus(`${version.label} restored in the editor.`);
@@ -3458,6 +3473,15 @@ export function DocumentAssistantWorkspace({
     );
   }
 
+  function applyDeckPalette(name: string, accent: string, background: string, heading: string, body: string) {
+    endDeckEditSession();
+    const deck = flushDeckTextEdits() ?? deckState;
+    if (!deck) return;
+    commitDeck({ ...deck, theme: { ...deck.theme, sourceLabel: name,
+      colors: { ...deck.theme.colors, accent1: accent, accent2: accent, background, heading, body, surface: background },
+    } }, `${name} colors applied to the deck.`, serializeSlideDeck(deck));
+  }
+
   function triggerDeckBrandUpload() {
     deckBrandInputRef.current?.click();
   }
@@ -3868,29 +3892,37 @@ export function DocumentAssistantWorkspace({
     return nextVersion;
   }
 
-  /** Local history persistence for decks. Server sync is deliberately not
-   * attempted: the drafts API validates canonical HTML, so decks stay on this
-   * device with an explicit Local-only badge until deck sync ships. */
+  /** Server-first save for decks, mirroring rememberDocumentSnapshot: the
+   * canonical deck JSON is cached on this device, then created or CAS-updated
+   * on the server as a kind "deck" draft so it follows the account. */
   function rememberDeckSnapshot(title: string, serialized: string, summary: string) {
+    if (deckServerRef.current.historyId !== deckHistoryIdRef.current) {
+      deckServerRef.current = { id: null, revision: null, historyId: deckHistoryIdRef.current };
+    }
+    const binding = deckServerRef.current;
     const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
       id: deckHistoryIdRef.current,
       title,
       content: serialized,
       summary,
       sourceLabel: activeSourceLabel,
+      kind: "deck",
+      serverId: binding.id,
+      serverRevision: binding.revision,
+      serverSavePending: true,
     });
     setSavedDocumentTitle(title);
     setDocumentHistory(nextHistory);
-    // A successful device save is the expected outcome for decks — announcing
-    // it added a badge that reflowed the topbar. Only failures get a badge.
-    setServerSaveState(
-      lastDraftHistoryWriteSucceededRef.current
-        ? { kind: "idle" }
-        : {
-            kind: "not-stored",
-            message:
-              "This deck is too large for this browser's storage, so it was not saved on this device. Export it to keep a copy.",
-          },
+    queueDraftServerSync(
+      {
+        historyId: nextHistory[0].id,
+        title,
+        content: serialized,
+        summary,
+        sourceLabel: activeSourceLabel,
+        kind: "deck",
+      },
+      binding,
     );
   }
 
@@ -3932,6 +3964,7 @@ export function DocumentAssistantWorkspace({
 
   function startBlankDeck() {
     deckHistoryIdRef.current = createDraftHistoryId();
+    deckServerRef.current = { id: null, revision: null, historyId: deckHistoryIdRef.current };
     const deck = blankSlideDeck(documentTitle.trim() || EMPTY_DOCUMENT_TITLE);
     setDeckState(deck);
     setSelectedSlideId(deck.slides[0]?.id ?? null);
@@ -3963,6 +3996,7 @@ export function DocumentAssistantWorkspace({
 
   function convertDocumentToDeckNow() {
     deckHistoryIdRef.current = createDraftHistoryId();
+    deckServerRef.current = { id: null, revision: null, historyId: deckHistoryIdRef.current };
     const sourceLabel =
       versions.find((version) => version.id === selectedVersionId)?.label ?? "the document";
     const { deck, warnings } = deckFromDocumentHtml(
@@ -4237,10 +4271,13 @@ export function DocumentAssistantWorkspace({
     // A save owns the document binding captured when it was queued. Switching
     // the editor must never retarget a pending PUT or adopt its response.
     const reportSaveState = (state: DraftServerSaveState) => {
-      if (serverDraftRef.current === binding && binding.lastSnapshot === snapshot) {
+      const owned = serverDraftRef.current === binding || deckServerRef.current === binding;
+      if (owned && binding.lastSnapshot === snapshot) {
         setServerSaveState(state);
       }
     };
+    const kind: ServerDraftKind = snapshot.kind ?? "document";
+    const accountContent = kind === "document" ? draftHtmlForAccount(snapshot.content) : snapshot.content;
     const reportUnstored = (reason: string) => reportSaveState({
       kind: snapshot.storedLocally ? "local-only" : "not-stored",
       message: snapshot.storedLocally
@@ -4248,8 +4285,12 @@ export function DocumentAssistantWorkspace({
         : `Not saved — ${reason}, and browser storage could not keep a copy. Keep this workspace open and retry or export your changes.`,
     });
     const title = snapshot.title.trim() || EMPTY_DOCUMENT_TITLE;
-    if (utf8ByteLength(snapshot.content) > MAX_DRAFT_CONTENT_BYTES) {
-      reportUnstored("this draft exceeds the 2 MB server draft limit");
+    if (utf8ByteLength(snapshot.content) > maxDraftContentBytes(kind)) {
+      reportUnstored(
+        kind === "deck"
+          ? "this deck exceeds the 8 MB server deck limit"
+          : "this draft exceeds the 2 MB server draft limit",
+      );
       return;
     }
     if (binding.id && binding.revision === null) {
@@ -4273,12 +4314,12 @@ export function DocumentAssistantWorkspace({
           ? await updateDraft(
               completionUserId,
               binding.id,
-              { expected_revision: binding.revision, title, content: snapshot.content },
+              { expected_revision: binding.revision, title, content: accountContent },
               { tenantSlug: draftTenantSlug },
             )
           : await createDraft(
               completionUserId,
-              { title, content: snapshot.content },
+              { title, content: accountContent, kind },
               { tenantSlug: draftTenantSlug },
             );
       binding.id = result.document.id;
@@ -4304,6 +4345,7 @@ export function DocumentAssistantWorkspace({
         content: latest.content,
         summary: latest.summary,
         sourceLabel: latest.sourceLabel,
+        kind,
         serverId: result.document.id,
         serverRevision: result.document.current_revision,
         serverContentStale: false,
@@ -4327,8 +4369,9 @@ export function DocumentAssistantWorkspace({
   }
 
   function retryDraftServerSync() {
-    const snapshot = serverDraftRef.current.lastSnapshot;
-    if (snapshot) queueDraftServerSync(snapshot);
+    const binding = draftKind === "deck" ? deckServerRef.current : serverDraftRef.current;
+    const snapshot = binding.lastSnapshot;
+    if (snapshot) queueDraftServerSync(snapshot, binding);
   }
 
   function persistDraftDocumentHistorySnapshot(scope: DraftCacheScope, snapshot: DraftHistorySnapshot) {
@@ -4386,6 +4429,7 @@ export function DocumentAssistantWorkspace({
         content: snapshot.revision.content,
         updatedAt: snapshot.document.updated_at,
         status: "complete",
+        kind: snapshot.document.kind ?? "document",
         serverId: snapshot.document.id,
         serverRevision: snapshot.document.current_revision,
         serverContentStale: false,
@@ -4413,11 +4457,19 @@ export function DocumentAssistantWorkspace({
 
   async function reloadServerDraftCopy(serverId: string) {
     const requestId = ++draftOpenRequestRef.current;
-    const binding = serverDraftRef.current;
+    const reloadingDeck = draftKind === "deck";
+    const binding = reloadingDeck ? deckServerRef.current : serverDraftRef.current;
+    const stillBound = () =>
+      reloadingDeck ? deckServerRef.current === binding : serverDraftRef.current === binding;
     try {
       const snapshot = await getDraft(completionUserId, serverId, { tenantSlug: draftTenantSlug });
-      if (requestId !== draftOpenRequestRef.current || serverDraftRef.current !== binding) return;
-      const localContent = contentRef.current;
+      if (requestId !== draftOpenRequestRef.current || !stillBound()) return;
+      const localDeck = reloadingDeck ? flushDeckTextEdits() ?? deckState : null;
+      const localContent = reloadingDeck
+        ? localDeck
+          ? serializeSlideDeck(localDeck)
+          : ""
+        : contentRef.current;
       if (localContent && localContent !== snapshot.revision.content) {
         persistDraftDocumentHistorySnapshot(draftScope, {
           id: `${slugify(documentTitle)}-local-${Date.now()}`,
@@ -4425,6 +4477,7 @@ export function DocumentAssistantWorkspace({
           content: localContent,
           summary: "Local copy preserved before reloading the server draft",
           sourceLabel: activeSourceLabel,
+          kind: reloadingDeck ? "deck" : "document",
           serverId: null,
           serverRevision: null,
         });
@@ -4445,6 +4498,7 @@ export function DocumentAssistantWorkspace({
         content: snapshot.revision.content,
         updatedAt: snapshot.document.updated_at,
         status: "complete",
+        kind: snapshot.document.kind ?? "document",
         serverId: snapshot.document.id,
         serverRevision: snapshot.document.current_revision,
         serverContentStale: false,
@@ -4454,7 +4508,7 @@ export function DocumentAssistantWorkspace({
       hydrateDocumentHistoryItem(restoredItem);
       setServerSaveState({ kind: "idle" });
     } catch (error) {
-      if (requestId !== draftOpenRequestRef.current || serverDraftRef.current !== binding) return;
+      if (requestId !== draftOpenRequestRef.current || !stillBound()) return;
       setServerSaveState({
         kind: "conflict",
         serverId,
@@ -4472,7 +4526,7 @@ export function DocumentAssistantWorkspace({
   }
 
   async function changeHistoryItem(item: DraftDocumentHistoryItem, remove: boolean) {
-    if (historyBusyId || item.status === "running" || item.serverSavePending || assistantWorking) return;
+    if (historyBusyId || item.status === "running" || (item.serverSavePending && (remove || item.serverId)) || assistantWorking) return;
     setHistoryBusyId(item.id);
     try {
       if (item.serverId) {
@@ -4503,6 +4557,7 @@ export function DocumentAssistantWorkspace({
       }
       if (remove && deckHistoryIdRef.current === item.id) {
         deckHistoryIdRef.current = createDraftHistoryId();
+        deckServerRef.current = { id: null, revision: null, historyId: deckHistoryIdRef.current };
         setSavedDocumentTitle("");
       }
       setHistoryDeleteTarget(null);
@@ -4564,7 +4619,20 @@ export function DocumentAssistantWorkspace({
       }
       serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
       deckHistoryIdRef.current = item.id;
-      setServerSaveState({ kind: "idle" });
+      const deckBindingKey = `${scopedDraftCacheKey(draftScope)}:${item.id}`;
+      const existingDeckBinding = draftServerBindings.get(deckBindingKey);
+      deckServerRef.current = existingDeckBinding ?? {
+        id: item.serverId ?? null,
+        revision: item.serverRevision ?? null,
+        historyId: item.id,
+      };
+      if (existingDeckBinding && !item.serverSavePending) {
+        existingDeckBinding.id = item.serverId ?? existingDeckBinding.id;
+        existingDeckBinding.revision = item.serverRevision ?? existingDeckBinding.revision;
+      }
+      setServerSaveState(
+        item.serverId ? { kind: "saved", revision: item.serverRevision ?? 0 } : { kind: "idle" },
+      );
       const restoredVersion: DraftVersion = {
         id: "version-1",
         label: "Version 1",
@@ -4597,7 +4665,7 @@ export function DocumentAssistantWorkspace({
     // Stored HTML (scoped cache, legacy history, or a server revision) is
     // never reinstated through innerHTML without the same allowlist
     // sanitization the print/redline surfaces already enforce.
-    const safeContent = sanitizeDocumentHtml(item.content);
+    const safeContent = paginateTransferredDocumentHtml(sanitizeDocumentHtml(item.content), "", { forceMarkerPages: true });
     const bindingKey = `${scopedDraftCacheKey(draftScope)}:${item.id}`;
     const existingBinding = draftServerBindings.get(bindingKey);
     serverDraftRef.current = existingBinding ?? {
@@ -4664,7 +4732,12 @@ export function DocumentAssistantWorkspace({
     );
   }
 
+  const [historyOpenNotice, setHistoryOpenNotice] = useState<string | null>(null);
+  const [historyOpeningId, setHistoryOpeningId] = useState<string | null>(null);
+
   async function restoreDocumentHistoryItem(item: DraftDocumentHistoryItem) {
+    setHistoryOpenNotice(null);
+    setHistoryOpeningId(item.id);
     const requestId = ++draftOpenRequestRef.current;
     // Server wins at a higher revision: entries whose server copy advanced
     // (or that only exist as server stubs) fetch the recoverable HTML first.
@@ -4674,6 +4747,7 @@ export function DocumentAssistantWorkspace({
           tenantSlug: draftTenantSlug,
         });
         if (requestId !== draftOpenRequestRef.current) return;
+        setHistoryOpeningId(null);
         const refreshed: DraftDocumentHistoryItem = {
           ...item,
           title: snapshot.document.title,
@@ -4692,7 +4766,9 @@ export function DocumentAssistantWorkspace({
         return;
       } catch (error) {
         if (requestId !== draftOpenRequestRef.current) return;
+        setHistoryOpeningId(null);
         if (!item.content) {
+          setHistoryOpenNotice(`Could not open “${item.title}”. Your saved draft is still listed in your account. Select it again to retry. If this continues, contact your administrator to recover its saved revision.`);
           setStatus(
             `This draft is stored in your account but could not be loaded (${draftErrorText(error)}). Try again once the connection recovers.`,
           );
@@ -4703,6 +4779,7 @@ export function DocumentAssistantWorkspace({
         );
       }
     }
+    setHistoryOpeningId(null);
     requestDraftNavigation(`open ${item.title}`, () => {
       hydrateDocumentHistoryItem(item);
       window.setTimeout(() => editorRef.current?.focus(), 0);
@@ -7149,7 +7226,8 @@ export function DocumentAssistantWorkspace({
               {activeAssistantTool === "history" && (
                 <div className="draft-history-panel" aria-label="Draft history">
                   <div className="draft-history-section">
-                    <strong className="draft-history-section-title">Document history</strong>
+                    {historyOpeningId && <p className="draft-history-empty" role="status">Opening saved draft…</p>}
+                    {historyOpenNotice && <p className="draft-history-empty" role="alert">{historyOpenNotice}</p>}
                     <div className="draft-history-filter" role="group" aria-label="History filter">
                       <button type="button" aria-pressed={!showArchivedDrafts} onClick={() => setShowArchivedDrafts(false)}>Active</button>
                       <button type="button" aria-pressed={showArchivedDrafts} onClick={() => setShowArchivedDrafts(true)}>Archived</button>
@@ -7169,6 +7247,8 @@ export function DocumentAssistantWorkspace({
                           <DraftHistoryCard key={`${item.id}:${item.updatedAt}:${item.serverContentStale}`}
                             title={item.title} summary={item.summary} source={item.sourceLabel}
                             time={formatHistoryTimestamp(item.updatedAt)} status={draftHistoryStatusLabel(item)}
+                            archiveDisabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverId && item.serverSavePending) || assistantWorking}
+                            opening={historyOpeningId === item.id}
                             archived={Boolean(item.archived)}
                             disabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverSavePending) || assistantWorking}
                             onRestore={() => void restoreDocumentHistoryItem(item)}
@@ -7669,11 +7749,11 @@ export function DocumentAssistantWorkspace({
                   ) : serverSaveState.kind === "not-stored" ? (
                     serverSaveState.message
                   ) : serverSaveState.kind === "local-only" ? (
-                    draftKind === "deck" ? "Local only — decks save on this device" : "Local only — server save failed"
+                    "Local only — server save failed"
                   ) : (
                     "Draft changed elsewhere"
                   )}
-                  {(serverSaveState.kind === "local-only" || serverSaveState.kind === "not-stored") && draftKind !== "deck" && (
+                  {(serverSaveState.kind === "local-only" || serverSaveState.kind === "not-stored") && (
                     <button type="button" onClick={retryDraftServerSync}>
                       Retry
                     </button>
@@ -7692,11 +7772,7 @@ export function DocumentAssistantWorkspace({
                 className="document-save-version-button"
                 type="button"
                 aria-label="Save version"
-                data-tooltip={
-                  draftKind === "deck"
-                    ? "Save a version on this device — decks stay local until you export them"
-                    : "Snapshot the current draft so you can compare or restore it later"
-                }
+                data-tooltip="Snapshot the current draft so you can compare or restore it later"
                 onClick={saveManualVersion}
                 disabled={!hasUnsavedEdits || assistantWorking}
               >
@@ -9121,6 +9197,36 @@ export function DocumentAssistantWorkspace({
                 </button>
               </div>
               <div className="deck-stage-column">
+                <section className="deck-design-browser" aria-label="Slide design choices">
+                  <div className="deck-design-heading">
+                    <strong>Slide layouts</strong>
+                    <button type="button" className="secondary-button compact" onClick={() => { setActiveAssistantTool("templates"); if (railIsDrawer) setRailOpen(true); }}>Deck starters &amp; brand themes</button>
+                  </div>
+                  <div className="deck-theme-gallery" role="group" aria-label="Deck color themes">
+                    {[
+                      ["Aperture", "#087d8b", "#ffffff", "#0c1a26", "#22313f"],
+                      ["Midnight", "#66d9ef", "#122033", "#ffffff", "#dbe5f0"],
+                      ["Editorial", "#a44932", "#faf4e8", "#38271f", "#514237"],
+                      ["Violet", "#7952c8", "#f7f4ff", "#2e1c4b", "#4b3c62"],
+                      ["Forest", "#397b52", "#f1f6ef", "#193823", "#35533d"],
+                    ].map(([name, accent, background, heading, body]) => (
+                      <button key={name} type="button" aria-label={`Apply ${name} color theme`}
+                        aria-pressed={deckState.theme.colors.accent1 === accent && deckState.theme.colors.background === background}
+                        onClick={() => applyDeckPalette(name, accent, background, heading, body)}>
+                        <span aria-hidden="true" style={{ background, borderColor: accent, color: heading }}>Aa</span>{name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="deck-layout-gallery" aria-label="Browse slide layouts">
+                    {SUPPORTED_DECK_LAYOUTS.map(layout => (
+                      <button type="button" key={layout} aria-label={`Apply ${DECK_LAYOUT_LABELS[layout]} layout`}
+                        aria-pressed={selectedSlide?.layout === layout} onClick={() => switchDeckSlideLayout(layout)}>
+                        <span className="deck-layout-preview" aria-hidden="true"><span className="deck-thumb-scale"><DeckSlideStatic slide={previewDeckLayout(layout)} theme={deckState.theme} /></span></span>
+                        <span>{DECK_LAYOUT_LABELS[layout]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
                 {selectedSlide ? (
                   <>
                     {/* Fixed-position pill; must live OUTSIDE the scaled
@@ -9583,7 +9689,7 @@ export function DocumentAssistantWorkspace({
                   />
                 </div>
               </div>
-              {renderedPageCount > 1 && (
+              {draftKind === "document" && (
                 <div
                   className="document-page-navigator"
                   role="navigation"
@@ -10943,6 +11049,7 @@ function paginateTransferredDocumentHtml(
   requestContext: string,
   options?: { forceMarkerPages?: boolean },
 ) {
+  html = removeDraftPageLabels(html);
   if (countDocumentPages(html)) return html;
   html = wrapFillInBlanks(html);
   const requestedPages = parseRequestedPageCount(requestContext);
@@ -10968,6 +11075,7 @@ function paginateTransferredDocumentHtml(
       estimatedPages > 1);
 
   let pages: string[][];
+  const manualPageStarts = new Set<number>();
   if (structuralMarkers) {
     const contentNodes = segments.flat();
     if (!contentNodes.length) return html;
@@ -10975,8 +11083,9 @@ function paginateTransferredDocumentHtml(
     const totalWeight = contentNodes.reduce((sum, node) => sum + htmlBlockWeight(node), 0);
     const targetWeight = Math.max(1, totalWeight / pageTotal);
     pages = [];
-    segments.forEach((segment) => {
+    segments.forEach((segment, index) => {
       if (!segment.length) return;
+      if (index > 0 && options?.forceMarkerPages) manualPageStarts.add(pages.length);
       const segmentWeight = segment.reduce((sum, node) => sum + htmlBlockWeight(node), 0);
       // A marker-delimited segment is an authored page. Only clearly
       // oversized segments flow onto extra pages; everything else stays one
@@ -11004,9 +11113,7 @@ function paginateTransferredDocumentHtml(
   return pages
     .map(
       (page, index) =>
-        `<section class="document-page" data-page-number="${index + 1}"><span class="document-page-label" contenteditable="false">Page ${
-          index + 1
-        }</span>${page.join("")}</section>`,
+        `<section class="document-page" data-page-number="${index + 1}"${manualPageStarts.has(index) ? ' data-page-break-before="manual"' : ""}>${page.join("")}</section>`,
     )
     .join("");
 }
@@ -11171,14 +11278,7 @@ function renumberDocumentPages(editor: HTMLElement) {
   const pages = Array.from(editor.querySelectorAll<HTMLElement>("section.document-page"));
   pages.forEach((page, index) => {
     page.setAttribute("data-page-number", String(index + 1));
-    let label = page.querySelector<HTMLElement>(":scope > .document-page-label");
-    if (!label) {
-      label = document.createElement("span");
-      label.className = "document-page-label";
-      label.setAttribute("contenteditable", "false");
-      page.insertBefore(label, page.firstChild);
-    }
-    label.textContent = `Page ${index + 1}`;
+    page.querySelectorAll(".document-page-label").forEach(label => label.remove());
   });
 }
 
@@ -11938,6 +12038,7 @@ function upsertDraftDocumentHistory(
         : existing?.serverContentStale,
     serverSavePending: snapshot.serverSavePending ?? existing?.serverSavePending,
     cacheWriterId: snapshot.cacheWriterId ?? existing?.cacheWriterId,
+    kind: snapshot.kind ?? existing?.kind,
   };
   return limitDraftCacheEntries([
     nextItem,
@@ -14699,6 +14800,20 @@ function DeckPresentationOverlay({
 
 /** Read-only slide render used by filmstrip thumbnails (and any other
  * non-editing preview). Absolute layout on the shared 960x540 canvas. */
+function previewDeckLayout(layout: DeckSlideLayout): DeckSlide {
+  const slide = createDeckSlide(layout, `preview-${layout}`);
+  const text = (value: string) => [{ text: value }];
+  const points = [{ runs: text("Key point"), level: 0 as const }, { runs: text("Supporting detail"), level: 0 as const }];
+  if ("title" in slide) slide.title = text(DECK_LAYOUT_LABELS[layout]);
+  if ("subtitle" in slide) slide.subtitle = text("Your story starts here");
+  if (slide.layout === "title-bullets") slide.bullets = points;
+  if (slide.layout === "two-column") { slide.left = points; slide.right = points; }
+  if (slide.layout === "image-caption") slide.caption = text("Image caption");
+  if (slide.layout === "quote") { slide.quote = text("An idea worth sharing"); slide.attribution = text("Speaker"); }
+  if (slide.layout === "closing") slide.body = text("Next steps and questions");
+  return slide;
+}
+
 function DeckSlideStatic({ slide, theme }: { slide: DeckSlide; theme: DeckTheme }) {
   const regions = resolvedTextRegions(slide);
   return (
