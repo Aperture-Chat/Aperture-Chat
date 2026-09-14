@@ -24846,3 +24846,17 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
   .composer-options-resources > input { font-size: 16px; min-height: 44px; }
   .composer-resource-results { max-height: none; overflow: visible; }
 }
+
+/* "Only on this device" rail badge (unsynced chats, drafts, legacy history) */
+.unsynced-work-badge {
+  color: var(--warning-ink, #8a5a00);
+  background: color-mix(in srgb, var(--warning, #f5b301) 14%, transparent);
+}
+.unsynced-work-badge:hover {
+  background: color-mix(in srgb, var(--warning, #f5b301) 24%, transparent);
+  color: var(--warning-ink, #8a5a00);
+}
+.sidebar-dark .unsynced-work-badge {
+  color: #ffd98a;
+  background: rgba(245, 179, 1, 0.16);
+}

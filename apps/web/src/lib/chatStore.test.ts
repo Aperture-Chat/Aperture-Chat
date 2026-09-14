@@ -252,3 +252,39 @@ test("a completed server snapshot wins over a stale local pending bubble", () =>
   expect(merged.messages[1].status).toBe("ok");
   expect(merged.messages[1].content).toBe("Finished on another tab");
 });
+
+test("a failed thread save marks it unsynced, and a successful retry clears it", async () => {
+  const data = firstUseData();
+  const thread: ChatThread = {
+    id: "thread-unsynced",
+    owner_user_id: data.me.id,
+    title: "Offline edits",
+    model_id: "text-model",
+    group_id: null,
+    pinned: false,
+    used_agent: false,
+    updated_at: "2026-09-13T00:00:00Z",
+    messages: [{ id: "m1", role: "user", content: "hello", createdAt: "12:00 PM", status: "ok" } as ChatMessage],
+  };
+  window.localStorage.setItem(`aperture-chats-v2-${data.me.id}`, JSON.stringify([thread]));
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const save = vi.spyOn(api, "saveChatThread").mockRejectedValue(new Error("offline"));
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  expect(view.result.current.unsyncedThreadCount).toBe(0);
+
+  await act(async () => {
+    view.result.current.togglePin("thread-unsynced");
+  });
+  await act(async () => {});
+  expect(view.result.current.unsyncedThreadCount).toBe(1);
+  expect(view.result.current.threads.find((item) => item.id === "thread-unsynced")?.syncPending).toBe(true);
+  expect(save).toHaveBeenCalled();
+
+  save.mockImplementation(async (_userId, saved) => ({ ...saved, syncPending: undefined }));
+  await act(async () => {
+    await view.result.current.retryUnsyncedThreads();
+  });
+  expect(view.result.current.unsyncedThreadCount).toBe(0);
+  expect(view.result.current.threads.find((item) => item.id === "thread-unsynced")?.syncPending).toBe(false);
+});

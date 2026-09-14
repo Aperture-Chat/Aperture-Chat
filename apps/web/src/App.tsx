@@ -1344,6 +1344,7 @@ export function App() {
       onOpenChat={openChat}
       onNewChat={startNewChat}
       onOpenDraft={handleOpenDraftFromSearch}
+      unsyncedWork={chat}
       onTogglePin={chat.togglePin}
       onArchiveThread={chat.archiveThread}
       onRestoreThread={chat.restoreThread}

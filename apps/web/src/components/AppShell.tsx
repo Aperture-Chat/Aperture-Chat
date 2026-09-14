@@ -63,7 +63,8 @@ import type {
 } from "../lib/types";
 import type { SearchNavigation } from "../lib/api/search";
 import { getMyUsageBudget, type MyUsageBudget } from "../lib/api/auth";
-import { isBlankNewChat } from "../lib/chatStore";
+import { isBlankNewChat, type ChatStore } from "../lib/chatStore";
+import { UnsyncedWorkBadge } from "./UnsyncedWorkBadge";
 import { usableModels } from "../lib/modelAccess";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { useModalFocus } from "../lib/useModalFocus";
@@ -251,6 +252,7 @@ function UserAppShell({
   onOpenChat,
   onNewChat,
   onOpenDraft,
+  unsyncedWork,
   onTogglePin,
   onArchiveThread,
   onRestoreThread,
@@ -288,6 +290,8 @@ function UserAppShell({
   onNewChat: () => void;
   /** Opens one saved server draft fully loaded in the Drafter (search hits). */
   onOpenDraft?: (draftId: string) => void;
+  /** Chat sync state for the "only on this device" badge; omitted in tests that mock the store. */
+  unsyncedWork?: Pick<ChatStore, "threads" | "unsyncedThreadCount" | "retryUnsyncedThreads">;
   onTogglePin: (id: string) => void;
   onArchiveThread: (id: string) => void;
   onRestoreThread: (id: string) => void;
@@ -1143,6 +1147,14 @@ function UserAppShell({
         <div className="sidebar-bottom">
           <div className="utility-rows">
             <PlatformUpdateRow userId={data.me.id} enabled={data.me.role === "PLATFORM_OWNER"} />
+            {unsyncedWork && (
+              <UnsyncedWorkBadge
+                chat={unsyncedWork}
+                scope={{ tenantId: data.currentTenant.id, userId: data.me.id }}
+                collapsed={collapsed}
+                onOpenDrafts={() => handleSelectView("drafts")}
+              />
+            )}
             <button
               className="minor-row"
               type="button"

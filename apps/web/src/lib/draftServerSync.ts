@@ -25,6 +25,8 @@ export type DraftCacheScope = {
 /** Server-sync bookkeeping carried on each cached entry. */
 export type DraftSyncFields = {
   archived?: boolean;
+  /** "deck" entries hold canonical deck JSON; absent means an HTML document. */
+  kind?: "document" | "deck";
   serverListedRevision?: number;
   /** Server-assigned draft id; missing/null means the entry is local only. */
   serverId?: string | null;
@@ -39,6 +41,12 @@ export type DraftSyncFields = {
   /** Identifies the browser session that owns unsent edits in shared storage. */
   cacheWriterId?: string;
 };
+
+/** Entries that exist only on this browser: never uploaded, or edited since
+ * the last acknowledged server save. Drives the "only on this device" badge. */
+export function unsyncedDraftEntries<T extends DraftSyncFields>(entries: T[]): T[] {
+  return entries.filter((entry) => !entry.serverId || Boolean(entry.serverSavePending));
+}
 
 /** Evict only recoverable server copies. Local drafts (including decks) and
  * unsent edits may have no other copy, so the cache window must not delete them. */
