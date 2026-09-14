@@ -1284,6 +1284,9 @@ export type ChatMessage = {
 
 export type ChatThread = ChatSession & {
   messages: ChatMessage[];
+  /** Client-only: the last server save of this thread failed, so the newest
+   * messages exist only in this browser until a retry succeeds. Never sent. */
+  syncPending?: boolean;
 };
 
 export type AgentRun = {
