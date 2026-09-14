@@ -392,3 +392,61 @@ test("search results from the previous workspace disappear before the next reque
   expect(screen.queryByRole("option", { name: /Quarterly policy review/ })).not.toBeInTheDocument();
   expect(screen.getByText("Searching…")).toBeInTheDocument();
 });
+
+function paletteCommands(run = vi.fn()) {
+  return [
+    { id: "action:new-chat", label: "New chat", hint: "Start a fresh conversation", group: "action" as const, run },
+    { id: "go:/drafts", label: "Go to Drafts", hint: "/drafts", keywords: ["document"], group: "navigate" as const, run },
+    { id: "go:/admin/users", label: "Go to Admin › Users", hint: "/admin/users", group: "navigate" as const, run },
+  ];
+}
+
+test("the empty palette lists top commands and recent items; > filters to commands only", async () => {
+  window.sessionStorage.setItem(
+    "aperture-palette-recent:user-admin",
+    JSON.stringify([{ id: "thread-old", kind: "chat", title: "Opened before", navigation: { view: "chat", thread_id: "thread-old" }, openedAt: "2026-09-13T00:00:00Z" }]),
+  );
+  const run = vi.fn();
+  const onClose = vi.fn();
+  const onNavigate = vi.fn().mockReturnValue(true);
+  render(<CommandPalette userId="user-admin" tenantSlug="t" onClose={onClose} onNavigate={onNavigate} commands={paletteCommands(run)} />);
+
+  expect(screen.getByRole("group", { name: "Recent" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Opened before/ })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Commands" })).toBeInTheDocument();
+  expect(screen.getByText("Type > to see every command.")).toBeInTheDocument();
+  expect(mockedSearch).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("option", { name: /Opened before/ }));
+  expect(onNavigate).toHaveBeenCalledWith({ view: "chat", thread_id: "thread-old" });
+  expect(onClose).toHaveBeenCalledTimes(1);
+
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "> admin" } });
+  expect(screen.queryByRole("group", { name: "Recent" })).not.toBeInTheDocument();
+  const options = screen.getAllByRole("option");
+  expect(options).toHaveLength(1);
+  expect(options[0]).toHaveTextContent("Go to Admin › Users");
+  expect(mockedSearch).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  expect(run).toHaveBeenCalledOnce();
+  expect(onClose).toHaveBeenCalledTimes(2);
+
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "> nothing here" } });
+  expect(screen.getByText(/No commands match/)).toBeInTheDocument();
+});
+
+test("matching commands ride along with search results and a backfilling index is disclosed", async () => {
+  vi.useFakeTimers();
+  mockedSearch.mockResolvedValue({ ...searchResponse(), index_state: "backfilling" });
+  render(<CommandPalette userId="user-admin" tenantSlug="t" onClose={vi.fn()} onNavigate={vi.fn().mockReturnValue(true)} commands={paletteCommands()} />);
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "drafts" } });
+  await act(async () => {
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+  });
+  await act(async () => {});
+  expect(mockedSearch).toHaveBeenCalledWith("user-admin", "drafts", 8, expect.objectContaining({ tenantSlug: "t" }));
+  expect(screen.getByRole("option", { name: /Quarterly policy review/ })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Commands" })).toHaveTextContent("Go to Drafts");
+  expect(screen.getByText(/Indexing your workspace/)).toBeInTheDocument();
+  vi.useRealTimers();
+});

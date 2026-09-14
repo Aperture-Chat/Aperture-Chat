@@ -78,3 +78,20 @@ test("no models leaves an honestly disabled picker", () => {
   expect(screen.getByRole("button", { name: "No connected models" })).toBeDisabled();
   expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 });
+
+test("the picker footer and the empty state open the model access explainer", () => {
+  const onExplainAccess = vi.fn();
+  const models = [{ ...sampleData.models[0], id: "alpha", name: "Alpha", provider_name: "Example provider" }];
+  const view = render(<ModelSelect chat={{ enabledModels: models, model: "alpha", defaultModelId: "alpha", setModel: vi.fn(), setDefaultModel: vi.fn() }} onExplainAccess={onExplainAccess} />);
+  fireEvent.click(screen.getByRole("button", { name: "Select model" }));
+  fireEvent.click(screen.getByRole("button", { name: "Why isn't a model listed?" }));
+  expect(onExplainAccess).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  view.unmount();
+
+  render(<ModelSelect chat={{ enabledModels: [], model: "", defaultModelId: "", setModel: vi.fn(), setDefaultModel: vi.fn() }} onExplainAccess={onExplainAccess} />);
+  const empty = screen.getByRole("button", { name: /No connected models/ });
+  expect(empty).toBeEnabled();
+  fireEvent.click(empty);
+  expect(onExplainAccess).toHaveBeenCalledTimes(2);
+});

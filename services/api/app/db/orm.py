@@ -48,6 +48,7 @@ from app.models.schemas import (
     ChatThread,
     ChatThreadTag,
     IssueReportRecord,
+    ModelAccessRequest,
     RetentionHold,
     TenantDailyUsage,
     TenantUsageBudget,
@@ -1374,6 +1375,140 @@ class ChatFeedbackRow(Base):
         )
 
 
+class ModelAccessRequestRow(Base):
+    """A person's request to use one organization model, reviewed by admins.
+
+    Advisory rows: nothing derives authorization from them, and only one
+    pending request per (tenant, user, model) is kept (repository-enforced).
+    """
+
+    __tablename__ = "model_access_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'declined', 'withdrawn')",
+            name="status_valid",
+        ),
+        CheckConstraint("note IS NULL OR length(note) <= 500", name="note_bounded"),
+        CheckConstraint(
+            "resolution_note IS NULL OR length(resolution_note) <= 500",
+            name="resolution_note_bounded",
+        ),
+        CheckConstraint("updated_at >= created_at", name="updated_after_creation"),
+        Index(
+            "ix_model_access_requests_tenant_status_created",
+            "tenant_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_model_access_requests_tenant_user_model",
+            "tenant_id",
+            "user_id",
+            "model_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    resolved_by_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    granted_group_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    @classmethod
+    def from_model(cls, request: ModelAccessRequest) -> ModelAccessRequestRow:
+        return cls(**request.model_dump(mode="python"))
+
+    def to_model(self) -> ModelAccessRequest:
+        return ModelAccessRequest(
+            id=self.id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            model_id=self.model_id,
+            status=self.status,
+            note=self.note,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+            resolved_by_user_id=self.resolved_by_user_id,
+            resolution_note=self.resolution_note,
+            granted_group_id=self.granted_group_id,
+        )
+
+
+class SearchIndexEntryRow(Base):
+    """Derived, owner/tenant-tagged plain text for global search candidates.
+
+    Never an authority: routes re-verify every candidate against the live
+    record. ``search_text`` is the lower-cased ``title + body`` the LIKE query
+    matches against so no per-row function call is needed.
+    """
+
+    __tablename__ = "search_index_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('chat', 'draft', 'agent', 'automation', 'matter', 'review', 'knowledge')",
+            name="kind_valid",
+        ),
+        CheckConstraint(
+            "visibility IN ('owner', 'tenant', 'groups', 'private', 'matter')",
+            name="visibility_valid",
+        ),
+        Index("ix_search_index_entries_tenant_kind_owner", "tenant_id", "kind", "owner_user_id"),
+        Index(
+            "ix_search_index_entries_tenant_kind_updated",
+            "tenant_id",
+            "kind",
+            "source_updated_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(300), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False)
+    acl_group_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    matter_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    indexed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    index_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class SearchIndexStateRow(Base):
+    """Per-tenant backfill progress and the text-match mode in use."""
+
+    __tablename__ = "search_index_state"
+    __table_args__ = (
+        CheckConstraint("fts_mode IN ('fts5', 'tsv', 'like')", name="fts_mode_valid"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    backfill_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    backfill_completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    fts_mode: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="like", server_default="like"
+    )
+    entry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
 class IssueReportRow(Base):
     """Server-side issue report with an optional separately stored image preview."""
 
@@ -2052,6 +2187,7 @@ class DraftDocumentRow(Base):
             name="current_revision_bounded",
         ),
         CheckConstraint("updated_at >= created_at", name="updated_after_creation"),
+        CheckConstraint("kind IN ('document', 'deck')", name="kind_valid"),
         UniqueConstraint(
             "id",
             "tenant_id",
@@ -2071,6 +2207,13 @@ class DraftDocumentRow(Base):
             "owner_user_id",
             "updated_at",
         ),
+        Index(
+            "ix_draft_documents_tenant_owner_kind_updated",
+            "tenant_id",
+            "owner_user_id",
+            "kind",
+            "updated_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -2086,6 +2229,9 @@ class DraftDocumentRow(Base):
         nullable=True,
     )
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="document", server_default="document"
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     current_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
@@ -2102,6 +2248,7 @@ class DraftDocumentRow(Base):
             owner_user_id=self.owner_user_id,
             matter_id=self.matter_id,
             archived=self.archived,
+            kind=self.kind,
             title=self.title,
             current_revision=self.current_revision,
             created_at=self.created_at,
@@ -2120,17 +2267,19 @@ class DraftRevisionRow(Base):
             "length(trim(title)) >= 1 AND length(title) <= 240",
             name="title_bounded",
         ),
+        # Outer ceiling shared by both kinds; the 2,000,000-byte HTML bound is
+        # enforced in Python for documents (see app.models.matters).
         CheckConstraint(
-            "octet_length(content) <= 2000000",
-            name="content_utf8_bytes_bounded",
+            "octet_length(content) <= 8000000",
+            name="content_utf8_bytes_ceiling",
         ),
         CheckConstraint(
             "length(content_sha256) = 64",
             name="content_sha256_length",
         ),
         CheckConstraint(
-            "sanitizer_version = 'sanitized-html-v1'",
-            name="sanitizer_version_valid",
+            "sanitizer_version IN ('sanitized-html-v1', 'deck-json-v1')",
+            name="sanitizer_version_known",
         ),
         ForeignKeyConstraint(
             ["draft_id", "tenant_id", "owner_user_id"],

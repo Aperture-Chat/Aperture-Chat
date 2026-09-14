@@ -230,7 +230,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Register a gateway",
         caption: "Add Provider covers OpenAI, Anthropic, Azure, Foundry, GCP Gemini, Bedrock, OpenRouter, Ollama, and more.",
         narration:
-          "Start in the Providers tab. Add Provider registers OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP Gemini, Bedrock, Open WebUI, OpenRouter, Ollama, OpenAI-compatible gateways, and local runtimes.",
+          "Start in the Setup tab for a guided checklist, or go straight to the Providers tab. Add Provider registers OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP Gemini, Bedrock, Open WebUI, OpenRouter, Ollama, OpenAI-compatible gateways, and local runtimes.",
         durationSeconds: 17,
         focus: "addProvider",
       },

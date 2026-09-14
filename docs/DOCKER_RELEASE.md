@@ -131,11 +131,11 @@ SHA tag. The `test` to `main` promotion gate and release-only `latest` tags
 continue to use the existing release workflow.
 
 Version-qualified branch tags follow `v<version>-<branch>`, for example
-`v0.5.1-dev`, `v0.5.1-test`, and `v0.5.1-main`. Both the API and web package
+`v0.5.2-dev`, `v0.5.2-test`, and `v0.5.2-main`. Both the API and web package
 use these tags. They advance with subsequent commits carrying that version;
 use the recorded digest pair to pin an exact build. The workflow verifies the
 version-qualified pair before moving the plain branch aliases. Stable
-`v0.5.1` and `latest` remain exclusive to the tagged main release.
+`v0.5.2` and `latest` remain exclusive to the tagged main release.
 
 ## Persistent storage and backups
 
@@ -230,6 +230,28 @@ docker compose -f docker-compose.release.yml --profile local logs --tail=200 web
 Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
+
+## New Since v0.5.1
+
+- Draft history reliably opens saved documents and decks, with visible loading
+  and retry states. Restored documents automatically rebuild page breaks and
+  show page counts outside the editable body; generated page labels are removed.
+- Deck editing offers more starting layouts and theme previews while preserving
+  slide content. Model favorites and selection controls fit the drafting rail.
+- Local-work reminders can be cleared without deleting drafts or chats, or hidden
+  for an account in a browser. Archived drafts leave the reminder list.
+- Model access explanations, request tracking, and administrator decisions make
+  provider and policy restrictions easier to understand without bypassing them.
+- A guided platform setup view, persistent workspace routes, and searchable
+  commands improve navigation and configuration.
+- A tenant-scoped relational search index supports global search and owner
+  rebuild/status controls while retaining live-record authorization checks.
+- Document and deck storage, model-access requests, and the search index add
+  database migrations. Back up the complete application data before upgrading.
+  The SQLite deck migration preserves existing draft revisions; schema rollback
+  and image rollback do not restore data that was lost before this fix.
+- API and web images publish as `v0.5.2-dev`, `v0.5.2-test`, and `v0.5.2-main`.
+  Stable `v0.5.2` and `latest` promote the inspected test images without rebuilding.
 
 ## New Since v0.5.0
 

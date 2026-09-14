@@ -29,6 +29,7 @@ from app.core.automation_runner import (
 )
 from app.core.config import Settings, get_settings
 from app.core.elastic_export import flush_elastic_events
+from app.core.search_index import search_index_pass
 from app.core.model_gateway import ModelGatewayError, get_model_gateway_client
 from app.core.platform_updates import reconcile_updater_outcome, refresh_platform_update_check
 from app.models.schemas import Automation, ChatMessage, ChatThread, PlatformSettings, User
@@ -490,6 +491,11 @@ def scheduler_pass(store: SeedStore, settings: Settings) -> None:
         reconcile_updater_outcome(store, settings)
     except Exception:  # noqa: BLE001
         logger.exception("Updater outcome reconciliation failed")
+    if settings.search_index_enabled:
+        try:
+            search_index_pass(store)
+        except Exception:  # noqa: BLE001
+            logger.exception("Search index maintenance failed")
 
 
 async def scheduler_loop() -> None:

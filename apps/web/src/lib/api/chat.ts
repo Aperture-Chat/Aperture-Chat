@@ -141,7 +141,8 @@ export function saveChatThread(
   thread: ChatThread,
   options: ApiMutationOptions = {},
 ): Promise<ChatThread> {
-  const { id, ...payload } = thread;
+  // syncPending is browser-side bookkeeping and must never reach the API.
+  const { id, syncPending: _syncPending, ...payload } = thread;
   return apiRequest<ChatThread>(userId, `/api/chat/threads/${pathId(id)}`, {
     method: "PUT",
     body: payload,

@@ -13,11 +13,13 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
+from app.models.deck_document import DeckValidationError
 from app.models.matters import (
-    MAX_DRAFT_CONTENT_BYTES,
     MAX_DRAFT_LIST_LIMIT,
+    DraftContentTooLarge,
     DraftDocument,
     DraftCreateRequest,
+    DraftKind,
     DraftPutRequest,
     DraftRevisionCapacity,
     DraftSnapshot,
@@ -28,6 +30,7 @@ from app.models.matters import (
     MatterMembership,
     MatterMemberMutationRequest,
     MatterUpdateRequest,
+    max_content_bytes_for_kind,
     matter_now,
 )
 from app.core.policy import knowledge_access_allowed
@@ -649,6 +652,7 @@ def delete_matter(
 @router.get("/api/drafts")
 def list_drafts(
     matter_id: str | None = Query(default=None, min_length=1, max_length=255),
+    kind: DraftKind | None = Query(default=None),
     limit: int = Query(default=MAX_DRAFT_LIST_LIMIT, ge=1, le=MAX_DRAFT_LIST_LIMIT),
     offset: int = Query(default=0, ge=0),
     scope: MatterActorScope = Depends(current_matter_scope),
@@ -661,6 +665,7 @@ def list_drafts(
             matter_id=matter_id,
             limit=limit,
             offset=offset,
+            kind=kind,
         )
     raise AssertionError("unreachable")
 
@@ -688,7 +693,7 @@ def create_draft(
 ) -> DraftSnapshot:
     """Create a private draft with a non-caller-controlled identifier."""
 
-    _require_draft_content_bound(payload.content)
+    _require_draft_content_bound(payload.content, payload.kind)
     with _repository_errors():
         return repository.create_draft(
             tenant_id=scope.tenant_id,
@@ -696,6 +701,7 @@ def create_draft(
             title=payload.title,
             content=payload.content,
             matter_id=payload.matter_id,
+            kind=payload.kind,
         )
     raise AssertionError("unreachable")
 
@@ -708,7 +714,9 @@ def put_draft(
     repository: MatterDraftRepository = Depends(get_matter_draft_repository),
 ) -> DraftSnapshot:
     if payload.content is not None:
-        _require_draft_content_bound(payload.content)
+        # The stored kind decides the exact bound inside the repository; this
+        # is the outer ceiling that rejects absurd bodies before any work.
+        _require_draft_content_bound(payload.content, "deck")
     with _repository_errors():
         if "title" in payload.model_fields_set and payload.title is None:
             raise HTTPException(
@@ -801,11 +809,12 @@ def get_draft_capacity(
     raise AssertionError("unreachable")
 
 
-def _require_draft_content_bound(content: str) -> None:
-    if len(content.encode("utf-8")) > MAX_DRAFT_CONTENT_BYTES:
+def _require_draft_content_bound(content: str, kind: DraftKind) -> None:
+    bound = max_content_bytes_for_kind(kind)
+    if len(content.encode("utf-8")) > bound:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"Draft content is limited to {MAX_DRAFT_CONTENT_BYTES} UTF-8 bytes.",
+            detail=f"Draft content is limited to {bound} UTF-8 bytes.",
         )
 
 
@@ -887,6 +896,17 @@ def _repository_errors() -> Iterator[None]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Matter persistence is temporarily unavailable.",
+        ) from exc
+    except DraftContentTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    except DeckValidationError as exc:
+        # Deck validation messages name the offending field and are safe to show.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Deck content is invalid: {exc}",
         ) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(

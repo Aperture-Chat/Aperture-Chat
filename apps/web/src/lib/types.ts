@@ -52,6 +52,62 @@ export type Provider = {
   auth_type?: string | null;
   auth_metadata?: ConfigSettings;
   status_message?: string;
+  /** Machine-readable outcome of the last live runtime test (ISO-8601 UTC). */
+  last_validated_at?: string | null;
+  last_validation_status?: "passed" | "auth_failed" | "failed" | null;
+  last_validation_model_id?: string | null;
+  last_synced_at?: string | null;
+};
+
+export type ProviderValidationResponse = {
+  provider: Provider;
+  model_id: string;
+  model_name: string;
+  latency_ms: number;
+};
+
+export type SetupStepState = "done" | "todo" | "attention";
+
+export type PlatformSetupProviderStatus = {
+  id: string;
+  name: string;
+  kind: string;
+  connected: boolean;
+  has_active_platform_key: boolean;
+  supports_model_sync: boolean;
+  model_count: number;
+  last_validation_status: "passed" | "auth_failed" | "failed" | null;
+  last_validated_at: string | null;
+  last_validation_model_id: string | null;
+  last_synced_at: string | null;
+  status_message: string | null;
+};
+
+export type PlatformSetupTenantGrant = {
+  tenant_id: string;
+  tenant_name: string;
+  groups_total: number;
+  groups_with_any_model: number;
+  active_users: number;
+  active_users_with_model: number;
+  pending_access_requests: number;
+};
+
+export type PlatformSetupStepKey = "provider" | "credential" | "validate" | "catalog" | "enable" | "grant";
+
+export type PlatformSetupStep = {
+  key: PlatformSetupStepKey;
+  state: SetupStepState;
+  summary: string;
+  counts: Record<string, number>;
+  providers: PlatformSetupProviderStatus[];
+  per_tenant: PlatformSetupTenantGrant[];
+};
+
+export type PlatformSetupStatus = {
+  steps: PlatformSetupStep[];
+  ready_for_users: boolean;
+  generated_at: string;
 };
 
 /** Provider-reported capability metadata captured at model sync. Empty or
@@ -138,9 +194,81 @@ export type PlatformSettings = {
   tenant_admins_can_create_admins: boolean;
   default_user_group_enabled: boolean;
   memory_enabled: boolean;
+  /** Owner kill switch for the user-facing "models in your organization" list. */
+  users_can_browse_model_catalog?: boolean;
 };
 
 export type PlatformSettingsUpdateRequest = Partial<PlatformSettings>;
+
+/* Explainable model access (routes/model_access.py). Reason text is server-owned. */
+export type ModelAccessGate = { key: string; passed: boolean; detail: string };
+
+export type ModelAccessDecision = {
+  allowed: boolean;
+  usable: boolean;
+  reason_code: string | null;
+  reason: string;
+  gates: ModelAccessGate[];
+  requestable: boolean;
+};
+
+export type ModelAccessRequestStatus = "pending" | "approved" | "declined" | "withdrawn";
+
+export type ModelAccessRequest = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  model_id: string;
+  status: ModelAccessRequestStatus;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_by_user_id: string | null;
+  resolution_note: string | null;
+  granted_group_id: string | null;
+};
+
+/** Redacted model card: prompts and operator notes never reach users. */
+export type ModelCatalogModel = {
+  id: string;
+  name: string;
+  provider_id: string;
+  provider_name: string;
+  upstream_model_id: string | null;
+  platform_enabled: boolean;
+  is_custom: boolean;
+  visibility: string;
+  context_window: number | null;
+};
+
+export type ModelCatalogEntry = {
+  model: ModelCatalogModel;
+  decision: ModelAccessDecision;
+  open_request: ModelAccessRequest | null;
+};
+
+export type ModelCatalogResponse = { entries: ModelCatalogEntry[]; browsing_enabled: boolean };
+
+export type AdminModelAccessRequestView = {
+  request: ModelAccessRequest;
+  requester_display_name: string;
+  requester_email: string;
+  requester_group_ids: string[];
+  model_name: string;
+  model_provider_name: string;
+  eligible_group_ids: string[];
+  can_grant_new_group: boolean;
+  decision: ModelAccessDecision;
+};
+
+export type ModelAccessRequestResolution = { request: ModelAccessRequest; decision: ModelAccessDecision };
+
+export type UserModelAccessTrace = {
+  user_id: string;
+  display_name: string;
+  group_ids: string[];
+  entries: { model: ModelCatalogModel; decision: ModelAccessDecision }[];
+};
 
 export type MemoryKind = "preference" | "directive" | "profile" | "project" | "fact";
 
@@ -1349,6 +1477,8 @@ export type BootstrapData = {
   memoryPolicy?: TenantMemoryPolicy;
   /** Resolved authoring capabilities for the current user. */
   authoringState?: AuthoringState;
+  /** Pending per-model access requests the actor may review (admins/owners only). */
+  modelAccessRequestCount?: number | null;
 };
 
 export type AuthoringState = {
@@ -1546,4 +1676,20 @@ export type AuthLoginResponse = {
   bootstrap: BootstrapWireData;
   /** True when the account signed in with an admin-issued temporary password. */
   must_change_password?: boolean;
+};
+
+export type SearchIndexTenantStatus = {
+  tenant_id: string;
+  tenant_name: string;
+  ready: boolean;
+  backfill_revision: number;
+  backfill_completed_at: string | null;
+  fts_mode: string;
+  entry_count: number;
+};
+
+export type SearchIndexStatus = {
+  enabled: boolean;
+  tenants: SearchIndexTenantStatus[];
+  total_entries: number;
 };

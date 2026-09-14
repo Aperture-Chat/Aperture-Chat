@@ -62,9 +62,17 @@ import type {
   User,
 } from "../lib/types";
 import type { SearchNavigation } from "../lib/api/search";
-import { getMyUsageBudget, type MyUsageBudget } from "../lib/api/auth";
-import { isBlankNewChat, type ChatStore } from "../lib/chatStore";
+import {
+  defaultRouteForView,
+  routeToPath,
+  type AppRoute,
+  type ViewKey,
+} from "../lib/appRoute";
+import type { ChatStore } from "../lib/chatStore";
+import { buildCommands } from "../lib/commands";
 import { UnsyncedWorkBadge } from "./UnsyncedWorkBadge";
+import { getMyUsageBudget, type MyUsageBudget } from "../lib/api/auth";
+import { isBlankNewChat } from "../lib/chatStore";
 import { usableModels } from "../lib/modelAccess";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { useModalFocus } from "../lib/useModalFocus";
@@ -85,13 +93,7 @@ import {
   type ChatReadState,
 } from "../lib/chatReadState";
 
-export type ViewKey =
-  | "chat"
-  | "drafts"
-  | "agents"
-  | "library"
-  | "admin"
-  | "platform";
+export type { ViewKey };
 
 const nav = [
   { key: "chat", label: "New chat", icon: Plus },
@@ -240,6 +242,7 @@ function UserAppShell({
   onViewAsRoleChange,
   currentView,
   onViewChange,
+  onNavigate,
   openHelpRequestKey,
   darkMode,
   onToggleDarkMode,
@@ -275,6 +278,8 @@ function UserAppShell({
   onViewAsRoleChange: (role: Role | null) => void;
   currentView: ViewKey;
   onViewChange: (view: ViewKey) => void;
+  /** Route-level navigation (sections and ids); falls back to `onViewChange`. */
+  onNavigate?: (route: AppRoute) => void;
   openHelpRequestKey?: number;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -523,6 +528,38 @@ function UserAppShell({
     closeDrawer();
   };
 
+  const handleNavigateRoute = (route: AppRoute) => {
+    if (securityCloseBlockedRef.current) return;
+    if (onNavigate) onNavigate(route);
+    else onViewChange(route.kind);
+    setDrawer(null);
+    closeDrawer();
+  };
+
+  // Palette commands share the rail's role predicates and existing actions;
+  // nothing here can reach a screen the role could not open from the rail.
+  const paletteCommands = useMemo(
+    () =>
+      buildCommands({
+        role: data.me.role,
+        route: defaultRouteForView(currentView),
+        darkMode,
+        actions: {
+          navigate: (route) => {
+            if (route.kind === "chat") handleNewChat();
+            else handleNavigateRoute(route);
+          },
+          newChat: () => handleNewChat(),
+          toggleDarkMode: onToggleDarkMode,
+          openHelp: () => openUtilityDrawer("help"),
+          installApp: pwaInstallTarget && onOpenPwaInstall ? onOpenPwaInstall : undefined,
+          signOut: onRequestSignOut ?? onSignOut,
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.me.role, currentView, darkMode, pwaInstallTarget, onOpenPwaInstall, onRequestSignOut, onSignOut, onToggleDarkMode],
+  );
+
   const handleOpenChat = (id: string) => {
     if (securityCloseBlockedRef.current) return;
     const opened = threads.find((thread) => thread.id === id);
@@ -568,13 +605,17 @@ function UserAppShell({
       closeDrawer();
       return true;
     }
-    if (view === "drafts" || view === "agents" || view === "library") {
-      handleSelectView(view);
+    if (view === "drafts" || view === "agents") {
+      handleNavigateRoute(defaultRouteForView(view));
+      return true;
+    }
+    if (view === "library") {
+      handleNavigateRoute({ kind: "library", section: "knowledge" });
       return true;
     }
     if (view === "automations") {
       // Automations live inside the Agents workspace section tabs.
-      handleSelectView("agents");
+      handleNavigateRoute({ kind: "agents", section: "automations" });
       return true;
     }
     // Review-grid and matter results have no product surface by decision:
@@ -956,20 +997,42 @@ function UserAppShell({
         </div>
 
         <nav className="primary-nav" aria-label="Primary">
-          {nav.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              className={clsx("nav-item", currentView === key && "is-active")}
-              type="button"
-              aria-label={label}
-              aria-current={currentView === key ? "page" : undefined}
-              data-tooltip={NAV_TOOLTIPS[key]}
-              onClick={() => (key === "chat" ? handleNewChat() : handleSelectView(key))}
-            >
-              <Icon size={19} />
-              <span>{label}</span>
-            </button>
-          ))}
+          {nav.map(({ key, label, icon: Icon }) =>
+            key === "chat" ? (
+              <button
+                key={key}
+                className={clsx("nav-item", currentView === key && "is-active")}
+                type="button"
+                aria-label={label}
+                aria-current={currentView === key ? "page" : undefined}
+                data-tooltip={NAV_TOOLTIPS[key]}
+                onClick={handleNewChat}
+              >
+                <Icon size={19} />
+                <span>{label}</span>
+              </button>
+            ) : (
+              /* Real links so copy-link and middle-click open the same screen;
+               * a plain click stays in-app through the navigation guard. */
+              <a
+                key={key}
+                className={clsx("nav-item", currentView === key && "is-active")}
+                href={routeToPath(defaultRouteForView(key))}
+                aria-label={label}
+                aria-current={currentView === key ? "page" : undefined}
+                data-tooltip={NAV_TOOLTIPS[key]}
+                onClick={(event) => {
+                  if (event.defaultPrevented || event.button !== 0) return;
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  handleSelectView(key);
+                }}
+              >
+                <Icon size={19} />
+                <span>{label}</span>
+              </a>
+            ),
+          )}
         </nav>
 
         {!collapsed && (
@@ -1251,6 +1314,7 @@ function UserAppShell({
           tenantSlug={data.currentTenant.slug}
           onNavigate={handlePaletteNavigate}
           onClose={() => setPaletteOpen(false)}
+          commands={paletteCommands}
           threads={threads}
           folders={flattenFolderTree(folders).map(({ folder, depth }) => ({
             depth,
@@ -2180,10 +2244,16 @@ function UtilityDrawer({
                   {visibleAccountConsoles.map(({ key, icon: Icon }) => {
                     const isActive = currentView === key;
                     const label = key === "platform" ? "Platform owner console" : "Admin console";
+                    const pendingRequests =
+                      key === "admin" && typeof data.modelAccessRequestCount === "number"
+                        ? data.modelAccessRequestCount
+                        : 0;
                     const description =
                       key === "platform"
                         ? "Providers, organization policy, and audit"
-                        : "Users, groups, model access, and connections";
+                        : pendingRequests > 0
+                          ? `${pendingRequests} model access ${pendingRequests === 1 ? "request" : "requests"} waiting`
+                          : "Users, groups, model access, and connections";
                     return (
                       <button
                         key={key}
@@ -2198,6 +2268,11 @@ function UtilityDrawer({
                           <strong>{label}</strong>
                           <small>{description}</small>
                         </span>
+                        {pendingRequests > 0 && (
+                          <span className="pill pill-warning" aria-label={`${pendingRequests} pending model access requests`}>
+                            {pendingRequests}
+                          </span>
+                        )}
                         <ChevronRight size={15} aria-hidden="true" />
                       </button>
                     );

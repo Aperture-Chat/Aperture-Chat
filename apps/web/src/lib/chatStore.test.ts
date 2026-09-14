@@ -253,7 +253,7 @@ test("a completed server snapshot wins over a stale local pending bubble", () =>
   expect(merged.messages[1].content).toBe("Finished on another tab");
 });
 
-test("a failed thread save marks it unsynced, and a successful retry clears it", async () => {
+test("a failed thread save marks it unsynced, and a later success or hydration clears it", async () => {
   const data = firstUseData();
   const thread: ChatThread = {
     id: "thread-unsynced",

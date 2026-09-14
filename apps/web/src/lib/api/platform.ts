@@ -18,6 +18,9 @@ import type {
   PlatformProviderKeyCreateRequest,
   PlatformProviderUpdateRequest,
   PlatformSettings,
+  PlatformSetupStatus,
+  ProviderValidationResponse,
+  SearchIndexStatus,
   PlatformSettingsUpdateRequest,
   Provider,
   ProviderKey,
@@ -561,6 +564,40 @@ export function sendPlatformEmailTest(
     body: payload,
     signal: options.signal,
   });
+}
+
+/** Pure read of the six owner setup steps; never calls a provider. */
+export function getPlatformSetupStatus(
+  userId: string,
+  options: ApiMutationOptions & { tenantId?: string } = {},
+): Promise<PlatformSetupStatus> {
+  const query = options.tenantId ? `?tenant_id=${encodeURIComponent(options.tenantId)}` : "";
+  return apiRequest<PlatformSetupStatus>(userId, `/api/platform/setup-status${query}`, {
+    signal: options.signal,
+  });
+}
+
+/** Live runtime test only (no catalog discovery); the response is the real outcome. */
+export function validatePlatformProvider(
+  userId: string,
+  providerId: string,
+  options: ApiMutationOptions = {},
+): Promise<ProviderValidationResponse> {
+  return apiRequest<ProviderValidationResponse>(
+    userId,
+    `/api/platform/providers/${pathId(providerId)}/validate`,
+    { method: "POST", signal: options.signal },
+  );
+}
+
+export function getSearchIndexStatus(userId: string, options: ApiMutationOptions = {}): Promise<SearchIndexStatus> {
+  return apiRequest<SearchIndexStatus>(userId, "/api/platform/search-index/status", { signal: options.signal });
+}
+
+/** Re-derives every search index row from live records; returns the new status. */
+export function rebuildSearchIndex(userId: string, tenantId?: string): Promise<SearchIndexStatus> {
+  const query = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  return apiRequest<SearchIndexStatus>(userId, `/api/platform/search-index/rebuild${query}`, { method: "POST" });
 }
 
 export function getPlatformSettings(userId: string, options: ApiMutationOptions = {}): Promise<PlatformSettings> {

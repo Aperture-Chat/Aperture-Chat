@@ -29,7 +29,7 @@ from app.db import (
 from app.db.engine import alembic_config
 from app.models.matters import (
     DRAFT_SANITIZER_VERSION,
-    MAX_DRAFT_CONTENT_BYTES,
+    MAX_DECK_CONTENT_BYTES,
     draft_content_sha256,
 )
 
@@ -123,6 +123,7 @@ def test_m9_fresh_upgrade_has_exact_tables_links_and_metadata_parity(tmp_path: P
             },
             "draft_documents": {
                 "archived",
+                "kind",
                 "id",
                 "tenant_id",
                 "owner_user_id",
@@ -161,6 +162,7 @@ def test_m9_fresh_upgrade_has_exact_tables_links_and_metadata_parity(tmp_path: P
         }
         assert {index["name"] for index in inspector.get_indexes("draft_documents")} == {
             "ix_draft_documents_tenant_matter_owner_updated",
+            "ix_draft_documents_tenant_owner_kind_updated",
             "ix_draft_documents_tenant_owner_updated",
         }
         assert {index["name"] for index in inspector.get_indexes("matter_deletion_jobs")} == {
@@ -468,7 +470,9 @@ def test_sqlite_octet_length_enforces_exact_utf8_byte_bound(tmp_path: Path) -> N
     engine = create_application_engine(_sqlite_url(tmp_path / "m9-octets.sqlite3"))
     factory = create_session_factory(engine)
     now = datetime(2026, 7, 20, 12, tzinfo=UTC)
-    exact = "é" * (MAX_DRAFT_CONTENT_BYTES // 2)
+    # The database CHECK is the outer ceiling shared with decks; the tighter
+    # HTML bound is enforced in Python (see test_matters_models).
+    exact = "é" * (MAX_DECK_CONTENT_BYTES // 2)
     oversized = f"{exact}é"
     try:
         upgrade_database(engine)

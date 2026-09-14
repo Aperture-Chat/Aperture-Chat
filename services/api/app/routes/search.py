@@ -1,10 +1,14 @@
 """Actor-scoped global search across Aperture workspace records.
 
-The endpoint deliberately composes existing authorization rules instead of
-building a second search-only index. That keeps results honest while the
-relational search index described in the competitive plan is introduced in
-later persistence milestones. Personal chat search includes both active and
-archived conversations and matches their titles and message text.
+Chat threads and drafts are found through the relational search index
+(``search_index_entries``) once a tenant's backfill has completed; every
+candidate is then loaded through the actor's own owner-scoped repository call
+and re-checked with the same policy functions the scan path uses, so the
+index never decides authorization. Until the backfill finishes (or when the
+index is disabled) the original per-request scans run and the response says
+``index_state="backfilling"``. Agents, automations, matters, review grids, and
+knowledge keep their existing checks. Personal chat search includes archived
+conversations and matches titles and message text.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
 from app.core.policy import (
     agent_profile_access_allowed,
     group_permission_allowed,
@@ -26,6 +31,7 @@ from app.core.policy import (
     knowledge_access_allowed,
 )
 from app.core.review_store import ReviewStore
+from app.models.deck_document import deck_plain_text
 from app.models.matters import MAX_DRAFT_LIST_LIMIT, DraftSnapshot
 from app.models.review import ReviewMatrix
 from app.models.schemas import Automation, ChatThread, ModelConfig, User
@@ -35,8 +41,10 @@ from app.repositories.matters import (
     MatterDraftRepository,
     MatterNotFound,
     MatterRepositoryError,
+    PrivateResourceNotFound,
 )
 from app.repositories.review_deps import get_review_store
+from app.repositories.search_index import SearchIndexCandidate, SearchIndexUnavailable
 from app.repositories.seed import SeedStore
 from app.routes.dependencies import current_user
 from app.routes.matters import (
@@ -80,15 +88,49 @@ class GlobalSearchSection(BaseModel):
     results: list[GlobalSearchHit] = Field(default_factory=list)
 
 
+IndexState = Literal["ready", "backfilling", "disabled"]
+
+
 class GlobalSearchResponse(BaseModel):
     query: str
     sections: list[GlobalSearchSection]
+    # "ready": chat/draft sections came from the relational index (re-verified).
+    # "backfilling": the index is not complete for this tenant yet; scans ran.
+    index_state: IndexState = "disabled"
+
+
+def _parse_kinds(raw: str | None) -> set[str] | None:
+    if raw is None:
+        return None
+    kinds = {part.strip() for part in raw.split(",") if part.strip()}
+    allowed = {"chat", "knowledge", "review", "agent", "automation", "matter", "draft"}
+    unknown = kinds - allowed
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unknown search kinds: {', '.join(sorted(unknown))}.",
+        )
+    return kinds or None
+
+
+def _index_ready(store: SeedStore, tenant_id: str) -> bool:
+    if not get_settings().search_index_enabled:
+        return False
+    repository = getattr(store, "search_index_repository", None)
+    if repository is None:
+        return False
+    try:
+        state = repository.state(tenant_id)
+    except SearchIndexUnavailable:
+        return False
+    return state is not None and state.ready
 
 
 @router.get("")
 def global_search(
     q: str = Query(min_length=1, max_length=200),
     limit: int = Query(default=8, ge=1, le=25),
+    kinds: str | None = Query(default=None, max_length=120),
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
     review_store: ReviewStore = Depends(get_review_store),
@@ -101,51 +143,68 @@ def global_search(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Search query must not be blank.",
         )
+    wanted = _parse_kinds(kinds)
+
+    def include(kind: str) -> bool:
+        return wanted is None or kind in wanted
+
+    use_index = _index_ready(store, matter_scope.tenant_id)
+    index_state: IndexState = (
+        "ready" if use_index else "backfilling" if get_settings().search_index_enabled else "disabled"
+    )
 
     try:
-        matter_results = _search_matters(
-            matter_repository,
-            matter_scope,
-            query,
-            limit,
+        matter_results = (
+            _search_matters(matter_repository, matter_scope, query, limit) if include("matter") else []
         )
-        draft_results = _search_drafts(
-            matter_repository,
-            matter_scope,
-            query,
-            limit,
-        )
+        if not include("draft"):
+            draft_results: list[GlobalSearchHit] = []
+        elif use_index:
+            draft_results = _search_drafts_indexed(store, matter_repository, matter_scope, query, limit)
+        else:
+            draft_results = _search_drafts(matter_repository, matter_scope, query, limit)
     except MatterRepositoryError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Matter and draft search is temporarily unavailable.",
         ) from exc
 
+    if not include("chat"):
+        chat_results: list[GlobalSearchHit] = []
+    elif use_index:
+        chat_results = _search_threads_indexed(store, actor, matter_scope.tenant_id, query, limit)
+    else:
+        chat_results = _search_threads(store.chat_threads_for(actor), query, limit)
+
     sections = [
         GlobalSearchSection(
             kind="chat",
             title="Previous chats",
-            results=_search_threads(store.chat_threads_for(actor), query, limit),
+            results=chat_results,
         ),
         GlobalSearchSection(
             kind="knowledge",
             title="Documents & knowledge",
-            results=_search_knowledge(store, actor, query, limit),
+            results=_search_knowledge(store, actor, query, limit) if include("knowledge") else [],
         ),
         GlobalSearchSection(
             kind="review",
             title="Review Grids",
-            results=_search_review_matrices(review_store, store, actor, query, limit),
+            results=(
+                _search_review_matrices(review_store, store, actor, query, limit)
+                if include("review")
+                else []
+            ),
         ),
         GlobalSearchSection(
             kind="agent",
             title="Agents",
-            results=_search_agent_profiles(store, actor, query, limit),
+            results=_search_agent_profiles(store, actor, query, limit) if include("agent") else [],
         ),
         GlobalSearchSection(
             kind="automation",
             title="Automations",
-            results=_search_automations(store, actor, query, limit),
+            results=_search_automations(store, actor, query, limit) if include("automation") else [],
         ),
         GlobalSearchSection(
             kind="matter",
@@ -158,7 +217,90 @@ def global_search(
             results=draft_results,
         ),
     ]
-    return GlobalSearchResponse(query=query, sections=sections)
+    return GlobalSearchResponse(query=query, sections=sections, index_state=index_state)
+
+
+def _index_candidates(
+    store: SeedStore,
+    *,
+    tenant_id: str,
+    kind: str,
+    owner_user_id: str,
+    query: str,
+    limit: int,
+) -> list[SearchIndexCandidate] | None:
+    """Bounded candidates for one owner-private kind, or None to fall back to a scan."""
+
+    try:
+        return store.search_index_repository.query(
+            tenant_id=tenant_id,
+            text=query,
+            kinds=[kind],
+            owner_user_id=owner_user_id,
+            limit=max(limit * 4, 25),
+        )
+    except SearchIndexUnavailable:
+        return None
+
+
+def _search_threads_indexed(
+    store: SeedStore,
+    actor: User,
+    tenant_id: str,
+    query: str,
+    limit: int,
+) -> list[GlobalSearchHit]:
+    candidates = _index_candidates(
+        store, tenant_id=tenant_id, kind="chat", owner_user_id=actor.id, query=query, limit=limit
+    )
+    if candidates is None:
+        return _search_threads(store.chat_threads_for(actor), query, limit)
+    application = store.application_state_repository
+    live: list[ChatThread] = []
+    for candidate in candidates:
+        # Only ever load a thread under the actor's own id: a stale or
+        # mis-tagged index row can never surface someone else's chat.
+        thread = application.get_chat_thread_for_owner(
+            candidate.resource_id,
+            owner_user_id=actor.id,
+            tenant_id=tenant_id,
+            allow_cross_tenant=is_platform_owner(actor),
+        )
+        if thread is not None:
+            live.append(thread)
+    return _search_threads(live, query, limit)
+
+
+def _search_drafts_indexed(
+    store: SeedStore,
+    repository: MatterDraftRepository,
+    scope: MatterActorScope,
+    query: str,
+    limit: int,
+) -> list[GlobalSearchHit]:
+    candidates = _index_candidates(
+        store,
+        tenant_id=scope.tenant_id,
+        kind="draft",
+        owner_user_id=scope.actor.id,
+        query=query,
+        limit=limit,
+    )
+    if candidates is None:
+        return _search_drafts(repository, scope, query, limit)
+    snapshots: list[DraftSnapshot] = []
+    for candidate in candidates:
+        try:
+            snapshots.append(
+                repository.get_draft(
+                    candidate.resource_id,
+                    tenant_id=scope.tenant_id,
+                    owner_user_id=scope.actor.id,
+                )
+            )
+        except (MatterNotFound, MatterAccessDenied, PrivateResourceNotFound):
+            continue
+    return _draft_hits(repository, scope, snapshots, query, limit)
 
 
 def _search_threads(threads: Iterable[ChatThread], query: str, limit: int) -> list[GlobalSearchHit]:
@@ -231,13 +373,23 @@ def _search_drafts(
 ) -> list[GlobalSearchHit]:
     """Search current owner-private drafts and recheck linked matter access."""
 
-    results: list[GlobalSearchHit] = []
     snapshots = repository.search_drafts(
         query,
         tenant_id=scope.tenant_id,
         owner_user_id=scope.actor.id,
         limit=MAX_DRAFT_LIST_LIMIT,
     )
+    return _draft_hits(repository, scope, snapshots, query, limit)
+
+
+def _draft_hits(
+    repository: MatterDraftRepository,
+    scope: MatterActorScope,
+    snapshots: Iterable[DraftSnapshot],
+    query: str,
+    limit: int,
+) -> list[GlobalSearchHit]:
+    results: list[GlobalSearchHit] = []
     for snapshot in snapshots:
         document = snapshot.document
         if document.matter_id is not None and not _matter_membership_allows_draft(
@@ -252,7 +404,7 @@ def _search_drafts(
         if score <= 0:
             continue
         content_score = _lexical_score(plain_content, query)
-        navigation = {"view": "drafts", "draft_id": document.id}
+        navigation = {"view": "drafts", "draft_id": document.id, "kind": document.kind}
         if document.matter_id is not None:
             navigation["matter_id"] = document.matter_id
         results.append(
@@ -292,6 +444,8 @@ def _matter_membership_allows_draft(
 
 
 def _draft_plain_text(snapshot: DraftSnapshot) -> str:
+    if snapshot.document.kind == "deck":
+        return " ".join(deck_plain_text(snapshot.revision.content).split())
     without_tags = _HTML_TAG_PATTERN.sub(" ", snapshot.revision.content)
     return " ".join(unescape(without_tags).split())
 

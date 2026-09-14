@@ -182,6 +182,8 @@ from app.repositories.identity_cleanup import (
     IdentityCleanupRepository,
 )
 from app.repositories.matters import MatterDraftRepository
+from app.repositories.model_access_requests import ModelAccessRequestRepository
+from app.repositories.search_index import SearchIndexRepository
 from app.repositories.usage_budgets import TenantUsageBudgetRepository
 
 
@@ -378,6 +380,8 @@ class SeedStore:
         self.identity_config_repository = IdentityConfigSqlRepository(application_engine)
         self.identity_cleanup_repository = IdentityCleanupRepository(application_engine)
         self.matter_draft_repository = MatterDraftRepository(application_engine)
+        self.model_access_request_repository = ModelAccessRequestRepository(application_engine)
+        self.search_index_repository = SearchIndexRepository(application_engine)
         identity_authority = self.identity_config_repository.load_authority_state()
         authority_snapshot = identity_authority.snapshot
         active_identity_snapshot = (
@@ -2070,9 +2074,21 @@ class SeedStore:
                 elif stage == "m9":
                     if job.resource_kind == "tenant":
                         counts.update(self.matter_draft_repository.purge_tenant(job.tenant_id))
+                        counts["removed_model_access_requests"] = (
+                            self.model_access_request_repository.purge_tenant(job.tenant_id)
+                        )
+                        counts["removed_search_index_entries"] = (
+                            self.search_index_repository.delete_for_tenant(job.tenant_id)
+                        )
                     elif job.resource_kind == "user":
                         counts.update(
                             self.matter_draft_repository.purge_user(
+                                tenant_id=job.tenant_id,
+                                user_id=job.resource_id,
+                            )
+                        )
+                        counts["removed_model_access_requests"] = (
+                            self.model_access_request_repository.purge_user(
                                 tenant_id=job.tenant_id,
                                 user_id=job.resource_id,
                             )

@@ -4,7 +4,7 @@ import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 
 type Props = {
   title: string; summary: string; source: string; time: string; status: string;
-  archived: boolean; disabled: boolean;
+  archived: boolean; disabled: boolean; opening?: boolean; archiveDisabled?: boolean;
   onRestore: () => void; onArchive: () => void; onDelete: () => void;
   loadPreview: () => Promise<string>;
 };
@@ -29,13 +29,13 @@ export function DraftHistoryCard(props: Props) {
     <div ref={cardRef} className="draft-history-entry" onMouseEnter={() => void showPreview()}
       onMouseLeave={() => setExpanded(false)} onFocus={() => void showPreview()}
       onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(false); }}>
-      <button type="button" className="draft-history-document-card" onClick={props.onRestore}
+      <button type="button" className="draft-history-document-card" disabled={props.opening} aria-busy={props.opening} onClick={() => { setExpanded(false); props.onRestore(); }}
         aria-label={`Restore ${props.title} from document history (${props.status})`}>
-        <span><strong>{props.title}</strong><small>{props.status}</small><small>{props.summary}</small><small>{props.source}</small></span>
+        <span><strong>{props.title}</strong><small>{props.opening ? "Opening…" : props.status}</small><small>{props.summary}</small><small>{props.source}</small></span>
         <time>{props.time}</time>
       </button>
       <div className="draft-history-actions">
-        <button type="button" disabled={props.disabled} onClick={props.onArchive}
+        <button type="button" disabled={props.archiveDisabled ?? props.disabled} onClick={props.onArchive}
           aria-label={`${props.archived ? "Unarchive" : "Archive"} ${props.title}`}>
           {props.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
           {props.archived ? "Unarchive" : "Archive"}

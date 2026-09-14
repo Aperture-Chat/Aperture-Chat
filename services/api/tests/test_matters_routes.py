@@ -1052,3 +1052,116 @@ def test_draft_archive_is_private_durable_and_revision_guarded(matters_api) -> N
     assert client.get("/api/drafts").json()[0]["archived"] is True
     assert client.get(f"/api/drafts/{draft_id}").json()["revision"]["content"] == "<p>Keep this.</p>"
     assert client.patch(route, params={"archived": False, "expected_revision": 1}).json()["archived"] is False
+
+
+def _deck_json(title: str = "Kickoff deck", body: str = "Agenda") -> str:
+    import json
+
+    return json.dumps(
+        {
+            "schema": "aperture-deck-v1",
+            "title": title,
+            "theme": {},
+            "slides": [
+                {"id": "s1", "layout": "title", "title": title, "subtitle": "Q4", "notes": "Speaker notes here"},
+                {
+                    "id": "s2",
+                    "layout": "title-bullets",
+                    "title": body,
+                    "bullets": [{"runs": [{"text": "Point one"}], "level": 0}],
+                    "unknown": "dropped",
+                },
+            ],
+        }
+    )
+
+
+def test_decks_persist_as_canonical_json_drafts_with_their_own_bounds(matters_api) -> None:
+    from app.models.deck_document import canonicalize_deck_json, deck_content_sha256
+
+    client, actor, repository, *_ = matters_api
+    actor["value"] = _user("user-one")
+
+    created = client.post(
+        "/api/drafts", json={"title": "Kickoff deck", "content": _deck_json(), "kind": "deck"}
+    )
+    assert created.status_code == 201, created.text
+    snapshot = created.json()
+    assert snapshot["document"]["kind"] == "deck"
+    assert snapshot["revision"]["sanitizer_version"] == "deck-json-v1"
+    canonical = canonicalize_deck_json(_deck_json())
+    assert snapshot["revision"]["content"] == canonical
+    assert snapshot["revision"]["content_sha256"] == deck_content_sha256(canonical)
+    assert '"unknown"' not in snapshot["revision"]["content"]
+    deck_id = snapshot["document"]["id"]
+
+    # Documents still default to HTML and the kind filter separates the two.
+    document = client.post("/api/drafts", json={"title": "Memo", "content": "<p>Hi</p>"}).json()
+    assert document["document"]["kind"] == "document"
+    assert [item["id"] for item in client.get("/api/drafts", params={"kind": "deck"}).json()] == [deck_id]
+    assert {item["kind"] for item in client.get("/api/drafts").json()} == {"deck", "document"}
+    assert client.get("/api/drafts", params={"kind": "poster"}).status_code == 422
+
+    # Kind is immutable: HTML sent to a deck fails deck validation, deck JSON
+    # sent to a document is canonicalized as (escaped) HTML text, never a deck.
+    html_on_deck = client.put(
+        f"/api/drafts/{deck_id}", json={"expected_revision": 1, "content": "<p>Not a deck</p>"}
+    )
+    assert html_on_deck.status_code == 422
+    assert "Deck content is invalid" in html_on_deck.json()["detail"]
+    deck_on_document = client.put(
+        f"/api/drafts/{document['document']['id']}",
+        json={"expected_revision": 1, "content": _deck_json()},
+    )
+    assert deck_on_document.status_code == 200
+    assert deck_on_document.json()["document"]["kind"] == "document"
+    assert deck_on_document.json()["revision"]["sanitizer_version"] == "sanitized-html-v1"
+
+    # CAS still guards decks; a real edit creates revision 2.
+    stale = client.put(
+        f"/api/drafts/{deck_id}", json={"expected_revision": 5, "content": _deck_json(body="Changed")}
+    )
+    assert stale.status_code == 409
+    edited = client.put(
+        f"/api/drafts/{deck_id}", json={"expected_revision": 1, "content": _deck_json(body="Changed")}
+    )
+    assert edited.status_code == 200
+    assert edited.json()["document"]["current_revision"] == 2
+
+    # Bounds: an oversized deck is 413 at the deck ceiling, an oversized HTML
+    # document is still 413 at the tighter document bound.
+    huge_deck = client.post(
+        "/api/drafts",
+        json={"title": "Huge", "content": "{" + " " * 8_000_001 + "}", "kind": "deck"},
+    )
+    assert huge_deck.status_code == 413
+    big_html = "<p>" + "x" * 2_000_001 + "</p>"
+    assert client.post("/api/drafts", json={"title": "Big", "content": big_html}).status_code == 413
+    assert (
+        client.put(f"/api/drafts/{document['document']['id']}", json={"expected_revision": 2, "content": big_html}).status_code
+        == 413
+    )
+
+    # Unsafe pictures are refused with the field named.
+    bad = client.post(
+        "/api/drafts",
+        json={
+            "title": "Bad",
+            "kind": "deck",
+            "content": '{"schema":"aperture-deck-v1","title":"x","slides":[{"layout":"image-caption","title":"t","image":{"src":"javascript:alert(1)","alt":""},"caption":""}]}',
+        },
+    )
+    assert bad.status_code == 422
+    assert "image.src" in bad.json()["detail"]
+
+    # Other owners and tenants never see the deck.
+    actor["value"] = _user("user-two")
+    assert client.get(f"/api/drafts/{deck_id}").status_code == 404
+    actor["value"] = _user("tenant-b-user", tenant_id="tenant-b")
+    assert client.get(f"/api/drafts/{deck_id}").status_code == 404
+
+    # Purging the owner removes deck rows like documents.
+    actor["value"] = _user("user-one")
+    removed = repository.purge_user(tenant_id="tenant-a", user_id="user-one")
+    assert removed["removed_drafts"] == 2
+    assert client.get("/api/drafts").json() == []

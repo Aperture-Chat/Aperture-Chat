@@ -455,7 +455,7 @@ test("New chat stays a primary action while Chats reveals independent organizati
   expect(onNewChat).toHaveBeenCalledTimes(1);
   expect(onViewChange).not.toHaveBeenCalledWith("chat");
 
-  const libraryButton = within(primaryNav).getByRole("button", { name: "Knowledge/Tools" });
+  const libraryButton = within(primaryNav).getByRole("link", { name: "Knowledge/Tools" });
   const chatsButton = screen.getByRole("button", { name: "Chats" });
   expect(libraryButton.compareDocumentPosition(chatsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
@@ -1119,7 +1119,10 @@ test("Cmd/Ctrl+K opens conversation-first search and Escape closes it", () => {
   expect(input).toHaveFocus();
   expect(within(dialog).getByText("Find something from a previous conversation")).toBeInTheDocument();
   expect(within(dialog).getByText(/Archived chats are included/)).toBeInTheDocument();
-  expect(within(dialog).queryAllByRole("option")).toHaveLength(0);
+  // The empty palette now offers role-gated commands, never search results.
+  const commandGroup = within(dialog).getByRole("group", { name: "Commands" });
+  expect(within(commandGroup).getAllByRole("option").length).toBeGreaterThan(0);
+  expect(within(dialog).queryByRole("group", { name: "Recent" })).not.toBeInTheDocument();
   // Empty query never fires a search request.
   expect(globalThis.fetch).not.toHaveBeenCalled();
 

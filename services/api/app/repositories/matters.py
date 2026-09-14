@@ -24,7 +24,9 @@ from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from app.db.engine import create_session_factory, engine_write_lock
+from app.core.search_index import entry_for_draft
 from app.db.orm import (
+    SearchIndexEntryRow,
     ChatFolderRow,
     ChatThreadRow,
     DraftDocumentRow,
@@ -33,14 +35,18 @@ from app.db.orm import (
     MatterMembershipRow,
     MatterRow,
 )
+from app.models.deck_document import DeckValidationError
+from app.repositories.search_index import remove_entry, write_entry
 from app.models.matters import (
-    DRAFT_SANITIZER_VERSION,
+    DRAFT_KINDS,
     MAX_DRAFT_LIST_LIMIT,
     MAX_DRAFT_REVISIONS,
     MAX_DRAFT_REVISION_LIST_LIMIT,
     MAX_MATTER_RETENTION_DAYS,
     SIGNED_BIGINT_MAX,
+    DraftContentTooLarge,
     DraftDocument,
+    DraftKind,
     DraftRevision,
     DraftRevisionCapacity,
     DraftSnapshot,
@@ -49,13 +55,14 @@ from app.models.matters import (
     MatterDeletionResult,
     MatterDeletionStage,
     MatterMembership,
-    draft_content_sha256,
+    canonicalize_draft_content,
+    content_sha256_for_kind,
     matter_now,
     new_draft_id,
     new_matter_id,
     normalize_draft_title,
     normalize_matter_name,
-    sanitize_draft_html,
+    sanitizer_version_for_kind,
 )
 
 
@@ -204,6 +211,13 @@ class MatterDraftRepository:
                 ).rowcount
                 or 0
             )
+            session.execute(
+                delete(SearchIndexEntryRow).where(
+                    SearchIndexEntryRow.tenant_id == tenant_id,
+                    SearchIndexEntryRow.owner_user_id == user_id,
+                    SearchIndexEntryRow.kind.in_(["draft", "matter"]),
+                )
+            )
             removed_memberships = (
                 session.execute(
                     delete(MatterMembershipRow).where(
@@ -312,6 +326,19 @@ class MatterDraftRepository:
                 actor_user_id=actor_user_id,
             ).to_model()
         )
+
+    def list_all_matters(self, *, tenant_id: str) -> list[Matter]:
+        """Every matter in a tenant, for index maintenance only (no membership gate)."""
+
+        tenant_id = _required_id(tenant_id, "tenant_id")
+
+        def operation(session: Session) -> list[Matter]:
+            rows = session.scalars(
+                select(MatterRow).where(MatterRow.tenant_id == tenant_id).order_by(MatterRow.id)
+            )
+            return [row.to_model() for row in rows]
+
+        return self._run_read(operation)
 
     def list_matters(
         self,
@@ -1070,13 +1097,16 @@ class MatterDraftRepository:
         matter_id: str | None = None,
         draft_id: str | None = None,
         now: datetime | None = None,
+        kind: DraftKind = "document",
     ) -> DraftSnapshot:
         tenant_id = _required_id(tenant_id, "tenant_id")
         owner_user_id = _required_id(owner_user_id, "owner_user_id")
         draft_id = _required_id(draft_id or new_draft_id(), "draft_id")
         matter_id = _optional_id(matter_id, "matter_id")
         title = normalize_draft_title(title)
-        content = sanitize_draft_html(content)
+        if kind not in DRAFT_KINDS:
+            raise ValueError("Unknown draft kind.")
+        content = canonicalize_draft_content(content, kind)
         timestamp = _aware_utc(now or matter_now())
 
         def operation(session: Session) -> DraftSnapshot:
@@ -1093,6 +1123,7 @@ class MatterDraftRepository:
                 tenant_id=tenant_id,
                 owner_user_id=owner_user_id,
                 matter_id=matter_id,
+                kind=kind,
                 title=title,
                 current_revision=1,
                 created_at=timestamp,
@@ -1106,10 +1137,12 @@ class MatterDraftRepository:
                 title=title,
                 content=content,
                 created_at=timestamp,
+                kind=kind,
             )
             session.add(DraftDocumentRow.from_model(document))
             session.add(DraftRevisionRow.from_model(revision))
             session.flush()
+            write_entry(session, entry_for_draft(document, revision))
             return DraftSnapshot(document=document, revision=revision)
 
         try:
@@ -1221,6 +1254,7 @@ class MatterDraftRepository:
         matter_id: str | None = None,
         limit: int = MAX_DRAFT_LIST_LIMIT,
         offset: int = 0,
+        kind: DraftKind | None = None,
     ) -> list[DraftDocument]:
         """List bounded private draft metadata without loading snapshot bodies."""
 
@@ -1230,6 +1264,8 @@ class MatterDraftRepository:
         limit = _bounded_limit(limit, maximum=MAX_DRAFT_LIST_LIMIT)
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("offset must be a nonnegative integer")
+        if kind is not None and kind not in DRAFT_KINDS:
+            raise ValueError("Unknown draft kind.")
 
         def operation(session: Session) -> list[DraftDocument]:
             if matter_id is not None:
@@ -1245,6 +1281,8 @@ class MatterDraftRepository:
             ]
             if matter_id is not None:
                 filters.append(DraftDocumentRow.matter_id == matter_id)
+            if kind is not None:
+                filters.append(DraftDocumentRow.kind == kind)
             rows = session.scalars(
                 select(DraftDocumentRow)
                 .where(*filters)
@@ -1271,7 +1309,6 @@ class MatterDraftRepository:
         draft_id, tenant_id, owner_user_id = _scope(draft_id, tenant_id, owner_user_id)
         expected_revision = _positive_bigint(expected_revision, "expected_revision")
         normalized_title = None if title is None else normalize_draft_title(title)
-        sanitized_content = None if content is None else sanitize_draft_html(content)
         validated_matter_id = (
             _UNSET
             if matter_id is _UNSET
@@ -1294,8 +1331,13 @@ class MatterDraftRepository:
                     current.document.matter_id,
                 )
             target_title = current.document.title if normalized_title is None else normalized_title
+            # The kind is immutable: content is canonicalized with the stored
+            # kind's sanitizer, so deck JSON sent to a document (or HTML sent to
+            # a deck) fails validation instead of silently switching shape.
             target_content = (
-                current.revision.content if sanitized_content is None else sanitized_content
+                current.revision.content
+                if content is None
+                else canonicalize_draft_content(content, current.document.kind)
             )
             if validated_matter_id is _UNSET:
                 target_matter_id = current.document.matter_id
@@ -1345,6 +1387,7 @@ class MatterDraftRepository:
                 title=target_title,
                 content=target_content,
                 created_at=timestamp,
+                kind=current.document.kind,
             )
             session.add(DraftRevisionRow.from_model(revision))
             session.flush()
@@ -1353,11 +1396,13 @@ class MatterDraftRepository:
                 tenant_id=tenant_id,
                 owner_user_id=owner_user_id,
                 matter_id=target_matter_id,
+                kind=current.document.kind,
                 title=target_title,
                 current_revision=next_revision,
                 created_at=current.document.created_at,
                 updated_at=timestamp,
             )
+            write_entry(session, entry_for_draft(document, revision))
             return DraftSnapshot(document=document, revision=revision)
 
         try:
@@ -1485,7 +1530,13 @@ class MatterDraftRepository:
             if changed.rowcount != 1:
                 raise DraftConflict("The draft changed before archiving completed.")
             session.refresh(row)
-            return row.to_model()
+            document = row.to_model()
+            revision_row = session.get(
+                DraftRevisionRow, {"draft_id": draft_id, "revision": document.current_revision}
+            )
+            if revision_row is not None:
+                write_entry(session, entry_for_draft(document, revision_row.to_model()))
+            return document
 
         return self._run_write(operation)
 
@@ -1522,6 +1573,7 @@ class MatterDraftRepository:
             ).rowcount
             if removed != 1:
                 raise DraftConflict("The draft changed before deletion completed.")
+            remove_entry(session, "draft", draft_id)
             return model
 
         return self._run_write(operation)
@@ -1945,6 +1997,7 @@ class MatterDraftRepository:
         title: str,
         content: str,
         created_at: datetime,
+        kind: DraftKind = "document",
     ) -> DraftRevision:
         return DraftRevision(
             draft_id=draft_id,
@@ -1953,8 +2006,8 @@ class MatterDraftRepository:
             revision=revision,
             title=title,
             content=content,
-            content_sha256=draft_content_sha256(content),
-            sanitizer_version=DRAFT_SANITIZER_VERSION,
+            content_sha256=content_sha256_for_kind(content, kind),
+            sanitizer_version=sanitizer_version_for_kind(kind),
             created_at=created_at,
         )
 
@@ -1963,6 +2016,9 @@ class MatterDraftRepository:
         try:
             return operation(session)
         except MatterRepositoryError:
+            raise
+        except (DeckValidationError, DraftContentTooLarge):
+            # Caller-input errors carry safe messages and map to 4xx in routes.
             raise
         except (TypeError, ValueError) as exc:
             raise MatterPersistenceUnavailable(
@@ -1984,6 +2040,8 @@ class MatterDraftRepository:
                     finally:
                         session.close()
             except MatterRepositoryError:
+                raise
+            except (DeckValidationError, DraftContentTooLarge):
                 raise
             except (TypeError, ValueError) as exc:
                 raise MatterPersistenceUnavailable(

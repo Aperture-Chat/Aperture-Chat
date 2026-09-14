@@ -973,6 +973,7 @@ export function ChatWorkspace({
   requestedAgentId,
   onRequestedAgentConsumed,
   onTransferToDraft,
+  onExplainModelAccess,
 }: {
   data: BootstrapData;
   chat: ChatStore;
@@ -981,6 +982,8 @@ export function ChatWorkspace({
   requestedAgentId?: string | null;
   onRequestedAgentConsumed?: () => void;
   onTransferToDraft?: (message: ChatMessage) => void;
+  /** Opens "Models in your organization" (why a model is not listed). */
+  onExplainModelAccess?: () => void;
 }) {
   const { activeThread, isSending, composerFocusToken } = chat;
   const [draft, setDraft] = useState("");
@@ -3060,7 +3063,7 @@ export function ChatWorkspace({
             {threadTitleError && <p className="chat-title-error" role="alert">{threadTitleError}</p>}
           </div>
           <div className="header-actions">
-            <ModelSelect chat={chat} />
+            <ModelSelect chat={chat} onExplainAccess={onExplainModelAccess} />
             <button
               className="icon-button"
               type="button"

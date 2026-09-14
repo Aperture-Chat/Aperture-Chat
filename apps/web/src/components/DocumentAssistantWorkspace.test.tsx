@@ -1078,7 +1078,7 @@ This original finding must remain in the live editor.`,
   await waitFor(() => {
     expect(screen.getAllByText(/current document was left unchanged/i).length).toBeGreaterThan(0);
   });
-  expect(documentText()).toContain("Page 2 — Findings");
+  expect(documentText()).toContain("Findings");
   expect(documentText()).toContain("This original finding must remain in the live editor.");
   expect(documentBody().querySelector(`a[href="${sourceUrl}"]`)).toBeInTheDocument();
   expect(documentBody().querySelector(`img[src="${imageUrl}"]`)).toBeInTheDocument();
@@ -2415,8 +2415,8 @@ test("markdown page-break rules become real preview pages that exports honor onc
     // Pagination consumes the explicit rules; no dashed markers remain inside
     // pages, so exports cannot double-break the same boundary.
     expect(documentBody().querySelector("hr.document-page-break")).toBeNull();
-    expect(pages[1].querySelector("h2")?.textContent).toBe("Page 1 — Introduction");
-    expect(pages[2].querySelector("h2")?.textContent).toBe("Page 2 — Findings");
+    expect(pages[1].querySelector("h2")?.textContent).toBe("Introduction");
+    expect(pages[2].querySelector("h2")?.textContent).toBe("Findings");
 
     openExportDialog();
     fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
@@ -2456,8 +2456,9 @@ This response is short enough for one page, but it still needs paper boundaries.
 
   const pages = documentBody().querySelectorAll(".document-page");
   expect(pages).toHaveLength(2);
-  expect(pages[0].querySelector(".document-page-label")?.textContent).toBe("Page 1");
-  expect(pages[1].querySelector(".document-page-label")?.textContent).toBe("Page 2");
+  expect(pages[0].querySelector(".document-page-label")).toBeNull();
+  expect(pages[1].querySelector(".document-page-label")).toBeNull();
+  expect(screen.getByRole("navigation", { name: /Page navigation.*of 2/ })).toBeInTheDocument();
   expect(pages[1]).toHaveAttribute("data-page-break-before", "manual");
   expect(documentBody().querySelector("hr.document-page-break")).toBeNull();
 });
@@ -4556,12 +4557,197 @@ test.each(['document', 'deck'] as const)('copy %s reports denied clipboard acces
     if (mode === 'document') openDocumentTools('More');
     const button = screen.getByRole('button', { name: mode === 'deck' ? 'Copy deck outline' : 'Copy document' });
     fireEvent.click(button);
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Could not access the clipboard.'));
+    // Decks now also report their server save in a status badge; read the
+    // workspace status line specifically.
+    const statusLine = () =>
+      screen.getAllByRole('status').filter((element) => !element.classList.contains('document-server-save-state'))[0];
+    await waitFor(() => expect(statusLine()).toHaveTextContent('Could not access the clipboard.'));
     fireEvent.click(button);
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(`${mode === 'deck' ? 'Deck outline' : 'Document'} copied to clipboard.`));
+    await waitFor(() => expect(statusLine()).toHaveTextContent(`${mode === 'deck' ? 'Deck outline' : 'Document'} copied to clipboard.`));
     expect(writeText.mock.calls[1][0]).toContain('Preserved passage.');
   } finally {
     if (previous) Object.defineProperty(navigator, 'clipboard', previous);
     else Reflect.deleteProperty(navigator, 'clipboard');
   }
+});
+
+function serverDeckSnapshot(id: string, title: string, content: string, revision: number) {
+  const snapshot = serverDraftSnapshot(id, title, content, revision);
+  return {
+    document: { ...snapshot.document, kind: "deck" },
+    revision: { ...snapshot.revision, sanitizer_version: "deck-json-v1" },
+  };
+}
+
+test("decks save to the server as kind deck and report Saved, conflicts, and size refusals honestly", async () => {
+  let creates = 0;
+  const calls = installDraftsApiFetchMock({
+    create: (body) => {
+      creates += 1;
+      return jsonResponse(serverDeckSnapshot("deck-srv-1", String(body.title), String(body.content), 1), 201);
+    },
+    update: () => jsonResponse({ detail: "The draft changed before this update completed." }, 409),
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  documentBody().innerHTML = "<h1>Board deck</h1><p>Agenda item one.</p>";
+  fireEvent.input(documentBody());
+  fireEvent.click(screen.getByRole("button", { name: "Deck", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Convert into slides" }));
+
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saved"));
+  const createCall = calls.find((call) => call.method === "POST");
+  expect(createCall?.body).toMatchObject({ kind: "deck" });
+  expect(String(createCall?.body?.content)).toContain('"schema":"aperture-deck-v1"');
+  expect(screen.queryByText(/decks save on this device/)).not.toBeInTheDocument();
+  const cached = storedDraftHistory().find((item) => item.serverId === "deck-srv-1") as Record<string, unknown> | undefined;
+  expect(cached).toMatchObject({ serverId: "deck-srv-1", serverRevision: 1, kind: "deck" });
+  expect(creates).toBe(1);
+
+  // A second save is a CAS update; a 409 is an explicit conflict with a reload action.
+  fireEvent.change(screen.getByLabelText("Document title"), { target: { value: "Board deck v2" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save version" }));
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Draft changed elsewhere"));
+  expect(within(serverSaveIndicator()).getByRole("button", { name: "Reload server copy" })).toBeInTheDocument();
+  expect(creates).toBe(1);
+});
+
+test("a server deck opened by id enters the deck editor bound to its server revision", async () => {
+  const deck = JSON.stringify({
+    schema: "aperture-deck-v1",
+    title: "Kickoff",
+    theme: {},
+    slides: [
+      { id: "s1", layout: "title", title: [{ text: "Kickoff" }], subtitle: [{ text: "Q4 plan" }], notes: "" },
+      { id: "s2", layout: "title-bullets", title: [{ text: "Agenda" }], bullets: [{ runs: [{ text: "Roadmap review" }], level: 0 }], notes: "" },
+    ],
+  });
+  const calls = installDraftsApiFetchMock({
+    get: () => jsonResponse(serverDeckSnapshot("deck-srv-9", "Kickoff", deck, 3)),
+    update: (_id, body) => jsonResponse(serverDeckSnapshot("deck-srv-9", "Kickoff", String(body.content), 4)),
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" initialServerDraftId="deck-srv-9" />);
+
+  expect(await screen.findByRole("button", { name: "Document", exact: true })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Deck", exact: true })).toHaveAttribute("aria-pressed", "true"));
+  expect(screen.getByLabelText("Document title")).toHaveValue("Kickoff");
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saved"));
+
+  fireEvent.change(screen.getByLabelText("Document title"), { target: { value: "Kickoff (final)" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save version" }));
+  await waitFor(() => expect(calls.some((call) => call.method === "PUT")).toBe(true));
+  const put = calls.find((call) => call.method === "PUT");
+  expect(put?.url).toContain("/api/drafts/deck-srv-9");
+  expect(put?.body).toMatchObject({ expected_revision: 3 });
+  expect(String(put?.body?.content)).toContain("Roadmap review");
+});
+
+
+test("saved draft loading failures are visible and selecting the card retries", async () => {
+  const saved = serverDraftSnapshot("open-retry", "Retry review", "<p>Recovered review.</p>", 1);
+  let available = false;
+  installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => available ? jsonResponse(saved) : offlineResponse() });
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Retry review/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Could not open");
+  expect(screen.getAllByText("Document history")).toHaveLength(1);
+  available = true;
+  fireEvent.click(screen.getByRole("button", { name: /Restore Retry review/ }));
+  await waitFor(() => expect(documentText()).toContain("Recovered review."));
+});
+
+test("slide layouts are directly browsable and applied to the selected slide", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Deck" }));
+  const gallery = screen.getByLabelText("Browse slide layouts");
+  expect(within(gallery).getAllByRole("button")).toHaveLength(7);
+  fireEvent.click(within(gallery).getByRole("button", { name: "Apply Two columns layout" }));
+  expect(within(gallery).getByRole("button", { name: "Apply Two columns layout" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Deck starters & brand themes" }));
+  expect(screen.getByLabelText("Deck starter templates")).toBeInTheDocument();
+});
+
+
+test("palette changes preserve slide text and can be undone", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Deck" }));
+  const title = screen.getByRole("textbox", { name: "Title slide title" });
+  title.innerHTML = "A title to keep";
+  fireEvent.input(title);
+  fireEvent.click(screen.getByRole("button", { name: "Apply Midnight color theme" }));
+  expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("A title to keep");
+  expect(screen.getByRole("button", { name: "Apply Midnight color theme" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  expect(screen.getByRole("button", { name: "Apply Aperture color theme" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("A title to keep");
+});
+
+test("local pending drafts can be archived without deleting their only copy", async () => {
+  window.localStorage.setItem(SCOPED_DRAFT_CACHE_KEY, JSON.stringify([{
+    id: "pending-archive", title: "Offline notes", content: "<p>Keep these notes.</p>",
+    summary: "Local changes", sourceLabel: "Local draft", updatedAt: new Date().toISOString(),
+    status: "complete", serverSavePending: true,
+  }]));
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive Offline notes" }));
+  await waitFor(() => expect(storedDraftHistory().find(item => item.id === "pending-archive")).toMatchObject({archived: true, content: "<p>Keep these notes.</p>"}));
+});
+
+
+test("reopening the same document from deck mode rehydrates its newly mounted editor", async () => {
+  const saved = serverDraftSnapshot("remount-doc", "Remount review", "<p>Document body survives mode changes.</p>", 1);
+  installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => jsonResponse(saved) });
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Remount review/ }));
+  await waitFor(() => expect(documentText()).toContain("Document body survives mode changes."));
+  fireEvent.click(screen.getByRole("button", { name: "Deck" }));
+  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: /Restore Remount review/ }));
+  await waitFor(() => expect(documentText()).toContain("Document body survives mode changes."));
+});
+
+
+test("the deck starters shortcut opens its assistant drawer on a phone", () => {
+  const width = window.innerWidth;
+  window.innerWidth = 390;
+  try {
+    render(<DocumentAssistantWorkspace data={sampleData} />);
+    fireEvent.click(screen.getByRole("button", { name: "Deck" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deck starters & brand themes" }));
+    expect(screen.getByRole("dialog", { name: "Assistant workflow" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Deck starter templates")).toBeInTheDocument();
+  } finally { window.innerWidth = width; }
+});
+
+
+test("restoring an old account draft rebuilds pages and keeps page numbers outside its body", async () => {
+  const paragraph = "This restored paragraph remains part of the paper. ".repeat(30);
+  const body = `<span class="document-page-label">Page 6</span><h2>Page 4 — Launch vehicle</h2>${Array.from({length: 8}, () => `<p>${paragraph}</p>`).join("")}<p>See page 4 of the reference.</p>`;
+  const saved = serverDraftSnapshot("old-pagination", "Archived paper", body, 1);
+  installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => jsonResponse(saved) });
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Archived paper/ }));
+  await waitFor(() => expect(documentBody().querySelectorAll("section.document-page").length).toBeGreaterThan(1));
+  expect(documentBody().querySelector(".document-page-label")).toBeNull();
+  expect(documentText()).not.toContain("Page 6");
+  expect(documentBody().querySelector("h2")).toHaveTextContent("Launch vehicle");
+  expect(documentBody().querySelector("h2")).not.toHaveTextContent("Page 4");
+  expect(documentText()).toContain("See page 4 of the reference.");
+  const navigator = screen.getByRole("navigation", { name: /Page navigation/ });
+  expect(documentBody()).not.toContainElement(navigator);
+  expect(navigator).toHaveAttribute("aria-label", `Page navigation. Page 1 of ${documentBody().querySelectorAll("section.document-page").length}`);
+});
+
+test("restored explicit page breaks remain real boundaries without label text", async () => {
+  const saved = serverDraftSnapshot("manual-pagination", "Manual breaks", "<p>First page.</p><hr class=\"document-page-break\"><p>Second page.</p>", 1);
+  installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => jsonResponse(saved) });
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Manual breaks/ }));
+  await waitFor(() => expect(documentBody().querySelectorAll("section.document-page")).toHaveLength(2));
+  expect(documentBody().querySelectorAll("section.document-page")[1]).toHaveAttribute("data-page-break-before", "manual");
+  expect(documentText()).toBe("First page.Second page.");
 });

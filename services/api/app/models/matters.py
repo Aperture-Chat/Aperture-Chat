@@ -27,6 +27,20 @@ from pydantic import (
     model_validator,
 )
 
+from app.models.deck_document import (
+    DECK_SANITIZER_VERSION,
+    MAX_DECK_CONTENT_BYTES,
+    MAX_DECK_SLIDES,
+    canonicalize_deck_json,
+    deck_content_sha256,
+)
+
+__all__ = [
+    "DECK_SANITIZER_VERSION",
+    "MAX_DECK_CONTENT_BYTES",
+    "MAX_DECK_SLIDES",
+]
+
 
 SIGNED_BIGINT_MAX = 9_223_372_036_854_775_807
 MAX_MATTER_NAME_CHARS = 200
@@ -37,6 +51,39 @@ MAX_DRAFT_REVISIONS = 200
 MAX_DRAFT_LIST_LIMIT = 200
 MAX_DRAFT_REVISION_LIST_LIMIT = 200
 DRAFT_SANITIZER_VERSION = "sanitized-html-v1"
+
+DraftKind = Literal["document", "deck"]
+DRAFT_KINDS: tuple[DraftKind, ...] = ("document", "deck")
+
+
+def sanitizer_version_for_kind(kind: str) -> str:
+    return DECK_SANITIZER_VERSION if kind == "deck" else DRAFT_SANITIZER_VERSION
+
+
+def max_content_bytes_for_kind(kind: str) -> int:
+    return MAX_DECK_CONTENT_BYTES if kind == "deck" else MAX_DRAFT_CONTENT_BYTES
+
+
+class DraftContentTooLarge(ValueError):
+    """Submitted content exceeds the bound for its draft kind."""
+
+
+def canonicalize_draft_content(content: str, kind: str) -> str:
+    """Canonical storable form for either kind; raises ``ValueError`` when unsafe."""
+
+    if not isinstance(content, str):
+        raise TypeError("Draft content must be a string.")
+    bound = max_content_bytes_for_kind(kind)
+    if len(content.encode("utf-8")) > bound:
+        raise DraftContentTooLarge(f"Draft content is limited to {bound} UTF-8 bytes.")
+    if kind == "deck":
+        return canonicalize_deck_json(content)
+    return sanitize_draft_html(content)
+
+
+def content_sha256_for_kind(content: str, kind: str) -> str:
+    return deck_content_sha256(content) if kind == "deck" else draft_content_sha256(content)
+
 
 MatterDeletionStatus = Literal["pending", "running", "failed", "ready", "complete"]
 MatterDeletionStage = Literal["application", "review", "knowledge", "legacy"]
@@ -142,6 +189,7 @@ class DraftDocument(BaseModel):
     owner_user_id: ScopedId
     matter_id: ScopedId | None = None
     archived: bool = False
+    kind: DraftKind = "document"
     title: str = Field(min_length=1, max_length=MAX_DRAFT_TITLE_CHARS)
     current_revision: int = Field(ge=1, le=MAX_DRAFT_REVISIONS)
     created_at: datetime
@@ -174,7 +222,7 @@ class DraftRevision(BaseModel):
     title: str = Field(min_length=1, max_length=MAX_DRAFT_TITLE_CHARS)
     content: str
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    sanitizer_version: str = Field(pattern=r"^sanitized-html-v[1-9][0-9]*$")
+    sanitizer_version: str = Field(pattern=r"^(sanitized-html|deck-json)-v[1-9][0-9]*$")
     created_at: datetime
 
     @field_validator("title")
@@ -185,8 +233,10 @@ class DraftRevision(BaseModel):
     @field_validator("content")
     @classmethod
     def validate_content_bound(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > MAX_DRAFT_CONTENT_BYTES:
-            raise ValueError(f"Draft content is limited to {MAX_DRAFT_CONTENT_BYTES} UTF-8 bytes.")
+        # Outer ceiling shared by both kinds; the per-kind bound is applied in
+        # validate_canonical_content once the sanitizer id is known.
+        if len(value.encode("utf-8")) > MAX_DECK_CONTENT_BYTES:
+            raise ValueError(f"Draft content is limited to {MAX_DECK_CONTENT_BYTES} UTF-8 bytes.")
         return value
 
     @field_validator("created_at")
@@ -194,15 +244,29 @@ class DraftRevision(BaseModel):
     def require_aware_timestamp(cls, value: datetime) -> datetime:
         return _aware_utc(value)
 
+    @property
+    def kind(self) -> DraftKind:
+        return "deck" if self.sanitizer_version == DECK_SANITIZER_VERSION else "document"
+
     @model_validator(mode="after")
     def validate_canonical_content(self) -> DraftRevision:
-        if self.sanitizer_version != DRAFT_SANITIZER_VERSION:
-            raise ValueError("Unsupported draft sanitizer version.")
-        if sanitize_draft_html(self.content) != self.content:
-            raise ValueError("Draft content is not canonical sanitized HTML.")
-        if draft_content_sha256(self.content) != self.content_sha256:
-            raise ValueError("Draft content digest does not match the stored snapshot.")
-        return self
+        if self.sanitizer_version == DRAFT_SANITIZER_VERSION:
+            if len(self.content.encode("utf-8")) > MAX_DRAFT_CONTENT_BYTES:
+                raise ValueError(
+                    f"Draft content is limited to {MAX_DRAFT_CONTENT_BYTES} UTF-8 bytes."
+                )
+            if sanitize_draft_html(self.content) != self.content:
+                raise ValueError("Draft content is not canonical sanitized HTML.")
+            if draft_content_sha256(self.content) != self.content_sha256:
+                raise ValueError("Draft content digest does not match the stored snapshot.")
+            return self
+        if self.sanitizer_version == DECK_SANITIZER_VERSION:
+            if canonicalize_deck_json(self.content) != self.content:
+                raise ValueError("Deck content is not canonical deck JSON.")
+            if deck_content_sha256(self.content) != self.content_sha256:
+                raise ValueError("Deck content digest does not match the stored snapshot.")
+            return self
+        raise ValueError("Unsupported draft sanitizer version.")
 
 
 class DraftSnapshot(BaseModel):
@@ -223,6 +287,8 @@ class DraftSnapshot(BaseModel):
             or revision.title != document.title
         ):
             raise ValueError("Draft document and current revision are inconsistent.")
+        if revision.sanitizer_version != sanitizer_version_for_kind(document.kind):
+            raise ValueError("Draft revision content does not match the document kind.")
         return self
 
 
@@ -360,6 +426,8 @@ class DraftCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=MAX_DRAFT_TITLE_CHARS)
     content: str
     matter_id: ScopedId | None = None
+    # Immutable after creation: a deck stays a deck and a document a document.
+    kind: DraftKind = "document"
 
 
 class DraftPutRequest(BaseModel):
