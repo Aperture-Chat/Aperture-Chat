@@ -1,11 +1,12 @@
 import { Check, ChevronDown, Star } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import "./model-select.css";
+import "./draft-model-menu.css";
 
 type DraftModelOption = { id: string; name: string; providerName: string };
 
 /** Focus previews a model; only explicit selection changes the draft's model.
- * Keep the default action outside the listbox so it is a real keyboard target. */
+ * Each model has a stable favorite button beside its selection button. */
 export function DraftModelMenu({
   agents,
   selectedAgent,
@@ -70,6 +71,7 @@ export function DraftModelMenu({
   }, [isOpen, hasAgents]);
 
   function onListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest(".model-default-button")) return;
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return;
     const index = Math.max(0, agents.findIndex((agent) => agent.id === active?.id));
     let next: number | undefined;
@@ -150,9 +152,9 @@ export function DraftModelMenu({
         <div className="model-menu">
           <div id={listId} role="listbox" aria-label="Select drafting model" onKeyDown={onListKeyDown}>
             {agents.map((agent) => (
+              <div className="model-option-row" key={agent.id}>
               <button
                 ref={(node) => { if (node) optionRefs.current.set(agent.id, node); else optionRefs.current.delete(agent.id); }}
-                key={agent.id}
                 type="button"
                 role="option"
                 tabIndex={agent.id === active?.id ? 0 : -1}
@@ -164,24 +166,22 @@ export function DraftModelMenu({
               >
                 <span><strong>{agent.name}</strong><small>{agent.providerName}</small></span>
                 <span className="model-option-indicators" aria-hidden="true">
-                  {agent.id === defaultAgentId && <Star size={13} fill="currentColor" />}
                   {agent.id === selected?.id && <Check size={16} />}
                 </span>
               </button>
+              <button
+                type="button"
+                className={`model-default-button ${agent.id === defaultAgentId ? "is-default" : ""}`}
+                aria-label={`Set ${agent.name} as default drafting model`}
+                aria-pressed={agent.id === defaultAgentId}
+                data-tooltip="Use as default for new drafts"
+                onClick={() => onSetDefault(agent.id)}
+              >
+                <Star size={16} fill={agent.id === defaultAgentId ? "currentColor" : "none"} aria-hidden="true" />
+              </button>
+              </div>
             ))}
           </div>
-          {active && (
-            <button
-              type="button"
-              className={`model-default-action ${active.id === defaultAgentId ? "is-default" : ""}`}
-              aria-label={`Set ${active.name} as default drafting model`}
-              aria-pressed={active.id === defaultAgentId}
-              onClick={() => { onSetDefault(active.id); close(); }}
-            >
-              <Star size={14} fill={active.id === defaultAgentId ? "currentColor" : "none"} aria-hidden="true" />
-              <span>{active.id === defaultAgentId ? "Default for new drafts" : "Use as default for new drafts"}<small>{active.name}</small></span>
-            </button>
-          )}
         </div>
       )}
     </div>
