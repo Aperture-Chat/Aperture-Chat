@@ -53,20 +53,31 @@ test("typeahead cycles matching drafting models and Space commits the focused ch
   expect(trigger).toHaveFocus();
 });
 
-test("the separate default action uses the focused model without selecting it", () => {
+test("every model has a stable favorite action that leaves the picker open without selecting", () => {
   const { trigger, onSelect, onSetDefault } = renderPicker();
   fireEvent.click(trigger);
   fireEvent.keyDown(document.activeElement!, { key: "End" });
   const listbox = screen.getByRole("listbox");
   const action = screen.getByRole("button", { name: "Set Gemini as default drafting model" });
-  expect(within(listbox).queryByRole("button")).not.toBeInTheDocument();
+  expect(within(listbox).getAllByRole("button")).toHaveLength(agents.length);
+  expect(screen.getByRole("button", { name: "Set Alpha as default drafting model" })).toHaveAttribute("aria-pressed", "true");
+  expect(action.closest(".model-option-row")).toContainElement(screen.getByRole("option", { name: /Gemini/ }));
+  fireEvent.keyDown(document.activeElement!, { key: "Home" });
+  expect(action).toHaveAccessibleName("Set Gemini as default drafting model");
   expect(action).toHaveAttribute("aria-pressed", "false");
   act(() => action.focus());
   expect(action).toHaveFocus();
-  expect(screen.getByRole("option", { name: /Gemini/ })).toHaveAttribute("tabindex", "0");
+  fireEvent.keyDown(action, { key: "Enter" });
+  fireEvent.keyDown(action, { key: " " });
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(screen.getByRole("listbox")).toBeInTheDocument();
   fireEvent.click(action);
   expect(onSetDefault).toHaveBeenCalledExactlyOnceWith("gemini");
   expect(onSelect).not.toHaveBeenCalled();
+  expect(action).toHaveFocus();
+  expect(screen.getByRole("listbox")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("option", { name: /Beta/ }));
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith("beta");
   expect(trigger).toHaveFocus();
 });
 
