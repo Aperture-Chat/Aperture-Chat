@@ -1,0 +1,36 @@
+/* Constrain the trigger itself, not just its flex wrapper: long model names
+   must shrink inside their own control instead of covering version actions. */
+.document-editor-topbar > .document-top-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.document-top-actions > .document-model-menu {
+  flex: 0 1 320px;
+  width: 320px;
+  max-width: 100%;
+}
+
+.document-model-menu > .select-button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.document-model-menu .model-select-label {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.document-top-actions > button {
+  flex: 0 0 auto;
+}
+
+.document-model-menu .model-option {
+  min-width: 0;
+}
+
+.document-model-menu .model-option strong,
+.document-model-menu .model-option small {
+  overflow-wrap: anywhere;
+}
