@@ -776,10 +776,24 @@ function contextImageAttachmentIds(messages: ChatMessage[]): string[] {
   return [...new Set(ids)].slice(-MAX_CONTEXT_IMAGE_ATTACHMENTS);
 }
 
+/** Fired whenever a thread's server-sync state changes; the shell badge listens. */
+export const CHAT_SYNC_UPDATED_EVENT = "aperture-chat-sync-updated";
+
+function notifyChatSyncChanged() {
+  try {
+    window.dispatchEvent(new Event(CHAT_SYNC_UPDATED_EVENT));
+  } catch {
+    // Badge refresh is best-effort.
+  }
+}
+
 export type ChatStore = {
   threads: ChatThread[];
   activeId: string;
   activeThread: ChatThread | null;
+  /** Threads whose newest messages exist only in this browser (last save failed). */
+  unsyncedThreadCount: number;
+  retryUnsyncedThreads: () => Promise<void>;
   model: string;
   enabledModels: ModelConfig[];
   /** True only when the currently open thread has a model request in flight. */
@@ -959,17 +973,33 @@ export function useChatStore(
       return saveChatThread(persona, thread)
         .then((saved) => {
           setThreads((current) =>
-            current.map((item) => (item.id === saved.id ? preservePendingTraceState(item, saved) : item)),
+            current.map((item) =>
+              item.id === saved.id
+                ? { ...preservePendingTraceState(item, saved), syncPending: false }
+                : item,
+            ),
           );
+          notifyChatSyncChanged();
           return saved;
         })
         .catch(() => {
-          // Local cache has already been updated. The next successful hydration/save reconciles the server.
+          // Local cache has already been updated. Flag the thread so the
+          // shell can show it as only-on-this-device until a retry succeeds.
+          setThreads((current) =>
+            current.map((item) => (item.id === thread.id ? { ...item, syncPending: true } : item)),
+          );
+          notifyChatSyncChanged();
           return null;
         });
     },
     [enabled, persona],
   );
+
+  /** Re-sends every thread whose last save failed; resolves when all settle. */
+  const retryUnsyncedThreads = useCallback(async () => {
+    const pending = threadsRef.current.filter((thread) => thread.syncPending && !isBlankNewChat(thread));
+    await Promise.all(pending.map((thread) => persistThread(thread)));
+  }, [persistThread]);
 
   const continuePendingAssistant = useCallback(
     (thread: ChatThread, pendingMessage: ChatMessage) => {
@@ -2189,10 +2219,17 @@ export function useChatStore(
     [activeId, data, enabled, fallbackModel, persistThread, persona, setThreadSending],
   );
 
+  const unsyncedThreadCount = useMemo(
+    () => threads.filter((thread) => thread.syncPending && !isBlankNewChat(thread)).length,
+    [threads],
+  );
+
   return {
     threads,
     activeId,
     activeThread,
+    unsyncedThreadCount,
+    retryUnsyncedThreads,
     model,
     enabledModels,
     isSending,
