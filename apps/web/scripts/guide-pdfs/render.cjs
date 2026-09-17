@@ -66,6 +66,7 @@ const CSS = `
   }
   code { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 0.86em;
     background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  a { color: var(--teal-strong); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
   .sec-marker { position: absolute; font-size: 2px; color: #fff; }
 
   /* ---- cover ---- */
@@ -87,10 +88,11 @@ const CSS = `
 
   /* ---- table of contents ---- */
   .toc { page-break-after: always; }
-  .toc h2 { font-size: 17pt; font-weight: 800; letter-spacing: -0.01em; color: var(--text-strong); margin-bottom: 16px; }
-  .toc-part { margin: 14px 0 4px; font-size: 8.5pt; font-weight: 800; letter-spacing: 0.09em;
+  .toc h2 { font-size: 17pt; font-weight: 800; letter-spacing: -0.01em; color: var(--text-strong); margin-bottom: 12px; }
+  .toc-part { margin: 12px 0 4px; font-size: 8.5pt; font-weight: 800; letter-spacing: 0.09em;
     text-transform: uppercase; color: var(--teal-strong); break-after: avoid; page-break-after: avoid; }
-  .toc-row { display: flex; align-items: baseline; gap: 8px; padding: 3.5px 0; font-size: 10.2pt; }
+  .toc-row { display: flex; align-items: baseline; gap: 8px; padding: 2.4px 0; font-size: 10.2pt;
+    break-inside: avoid; page-break-inside: avoid; }
   .toc-row .toc-num { color: var(--faint); min-width: 22px; font-variant-numeric: tabular-nums; }
   .toc-row .toc-title { font-weight: 600; color: var(--text); }
   .toc-row .toc-dots { flex: 1; border-bottom: 1.5px dotted var(--border-strong); transform: translateY(-3px); }
@@ -108,6 +110,9 @@ const CSS = `
 
   /* ---- sections ---- */
   .doc-section { margin-bottom: 26px; position: relative; }
+  .doc-section[data-section="help"] { break-inside: avoid; page-break-inside: avoid; }
+  .section-intro { position: relative; break-inside: avoid; page-break-inside: avoid;
+    break-after: avoid; page-break-after: avoid; }
   .doc-section h3 { font-size: 13.5pt; font-weight: 800; letter-spacing: -0.01em; color: var(--text-strong);
     display: flex; align-items: baseline; gap: 10px; break-after: avoid; page-break-after: avoid; }
   .doc-section h3 .sec-num { color: var(--teal); font-variant-numeric: tabular-nums; }
@@ -164,29 +169,41 @@ const UI_LABELS = [
   "Recent", "View all chats", "Search past work", "Search", "Help", "Dark mode", "Light mode", "Install app",
   "Management", "Admin console", "Platform owner console", "View as", "Usage this month", "Archived chats",
   "Sign out", "Save profile", "Cancel", "Create", "Profile", "Account", "Share",
+  "Security", "Manage security", "Set up authenticator", "Verify authenticator", "Authenticator code",
+  "Copy recovery codes", "Replace recovery codes", "Turn off verification", "Verify and enable MFA",
+  "Begin authenticator setup", "Use a recovery code instead", "Theme schedule", "Switch automatically",
+  "Light mode at", "Dark mode at", "Save schedule", "Only on this device", "Retry all", "Open Drafts",
+  "Clear list", "Hide this reminder", "Import to my account", "Commands",
   /* chat */
   "Ask anything...", "Shift+Enter", "Web search", "Tools", "Knowledge", "Web", "Agent", "Chat", "Send now",
   "Reasoning", "Fast", "Smart", "Copy", "Branch", "Regenerate response", "Stop this response", "Edit message",
   "Load prompt in new chat", "Transfer to Drafts", "Download", "PNG", "SVG", "Code", "Upload from computer",
   "Web page by link", "Attach from source", "Messages and model", "Token usage", "Sources gathered",
+  "Context window", "Tokens used", "Current chat", "Agent profile",
+  "Models in your organization", "Usable now", "Not available to you", "Provider offline", "Locked",
+  "Request access", "Withdraw request", "Refresh model access", "Why isn't a model listed?",
+  "MCP connections and resources", "Find a resource", "Stream replies", "Type shortcuts in chat",
+  "Send options", "Reply settings", "Resources", "Interactive platform guide", "Admin documentation", "Chat help",
   /* drafts and decks */
   "Draft format", "Document", "Deck", "Text size", "Superscript", "Subscript", "Highlight", "Clear formatting",
   "Web image", "Chart", "Table", "Divider", "Page break", "Inline AI edit", "Save version", "Compare versions",
   "Export deck", "Export", "Word document", "Markdown outline", "Markdown", "PowerPoint deck",
   "Print / Save as PDF", "Save your edits first", "Save version and export", "Save version and print",
   "Start a blank deck", "Convert into slides", "Add slide", "Title + bullets", "Title", "Two columns",
-  "Image + caption", "Quote", "Section", "Closing", "Edit selection with AI", "Apply AI edit",
+  "Image + caption", "Quote", "Section", "Closing", "Edit selection with AI", "Replace highlight",
   "Generate AI slide image", "Generate image", "Toggle AI slide images", "Use templates in chat",
   "Upload brand template", "Apply to deck", "Pitch deck", "Quarterly review", "Project kickoff",
   "Client proposal", "Training session", "Upload background…", "Use on every slide", "Remove from this slide",
   "Clear from all slides", "Speaker notes", "Present deck", "Exit", "Notes",
+  "Text", "Paragraph", "More", "Insert", "AI edit trail", "Assistant settings", "Apply MLA layout",
+  "Document history", "Draft history", "Archived", "Unarchive", "Choose a location", "Browser downloads",
   /* agents (the tab label matches the HTML-escaped text the renderer bolds) */
   "New Agent", "Prompts &amp; Skills", "Access", "Hermes",
   /* library */
   "Knowledge Bases", "Add Knowledge Base", "Add a web link", "Connect an API", "Tools Library and Connectors",
   "Connections", "Prompts", "Skills", "New Prompt", "New Skill",
   /* automations */
-  "New automation", "Run now", "Save automation", "Add step", "Once", "Weekly", "Cron expression", "Cron",
+  "New automation", "Run now", "Save automation", "Add step", "Once", "Daily", "Weekly", "Cron expression", "Cron",
   "Draft",
   /* admin console */
   "Users", "Groups", "Model Access", "SSO", "Analytics", "Audit", "Alerts", "Documentation", "Add User",
@@ -202,6 +219,8 @@ const UI_LABELS = [
   "User Prompt Activity", "Security Alerts", "Audit Trail", "Acknowledge", "Reopen", "CSV", "Email Delivery",
   "Alert Rules", "Alert Deliveries", "Suspicious-activity template", "New rule", "Action patterns",
   "Minimum severity", "Watched user", "Archive", "Show archived", "Restore",
+  "Access requests", "Grant through group", "Approve", "Decline", "Model access trace",
+  "Allowed, provider offline", "Usable", "Blocked",
   /* owner console */
   "Models", "Providers", "API Key Vault", "API Keys", "Org Settings", "Add Provider", "Sync Models",
   "Edit Connection", "Add Key", "Reveal", "Replace", "Edit details", "Connected", "Adapter needed",
@@ -219,6 +238,8 @@ const UI_LABELS = [
   "All owners, admins, and users", "Critical events", "Connector availability", "Agent approval activity",
   "Connectors", "Owner Audit", "SMTP host", "Port", "STARTTLS", "SSL/TLS", "From address",
   "Save Email Settings", "Send test email", "Create the first platform owner",
+  "Users can browse the model catalog",
+  "Require the platform authenticator after SSO", "Search index", "Rebuild index", "Backfilling",
 ];
 const LABEL_PATTERN = new RegExp(
   `(?<![\\w>])(${[...UI_LABELS].sort((a, b) => b.length - a.length).map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\w<])`,
@@ -233,7 +254,8 @@ function richText(text) {
     .replaceAll("Aperture Chat", BRAND)
     .replace(CODE_PATTERN, (match) => `<code>${match}</code>`)
     .replace(LABEL_PATTERN, "<strong>$1</strong>")
-    .replaceAll(BRAND, "Aperture Chat");
+    .replaceAll(BRAND, "Aperture Chat")
+    .replaceAll("https://aperturechat.com/guide.html", '<a href="https://aperturechat.com/guide.html">https://aperturechat.com/guide.html</a>');
 }
 
 function renderBlock(block) {
@@ -293,9 +315,9 @@ function renderGuideHtml(role, pageMap = {}) {
       const partSections = sections
         .filter((section) => section.part === part.id)
         .map(
-          (section) => `<section class="doc-section"><span class="sec-marker">[[s:${section.id}]]</span><h3><span class="sec-num">${numberOf.get(
+          (section) => `<section class="doc-section" data-section="${escapeHtml(section.id)}"><div class="section-intro"><span class="sec-marker">[[s:${section.id}]]</span><h3><span class="sec-num">${numberOf.get(
             section.id,
-          )}.</span>${escapeHtml(section.title)}</h3><p class="doc-summary">${escapeHtml(section.summary)}</p>${renderSectionFigure(section.id)}${section.blocks
+          )}.</span>${escapeHtml(section.title)}</h3><p class="doc-summary">${escapeHtml(section.summary)}</p>${renderSectionFigure(section.id)}</div>${section.blocks
             .map(renderBlock)
             .join("")}</section>`,
         )

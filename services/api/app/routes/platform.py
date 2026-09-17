@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
+from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.core.model_discovery import DiscoveredModel, ModelDiscoveryError, discover_provider_models
@@ -25,7 +28,11 @@ from app.core.alerting import (
 )
 from app.core.audit_severity import decorate_audit_events
 from app.core.mailer import MailerError, email_configured, send_email
-from app.core.policy import hermes_companion_allowed, require_platform_owner
+from app.core.policy import hermes_companion_allowed, model_access_allowed, require_platform_owner
+from app.core.provider_credential_expiry import parse_provider_credential_expiry
+from app.core.search_index import backfill_tenant
+from app.core.security import redact_metadata
+from app.repositories.search_index import SearchIndexUnavailable
 from app.core.usage_analytics import build_usage_summary
 from app.core.usage_budget import UsageBudgetError, UsageBudgetUnavailable, utc_usage_date
 from app.core.usage_budget_runtime import (
@@ -56,7 +63,13 @@ from app.models.schemas import (
     ProviderKeyCreateRequest,
     ProviderKeySecret,
     ProviderModelSyncResponse,
+    Role,
+    ProviderValidationResponse,
     ProviderUpdateRequest,
+    PlatformSetupProviderStatus,
+    PlatformSetupStatus,
+    PlatformSetupStep,
+    PlatformSetupTenantGrant,
     SecurityAlert,
     SecurityAlertUpdateRequest,
     ScimTokenCreateResponse,
@@ -487,6 +500,7 @@ def sync_provider_models(
         store, provider, discovered_models
     )
     provider.connected = True
+    _record_provider_sync(provider)
     provider_models = _provider_models(store, provider.id)
     source_label = _provider_sync_source_label(provider, source)
     try:
@@ -511,6 +525,7 @@ def sync_provider_models(
         provider.connected = False
         provider.last_sync = "Runtime test failed"
         provider.status_message = detail
+        _record_provider_validation(provider, "failed", None)
         store.record_audit(
             actor,
             "platform.provider_runtime_validation_failed",
@@ -527,6 +542,7 @@ def sync_provider_models(
 
     provider.last_sync = "Just synced"
     provider.status_message = f"{source_label} Runtime test passed with {runtime_model.name}."
+    _record_provider_validation(provider, "passed", runtime_model.id)
     message = (
         f"Synced {len(provider_models)} {provider.name} model"
         f"{'' if len(provider_models) == 1 else 's'} from the provider API. Runtime test passed with {runtime_model.name}."
@@ -631,6 +647,7 @@ def create_provider_key(
                 store, provider, discovered_models
             )
             provider.connected = True
+            _record_provider_sync(provider)
             provider_models = _provider_models(store, provider.id)
             try:
                 runtime_model = _validate_provider_runtime(
@@ -662,6 +679,7 @@ def create_provider_key(
                 provider.connected = False
                 provider.last_sync = "Runtime test failed"
                 provider.status_message = _provider_runtime_validation_failure(provider, exc)
+                _record_provider_validation(provider, "failed", None)
                 store.record_audit(
                     actor,
                     "platform.provider_runtime_validation_failed",
@@ -677,6 +695,7 @@ def create_provider_key(
             else:
                 provider.last_sync = "Just synced"
                 provider.status_message = f"{_provider_sync_source_label(provider, source)} Runtime test passed with {runtime_model.name}."
+                _record_provider_validation(provider, "passed", runtime_model.id)
                 store.record_audit(
                     actor,
                     "platform.provider_models_synced",
@@ -709,6 +728,443 @@ def create_provider_key(
     return key
 
 
+def _record_provider_validation(
+    provider: Provider,
+    outcome: str,
+    model_id: str | None,
+) -> None:
+    """Machine-readable twin of the display strings set around each runtime test."""
+
+    provider.last_validated_at = clock.now_iso()
+    provider.last_validation_status = outcome  # type: ignore[assignment]
+    provider.last_validation_model_id = model_id
+
+
+def _record_provider_sync(provider: Provider) -> None:
+    provider.last_synced_at = clock.now_iso()
+
+
+# One in-flight validation per provider so a double-click never fans out
+# duplicate upstream calls.
+_PROVIDER_VALIDATION_LOCKS: dict[str, threading.Lock] = {}
+_PROVIDER_VALIDATION_LOCKS_GUARD = threading.Lock()
+
+
+def _provider_validation_lock(provider_id: str) -> threading.Lock:
+    with _PROVIDER_VALIDATION_LOCKS_GUARD:
+        return _PROVIDER_VALIDATION_LOCKS.setdefault(provider_id, threading.Lock())
+
+
+@router.post("/providers/{provider_id}/validate")
+def validate_provider(
+    provider_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> ProviderValidationResponse:
+    """Run only the live runtime test (no catalog discovery) and record the outcome."""
+
+    require_platform_owner(actor)
+    provider = _get_provider(provider_id, store)
+    lock = _provider_validation_lock(provider.id)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A validation for this provider is already running.",
+        )
+    try:
+        started = time.monotonic()
+        try:
+            runtime_model = _validate_provider_runtime(store, provider)
+        except ModelGatewayAuthError as exc:
+            detail = _provider_runtime_auth_failure(store, provider, exc)
+            store.record_audit(
+                actor,
+                "platform.provider_runtime_validation_failed",
+                provider.id,
+                {
+                    "provider_id": provider.id,
+                    "provider_kind": provider.kind,
+                    "trigger": "validate",
+                    "status_code": exc.status_code,
+                },
+            )
+            store.save_runtime_state()
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail) from exc
+        except ModelGatewayError as exc:
+            detail = _provider_runtime_validation_failure(provider, exc)
+            provider.connected = False
+            provider.last_sync = "Runtime test failed"
+            provider.status_message = detail
+            _record_provider_validation(provider, "failed", None)
+            store.record_audit(
+                actor,
+                "platform.provider_runtime_validation_failed",
+                provider.id,
+                {
+                    "provider_id": provider.id,
+                    "provider_kind": provider.kind,
+                    "trigger": "validate",
+                    "error": str(exc),
+                },
+            )
+            store.save_runtime_state()
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail) from exc
+        latency_ms = int((time.monotonic() - started) * 1000)
+        provider.connected = True
+        provider.last_sync = "Validated now"
+        provider.status_message = f"Runtime test passed with {runtime_model.name}."
+        _record_provider_validation(provider, "passed", runtime_model.id)
+        store.record_audit(
+            actor,
+            "platform.provider_runtime_validated",
+            provider.id,
+            {
+                "provider_id": provider.id,
+                "provider_kind": provider.kind,
+                "runtime_test_model_id": runtime_model.id,
+                "runtime_test_model_name": runtime_model.name,
+                "latency_ms": latency_ms,
+            },
+        )
+        store.save_runtime_state()
+        return ProviderValidationResponse(
+            provider=provider,
+            model_id=runtime_model.id,
+            model_name=runtime_model.name,
+            latency_ms=latency_ms,
+        )
+    finally:
+        lock.release()
+
+
+@router.get("/setup-status")
+def setup_status(
+    tenant_id: str | None = Query(default=None),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> PlatformSetupStatus:
+    """Pure read of where the deployment stands on the six setup steps.
+
+    Every state comes from stored records; nothing here calls a provider. The
+    grant step evaluates the real access policy per active user so the summary
+    describes what people will actually get, not what group lists imply.
+    """
+
+    require_platform_owner(actor)
+    if tenant_id is not None and tenant_id not in store.tenants:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown tenant.")
+    return build_platform_setup_status(store, tenant_id=tenant_id)
+
+
+def build_platform_setup_status(store: SeedStore, *, tenant_id: str | None = None) -> PlatformSetupStatus:
+    providers = list(store.providers.values())
+    keys = list(store.provider_keys.values())
+    now = clock.now()
+    active_platform_keys = [k for k in keys if k.tenant_id is None and k.status.lower() == "active"]
+    providers_with_key = {k.provider_id for k in active_platform_keys}
+    inactive_keys = [k for k in keys if k.status.lower() != "active"]
+    expiring_soon = 0
+    for key in active_platform_keys:
+        expires = parse_provider_credential_expiry(key.expires)
+        if expires is not None and 0 <= (expires - now).total_seconds() <= 30 * 86_400:
+            expiring_soon += 1
+
+    connected = [p for p in providers if p.connected]
+    provider_step = PlatformSetupStep(
+        key="provider",
+        state="done" if providers else "todo",
+        summary=(
+            f"{len(providers)} provider{'' if len(providers) == 1 else 's'}, {len(connected)} connected"
+            if providers
+            else "No provider yet. Add the first provider to begin."
+        ),
+        counts={"providers": len(providers), "connected": len(connected)},
+    )
+
+    credential_step = PlatformSetupStep(
+        key="credential",
+        state=(
+            "done"
+            if providers_with_key and not inactive_keys and not expiring_soon
+            else "attention"
+            if providers_with_key
+            else "todo"
+        ),
+        summary=(
+            f"{len(providers_with_key)} of {len(providers)} provider{'' if len(providers) == 1 else 's'} "
+            f"{'has' if len(providers_with_key) == 1 else 'have'} an active platform key"
+            + (f"; {len(inactive_keys)} inactive" if inactive_keys else "")
+            + (f"; {expiring_soon} expiring within 30 days" if expiring_soon else "")
+            if providers
+            else "Add a provider before storing a credential."
+        ),
+        counts={
+            "providers_with_active_platform_key": len(providers_with_key),
+            "keys_inactive": len(inactive_keys),
+            "keys_expiring_30d": expiring_soon,
+        },
+    )
+
+    provider_statuses = [
+        PlatformSetupProviderStatus(
+            id=p.id,
+            name=p.name,
+            kind=p.kind,
+            connected=p.connected,
+            has_active_platform_key=p.id in providers_with_key,
+            supports_model_sync=_provider_supports_model_sync(p),
+            model_count=len(_provider_models(store, p.id)),
+            last_validation_status=p.last_validation_status,
+            last_validated_at=p.last_validated_at,
+            last_validation_model_id=p.last_validation_model_id,
+            last_synced_at=p.last_synced_at,
+            status_message=_redacted_status_message(p.status_message),
+        )
+        for p in providers
+    ]
+    validated = [p for p in providers if p.last_validation_status == "passed" and p.connected]
+    failed_validation = [p for p in providers if p.last_validation_status in {"failed", "auth_failed"}]
+    validate_step = PlatformSetupStep(
+        key="validate",
+        state=(
+            "done"
+            if validated and not failed_validation
+            else "attention"
+            if validated or failed_validation
+            else "todo"
+        ),
+        summary=(
+            f"{len(validated)} provider{'' if len(validated) == 1 else 's'} passed a live runtime test"
+            + (f"; {len(failed_validation)} failed" if failed_validation else "")
+            if validated or failed_validation
+            else "No provider has passed a live runtime test yet."
+        ),
+        counts={"validated": len(validated), "failed": len(failed_validation)},
+        providers=provider_statuses,
+    )
+
+    synced_models = [m for m in store.models.values() if not m.is_custom]
+    never_synced = [
+        p for p in providers if _provider_supports_model_sync(p) and not p.last_synced_at and not _provider_models(store, p.id)
+    ]
+    manual_catalog = [p for p in providers if not _provider_supports_model_sync(p)]
+    catalog_step = PlatformSetupStep(
+        key="catalog",
+        state="done" if synced_models else "todo",
+        summary=(
+            f"{len(synced_models)} model{'' if len(synced_models) == 1 else 's'} in the catalog"
+            + (f"; {len(never_synced)} provider{'' if len(never_synced) == 1 else 's'} never synced" if never_synced else "")
+            + (f"; {len(manual_catalog)} with a manual catalog" if manual_catalog else "")
+            if synced_models
+            else "No models in the catalog yet. Sync a connected provider."
+        ),
+        counts={
+            "synced_models": len(synced_models),
+            "providers_never_synced": len(never_synced),
+            "providers_without_discovery": len(manual_catalog),
+        },
+    )
+
+    enabled_models = [m for m in store.models.values() if m.platform_enabled]
+    disabled_models = [m for m in store.models.values() if not m.platform_enabled]
+    enable_step = PlatformSetupStep(
+        key="enable",
+        state="done" if enabled_models else "todo",
+        summary=(
+            f"{len(enabled_models)} model{'' if len(enabled_models) == 1 else 's'} enabled, {len(disabled_models)} disabled"
+            if store.models
+            else "Enable models once the catalog has synced."
+        ),
+        counts={"enabled_models": len(enabled_models), "disabled_models": len(disabled_models)},
+    )
+
+    tenants = (
+        [store.tenants[tenant_id]] if tenant_id is not None else list(store.tenants.values())
+    )
+    per_tenant: list[PlatformSetupTenantGrant] = []
+    total_users_with_model = 0
+    total_active_users = 0
+    total_groups_with_model = 0
+    total_groups = 0
+    total_pending_requests = 0
+    for tenant in tenants:
+        groups = [g for g in store.groups.values() if g.tenant_id == tenant.id]
+        model_group_ids = {gid for m in enabled_models for gid in m.group_ids}
+        groups_with_model = [g for g in groups if g.id in model_group_ids]
+        users = [
+            u
+            for u in store.users.values()
+            if u.tenant_id == tenant.id and u.active and u.role != Role.PLATFORM_OWNER
+        ]
+        users_with_model = [
+            u for u in users if any(model_access_allowed(u, m) for m in enabled_models)
+        ]
+        try:
+            pending = store.model_access_request_repository.count_pending(tenant_id=tenant.id)
+        except Exception:  # noqa: BLE001 - the wizard is read-only and must render
+            pending = 0
+        per_tenant.append(
+            PlatformSetupTenantGrant(
+                tenant_id=tenant.id,
+                tenant_name=tenant.name,
+                groups_total=len(groups),
+                groups_with_any_model=len(groups_with_model),
+                active_users=len(users),
+                active_users_with_model=len(users_with_model),
+                pending_access_requests=pending,
+            )
+        )
+        total_users_with_model += len(users_with_model)
+        total_active_users += len(users)
+        total_groups_with_model += len(groups_with_model)
+        total_groups += len(groups)
+        total_pending_requests += pending
+
+    enabled_with_groups = [m for m in enabled_models if m.group_ids]
+    grant_step = PlatformSetupStep(
+        key="grant",
+        state=(
+            "done"
+            if enabled_with_groups and total_users_with_model > 0 and not total_pending_requests
+            else "attention"
+            if enabled_with_groups or total_pending_requests
+            else "todo"
+        ),
+        summary=(
+            f"{len(enabled_with_groups)} enabled model{'' if len(enabled_with_groups) == 1 else 's'} granted to groups; "
+            f"{total_users_with_model} of {total_active_users} active user{'' if total_active_users == 1 else 's'} can use at least one model"
+            + (f"; {total_pending_requests} access request{'' if total_pending_requests == 1 else 's'} waiting" if total_pending_requests else "")
+            if enabled_models
+            else "Grant models to groups once some are enabled."
+        ),
+        counts={
+            "enabled_models_with_groups": len(enabled_with_groups),
+            "enabled_models_without_groups": len(enabled_models) - len(enabled_with_groups),
+            "groups_with_any_model": total_groups_with_model,
+            "groups_total": total_groups,
+            "active_users_with_group": total_users_with_model,
+            "active_users_without_group": total_active_users - total_users_with_model,
+            "pending_access_requests": total_pending_requests,
+        },
+        per_tenant=per_tenant,
+    )
+
+    steps = [provider_step, credential_step, validate_step, catalog_step, enable_step, grant_step]
+    ready = (
+        all(step.state != "todo" for step in steps)
+        and bool(enabled_models)
+        and bool(enabled_with_groups)
+        and total_users_with_model > 0
+    )
+    return PlatformSetupStatus(steps=steps, ready_for_users=ready, generated_at=clock.now_iso())
+
+
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(api[_-]?key|secret|token|bearer|password|authorization)\b\s*[=:]?\s*\S+"
+)
+_SECRET_SHAPE = re.compile(r"\b(?:sk|rk|pk|xai|gsk|ant)-[A-Za-z0-9_\-]{8,}|\b[A-Za-z0-9_\-]{32,}\b")
+
+
+class SearchIndexTenantStatus(BaseModel):
+    tenant_id: str
+    tenant_name: str
+    ready: bool
+    backfill_revision: int
+    backfill_completed_at: str | None
+    fts_mode: str
+    entry_count: int
+
+
+class SearchIndexStatusResponse(BaseModel):
+    enabled: bool
+    tenants: list[SearchIndexTenantStatus]
+    total_entries: int
+
+
+def _search_index_status(store: SeedStore) -> SearchIndexStatusResponse:
+    repository = store.search_index_repository
+    states = {state.tenant_id: state for state in repository.states()}
+    tenants: list[SearchIndexTenantStatus] = []
+    for tenant in store.tenants.values():
+        state = states.get(tenant.id)
+        tenants.append(
+            SearchIndexTenantStatus(
+                tenant_id=tenant.id,
+                tenant_name=tenant.name,
+                ready=bool(state and state.ready),
+                backfill_revision=state.backfill_revision if state else 0,
+                backfill_completed_at=(
+                    state.backfill_completed_at.isoformat()
+                    if state and state.backfill_completed_at
+                    else None
+                ),
+                fts_mode=state.fts_mode if state else "like",
+                entry_count=repository.count(tenant.id),
+            )
+        )
+    return SearchIndexStatusResponse(
+        enabled=get_settings().search_index_enabled,
+        tenants=tenants,
+        total_entries=repository.count(),
+    )
+
+
+@router.get("/search-index/status")
+def search_index_status(
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> SearchIndexStatusResponse:
+    require_platform_owner(actor)
+    try:
+        return _search_index_status(store)
+    except SearchIndexUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The search index is temporarily unavailable.",
+        ) from exc
+
+
+@router.post("/search-index/rebuild")
+def rebuild_search_index(
+    tenant_id: str | None = Query(default=None),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> SearchIndexStatusResponse:
+    """Re-derive every index row from the live records (idempotent, per tenant)."""
+
+    require_platform_owner(actor)
+    if tenant_id is not None and tenant_id not in store.tenants:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown tenant.")
+    targets = [tenant_id] if tenant_id else list(store.tenants)
+    try:
+        for target in targets:
+            backfill_tenant(store, target)
+    except SearchIndexUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The search index is temporarily unavailable.",
+        ) from exc
+    store.record_audit(
+        actor,
+        "platform.search_index_rebuilt",
+        ",".join(targets),
+        {"tenant_ids": targets},
+    )
+    return _search_index_status(store)
+
+
+def _redacted_status_message(message: str | None) -> str | None:
+    """Provider status strings can echo upstream error bodies; scrub anything
+    that looks like a credential before the wizard displays them."""
+
+    if not message:
+        return None
+    scrubbed = _SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=[redacted]", message)
+    scrubbed = _SECRET_SHAPE.sub("[redacted]", scrubbed)
+    redacted = redact_metadata({"message": scrubbed}).get("message")
+    return str(redacted)[:500] if redacted is not None else None
+
+
 def _mark_provider_keys_invalid(
     store: SeedStore,
     provider_id: str,
@@ -734,6 +1190,7 @@ def _provider_runtime_auth_failure(
     if tenant_id is None:
         provider.connected = False
         provider.last_sync = "Credential rejected"
+        _record_provider_validation(provider, "auth_failed", None)
     message = (
         f"{provider.name} rejected its provider key with HTTP {exc.status_code}. "
         "Paste a valid provider-generated key, make sure billing or credits are available, then sync models again."

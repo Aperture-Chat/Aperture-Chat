@@ -1,5 +1,11 @@
 # Data Retention & Tagging Plan
 
+Current implementation (September 17, 2026): both consoles group schedules,
+classification, tag review, and legal holds under **Audit → Data Retention**.
+Use **Schedule and rules** for configuration and **Tags and holds** for chats.
+Automatic deletion defaults off (Forever). See [Chat retention and classification](../RETENTION.md)
+for the implemented behavior and limits. The August progress notes below are historical.
+
 Status: APPROVED Aug 16 2026; Phase 1 (Foundations) and the Phase 2 core are
 implemented and live on the dev instance, uncommitted: generic MCP
 auto-tagging, a shared RetentionPanel in BOTH consoles (admin Policies tab +

@@ -17,3 +17,4 @@ export * from "./api/agents";
 export * from "./api/automations";
 export * from "./api/assets";
 export * from "./api/deckTemplates";
+export * from "./api/modelAccess";

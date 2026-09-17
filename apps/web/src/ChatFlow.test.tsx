@@ -232,6 +232,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // The shell keeps the open thread in the URL; reset it between tests.
+  window.history.pushState({}, "", "/");
   if (originalCreateObjectUrl) {
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
@@ -1512,7 +1514,7 @@ test("use in chat from Agents sends the selected agent profile runtime", async (
 
   openChatHistorySection("Recent");
   expect(await screen.findByText("No recent chats.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Agents/Automations" }));
+  fireEvent.click(screen.getByRole("link", { name: "Agents/Automations" }));
 
   const profileCard = (await screen.findByText("Client Update Agent")).closest(".agent-profile-card");
   expect(profileCard).not.toBeNull();

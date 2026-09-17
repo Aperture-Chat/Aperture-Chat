@@ -19,6 +19,7 @@ import { AutomationsConsole } from "./components/AutomationsConsole";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { SessionRestoreScreen } from "./components/SessionRestoreScreen";
 import { FirstRunWelcome } from "./components/FirstRunWelcome";
+import { ModelAccessExplainer } from "./components/ModelAccessExplainer";
 import {
   createAdminConnectorConfig,
   bulkCreateAdminGroups,
@@ -134,8 +135,19 @@ import {
   revokeAccountApiKey,
   submitIssueReport,
 } from "./lib/api";
-import { useChatStore } from "./lib/chatStore";
+import { isBlankNewChat, useChatStore } from "./lib/chatStore";
 import { markdownToPlainText } from "./lib/markdown";
+import {
+  DEFAULT_ROUTE,
+  defaultRouteForView,
+  parsePath,
+  routeForRole,
+  routeLabel,
+  routesEqual,
+  viewKeyForRoute,
+  type AppRoute,
+} from "./lib/appRoute";
+import { useAppRoute, type PopInterceptor } from "./lib/useAppRoute";
 import { useGlobalTooltip } from "./lib/useGlobalTooltip";
 import {
   detectMobilePlatform,
@@ -188,13 +200,8 @@ export function App() {
     readInitialSessionUserId(),
   );
   const [data, setData] = useState<BootstrapData>(sampleData);
-  const [view, setView] = useState<ViewKey>("chat");
-  const [libraryTab, setLibraryTab] = useState<"knowledge" | "tools">("knowledge");
-  const [agentsSection, setAgentsSection] = useState<"agents" | "automations">("agents");
   const [draftSessionKey, setDraftSessionKey] = useState(0);
   const [draftImport, setDraftImport] = useState<DraftImportPayload | null>(null);
-  /** Server draft id a search hit asked to open fully loaded in the Drafter. */
-  const [draftOpenServerId, setDraftOpenServerId] = useState<string | null>(null);
   const draftNavigationGuardRef = useRef<DraftNavigationGuard | null>(null);
   const registerDraftNavigationGuard = useCallback((guard: DraftNavigationGuard | null) => {
     draftNavigationGuardRef.current = guard;
@@ -206,11 +213,32 @@ export function App() {
     if (guard) guard(label, proceed);
     else proceed();
   }, []);
+  // Browser back/forward runs through the same drafts guard as rail clicks.
+  const interceptPop = useCallback<PopInterceptor>((next, proceed) => {
+    requestWorkspaceNavigation(routeLabel(next), proceed);
+  }, [requestWorkspaceNavigation]);
+  const router = useAppRoute(interceptPop);
+  const { route, navigate } = router;
+  const view = viewKeyForRoute(route);
+  /* A deep link opened while signed out is remembered (as a parsed route,
+   * never a raw string) and restored after sign-in through the role gate. */
+  const returnToRef = useRef<AppRoute | null>(
+    sessionUserId ? null : parsePath(window.location.pathname),
+  );
+  const unknownPathNoticeRef = useRef(router.unknownPath);
+  /* Where a fresh sign-in lands: the remembered deep link when there is one,
+   * otherwise the caller's default, always passed through the role gate. */
+  const landAfterSignIn = useCallback((role: Role, fallback: AppRoute = DEFAULT_ROUTE) => {
+    const pending = returnToRef.current;
+    returnToRef.current = null;
+    const target = pending && !routesEqual(pending, DEFAULT_ROUTE) ? pending : fallback;
+    navigate(routeForRole(target, role), { replace: true });
+  }, [navigate]);
   const [requestedAgentId, setRequestedAgentId] = useState<string | null>(null);
   const [helpDrawerRequestKey, setHelpDrawerRequestKey] = useState(0);
   const [adminDocumentationRequestKey, setAdminDocumentationRequestKey] = useState(0);
   const [ownerDocumentationRequestKey, setOwnerDocumentationRequestKey] = useState(0);
-  const [platformSetupRequestKey, setPlatformSetupRequestKey] = useState(0);
+  const [modelAccessExplainerOpen, setModelAccessExplainerOpen] = useState(false);
   const [firstRunGuideRequest, setFirstRunGuideRequest] = useState<FirstRunGuideRequest | null>(null);
   const [pwaInstallPlatform, setPwaInstallPlatform] = useState<MobilePlatform | null>(null);
   /* Which mobile OS this browser tab runs on, or null on desktop and inside
@@ -370,7 +398,6 @@ export function App() {
         setData(loaded);
         setSessionHydrated(true);
         setBootstrapError(null);
-        setView((current) => resolveViewForRole(current, loaded.me.role));
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -381,7 +408,8 @@ export function App() {
           setSessionUserId(null);
           setData(sampleData);
           setSessionHydrated(false);
-          setView("chat");
+          returnToRef.current = parsePath(window.location.pathname);
+          navigate(DEFAULT_ROUTE, { replace: true });
           setViewAsRole(null);
           setAuthError(null);
           setBootstrapError(null);
@@ -399,7 +427,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [sessionUserId, bootstrapAttempt]);
+  }, [sessionUserId, bootstrapAttempt, navigate]);
 
   // Finish an SSO sign-in when the OIDC callback redirected back with a session
   // token (or an honest error) in the URL fragment.
@@ -435,7 +463,7 @@ export function App() {
           setData(result.bootstrap);
           setSessionHydrated(true);
           setViewAsRole(null);
-          setView("chat");
+          landAfterSignIn(result.bootstrap.me.role);
           setBootstrapError(null);
           queueFirstRunGuide(result.bootstrap.me);
         })
@@ -465,7 +493,7 @@ export function App() {
         setData(result.bootstrap);
         setSessionHydrated(true);
         setViewAsRole(null);
-        setView("chat");
+        landAfterSignIn(result.bootstrap.me.role);
         setBootstrapError(null);
         queueFirstRunGuide(result.bootstrap.me);
       })
@@ -480,7 +508,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [queueFirstRunGuide]);
+  }, [queueFirstRunGuide, landAfterSignIn]);
 
   const handleAuthLogin = useCallback(async (payload: AuthLoginRequest) => {
     setAuthLoading(true);
@@ -500,7 +528,7 @@ export function App() {
       setData(result.bootstrap);
       setSessionHydrated(true);
       setViewAsRole(null);
-      setView("chat");
+      landAfterSignIn(result.bootstrap.me.role);
       setBootstrapError(null);
       queueFirstRunGuide(result.bootstrap.me);
     } catch (error) {
@@ -508,7 +536,7 @@ export function App() {
     } finally {
       setAuthLoading(false);
     }
-  }, [queueFirstRunGuide]);
+  }, [queueFirstRunGuide, landAfterSignIn]);
 
   const completeForcedPasswordChange = useCallback(
     async (newPassword: string) => {
@@ -523,12 +551,12 @@ export function App() {
       setData(result.bootstrap);
       setSessionHydrated(true);
       setViewAsRole(null);
-      setView("chat");
+      landAfterSignIn(result.bootstrap.me.role);
       setBootstrapError(null);
       setPendingPasswordChange(null);
       queueFirstRunGuide(result.bootstrap.me);
     },
-    [pendingPasswordChange, queueFirstRunGuide],
+    [pendingPasswordChange, queueFirstRunGuide, landAfterSignIn],
   );
 
   const cancelForcedPasswordChange = useCallback(() => {
@@ -547,7 +575,7 @@ export function App() {
       setData(result.bootstrap);
       setSessionHydrated(true);
       setViewAsRole(null);
-      setView("platform");
+      landAfterSignIn(result.bootstrap.me.role, { kind: "platform", section: "org-settings" });
       setBootstrapError(null);
       queueFirstRunGuide(result.bootstrap.me);
     } catch (error) {
@@ -555,7 +583,7 @@ export function App() {
     } finally {
       setAuthLoading(false);
     }
-  }, [queueFirstRunGuide]);
+  }, [queueFirstRunGuide, landAfterSignIn]);
 
 
   const handleSignOut = useCallback(() => {
@@ -565,7 +593,8 @@ export function App() {
     setSessionUserId(null);
     setData(sampleData);
     setSessionHydrated(false);
-    setView("chat");
+    returnToRef.current = null;
+    navigate(DEFAULT_ROUTE, { replace: true });
     setViewAsRole(null);
     setBootstrapError(null);
     setAuthError(null);
@@ -580,7 +609,7 @@ export function App() {
         }
       });
     }
-  }, []);
+  }, [navigate]);
 
   const requestSignOut = useCallback(() => {
     requestWorkspaceNavigation("sign out", handleSignOut);
@@ -627,9 +656,78 @@ export function App() {
     });
   }, [data.me.role]);
 
+  /* The URL never grants access: once the real account is known, any route
+   * outside its role is replaced and the person is told so honestly. Also
+   * covers the View-as-role preview moving off an owner-only screen. */
   useEffect(() => {
-    setView((current) => resolveViewForRole(current, effectiveData.me.role));
-  }, [effectiveData.me.role]);
+    if (!sessionHydrated) return;
+    const gated = routeForRole(route, effectiveData.me.role);
+    if (routesEqual(gated, route)) return;
+    navigate(gated, { replace: true });
+    if (!viewAsRole) {
+      setAppNotice({
+        tone: "warning",
+        message: "That area is not available to your account, so you were returned to your workspace.",
+      });
+    }
+  }, [effectiveData.me.role, navigate, route, sessionHydrated, viewAsRole]);
+
+  useEffect(() => {
+    if (!sessionHydrated || !unknownPathNoticeRef.current) return;
+    unknownPathNoticeRef.current = false;
+    navigate(DEFAULT_ROUTE, { replace: true });
+    setAppNotice({ tone: "warning", message: "That page does not exist in this workspace." });
+  }, [navigate, sessionHydrated]);
+
+  /* Deep link to a specific chat: select it once the personal thread list has
+   * loaded; an id that is not in the actor's own list is reported, never fetched. */
+  const chatThreadIds = useMemo(() => chat.threads.map((thread) => thread.id).join("\u0000"), [chat.threads]);
+  const activeChatIsBlank = chat.activeThread ? isBlankNewChat(chat.activeThread) : true;
+  /* The thread id most recently reconciled between URL and store. A route
+   * whose id matches it carries no new request, so store-driven changes (a
+   * branch, a first message) never get reverted by the URL. */
+  const reconciledChatThreadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sessionHydrated || route.kind !== "chat") return;
+    const linked = route.threadId ?? null;
+    if (linked === reconciledChatThreadRef.current) return;
+    if (!linked) {
+      // `/chat` returns to whatever conversation is open; only the explicit
+      // New chat action blanks it. Reflect the open thread in the URL.
+      const current = activeChatIsBlank ? null : chat.activeId;
+      reconciledChatThreadRef.current = current;
+      if (current) navigate({ kind: "chat", threadId: current }, { replace: true });
+      return;
+    }
+    if (linked === chat.activeId) {
+      reconciledChatThreadRef.current = linked;
+      return;
+    }
+    if (!chat.hydrated) return;
+    if (chatThreadIds.split("\u0000").includes(linked)) {
+      reconciledChatThreadRef.current = linked;
+      chat.selectThread(linked);
+      return;
+    }
+    reconciledChatThreadRef.current = null;
+    navigate(DEFAULT_ROUTE, { replace: true });
+    setAppNotice({ tone: "warning", message: "That chat is not in your workspace. It may have been deleted." });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, chat.hydrated, chatThreadIds, sessionHydrated, navigate]);
+
+  /* Keep the address bar on the open thread when the store changes it (new
+   * chat, first message in a blank chat, branch, thread deleted). */
+  useEffect(() => {
+    if (!sessionHydrated || route.kind !== "chat") return;
+    if (route.threadId && route.threadId !== chat.activeId && route.threadId !== reconciledChatThreadRef.current) {
+      // A linked thread is still being resolved by the effect above.
+      return;
+    }
+    const desired: AppRoute = activeChatIsBlank ? { kind: "chat" } : { kind: "chat", threadId: chat.activeId };
+    reconciledChatThreadRef.current = desired.threadId ?? null;
+    if (!routesEqual(desired, route)) navigate(desired, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat.activeId, activeChatIsBlank, sessionHydrated]);
 
   const acknowledgeFirstRun = useCallback(() => {
     if (!sessionUserId || !firstRunGuideRequest) return;
@@ -692,39 +790,40 @@ export function App() {
     (id: string) => {
       requestWorkspaceNavigation("open another chat", () => {
         chat.selectThread(id);
-        setView("chat");
+        navigate({ kind: "chat", threadId: id });
       });
     },
-    [chat, requestWorkspaceNavigation],
+    [chat, navigate, requestWorkspaceNavigation],
   );
 
   const startNewChat = useCallback(() => {
     requestWorkspaceNavigation("start a new chat", () => {
       chat.newChat();
-      setView("chat");
+      navigate(DEFAULT_ROUTE);
     });
-  }, [chat, requestWorkspaceNavigation]);
+  }, [chat, navigate, requestWorkspaceNavigation]);
 
-  const handleViewChange = useCallback((nextView: ViewKey) => {
-    requestWorkspaceNavigation(nextView === "drafts" ? "start a new draft" : "leave Drafts", () => {
-      if (nextView === "drafts") {
+  /* Every voluntary route change funnels through here so the drafts guard
+   * runs and entering Drafts always starts from a fresh workspace instance. */
+  const navigateTo = useCallback((nextRoute: AppRoute, options: { replace?: boolean } = {}) => {
+    const label = nextRoute.kind === "drafts" ? routeLabel(nextRoute) : "leave Drafts";
+    requestWorkspaceNavigation(label, () => {
+      if (nextRoute.kind === "drafts") {
         setDraftImport(null);
-        setDraftOpenServerId(null);
         setDraftSessionKey((current) => current + 1);
       }
-      setView(nextView);
+      navigate(nextRoute, options);
     });
-  }, [requestWorkspaceNavigation]);
+  }, [navigate, requestWorkspaceNavigation]);
+
+  const handleViewChange = useCallback((nextView: ViewKey) => {
+    navigateTo(defaultRouteForView(nextView));
+  }, [navigateTo]);
 
   /** A draft search hit opens that document loaded, not a blank workspace. */
   const handleOpenDraftFromSearch = useCallback((draftId: string) => {
-    requestWorkspaceNavigation("open another draft", () => {
-      setDraftImport(null);
-      setDraftOpenServerId(draftId);
-      setDraftSessionKey((current) => current + 1);
-      setView("drafts");
-    });
-  }, [requestWorkspaceNavigation]);
+    navigateTo({ kind: "drafts", draftId });
+  }, [navigateTo]);
 
   const openHelpDrawer = useCallback(() => {
     setHelpDrawerRequestKey((current) => current + 1);
@@ -732,16 +831,15 @@ export function App() {
 
   const openAdminDocumentation = useCallback(() => {
     requestWorkspaceNavigation("open the administrator guide", () => {
-      setView("admin");
+      navigate({ kind: "admin", section: "users" });
       setAdminDocumentationRequestKey((current) => current + 1);
     });
-  }, [requestWorkspaceNavigation]);
+  }, [navigate, requestWorkspaceNavigation]);
 
   const handleTransferToDraft = useCallback(
     (message: ChatMessage) => {
       const threadTitle = chat.activeThread?.title ?? "Chat response";
       const title = transferredDraftTitle(threadTitle, message.content);
-      setDraftOpenServerId(null);
       setDraftImport({
         id: `${message.id}-${Date.now()}`,
         title,
@@ -751,9 +849,9 @@ export function App() {
         createdAtIso: message.completedAt || message.createdAtIso || message.executedAt,
       });
       setDraftSessionKey((current) => current + 1);
-      setView("drafts");
+      navigate({ kind: "drafts" });
     },
-    [chat.activeThread?.title],
+    [chat.activeThread?.title, navigate],
   );
 
   const adminApi = useMemo<AdminConsoleApi>(
@@ -1141,7 +1239,7 @@ export function App() {
   }, [authBrandName, authBrandLogoUrl, authBranding, sessionUserId]);
 
   const content = useMemo(() => {
-    if (view === "chat") {
+    if (route.kind === "chat") {
       return (
         <ChatWorkspace
           data={effectiveData}
@@ -1151,28 +1249,30 @@ export function App() {
           requestedAgentId={requestedAgentId}
           onRequestedAgentConsumed={() => setRequestedAgentId(null)}
           onTransferToDraft={handleTransferToDraft}
+          onExplainModelAccess={() => setModelAccessExplainerOpen(true)}
         />
       );
     }
-    if (view === "drafts") {
+    if (route.kind === "drafts") {
       return (
         <DocumentAssistantWorkspace
-          key={draftSessionKey}
+          key={`${draftSessionKey}:${route.draftId ?? ""}`}
           data={effectiveData}
           brandName={chatBrandName}
-          initialDraft={draftImport}
-          initialServerDraftId={draftOpenServerId}
+          initialDraft={route.draftId ? null : draftImport}
+          initialServerDraftId={route.draftId ?? null}
           actorUserId={effectiveData.me.id}
-          onCloseDraft={() => setView("chat")}
+          onCloseDraft={() => navigate(DEFAULT_ROUTE)}
           onNavigationGuardChange={registerDraftNavigationGuard}
         />
       );
     }
-    if (view === "platform" && effectiveData.me.role === "PLATFORM_OWNER") {
+    if (route.kind === "platform" && effectiveData.me.role === "PLATFORM_OWNER") {
       return (
         <PlatformConsole
           openDocumentationRequestKey={ownerDocumentationRequestKey}
-          openProvidersRequestKey={platformSetupRequestKey}
+          section={route.section}
+          onSectionChange={(section) => navigate({ kind: "platform", section })}
           data={effectiveData}
           onDataChange={setData}
           platformActions={platformActions}
@@ -1182,7 +1282,7 @@ export function App() {
       );
     }
     if (
-      view === "admin" &&
+      route.kind === "admin" &&
       ["PLATFORM_OWNER", "TENANT_ADMIN"].includes(effectiveData.me.role)
     ) {
       return (
@@ -1190,11 +1290,14 @@ export function App() {
           data={effectiveData}
           onDataChange={setData}
           adminApi={adminApi}
+          section={route.section}
+          onSectionChange={(section) => navigate({ kind: "admin", section })}
           openDocumentationRequestKey={adminDocumentationRequestKey}
         />
       );
     }
-    if (view === "agents") {
+    if (route.kind === "agents") {
+      const agentsSection = route.section;
       const agentTabs = (
         <SectionTabs
           ariaLabel="Agent workspace sections"
@@ -1203,7 +1306,7 @@ export function App() {
             { key: "automations", label: "Automations" },
           ]}
           active={agentsSection}
-          onSelect={(key) => setAgentsSection(key as "agents" | "automations")}
+          onSelect={(key) => navigate({ kind: "agents", section: key as "agents" | "automations" })}
         />
       );
       return (
@@ -1222,13 +1325,14 @@ export function App() {
           onUseInChat={(modelId) => {
             chat.setModel(modelId);
             setRequestedAgentId(modelId);
-            setView("chat");
+            navigate(DEFAULT_ROUTE);
           }}
         />
           )}
         </div>
       );
     }
+    const libraryTab = route.kind === "library" ? route.section : "knowledge";
     return (
       <LibraryConsole
         data={effectiveData}
@@ -1242,31 +1346,28 @@ export function App() {
               { key: "tools", label: "Tools" },
             ]}
             active={libraryTab}
-            onSelect={(key) => setLibraryTab(key as "knowledge" | "tools")}
+            onSelect={(key) => navigate({ kind: "library", section: key as "knowledge" | "tools" })}
           />
         }
       />
     );
   }, [
     adminApi,
-    agentsSection,
     effectiveData,
-    libraryTab,
     platformActions,
-    view,
+    route,
+    navigate,
     chat,
     chatBrandName,
     chatBrandLogoUrl,
     draftSessionKey,
     draftImport,
-    draftOpenServerId,
     registerDraftNavigationGuard,
     handleTransferToDraft,
     openAdminDocumentation,
     openHelpDrawer,
     adminDocumentationRequestKey,
     ownerDocumentationRequestKey,
-    platformSetupRequestKey,
     requestedAgentId,
     data.me.id,
   ]);
@@ -1332,6 +1433,7 @@ export function App() {
       onViewAsRoleChange={setViewAsRole}
       currentView={view}
       onViewChange={handleViewChange}
+      onNavigate={navigateTo}
       openHelpRequestKey={helpDrawerRequestKey}
       darkMode={darkMode}
       onToggleDarkMode={handleToggleDarkMode}
@@ -1398,16 +1500,20 @@ export function App() {
           onDismiss={acknowledgeFirstRun}
           onNavigate={(next) => {
             acknowledgeFirstRun();
-            if (next === "platform") setPlatformSetupRequestKey((key) => key + 1);
-            handleViewChange(next);
+            // The welcome action carries its destination section.
+            navigateTo(next);
+          }}
+          onOpenModelCatalog={() => {
+            acknowledgeFirstRun();
+            setModelAccessExplainerOpen(true);
           }}
           onGuide={() => {
             acknowledgeFirstRun();
             if (data.me.role === "PLATFORM_OWNER") {
-              handleViewChange("platform");
+              navigateTo({ kind: "platform", section: "org-settings" });
               setOwnerDocumentationRequestKey((key) => key + 1);
             } else if (data.me.role === "TENANT_ADMIN") {
-              handleViewChange("admin");
+              navigateTo({ kind: "admin", section: "users" });
               setAdminDocumentationRequestKey((key) => key + 1);
             } else {
               setHelpDrawerRequestKey((key) => key + 1);
@@ -1416,6 +1522,12 @@ export function App() {
         />
       )}
       {content}
+      {modelAccessExplainerOpen && sessionHydrated && (
+        <ModelAccessExplainer
+          userId={effectiveData.me.id}
+          onClose={() => setModelAccessExplainerOpen(false)}
+        />
+      )}
     </AppShell>
   );
 }
@@ -1489,20 +1601,6 @@ function previewRolesFor(role: Role): Role[] {
     return ["PLATFORM_OWNER", "TENANT_ADMIN", "USER"];
   if (role === "TENANT_ADMIN") return ["TENANT_ADMIN", "USER"];
   return [role];
-}
-
-function resolveViewForRole(view: ViewKey, role: Role): ViewKey {
-  if (view === "platform" && role !== "PLATFORM_OWNER") {
-    return role === "TENANT_ADMIN" ? "admin" : "chat";
-  }
-  if (
-    view === "admin" &&
-    role !== "PLATFORM_OWNER" &&
-    role !== "TENANT_ADMIN"
-  ) {
-    return "chat";
-  }
-  return view;
 }
 
 function transferredDraftTitle(threadTitle: string, content: string) {

@@ -24,7 +24,7 @@ test("console switches retain their track and keyboard focus between sections", 
   }));
   render(<App />);
   const primary = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primary).getByRole("button", { name: "Agents/Automations" }));
+  fireEvent.click(within(primary).getByRole("link", { name: "Agents/Automations" }));
   const track = await screen.findByRole("group", { name: "Agent workspace sections" });
   const agents = within(track).getByRole("button", { name: "Agents", exact: true });
   fireEvent.keyDown(agents, { key: "ArrowRight" });
@@ -38,7 +38,7 @@ test("console switches retain their track and keyboard focus between sections", 
   expect(agents).toHaveFocus();
   expect(track).toHaveAttribute("data-active-index", "0");
 
-  fireEvent.click(within(primary).getByRole("button", { name: "Knowledge/Tools" }));
+  fireEvent.click(within(primary).getByRole("link", { name: "Knowledge/Tools" }));
   const library = await screen.findByRole("group", { name: "Library sections" });
   fireEvent.keyDown(within(library).getByRole("button", { name: "Knowledge", exact: true }), { key: "End" });
   expect(library).toHaveAttribute("data-active-index", "1");
@@ -207,7 +207,7 @@ test("connector config mapping does not mark metadata-only connectors as configu
 test("opens the document assistant from the Drafts navigation item", async () => {
   render(<App />);
 
-  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Drafts" }));
 
   expect(
     await screen.findByRole("heading", { name: "Document Assistant" }),
@@ -224,7 +224,7 @@ test("opens the document assistant from the Drafts navigation item", async () =>
 test("Drafts navigation keeps edits until the user explicitly discards them", async () => {
   render(<App />);
 
-  const draftsButton = await screen.findByRole("button", { name: "Drafts" });
+  const draftsButton = await screen.findByRole("link", { name: "Drafts" });
   fireEvent.click(draftsButton);
 
   const editedText = "Manual draft text that must survive accidental navigation.";
@@ -251,7 +251,7 @@ test("Drafts navigation keeps edits until the user explicitly discards them", as
 
 test("global New chat navigation preserves an unsaved draft recovery copy", async () => {
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Drafts" }));
   const editor = await screen.findByRole("textbox", { name: "Document body" });
   editor.innerHTML = "<p>Keep this draft when starting a chat.</p>";
   fireEvent.input(editor);
@@ -263,7 +263,7 @@ test("global New chat navigation preserves an unsaved draft recovery copy", asyn
   fireEvent.click(within(confirmation).getByRole("button", { name: "Save copy and continue" }));
   expect(await screen.findByRole("button", { name: "Select model" })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Drafts" }));
+  fireEvent.click(screen.getByRole("link", { name: "Drafts" }));
   fireEvent.click((await screen.findAllByRole("button", { name: "Document history" }))[0]);
   fireEvent.click(await screen.findByRole("button", { name: /Restore Research notes \(unsaved copy\) from document history/ }));
   expect(await screen.findByRole("textbox", { name: "Document body" })).toHaveTextContent("Keep this draft when starting a chat.");
@@ -274,7 +274,7 @@ test("voluntary sign-out keeps a dirty draft open until confirmed", async () => 
   const logout = vi.fn(async () => new Response(JSON.stringify({ status: "logged_out" }), { status: 200 }));
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).includes("/api/auth/logout") ? logout() : originalFetch(input, init)));
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Drafts" }));
   fireEvent.change(await screen.findByLabelText("Document title"), { target: { value: "Unsaved title" } });
   setSessionToken("draft-browser-session");
   fireEvent.click(screen.getByRole("button", { name: /Account:/ }));
@@ -312,7 +312,7 @@ test("opening a draft search result waits for recovery before replacing the edit
     return new Response("Unavailable", { status: 503 });
   }));
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Drafts" }));
   fireEvent.change(await screen.findByLabelText("Document title"), { target: { value: "Unfinished research" } });
   fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }));
   fireEvent.change(within(screen.getByRole("dialog", { name: "Search past work" })).getByRole("combobox"), { target: { value: "policy" } });
@@ -371,7 +371,7 @@ test("transferring a chat response after opening a saved draft does not reopen t
 
 test("the unsaved-draft confirmation keeps focus when the search shortcut is pressed", async () => {
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Drafts" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Drafts" }));
   fireEvent.change(await screen.findByLabelText("Document title"), { target: { value: "Unfinished research" } });
   fireEvent.click(screen.getByRole("button", { name: "New chat", exact: true }));
   const confirmation = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
@@ -1398,8 +1398,12 @@ test("chat keeps provider setup errors out of the empty chat surface", async () 
 
   render(<App />);
 
-  expect(await screen.findByRole("button", { name: "No connected models" })).toBeDisabled();
+  // The empty picker is now a real action that opens the model access explainer.
+  const emptyPicker = await screen.findByRole("button", { name: /No connected models/ });
+  expect(emptyPicker).toBeEnabled();
   expect(screen.getByPlaceholderText("Connect a model provider to start chatting...")).toBeInTheDocument();
+  fireEvent.click(emptyPicker);
+  expect(await screen.findByRole("dialog", { name: "Models in your organization" })).toBeInTheDocument();
   expect(screen.queryByText("No usable model provider is connected")).not.toBeInTheDocument();
   expect(screen.queryByText(providerStatus)).not.toBeInTheDocument();
 });
@@ -1533,7 +1537,7 @@ test("knowledge bases load documents and sync through the knowledge API", async 
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -1601,7 +1605,7 @@ test("knowledge external connection setup lives in the API data tab", async () =
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -1709,7 +1713,7 @@ test("creates a knowledge base with its first web data source", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   fireEvent.click(
     await screen.findByRole("button", { name: "Add Knowledge Base" }),
@@ -1938,7 +1942,7 @@ test("uploads knowledge documents and reports indexed chunks", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2052,7 +2056,7 @@ test("knowledge API source shows OAuth client metadata fields and saves them", a
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
 
   const litigationRow = (await screen.findByText("Litigation Playbook")).closest(
@@ -2277,7 +2281,7 @@ test("deletes a single indexed knowledge document", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2368,7 +2372,7 @@ test("deletes a knowledge base through the admin API", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2439,7 +2443,7 @@ test("clears all knowledge bases through the admin API", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2506,7 +2510,7 @@ test("deletes a tool configuration through the admin API", async () => {
   render(<App />);
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }));
+  fireEvent.click(within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }));
   fireEvent.click(
     within(await screen.findByRole("group", { name: "Library sections" })).getByRole("button", {
       name: "Tools",
@@ -2588,7 +2592,7 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
   render(<App />);
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primaryNav).getByRole("button", { name: "Knowledge/Tools" }));
+  fireEvent.click(within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }));
   fireEvent.click(
     within(await screen.findByRole("group", { name: "Library sections" })).getByRole("button", {
       name: "Tools",
@@ -2767,4 +2771,120 @@ test("a late failed logout cannot affect a newly signed-in session", async () =>
   reject(new TypeError("Old logout unavailable"));
   await waitFor(() => expect(window.localStorage.getItem("aperture-session-token")).toBe("new-browser-session"));
   expect(screen.queryByText(/server could not confirm/)).not.toBeInTheDocument();
+});
+
+function bootstrapFetchFor(me: (typeof sampleData)["me"]) {
+  // Earlier tests may leave an in-memory session token; the persona path
+  // under test uses the plain bootstrap route.
+  setSessionToken(null);
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.includes("/api/bootstrap")) {
+      return json({
+        ...sampleData,
+        me,
+        visibleUsers:
+          me.role === "USER" ? [] : sampleData.users.filter((user) => user.role !== "PLATFORM_OWNER"),
+      });
+    }
+    if (url.includes("/api/admin/usage/summary") || url.includes("/api/admin/usage-summary")) {
+      return json({
+        totals: { messages: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 },
+        by_model: [], by_user: [], by_day: [], by_surface: [], backfilled_record_count: 0,
+      });
+    }
+    if (url.includes("/api/chat/threads")) {
+      return json([
+        {
+          id: "thread-linked",
+          owner_user_id: me.id,
+          title: "Linked thread",
+          model_id: "gpt-4o-mini",
+          group_id: null,
+          pinned: false,
+          used_agent: false,
+          updated_at: "2026-09-04T12:00:00Z",
+          messages: [
+            { id: "m-1", role: "user", content: "Hello from the linked thread.", createdAt: "12:00 PM", status: "ok" },
+          ],
+        },
+      ]);
+    }
+    return json([]);
+  });
+}
+
+test("deep link to an admin section opens that tab and the URL follows tab changes", async () => {
+  window.history.pushState({}, "", "/admin/groups");
+  vi.stubGlobal("fetch", bootstrapFetchFor(sampleData.users.find((user) => user.id === "user-admin") ?? sampleData.me));
+  render(<App />);
+  const tabs = await screen.findByRole("tablist", { name: "Admin sections" });
+  const groupsTab = within(tabs).getByRole("tab", { name: "Groups" });
+  await waitFor(() => expect(groupsTab).toHaveAttribute("aria-selected", "true"));
+  expect(window.location.pathname).toBe("/admin/groups");
+  const usersTab = within(tabs).getByRole("tab", { name: "Users" });
+  fireEvent.mouseDown(usersTab);
+  fireEvent.click(usersTab);
+  await waitFor(() => expect(window.location.pathname).toBe("/admin/users"));
+});
+
+test("a user pasting a platform-owner URL lands on chat with an honest notice", async () => {
+  window.history.pushState({}, "", "/platform/models");
+  const user = sampleData.users.find((candidate) => candidate.role === "USER") ?? { ...sampleData.me, role: "USER" as const };
+  window.localStorage.setItem(SESSION_STORAGE_KEY, user.id);
+  vi.stubGlobal("fetch", bootstrapFetchFor(user));
+  render(<App />);
+  expect(await screen.findByText(/not available to your account/)).toBeInTheDocument();
+  await waitFor(() => expect(window.location.pathname).toBe("/chat"));
+  expect(screen.queryByRole("tab", { name: "Providers" })).not.toBeInTheDocument();
+});
+
+test("deep link to a chat thread selects it after the thread list loads", async () => {
+  window.history.pushState({}, "", "/chat/thread-linked");
+  vi.stubGlobal("fetch", bootstrapFetchFor(sampleData.users.find((user) => user.id === "user-admin") ?? sampleData.me));
+  render(<App />);
+  expect(await screen.findByText("Hello from the linked thread.")).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/chat/thread-linked");
+});
+
+test("deep link to an unknown chat thread falls back to chat with a notice", async () => {
+  window.history.pushState({}, "", "/chat/thread-missing");
+  vi.stubGlobal("fetch", bootstrapFetchFor(sampleData.users.find((user) => user.id === "user-admin") ?? sampleData.me));
+  render(<App />);
+  expect(await screen.findByText(/That chat is not in your workspace/)).toBeInTheDocument();
+  await waitFor(() => expect(window.location.pathname).toBe("/chat"));
+});
+
+test("unknown paths fall back to chat and browser back returns to the previous screen", async () => {
+  window.history.pushState({}, "", "/not-a-screen");
+  vi.stubGlobal("fetch", bootstrapFetchFor(sampleData.users.find((user) => user.id === "user-admin") ?? sampleData.me));
+  render(<App />);
+  expect(await screen.findByText("That page does not exist in this workspace.")).toBeInTheDocument();
+  await waitFor(() => expect(window.location.pathname).toBe("/chat"));
+
+  const primary = await screen.findByRole("navigation", { name: "Primary" });
+  const agentsLink = within(primary).getByRole("link", { name: "Agents/Automations" });
+  expect(agentsLink).toHaveAttribute("href", "/agents");
+  fireEvent.click(agentsLink);
+  expect(await screen.findByRole("group", { name: "Agent workspace sections" })).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/agents");
+
+  // jsdom does not fire popstate on history.back(); simulate the browser.
+  window.history.pushState({}, "", "/chat");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Agent workspace sections" })).not.toBeInTheDocument());
+  expect(await screen.findByRole("button", { name: "Select model" })).toBeInTheDocument();
+});
+
+test("sign-out replaces the URL with the chat root", async () => {
+  window.history.pushState({}, "", "/library/tools");
+  vi.stubGlobal("fetch", bootstrapFetchFor(sampleData.users.find((user) => user.id === "user-admin") ?? sampleData.me));
+  render(<App />);
+  expect(await screen.findByRole("group", { name: "Library sections" })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Sign out/ }));
+  expect(await screen.findByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/chat");
 });

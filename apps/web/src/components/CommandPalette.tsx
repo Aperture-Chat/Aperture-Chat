@@ -5,6 +5,8 @@ import {
   BookOpen,
   Bot,
   CalendarClock,
+  ChevronRight,
+  Clock,
   FileText,
   Folder,
   FolderPlus,
@@ -13,6 +15,7 @@ import {
   PinOff,
   Search,
   Table2,
+  Terminal,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -31,8 +34,16 @@ import {
   type GlobalSearchHit,
   type GlobalSearchKind,
   type GlobalSearchSection,
+  type SearchIndexState,
   type SearchNavigation,
 } from "../lib/api/search";
+import {
+  filterCommands,
+  loadPaletteRecent,
+  rememberPaletteRecent,
+  type PaletteCommand,
+  type PaletteRecentItem,
+} from "../lib/commands";
 import type { ChatThread } from "../lib/types";
 import { ChatPreview } from "./ChatPreview";
 import { DraftPreview } from "./DraftPreview";
@@ -107,6 +118,7 @@ export function CommandPalette({
   onArchiveThread,
   onRestoreThread,
   onMoveThreadToFolder,
+  commands = [],
 }: {
   userId: string;
   /** Active tenant context, including for platform-owner matter and draft search. */
@@ -114,6 +126,8 @@ export function CommandPalette({
   /** Routes a backend `navigation` object; returns false when this build has no screen for it. */
   onNavigate: (navigation: SearchNavigation) => boolean;
   onClose: () => void;
+  /** Role-gated navigation and shell actions (">" prefix filters to these). */
+  commands?: PaletteCommand[];
   /** Local chat threads; enables hover previews and row actions on chat hits. */
   threads?: ChatThread[];
   /** Flattened folder tree for the move-to-folder menu on chat hits. */
@@ -125,6 +139,8 @@ export function CommandPalette({
 }) {
   const [query, setQuery] = useState("");
   const [sections, setSections] = useState<GlobalSearchSection[]>([]);
+  const [indexState, setIndexState] = useState<SearchIndexState | undefined>(undefined);
+  const [recent, setRecent] = useState<PaletteRecentItem[]>(() => loadPaletteRecent(userId));
   /** The query the current `sections` were fetched for; "" means none yet. */
   const [resultsQuery, setResultsQuery] = useState("");
   const [resultsScope, setResultsScope] = useState("");
@@ -143,7 +159,11 @@ export function CommandPalette({
     return map;
   }, [threads]);
 
-  const trimmed = query.trim();
+  const rawTrimmed = query.trim();
+  // ">" switches to command mode: no remote search, only role-gated commands.
+  const commandMode = rawTrimmed.startsWith(">");
+  const commandQuery = commandMode ? rawTrimmed.slice(1).trim() : rawTrimmed;
+  const trimmed = commandMode ? "" : rawTrimmed;
   const searchScope = JSON.stringify([userId, tenantSlug]);
 
   // Focus the input on open and hand focus back to the opener on close.
@@ -172,6 +192,7 @@ export function CommandPalette({
           if (controller.signal.aborted) return;
           setResultsScope(JSON.stringify([userId, tenantSlug]));
           setSections(response.sections.filter((section) => section.results.length > 0));
+          setIndexState(response.index_state);
           setResultsQuery(trimmed);
         })
         .catch((requestError: unknown) => {
@@ -189,7 +210,7 @@ export function CommandPalette({
     setActiveIndex(0);
     setNotice(null);
     setFolderMenuThreadId(null);
-  }, [trimmed]);
+  }, [rawTrimmed]);
 
   // Only results fetched for the query currently typed are rendered; while a
   // newer query is in flight the list shows a searching state instead.
@@ -197,9 +218,20 @@ export function CommandPalette({
   const showSections = trimmed && resultsAreCurrent ? sections : [];
   const resultItems = showSections.flatMap((section) => section.results);
   const searching = Boolean(trimmed) && !resultsAreCurrent && !error;
-  const itemCount = resultItems.length;
+  // Commands shown alongside results: everything in command mode or on the
+  // empty palette (top few), otherwise only those whose label matches.
+  const visibleCommands = useMemo(() => {
+    if (commandMode) return filterCommands(commands, commandQuery);
+    if (!rawTrimmed) return commands.slice(0, 6);
+    return filterCommands(commands, rawTrimmed).slice(0, 4);
+  }, [commandMode, commandQuery, commands, rawTrimmed]);
+  const visibleRecent = !rawTrimmed ? recent : [];
+  // One flat keyboard order: results, then recent, then commands.
+  const itemCount = resultItems.length + visibleRecent.length + visibleCommands.length;
   const boundedActive = itemCount === 0 ? -1 : Math.min(activeIndex, itemCount - 1);
-  const noMatches = Boolean(trimmed) && !searching && !error && resultItems.length === 0;
+  const noMatches =
+    Boolean(trimmed) && !searching && !error && resultItems.length === 0 && visibleCommands.length === 0;
+  const noCommands = commandMode && visibleCommands.length === 0;
 
   const itemId = (index: number) => `${baseId}-item-${index}`;
 
@@ -210,18 +242,33 @@ export function CommandPalette({
     document.getElementById(itemId(boundedActive))?.scrollIntoView?.({ block: "nearest" });
   });
 
-  const openHit = (hit: GlobalSearchHit) => {
+  const openHit = (hit: { id: string; kind: string; title: string; navigation: SearchNavigation }) => {
     if (onNavigate(hit.navigation)) {
+      setRecent(rememberPaletteRecent(userId, { id: hit.id, kind: hit.kind, title: hit.title, navigation: hit.navigation }));
       onClose();
       return;
     }
     setNotice(`"${hit.title}" has no screen in this build yet.`);
   };
 
+  const runCommand = (command: PaletteCommand) => {
+    onClose();
+    command.run();
+  };
+
   const activateItem = (index: number) => {
     if (index < 0) return;
-    const hit = resultItems[index];
-    if (hit) openHit(hit);
+    if (index < resultItems.length) {
+      openHit(resultItems[index]);
+      return;
+    }
+    const recentIndex = index - resultItems.length;
+    if (recentIndex < visibleRecent.length) {
+      openHit(visibleRecent[recentIndex]);
+      return;
+    }
+    const command = visibleCommands[recentIndex - visibleRecent.length];
+    if (command) runCommand(command);
   };
 
   const detailForHit = (hit: GlobalSearchHit) => {
@@ -483,7 +530,7 @@ export function CommandPalette({
           aria-label="Search results"
           style={{ overflowY: "auto", padding: "12px", display: "grid", gap: "12px", minHeight: "96px" }}
         >
-          {!trimmed && (
+          {!rawTrimmed && visibleRecent.length === 0 && (
             <div className="command-palette-intro">
               <span className="command-palette-intro-icon">
                 <MessageSquare size={18} aria-hidden="true" />
@@ -520,9 +567,85 @@ export function CommandPalette({
               </div>
             </div>
           ))}
+          {visibleRecent.length > 0 && (
+            <div role="group" aria-label="Recent">
+              <p style={groupLabelStyle}>Recent</p>
+              <div style={{ display: "grid", gap: "6px" }}>
+                {visibleRecent.map((item) => {
+                  flatIndex += 1;
+                  const index = flatIndex;
+                  const Icon = KIND_ICONS[item.kind as GlobalSearchKind] ?? Clock;
+                  return (
+                    <button
+                      key={itemId(index)}
+                      id={itemId(index)}
+                      role="option"
+                      aria-selected={index === boundedActive}
+                      className="drawer-row palette-option"
+                      type="button"
+                      tabIndex={-1}
+                      style={index === boundedActive ? { borderColor: "var(--teal)", background: "var(--teal-soft)" } : undefined}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => openHit(item)}
+                    >
+                      <Icon size={16} aria-hidden="true" />
+                      <span>
+                        <strong>{item.title}</strong>
+                        <small className="search-snippet">Opened recently</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {visibleCommands.length > 0 && (
+            <div role="group" aria-label="Commands">
+              <p style={groupLabelStyle}>Commands</p>
+              <div style={{ display: "grid", gap: "6px" }}>
+                {visibleCommands.map((command) => {
+                  flatIndex += 1;
+                  const index = flatIndex;
+                  return (
+                    <button
+                      key={command.id}
+                      id={itemId(index)}
+                      role="option"
+                      aria-selected={index === boundedActive}
+                      className="drawer-row palette-option palette-command"
+                      type="button"
+                      tabIndex={-1}
+                      style={index === boundedActive ? { borderColor: "var(--teal)", background: "var(--teal-soft)" } : undefined}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => runCommand(command)}
+                    >
+                      {command.group === "navigate" ? <ChevronRight size={16} aria-hidden="true" /> : <Terminal size={16} aria-hidden="true" />}
+                      <span>
+                        <strong>{command.label}</strong>
+                        {command.hint && <small className="search-snippet">{command.hint}</small>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!rawTrimmed && commands.length > 0 && (
+            <p style={statusLineStyle}>Type &gt; to see every command.</p>
+          )}
+          {noCommands && (
+            <p role="status" style={statusLineStyle}>
+              No commands match “{commandQuery}”.
+            </p>
+          )}
           {noMatches && (
             <p role="status" style={statusLineStyle}>
               No chats or workspace items found for “{trimmed}”.
+            </p>
+          )}
+          {trimmed && resultsAreCurrent && indexState === "backfilling" && (
+            <p role="status" style={statusLineStyle}>
+              Indexing your workspace… results may be incomplete until it finishes.
             </p>
           )}
           {notice && (

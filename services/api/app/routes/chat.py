@@ -31,6 +31,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from app.repositories.application_state import RetentionDeletedError
 from app.core import clock, hermes
 from app.core.retention import (
     SUBJECT_TAG_NAMESPACE,
@@ -685,7 +686,10 @@ def save_thread(
         updated_at=_format_upload_time(clock.now()),
         messages=_normalize_thread_message_times(payload.messages),
     )
-    saved = store.save_chat_thread(thread)
+    try:
+        saved = store.save_chat_thread(thread)
+    except RetentionDeletedError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
     store.record_audit(
         actor,
         "chat.thread_saved",
@@ -1010,7 +1014,8 @@ def delete_thread(
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat thread not found.")
     _assert_thread_write_scope(existing, actor)
-    store.delete_chat_thread(thread_id)
+    if store.delete_chat_thread(thread_id) is None:
+        raise HTTPException(status_code=409, detail="This chat is protected by a legal hold or changed during deletion. Refresh before trying again.")
     store.record_audit(
         actor,
         "chat.thread_deleted",

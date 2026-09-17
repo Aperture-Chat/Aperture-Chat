@@ -41,7 +41,9 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import type { PlatformSection } from "../lib/appRoute";
+import { SearchIndexCard } from "./SearchIndexCard";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
 import type {
@@ -358,6 +360,7 @@ type TenantPolicyState = {
   tenantAdminsCanCreateAdmins: boolean;
   defaultUserGroupEnabled: boolean;
   memoryEnabled: boolean;
+  usersCanBrowseModelCatalog: boolean;
 };
 
 const POLICY_FIELD_BY_KEY: Record<keyof TenantPolicyState, keyof PlatformSettings> = {
@@ -368,6 +371,7 @@ const POLICY_FIELD_BY_KEY: Record<keyof TenantPolicyState, keyof PlatformSetting
   tenantAdminsCanCreateAdmins: "tenant_admins_can_create_admins",
   defaultUserGroupEnabled: "default_user_group_enabled",
   memoryEnabled: "memory_enabled",
+  usersCanBrowseModelCatalog: "users_can_browse_model_catalog",
 };
 
 type OwnerUserDraftState = {
@@ -659,6 +663,8 @@ export function PlatformConsole({
   platformActions,
   openDocumentationRequestKey,
   openProvidersRequestKey,
+  section,
+  onSectionChange,
   onOpenAdminDocumentation,
   onOpenUserHelp,
 }: {
@@ -667,6 +673,9 @@ export function PlatformConsole({
   platformActions?: PlatformConsoleActions;
   openDocumentationRequestKey?: number;
   openProvidersRequestKey?: number;
+  /** Route-driven section; when provided the tabs are controlled by the URL. */
+  section?: PlatformSection;
+  onSectionChange?: (section: PlatformSection) => void;
   onOpenAdminDocumentation?: () => void;
   onOpenUserHelp?: () => void;
 }) {
@@ -680,6 +689,7 @@ export function PlatformConsole({
     tenantAdminsCanCreateAdmins: false,
     defaultUserGroupEnabled: true,
     memoryEnabled: false,
+    usersCanBrowseModelCatalog: true,
   });
   const [ownerUserDraft, setOwnerUserDraft] = useState<OwnerUserDraftState>({
     display_name: "",
@@ -742,7 +752,17 @@ export function PlatformConsole({
   const [ssoTestResult, setSsoTestResult] = useState<SsoTestResult | null>(null);
   // Honest default: disconnected until the backend reports configured env credentials.
   const [elasticStatus, setElasticStatus] = useState<ElasticStatus | null>(null);
-  const [activeSection, setActiveSection] = useState(openProvidersRequestKey ? "providers" : "org-settings");
+  const [localSection, setLocalSection] = useState<PlatformSection>(
+    section ?? (openProvidersRequestKey ? "providers" : "org-settings"),
+  );
+  const activeSection: PlatformSection = section ?? localSection;
+  const setActiveSection = useCallback(
+    (next: PlatformSection) => {
+      setLocalSection(next);
+      onSectionChange?.(next);
+    },
+    [onSectionChange],
+  );
   const [showProviderForm, setShowProviderForm] = useState(false);
   const [showKeyForm, setShowKeyForm] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -801,7 +821,6 @@ export function PlatformConsole({
   const [retentionTagged, setRetentionTagged] = useState<RetentionTaggedThread[] | null>(null);
   const [retentionError, setRetentionError] = useState<string | null>(null);
   const [retentionRefreshToken, setRetentionRefreshToken] = useState(0);
-  const [promptPanelView, setPromptPanelView] = useState<"prompts" | "tags">("prompts");
   // Matter labels and retention tags per thread, folded into the prompt
   // phrase search so client/matter numbers find their conversations.
   const promptSearchExtras = useMemo(() => {
@@ -995,6 +1014,7 @@ export function PlatformConsole({
     if (!openProvidersRequestKey) return;
     setActiveSection("providers");
     setShowDocumentation(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openProvidersRequestKey]);
 
   useEffect(() => {
@@ -1250,6 +1270,7 @@ export function PlatformConsole({
           tenantAdminsCanCreateAdmins: Boolean(settings.tenant_admins_can_create_admins),
           defaultUserGroupEnabled: settings.default_user_group_enabled,
           memoryEnabled: Boolean(settings.memory_enabled),
+          usersCanBrowseModelCatalog: settings.users_can_browse_model_catalog !== false,
         });
       })
       .catch(() => {
@@ -1877,6 +1898,7 @@ export function PlatformConsole({
           tenantAdminsCanCreateAdmins: Boolean(saved.tenant_admins_can_create_admins),
           defaultUserGroupEnabled: saved.default_user_group_enabled,
           memoryEnabled: Boolean(saved.memory_enabled),
+          usersCanBrowseModelCatalog: saved.users_can_browse_model_catalog !== false,
         });
         onDataChange((current) => ({ ...current, platformSettings: saved }));
       }
@@ -1911,6 +1933,10 @@ export function PlatformConsole({
                     ? next
                       ? "Tenant admins can now enable personalization memory for their organization."
                       : "Personalization memory is off platform-wide; tenant memory policies are inert."
+                  : key === "usersCanBrowseModelCatalog"
+                    ? next
+                      ? "Users can see every enabled model in their organization, why it is unavailable, and request access."
+                      : "Users see only the models they can already use; access requests are disabled."
                 : "Policy saved.",
       });
     } catch (error) {
@@ -2570,7 +2596,7 @@ export function PlatformConsole({
         value={activeSection}
         className="tabs-root"
         onValueChange={(value) => {
-          setActiveSection(value);
+          setActiveSection(value as PlatformSection);
           if (value === "audit") setAuditTrailRefreshToken((token) => token + 1);
         }}
       >
@@ -3424,6 +3450,7 @@ export function PlatformConsole({
 
         <Tabs.Content value="org-settings" className="tab-content">
           <div className="org-settings-stack">
+            <SearchIndexCard actorUserId={data.me.id} />
             <RoleBoundaryPanel
               data={data}
               userDraft={ownerUserDraft}
@@ -3468,12 +3495,7 @@ export function PlatformConsole({
               defaultCollapsed
             />
             <ElasticPanel elasticStatus={elasticStatus} />
-            <RetentionPanel
-              policy={retentionPolicy}
-              error={retentionError}
-              busy={pendingAction === "retention-policy"}
-              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
-            />
+
           </div>
         </Tabs.Content>
 
@@ -4150,6 +4172,34 @@ export function PlatformConsole({
               ))}
             </Panel>
 
+            <RetentionPanel
+              actorUserId={data.me.id}
+              onPolicySaved={(saved) => { setRetentionPolicy(saved); setRetentionRefreshToken(token => token + 1); }}
+              policy={retentionPolicy}
+              error={retentionError}
+              busy={pendingAction === "retention-policy"}
+              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
+            >
+              <RetentionTagsView
+                actorUserId={data.me.id}
+                policy={retentionPolicy}
+                tagged={retentionTagged}
+                error={retentionError}
+                busy={pendingAction === "retention-batch"}
+                onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
+                loadThreadRecords={
+                  listThreadPromptActivity
+                    ? (threadId) => Promise.resolve(listThreadPromptActivity(threadId))
+                    : undefined
+                }
+                onBatchAction={
+                  platformActions?.runRetentionBatch
+                    ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
+                    : undefined
+                }
+              />
+            </RetentionPanel>
+
             <Panel
               title="User Prompt Activity"
               subtitle="Drill into saved user prompts by person, thread, model, and timestamp."
@@ -4174,26 +4224,6 @@ export function PlatformConsole({
                 </>
               }
             >
-              <div className="prompt-panel-view-switch" role="group" aria-label="Prompt panel view">
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "prompts"}
-                  onClick={() => setPromptPanelView("prompts")}
-                >
-                  Prompts
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "tags"}
-                  onClick={() => setPromptPanelView("tags")}
-                >
-                  Tags
-                </button>
-              </div>
-              {promptPanelView === "prompts" ? (
-                <>
               <SectionScopeFilter
                 label="Prompt activity filter"
                 scope={promptScope}
@@ -4251,25 +4281,7 @@ export function PlatformConsole({
                   loadThreadRecords={listThreadPromptActivity}
                 />
               )}
-                </>
-              ) : (
-                <RetentionTagsView
-                  tagged={retentionTagged}
-                  error={retentionError}
-                  busy={pendingAction === "retention-batch"}
-                  onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
-                  loadThreadRecords={
-                    listThreadPromptActivity
-                      ? (threadId) => Promise.resolve(listThreadPromptActivity(threadId))
-                      : undefined
-                  }
-                  onBatchAction={
-                    platformActions?.runRetentionBatch
-                      ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
-                      : undefined
-                  }
-                />
-              )}
+
             </Panel>
 
             <Panel
@@ -5592,6 +5604,18 @@ function TenantPolicyPanel({
           disabled={pendingAction === "policy:memoryEnabled"}
           label="Personalization memory"
           onChange={(next) => onPolicyChange("memoryEnabled", next)}
+        />
+        <PolicyToggleRow
+          title="Users can browse the model catalog"
+          detail={
+            policies.usersCanBrowseModelCatalog
+              ? "Users see every model enabled for their organization with the reason it is or is not available, and can send an access request to their administrators. Prompts and notes stay hidden."
+              : "Users see only the models they can already use. \"Why isn't a model listed?\" shows nothing extra and access requests are refused."
+          }
+          checked={policies.usersCanBrowseModelCatalog}
+          disabled={pendingAction === "policy:usersCanBrowseModelCatalog"}
+          label="Users can browse the model catalog"
+          onChange={(next) => onPolicyChange("usersCanBrowseModelCatalog", next)}
         />
       </div>
       <div className="policy-callout">

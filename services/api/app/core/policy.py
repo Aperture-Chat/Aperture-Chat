@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from fastapi import HTTPException, status
 
@@ -10,6 +11,7 @@ from app.models.schemas import (
     KnowledgeConfig,
     ModelConfig,
     PlatformSettings,
+    Provider,
     Role,
     TENANT_ADMIN_ASSIGNABLE_ROLES,
     ToolConfig,
@@ -112,22 +114,178 @@ def assert_can_modify_user(actor: User, target: User, *, tenant_admins_can_creat
         )
 
 
-def model_access_allowed(user: User, model: ModelConfig, explicit_deny: bool = False) -> bool:
-    if explicit_deny:
-        return False
-    if model.tenant_id is not None and not is_platform_owner(user) and user.tenant_id != model.tenant_id:
-        return False
+@dataclass(frozen=True, slots=True)
+class ModelAccessGate:
+    """One evaluated step of the model-access decision, in evaluation order."""
+
+    key: str
+    passed: bool
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAccessDecision:
+    """Explainable model-access outcome shared by the policy and both consoles.
+
+    ``allowed`` is byte-for-byte the historical :func:`model_access_allowed`
+    verdict. ``usable`` additionally requires the provider behind the model to
+    be connected; that gate is informational and never changes ``allowed``.
+    ``reason_code`` names the first failing gate (or ``provider_connected``
+    when everything else passed but the model cannot run right now).
+    """
+
+    allowed: bool
+    usable: bool
+    reason_code: str | None
+    reason: str
+    gates: tuple[ModelAccessGate, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "allowed": self.allowed,
+            "usable": self.usable,
+            "reason_code": self.reason_code,
+            "reason": self.reason,
+            "gates": [
+                {"key": gate.key, "passed": gate.passed, "detail": gate.detail} for gate in self.gates
+            ],
+        }
+
+
+# Stable gate keys; both consoles render these, so renaming one is a contract change.
+GATE_EXPLICIT_DENY = "explicit_deny"
+GATE_TENANT_SCOPE = "tenant_scope"
+GATE_TEMP_USER_CONTRACT = "temp_user_contract"
+GATE_AGENT_PROFILE_VISIBILITY = "agent_profile_visibility"
+GATE_PLATFORM_ENABLED = "platform_enabled"
+GATE_ACCOUNT_PENDING = "account_pending"
+GATE_GROUP_GRANT = "group_grant"
+GATE_PROVIDER_CONNECTED = "provider_connected"
+
+# Server-owned, tenant-neutral wording shown to the person who cannot use the model.
+MODEL_ACCESS_REASONS: dict[str, str] = {
+    GATE_EXPLICIT_DENY: "Access to this model has been explicitly denied for your account.",
+    GATE_GROUP_GRANT: (
+        "Not granted to any of your groups. An administrator can add you to a group that has this model."
+    ),
+    GATE_PLATFORM_ENABLED: "Disabled by the platform owner for the whole organization.",
+    GATE_ACCOUNT_PENDING: (
+        "Your account has no group yet. An administrator needs to finish your access setup."
+    ),
+    GATE_TENANT_SCOPE: "This model belongs to another organization.",
+    GATE_TEMP_USER_CONTRACT: "Temporary accounts can use only the designated temporary-access models.",
+    GATE_AGENT_PROFILE_VISIBILITY: "This agent is private or shared with groups you are not in.",
+    GATE_PROVIDER_CONNECTED: "The provider behind this model is not connected right now.",
+}
+
+# Gates a person can ask an administrator to change; the rest are structural.
+REQUESTABLE_REASON_CODES = frozenset({GATE_GROUP_GRANT, GATE_ACCOUNT_PENDING, GATE_PLATFORM_ENABLED})
+
+
+def explain_model_access(
+    user: User,
+    model: ModelConfig,
+    *,
+    provider: Provider | None = None,
+    explicit_deny: bool = False,
+) -> ModelAccessDecision:
+    """Evaluate every model-access gate in the historical order and say why.
+
+    This is the single evaluator: :func:`model_access_allowed` delegates here,
+    and a parity test pins the two together. Evaluation stops at the first
+    failing gate exactly like the boolean version did, so later gates are not
+    reported for a model the person could never reach.
+    """
+
+    gates: list[ModelAccessGate] = []
+
+    def record(key: str, passed: bool, detail: str) -> bool:
+        gates.append(ModelAccessGate(key=key, passed=passed, detail=detail))
+        return passed
+
+    def finish(allowed: bool, failing: str | None) -> ModelAccessDecision:
+        connected = provider.connected if provider is not None else True
+        if allowed:
+            record(
+                GATE_PROVIDER_CONNECTED,
+                connected,
+                "Provider is connected." if connected else "Provider is not connected.",
+            )
+        usable = allowed and connected
+        if failing is None and not usable:
+            failing = GATE_PROVIDER_CONNECTED
+        reason = MODEL_ACCESS_REASONS[failing] if failing else "You can use this model."
+        return ModelAccessDecision(
+            allowed=allowed,
+            usable=usable,
+            reason_code=failing,
+            reason=reason,
+            gates=tuple(gates),
+        )
+
+    if not record(
+        GATE_EXPLICIT_DENY,
+        not explicit_deny,
+        "An explicit deny applies." if explicit_deny else "No explicit deny is recorded.",
+    ):
+        return finish(False, GATE_EXPLICIT_DENY)
+
+    tenant_ok = model.tenant_id is None or is_platform_owner(user) or user.tenant_id == model.tenant_id
+    if not record(
+        GATE_TENANT_SCOPE,
+        tenant_ok,
+        "Model is available to your organization." if tenant_ok else "Model is restricted to another organization.",
+    ):
+        return finish(False, GATE_TENANT_SCOPE)
+
     if is_temp_user(user):
-        return model.platform_enabled and not is_workspace_agent_profile(model) and is_temp_user_model(model)
+        temp_ok = model.platform_enabled and not is_workspace_agent_profile(model) and is_temp_user_model(model)
+        record(
+            GATE_TEMP_USER_CONTRACT,
+            temp_ok,
+            "Designated temporary-access model." if temp_ok else "Not a designated temporary-access model.",
+        )
+        return finish(temp_ok, None if temp_ok else GATE_TEMP_USER_CONTRACT)
+
     if is_workspace_agent_profile(model):
-        return agent_profile_access_allowed(user, model)
-    if not model.platform_enabled:
-        return False
+        agent_ok = agent_profile_access_allowed(user, model)
+        record(
+            GATE_AGENT_PROFILE_VISIBILITY,
+            agent_ok,
+            "Agent is shared with you." if agent_ok else "Agent visibility excludes your account.",
+        )
+        return finish(agent_ok, None if agent_ok else GATE_AGENT_PROFILE_VISIBILITY)
+
+    if not record(
+        GATE_PLATFORM_ENABLED,
+        model.platform_enabled,
+        "Enabled by the platform owner." if model.platform_enabled else "Disabled by the platform owner.",
+    ):
+        return finish(False, GATE_PLATFORM_ENABLED)
+
     if is_platform_owner(user):
-        return True
-    if is_pending_platform_user(user):
-        return False
-    return bool(set(user.group_ids).intersection(model.group_ids))
+        record(GATE_GROUP_GRANT, True, "Platform owners are not gated by group grants.")
+        return finish(True, None)
+
+    pending = is_pending_platform_user(user)
+    if not record(
+        GATE_ACCOUNT_PENDING,
+        not pending,
+        "Account has group membership." if not pending else "Account has no group yet.",
+    ):
+        return finish(False, GATE_ACCOUNT_PENDING)
+
+    granted = bool(set(user.group_ids).intersection(model.group_ids))
+    record(
+        GATE_GROUP_GRANT,
+        granted,
+        "One of your groups grants this model." if granted else "None of your groups grant this model.",
+    )
+    return finish(granted, None if granted else GATE_GROUP_GRANT)
+
+
+def model_access_allowed(user: User, model: ModelConfig, explicit_deny: bool = False) -> bool:
+    return explain_model_access(user, model, explicit_deny=explicit_deny).allowed
 
 
 def assert_model_access(user: User, model: ModelConfig, explicit_deny: bool = False) -> None:
