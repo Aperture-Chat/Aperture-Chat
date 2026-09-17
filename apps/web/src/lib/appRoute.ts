@@ -21,7 +21,6 @@ export type AdminSection =
   | "audit"
   | "alerts";
 export type PlatformSection =
-  | "setup"
   | "org-settings"
   | "models"
   | "providers"
@@ -50,7 +49,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
 ];
 
 export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
-  "setup",
   "org-settings",
   "models",
   "providers",
@@ -125,7 +123,7 @@ export function parsePath(pathname: string): AppRoute | null {
       return isAdminSection(second) ? { kind: "admin", section: second } : null;
     }
     case "platform": {
-      if (second === undefined) return { kind: "platform", section: "org-settings" };
+      if (second === undefined || second === "setup") return { kind: "platform", section: "org-settings" };
       return isPlatformSection(second) ? { kind: "platform", section: second } : null;
     }
     default:

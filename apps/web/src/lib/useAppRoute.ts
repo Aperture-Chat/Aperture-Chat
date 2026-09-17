@@ -104,6 +104,12 @@ export function useAppRoute(interceptPop?: PopInterceptor): AppRouter {
     emit();
   }, []);
 
+  useEffect(() => {
+    if (/^\/platform\/setup\/?$/.test(pathname)) {
+      navigate({ kind: "platform", section: "org-settings" }, { replace: true });
+    }
+  }, [pathname, navigate]);
+
   const back = useCallback(() => {
     window.history.back();
   }, []);

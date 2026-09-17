@@ -66,50 +66,6 @@ export type ProviderValidationResponse = {
   latency_ms: number;
 };
 
-export type SetupStepState = "done" | "todo" | "attention";
-
-export type PlatformSetupProviderStatus = {
-  id: string;
-  name: string;
-  kind: string;
-  connected: boolean;
-  has_active_platform_key: boolean;
-  supports_model_sync: boolean;
-  model_count: number;
-  last_validation_status: "passed" | "auth_failed" | "failed" | null;
-  last_validated_at: string | null;
-  last_validation_model_id: string | null;
-  last_synced_at: string | null;
-  status_message: string | null;
-};
-
-export type PlatformSetupTenantGrant = {
-  tenant_id: string;
-  tenant_name: string;
-  groups_total: number;
-  groups_with_any_model: number;
-  active_users: number;
-  active_users_with_model: number;
-  pending_access_requests: number;
-};
-
-export type PlatformSetupStepKey = "provider" | "credential" | "validate" | "catalog" | "enable" | "grant";
-
-export type PlatformSetupStep = {
-  key: PlatformSetupStepKey;
-  state: SetupStepState;
-  summary: string;
-  counts: Record<string, number>;
-  providers: PlatformSetupProviderStatus[];
-  per_tenant: PlatformSetupTenantGrant[];
-};
-
-export type PlatformSetupStatus = {
-  steps: PlatformSetupStep[];
-  ready_for_users: boolean;
-  generated_at: string;
-};
-
 /** Provider-reported capability metadata captured at model sync. Empty or
  * missing means "not reported", not "not supported" — gates fall back to
  * family heuristics when absent. */
@@ -355,7 +311,14 @@ export type RetentionRule = {
   note?: string;
 };
 
+export type RetentionSource = { id: string; kind: "client" | "matter" | "regulated"; name: string; aliases: string[] };
+export type RetentionPreview = { total: number; eligible: number; held: number; kept: number; preview_token: string; review_days: number; automation_enabled: boolean };
+export type RetentionHold = { id: string; name: string; reason: string; created_at: string };
+
 export type TenantRetentionPolicy = {
+  automation_enabled?: boolean;
+  sensitive_tagging_enabled?: boolean;
+  sources?: RetentionSource[];
   tenant_id: string;
   enabled: boolean;
   chat_retention_days: number;
@@ -374,6 +337,10 @@ export type TenantRetentionPolicy = {
 };
 
 export type TenantRetentionPolicyUpdateRequest = {
+  automation_enabled?: boolean;
+  sensitive_tagging_enabled?: boolean;
+  sources?: RetentionSource[];
+  preview_token?: string;
   enabled?: boolean;
   chat_retention_days?: number;
   retention_basis?: "last_activity" | "created";
@@ -401,6 +368,12 @@ export type ChatThreadTag = {
 
 /** Admin retention drilldown row. Carries thread metadata only, never content. */
 export type RetentionTaggedThread = {
+  created_at?: string | null;
+  last_activity_at?: string | null;
+  eligible_at?: string | null;
+  pending_since?: string | null;
+  held?: boolean;
+  retention_status?: string;
   thread_id: string;
   title?: string | null;
   owner_user_id?: string | null;

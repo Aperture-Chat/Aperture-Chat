@@ -42,8 +42,7 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import type { AppRoute, PlatformSection } from "../lib/appRoute";
-import { PlatformSetupWizard } from "./PlatformSetupWizard";
+import type { PlatformSection } from "../lib/appRoute";
 import { SearchIndexCard } from "./SearchIndexCard";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
@@ -503,7 +502,6 @@ const OPENROUTER_CATALOG_SCOPE_OPTIONS = [
 ];
 
 const TAB_TOOLTIPS: Record<string, string> = {
-  setup: "Walk through provider, credential, validation, catalog, enablement, and group grants with live status",
   models: "Review and control which models this workspace is allowed to use",
   providers: "Register providers and manage their connections and API keys",
   "org-settings": "Manage roles, SSO, branding, policies, budgets, and platform connectors",
@@ -667,7 +665,6 @@ export function PlatformConsole({
   openProvidersRequestKey,
   section,
   onSectionChange,
-  onNavigate,
   onOpenAdminDocumentation,
   onOpenUserHelp,
 }: {
@@ -679,8 +676,6 @@ export function PlatformConsole({
   /** Route-driven section; when provided the tabs are controlled by the URL. */
   section?: PlatformSection;
   onSectionChange?: (section: PlatformSection) => void;
-  /** Cross-console navigation used by the Setup wizard (e.g. Admin › Model Access). */
-  onNavigate?: (route: AppRoute) => void;
   onOpenAdminDocumentation?: () => void;
   onOpenUserHelp?: () => void;
 }) {
@@ -826,7 +821,6 @@ export function PlatformConsole({
   const [retentionTagged, setRetentionTagged] = useState<RetentionTaggedThread[] | null>(null);
   const [retentionError, setRetentionError] = useState<string | null>(null);
   const [retentionRefreshToken, setRetentionRefreshToken] = useState(0);
-  const [promptPanelView, setPromptPanelView] = useState<"prompts" | "tags">("prompts");
   // Matter labels and retention tags per thread, folded into the prompt
   // phrase search so client/matter numbers find their conversations.
   const promptSearchExtras = useMemo(() => {
@@ -2608,7 +2602,6 @@ export function PlatformConsole({
       >
         <Tabs.List className="tabs-list management-console-tabs" aria-label="Platform owner sections">
           {[
-            ["Setup", "setup"],
             ["Org Settings", "org-settings"],
             ["Models", "models"],
             ["Providers", "providers"],
@@ -2622,28 +2615,6 @@ export function PlatformConsole({
           ))}
         </Tabs.List>
 
-        <Tabs.Content value="setup" className="tab-content">
-          <PlatformSetupWizard
-            actorUserId={data.me.id}
-            onNavigate={(route) => {
-              if (route.kind === "platform") {
-                setActiveSection(route.section);
-                return;
-              }
-              onNavigate?.(route);
-            }}
-            onSyncProvider={
-              platformActions?.syncProviderModels
-                ? async (providerId) => {
-                    const result = await platformActions.syncProviderModels!(providerId);
-                    if (!result) throw new Error("The sync API did not return a result.");
-                    onDataChange((current) => applyProviderModelSync(current, result));
-                    return result;
-                  }
-                : undefined
-            }
-          />
-        </Tabs.Content>
         <Tabs.Content value="models" className="tab-content">
           <div className="console-main-col">
             <Panel
@@ -3524,12 +3495,7 @@ export function PlatformConsole({
               defaultCollapsed
             />
             <ElasticPanel elasticStatus={elasticStatus} />
-            <RetentionPanel
-              policy={retentionPolicy}
-              error={retentionError}
-              busy={pendingAction === "retention-policy"}
-              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
-            />
+
           </div>
         </Tabs.Content>
 
@@ -4206,6 +4172,34 @@ export function PlatformConsole({
               ))}
             </Panel>
 
+            <RetentionPanel
+              actorUserId={data.me.id}
+              onPolicySaved={(saved) => { setRetentionPolicy(saved); setRetentionRefreshToken(token => token + 1); }}
+              policy={retentionPolicy}
+              error={retentionError}
+              busy={pendingAction === "retention-policy"}
+              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
+            >
+              <RetentionTagsView
+                actorUserId={data.me.id}
+                policy={retentionPolicy}
+                tagged={retentionTagged}
+                error={retentionError}
+                busy={pendingAction === "retention-batch"}
+                onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
+                loadThreadRecords={
+                  listThreadPromptActivity
+                    ? (threadId) => Promise.resolve(listThreadPromptActivity(threadId))
+                    : undefined
+                }
+                onBatchAction={
+                  platformActions?.runRetentionBatch
+                    ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
+                    : undefined
+                }
+              />
+            </RetentionPanel>
+
             <Panel
               title="User Prompt Activity"
               subtitle="Drill into saved user prompts by person, thread, model, and timestamp."
@@ -4230,26 +4224,6 @@ export function PlatformConsole({
                 </>
               }
             >
-              <div className="prompt-panel-view-switch" role="group" aria-label="Prompt panel view">
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "prompts"}
-                  onClick={() => setPromptPanelView("prompts")}
-                >
-                  Prompts
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "tags"}
-                  onClick={() => setPromptPanelView("tags")}
-                >
-                  Tags
-                </button>
-              </div>
-              {promptPanelView === "prompts" ? (
-                <>
               <SectionScopeFilter
                 label="Prompt activity filter"
                 scope={promptScope}
@@ -4307,25 +4281,7 @@ export function PlatformConsole({
                   loadThreadRecords={listThreadPromptActivity}
                 />
               )}
-                </>
-              ) : (
-                <RetentionTagsView
-                  tagged={retentionTagged}
-                  error={retentionError}
-                  busy={pendingAction === "retention-batch"}
-                  onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
-                  loadThreadRecords={
-                    listThreadPromptActivity
-                      ? (threadId) => Promise.resolve(listThreadPromptActivity(threadId))
-                      : undefined
-                  }
-                  onBatchAction={
-                    platformActions?.runRetentionBatch
-                      ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
-                      : undefined
-                  }
-                />
-              )}
+
             </Panel>
 
             <Panel

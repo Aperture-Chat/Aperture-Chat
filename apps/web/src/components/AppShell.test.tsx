@@ -946,7 +946,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   expect(screen.getByText("Follow the work trace")).toBeInTheDocument();
   expect(screen.getByText("Composer symbol shortcuts")).toBeInTheDocument();
   expect(screen.getByText("Attach files and sources")).toBeInTheDocument();
-  expect(screen.getByText("Knowledge, Web, Agent, and reasoning")).toBeInTheDocument();
+  expect(screen.getByText("Knowledge, Web, Agent, and reply settings")).toBeInTheDocument();
   expect(screen.getByText("Session details and context")).toBeInTheDocument();
   expect(screen.getByText("Draft documents")).toBeInTheDocument();
   expect(screen.getByText("Agent profiles")).toBeInTheDocument();
@@ -962,7 +962,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   expect(screen.getByText("Organize and find your work")).toBeInTheDocument();
 
   const guidePdf = screen.getByRole("link", { name: /User guide \(PDF\)/ });
-  expect(guidePdf).toHaveAttribute("href", "docs/aperture-user-guide.pdf");
+  expect(guidePdf).toHaveAttribute("href", "/docs/aperture-user-guide.pdf");
   expect(guidePdf).toHaveAttribute("download");
 
   fireEvent.click(screen.getByRole("button", { name: /^Preview chats at a glance/ }));

@@ -128,7 +128,7 @@ async function main() {
       { frame: "access-welcome", reason: "Existing training accounts have already reviewed their first-run guide; no new-account state is fabricated." },
     ],
   };
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ ...(process.env.CAPTURE_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CAPTURE_CHROMIUM_EXECUTABLE_PATH } : {}) });
   let desktop;
   let mobile;
   let anonymousWrites = [];
@@ -140,10 +140,12 @@ async function main() {
     await page.getByRole("button", { name: /^(Light|Dark) mode$/ }).waitFor();
     await shot("appearance-control", { appearanceControl: page.locator(".sidebar-bottom") });
 
-    await page.getByRole("button", { name: "Composer shortcuts", exact: true }).click();
-    await page.getByRole("note", { name: "Composer shortcuts", exact: true }).waitFor();
-    await shot("composer-shortcuts-help", { composerShortcuts: page.getByRole("note", { name: "Composer shortcuts", exact: true }) });
-    await page.getByRole("button", { name: "Dismiss shortcuts", exact: true }).click();
+    await page.getByRole("button", { name: "Send options", exact: true }).click();
+    await page.getByRole("button", { name: "Resources", exact: true }).click();
+    const resources = page.getByRole("dialog", { name: "Send options", exact: true });
+    await resources.waitFor();
+    await shot("composer-shortcuts-help", { composerShortcuts: resources });
+    await page.getByRole("button", { name: "Close send options", exact: true }).click();
 
     await page.getByRole("button", { name: /^Account:/ }).click();
     const account = page.getByRole("dialog", { name: "Account", exact: true });

@@ -24,7 +24,8 @@ const roles = ["user", "admin", "owner"].map((role) => {
   const captureSource = captureScripts.map((name) => fs.readFileSync(path.join(__dirname, `capture-${name}-frames.cjs`), "utf8")).join("\n");
   const extraSource = role === "user" ? fs.readFileSync(path.join(__dirname, "capture-report-submission.cjs"), "utf8")
     : role === "owner" ? fs.readFileSync(path.join(__dirname, "capture-owner-provider-readiness.cjs"), "utf8") : "";
-  const captureFrames = new Set([...`${captureSource}\n${extraSource}`.matchAll(/await shot\((?:\w+,\s*)?"([a-z0-9-]+)"/g)].map((match) => `training/${role}/${match[1]}.png`));
+  const refreshSource = fs.readFileSync(path.join(__dirname, "capture-training-refresh.cjs"), "utf8") + (role === "user" ? "" : fs.readFileSync(path.join(__dirname, "capture-retention-governance.cjs"), "utf8"));
+  const captureFrames = new Set([...`${captureSource}\n${extraSource}\n${refreshSource}`.matchAll(/await shot\((?:\w+,\s*)?"([a-z0-9-]+)"/g)].map((match) => `training/${role}/${match[1]}.png`));
   const sourcePath = path.join(webRoot, "src/components/trainingDecks", `${role}.tsx`);
   const lessons = parseDeck(fs.readFileSync(sourcePath, "utf8"), role, { includeDrafts });
   for (const lesson of lessons) {

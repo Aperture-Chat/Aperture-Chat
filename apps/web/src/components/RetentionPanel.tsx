@@ -10,7 +10,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type {
   RetentionTaggedThread,
@@ -18,6 +18,7 @@ import type {
   TenantRetentionPolicyUpdateRequest,
   UserPromptRecord,
 } from "../lib/types";
+import { RetentionGovernance, RetentionTagActions } from "./RetentionGovernance";
 import { Markdown } from "./Markdown";
 import { Panel, Toggle } from "./Primitives";
 
@@ -30,27 +31,39 @@ function recordSortValue(record: UserPromptRecord) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-/** Slim retention policy panel for the admin Policies / owner Org Settings
- * tabs: tagging switches only. The chat list itself lives in the Audit tab's
- * prompt panel (RetentionTagsView) so this panel never grows with data. */
+/** Audit's shared home for retention schedules, classification, and holds. */
 export function RetentionPanel({
   policy,
   error,
   busy,
   onPolicyChange,
+  actorUserId,
+  onPolicySaved,
+  children,
 }: {
   policy: TenantRetentionPolicy | null;
   error: string | null;
   busy: boolean;
   onPolicyChange: (patch: TenantRetentionPolicyUpdateRequest) => void;
+  actorUserId?: string;
+  onPolicySaved?: (policy: TenantRetentionPolicy) => void;
+  children?: ReactNode;
 }) {
   const disabled = busy || policy === null;
+  const [view, setView] = useState<"policy" | "tags">("policy");
+  const viewId = useId();
   return (
     <Panel
       title={<><DatabaseZap size={18} /> Data Retention</>}
-      subtitle="Tag chats by connection, uploads, and subject so they can be found, held, and eventually purged by policy. Review and batch-manage tagged chats under Audit → User Prompt Activity → Tags."
+      subtitle="Manage retention schedules, client and matter labels, and legal holds in one place. Chats stay forever until you enable a schedule."
       defaultCollapsed
     >
+      {children && <div className="retention-view-switch" role="group" aria-label="Data retention view">
+        <button type="button" className="secondary-button compact" aria-pressed={view === "policy"} aria-controls={`${viewId}-policy`} onClick={() => setView("policy")}>Schedule and rules</button>
+        <button type="button" className="secondary-button compact" aria-pressed={view === "tags"} aria-controls={`${viewId}-tags`} onClick={() => setView("tags")}>Tags and holds</button>
+      </div>}
+      <div id={`${viewId}-policy`} hidden={view !== "policy"}>
+      {actorUserId && policy && onPolicySaved && <RetentionGovernance actorUserId={actorUserId} policy={policy} onSaved={onPolicySaved} />}
       <div className="permission-row policy-toggle-row">
         <span>
           <strong>Tag chats that use MCP connections</strong>
@@ -111,11 +124,13 @@ export function RetentionPanel({
           </span>
         </div>
       ) : null}
+      </div>
+      {children && <div id={`${viewId}-tags`} hidden={view !== "tags"}>{children}</div>}
     </Panel>
   );
 }
 
-/** The Tags side of the Audit prompt panel: every chat in the organization
+/** The Tags and holds view of Audit's Data Retention panel: every chat in the organization
  * with its retention tags, searchable and bounded, with batch archive/delete.
  * Everything shown is thread metadata and already-audited prompt records. */
 export function RetentionTagsView({
@@ -125,7 +140,11 @@ export function RetentionTagsView({
   onRefresh,
   loadThreadRecords,
   onBatchAction,
+  actorUserId,
+  policy = null,
 }: {
+  actorUserId?: string;
+  policy?: TenantRetentionPolicy | null;
   tagged: RetentionTaggedThread[] | null;
   error: string | null;
   busy: boolean;
@@ -317,6 +336,7 @@ export function RetentionTagsView({
         </button>
       </div>
 
+      {actorUserId && <RetentionTagActions actorUserId={actorUserId} policy={policy} selected={selected} rows={allRows} onRefresh={onRefresh} />}
       {onBatchAction && (
         <div className="retention-batch-bar">
           <label className="retention-select-all">
@@ -417,6 +437,7 @@ export function RetentionTagsView({
                   </span>
                 )}
                 <span className="retention-tag-chips">
+                  {row.retention_status && <span className="retention-tag-chip" title={row.eligible_at ? `Eligible from ${new Date(row.eligible_at).toLocaleDateString()}` : "No deletion deadline"}>{row.retention_status}{row.eligible_at ? ` · ${new Date(row.eligible_at).toLocaleDateString()}` : ""}</span>}
                   {row.matter_label && (
                     <span
                       className="retention-tag-chip is-matter"
@@ -432,9 +453,9 @@ export function RetentionTagsView({
                     <span
                       key={tag.id}
                       className="retention-tag-chip"
-                      title={`${tag.namespace}:${tag.key}`}
+                      title={`${tag.source} · ${new Date(tag.applied_at).toLocaleDateString()} · ${tag.namespace}:${tag.key}`}
                     >
-                      {tag.namespace}: {tag.value ? `${tag.key} / ${tag.value}` : tag.key}
+                      {tag.namespace.startsWith("suggested_") ? `Suggested ${tag.namespace.slice(10)}` : tag.namespace}: {["client", "matter", "regulated", "sensitive"].some(kind => tag.namespace.endsWith(kind)) ? (tag.value ?? tag.key) : tag.value ? `${tag.key} / ${tag.value}` : tag.key}
                     </span>
                   ))}
                 </span>

@@ -80,3 +80,13 @@ test("an interceptor can hold back/forward until it proceeds", () => {
   expect(window.location.pathname).toBe("/chat");
   expect(screen.getByTestId("path")).toHaveTextContent("/chat");
 });
+
+test("retired Setup URL is replaced without adding a history entry", () => {
+  window.history.pushState({}, "", "/platform/setup/?source=guide");
+  const before = window.history.length;
+  render(<Probe />);
+  expect(window.location.pathname).toBe("/platform/org-settings");
+  expect(window.location.search).toBe("?source=guide");
+  expect(window.history.length).toBe(before);
+  expect(screen.getByTestId("unknown")).toHaveTextContent("false");
+});

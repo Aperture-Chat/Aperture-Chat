@@ -662,8 +662,11 @@ test("documentation opens owner guide and audit replaces the old activity log ac
   fireEvent.click(screen.getByRole("button", { name: "Documentation" }));
 
   expect(await screen.findByRole("dialog", { name: "Platform owner documentation" })).toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Setup", exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Watch Check platform readiness step by step" })).not.toBeInTheDocument();
   const videoTitles = [
     "Set up the first workspace",
+    "Review workspace search readiness",
     "Providers and connections",
     "API Key Vault and replacement",
     "Organization model availability",
@@ -684,8 +687,9 @@ test("documentation opens owner guide and audit replaces the old activity log ac
   expect(screen.queryByText("Training video plan")).not.toBeInTheDocument();
 
   const guidePdf = screen.getByRole("link", { name: /Platform owner guide \(PDF\)/ });
-  expect(guidePdf).toHaveAttribute("href", "docs/aperture-owner-guide.pdf");
+  expect(guidePdf).toHaveAttribute("href", "/docs/aperture-owner-guide.pdf");
   expect(guidePdf).toHaveAttribute("download");
+  expect(screen.getByRole("link", { name: "Interactive platform guide" })).toHaveAttribute("href", "https://aperturechat.com/guide.html");
 
   fireEvent.click(screen.getByRole("button", { name: "Watch Providers and connections" }));
   expect(screen.getByRole("dialog", { name: "Providers and connections video" })).toBeInTheDocument();
@@ -721,7 +725,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "data-audio-src",
     "training/owner/policies-connectors.mp3",
   );
-  expect(screen.getByText(/every panel collapsed/i)).toBeInTheDocument();
+  expect(screen.getByText(/Org Settings groups controls into panels/i)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Close documentation" }));
@@ -2218,7 +2222,7 @@ test("every analytics and audit section carries its own user and date filter", a
   expect(screen.getByLabelText("Audit trail filter user")).toBeInTheDocument();
 });
 
-test("owner org settings includes the data retention panel with a working toggle", async () => {
+test("owner audit includes retention controls and org settings does not duplicate them", async () => {
   const policy = {
     tenant_id: "tenant-synthetic",
     enabled: false,
@@ -2246,6 +2250,8 @@ test("owner org settings includes the data retention panel with a working toggle
     listRetentionThreads,
   });
   selectTab("Org Settings");
+  expect(screen.queryByRole("heading", { name: "Data Retention" })).not.toBeInTheDocument();
+  selectTab("Audit");
 
   expect(await screen.findByRole("heading", { name: "Data Retention" })).toBeInTheDocument();
   expandPanel("Data Retention");
@@ -2258,7 +2264,7 @@ test("owner org settings includes the data retention panel with a working toggle
   expect(await screen.findByText("Retention policy saved.")).toBeInTheDocument();
 });
 
-test("owner audit prompt panel has a tags view with the chat list", async () => {
+test("owner audit retention panel has a tags and holds view with the chat list", async () => {
   const listRetentionThreads = vi.fn(async () => [
     {
       thread_id: "thread-owner-tagged",
@@ -2281,8 +2287,8 @@ test("owner audit prompt panel has a tags view with the chat list", async () => 
 
   renderPlatform(platformOwnerData(), { listRetentionThreads });
   selectTab("Audit");
-  expandPanel("User Prompt Activity");
-  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  expandPanel("Data Retention");
+  fireEvent.click(screen.getByRole("button", { name: "Tags and holds" }));
 
   expect(await screen.findByText("Owner tagged chat")).toBeInTheDocument();
   expect(screen.getByText("subject: legal / litigation")).toBeInTheDocument();

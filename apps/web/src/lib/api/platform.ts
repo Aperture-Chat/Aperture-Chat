@@ -18,7 +18,6 @@ import type {
   PlatformProviderKeyCreateRequest,
   PlatformProviderUpdateRequest,
   PlatformSettings,
-  PlatformSetupStatus,
   ProviderValidationResponse,
   SearchIndexStatus,
   PlatformSettingsUpdateRequest,
@@ -562,17 +561,6 @@ export function sendPlatformEmailTest(
   return apiRequest<EmailTestResult>(userId, "/api/platform/email-settings/test", {
     method: "POST",
     body: payload,
-    signal: options.signal,
-  });
-}
-
-/** Pure read of the six owner setup steps; never calls a provider. */
-export function getPlatformSetupStatus(
-  userId: string,
-  options: ApiMutationOptions & { tenantId?: string } = {},
-): Promise<PlatformSetupStatus> {
-  const query = options.tenantId ? `?tenant_id=${encodeURIComponent(options.tenantId)}` : "";
-  return apiRequest<PlatformSetupStatus>(userId, `/api/platform/setup-status${query}`, {
     signal: options.signal,
   });
 }

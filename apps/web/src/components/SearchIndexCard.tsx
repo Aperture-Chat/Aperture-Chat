@@ -45,7 +45,7 @@ export function SearchIndexCard({ actorUserId }: { actorUserId: string }) {
     <Panel
       className="search-index-card"
       title="Search index"
-      subtitle="Relational index behind Ctrl/⌘ K for chats and drafts. Every hit is re-verified against the live record; the index never grants access."
+      subtitle="Helps people find saved chats and drafts in Search (Ctrl + K on Windows or Linux, ⌘ + K on Mac). Rebuild if saved content is missing from results. People still see only content they have permission to access."
       actions={
         <button className="secondary-button" type="button" disabled={busy || status?.enabled === false} onClick={() => void rebuild()}>
           <RefreshCw size={16} /> {busy ? "Rebuilding…" : "Rebuild index"}
@@ -55,20 +55,30 @@ export function SearchIndexCard({ actorUserId }: { actorUserId: string }) {
       {error && <p className="inline-warning" role="alert">{error}</p>}
       {notice && <p role="status" className="muted-copy">{notice}</p>}
       {status && !status.enabled && (
-        <p className="muted-copy">The index is disabled (APERTURE_SEARCH_INDEX_ENABLED=false); search scans records on every request.</p>
+        <p className="muted-copy">The search index is disabled. Search still works by checking saved records directly.</p>
       )}
       {status && status.enabled && (
         <ul className="search-index-tenants" aria-label="Search index by organization">
           {status.tenants.map((tenant) => (
             <li key={tenant.tenant_id}>
-              <strong>{tenant.tenant_name}</strong>{" "}
-              <span className={`pill ${tenant.ready ? "pill-success" : "pill-warning"}`}>
-                {tenant.ready ? "Ready" : "Backfilling"}
-              </span>{" "}
-              <small className="muted-copy">
-                {tenant.entry_count} {tenant.entry_count === 1 ? "entry" : "entries"} · mode {tenant.fts_mode}
-                {tenant.backfill_completed_at ? ` · completed ${new Date(tenant.backfill_completed_at).toLocaleString()}` : ""}
-              </small>
+              <div className="search-index-organization">
+                <strong>{tenant.tenant_name}</strong>
+                <span className="search-index-status">
+                  {tenant.ready ? "Ready" : "Backfilling"}
+                </span>
+              </div>
+              <dl className="search-index-details">
+                <div>
+                  <dt>Indexed items</dt>
+                  <dd>{tenant.entry_count.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Last rebuilt</dt>
+                  <dd>{tenant.backfill_completed_at
+                    ? new Date(tenant.backfill_completed_at).toLocaleString()
+                    : "Not completed yet"}</dd>
+                </div>
+              </dl>
             </li>
           ))}
         </ul>

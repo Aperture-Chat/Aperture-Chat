@@ -102,6 +102,40 @@ describe("recorded image fit", () => {
     expect(Number.parseFloat(card.style.left) + Number.parseFloat(card.style.width) + 14).toBeLessThan(rect.x);
     expect(card.textContent).toContain("workspace authorization");
   });
+
+  it("lets dense scenes place captions above low controls while preserving automatic placement", () => {
+    playback.frame = 30;
+    const scene = {
+      title: "Permission grid", caption: "Read every permission before changing it.",
+      narration: "", durationSeconds: 10, focus: "permissions",
+      calloutPlacement: "left-rail" as const,
+    };
+    const regions = { permissions: ADMIN_FOCUS_REGIONS.groupsPermGrid };
+    const { container, rerender } = render(createElement(TrainingComposition, {
+      video: { ...video, scenes: [{ ...scene, captionPlacement: "top" }] }, regions, badge: "Admin guide",
+    }));
+    expect(container.querySelector(".training-caption")?.className).toContain("placement-top");
+    rerender(createElement(TrainingComposition, {
+      video: { ...video, scenes: [scene] }, regions, badge: "Admin guide",
+    }));
+    expect(container.querySelector(".training-caption")?.className).toContain("placement-bottom");
+  });
+
+  it("fits the side card beside a centered dialog without covering its leading text", () => {
+    playback.frame = 30;
+    const { container } = render(createElement(TrainingComposition, {
+      video: {
+        ...video,
+        scenes: [{ ...video.scenes[0], focus: "dialog", calloutPlacement: "left-rail" }],
+      },
+      regions: { dialog: ADMIN_FOCUS_REGIONS.feedbackConversation }, badge: "Admin guide",
+    }));
+    const card = container.querySelector<HTMLDivElement>(".training-title-card")!;
+    expect(Number.parseFloat(card.style.left)).toBeGreaterThanOrEqual(8);
+    expect(Number.parseFloat(card.style.width)).toBeGreaterThanOrEqual(150);
+    expect(Number.parseFloat(card.style.left) + Number.parseFloat(card.style.width) + 14)
+      .toBeLessThanOrEqual(ADMIN_FOCUS_REGIONS.feedbackConversation.rect.x);
+  });
 });
 
 /* Card placement mirror of the .training-title-card CSS, expanded a touch so

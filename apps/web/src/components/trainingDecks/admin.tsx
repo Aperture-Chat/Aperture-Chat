@@ -41,6 +41,12 @@ export type AdminFocus =
   | "alRules"
   | "alRuleForm"
   | "alDeliveries"
+  | "retentionNavigation"
+  | "retentionWorkspace"
+  | "retentionSources"
+  | "retentionSensitive"
+  | "retentionHolds"
+  | "retentionSchedulePreview"
   | "retentionPanel"
   | "retentionToggles"
   | "retentionTagsSwitch"
@@ -55,9 +61,15 @@ export type AdminFocus =
   | "feedbackOverview"
   | "feedbackEntries"
   | "feedbackConversation"
-  | "feedbackIssueReport";
+  | "feedbackIssueReport"
+  | "maRequests"
+  | "maRequestGroup"
+  | "maUserTrace";
 
 export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
+  maRequests: { frame: "training/admin/model-access-requests.png", rect: { x: 264.90625, y: 237.75, w: 881.1875, h: 277 } },
+  maRequestGroup: { frame: "training/admin/model-access-requests.png", rect: { x: 779.59375, y: 358.75, w: 330.484375, h: 122 } },
+  maUserTrace: { frame: "training/admin/model-access-trace.png", rect: { x: 212.5, y: 68.390625, w: 760, h: 684 } },
   usersTabs: { frame: "training/admin/users.png", rect: { x: 261, y: 163, w: 889, h: 54 } },
   usersAdd: { frame: "training/admin/users.png", rect: { x: 836, y: 259, w: 116, h: 45 } },
   usersTable: { frame: "training/admin/users.png", rect: { x: 282, y: 342, w: 867, h: 434 } },
@@ -83,26 +95,32 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   anBudget: { frame: "training/admin/analytics-usage-budget.png", rect: { x: 261, y: 190, w: 889, h: 314 } },
   // These frames are captured at the native 1185 x 855 composition size, so
   // text stays legible and measured focus borders map one-to-one to the UI.
-  policyCollapsed: { frame: "training/admin/policies-collapsed.png", rect: { x: 261, y: 234, w: 889, h: 427 } },
-  policyServiceAvailability: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 96, w: 887, h: 331 } },
-  policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 432, w: 887, h: 384 } },
-  policyMemory: { frame: "training/admin/policies-memory.png", rect: { x: 261, y: 338, w: 889, h: 440 } },
+  policyCollapsed: { frame: "training/admin/policies-collapsed.png", rect: { x: 261, y: 234, w: 889, h: 303 } },
+  policyServiceAvailability: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 117, w: 887, h: 331 } },
+  policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 453, w: 887, h: 384 } },
+  policyMemory: { frame: "training/admin/policies-memory.png", rect: { x: 261, y: 285, w: 889, h: 440 } },
   policyCounts: { frame: "training/admin/policies-counts.png", rect: { x: 261, y: 442, w: 889, h: 217 } },
   auCards: { frame: "training/admin/audit.png", rect: { x: 262, y: 322, w: 887, h: 323 } },
-  auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 276, y: 175, w: 859, h: 154 } },
-  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 262, y: 244, w: 887, h: 85 } },
+  auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 276, y: 118, w: 859, h: 154 } },
+  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 262, y: 265, w: 887, h: 85 } },
   alEmail: { frame: "training/admin/alerts.png", rect: { x: 261, y: 234, w: 889, h: 181 } },
   alRules: { frame: "training/admin/alerts.png", rect: { x: 261, y: 424, w: 889, h: 199 } },
   alRuleForm: { frame: "training/admin/alerts-rule-form.png", rect: { x: 262, y: 204, w: 887, h: 447 } },
   alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 261, y: 632, w: 889, h: 223 } },
   // Retention frames are local-stack captures with synthetic chats and tags;
   // rects were measured from the live DOM at capture time.
-  retentionPanel: { frame: "training/admin/retention-policy.png", rect: { x: 261, y: 546, w: 889, h: 309 } },
-  retentionToggles: { frame: "training/admin/retention-policy.png", rect: { x: 262, y: 654, w: 887, h: 201 } },
-  retentionTagsSwitch: { frame: "training/admin/retention-tags.png", rect: { x: 262, y: 385, w: 887, h: 85 } },
-  retentionTagsExplorer: { frame: "training/admin/retention-tags.png", rect: { x: 262, y: 475, w: 887, h: 380 } },
-  retentionPreview: { frame: "training/admin/retention-preview.png", rect: { x: 179, y: 98, w: 827, h: 659 } },
-  retentionBatch: { frame: "training/admin/retention-batch.png", rect: { x: 262, y: 599, w: 887, h: 87 } },
+  retentionNavigation: { frame: "training/admin/retention-navigation.png", rect: { x: 893.46875, y: 160.75, w: 69.515625, h: 58 } },
+  retentionWorkspace: { frame: "training/admin/retention-workspace.png", rect: { x: 257.90625, y: 382.75, w: 895.1875, h: 90 } },
+  retentionSources: { frame: "training/admin/retention-sources.png", rect: { x: 277.90625, y: 413.0625, w: 855.1875, h: 308.875 } },
+  retentionSensitive: { frame: "training/admin/retention-sensitive.png", rect: { x: 277.90625, y: 410.9375, w: 855.1875, h: 34 } },
+  retentionHolds: { frame: "training/admin/retention-holds.png", rect: { x: 296.90625, y: 318.703125, w: 817.1875, h: 216.875 } },
+  retentionSchedulePreview: { frame: "training/admin/retention-schedule-preview.png", rect: { x: 277.90625, y: 367.25, w: 855.1875, h: 178.875 } },
+  retentionPanel: { frame: "training/admin/retention-policy.png", rect: { x: 277.90625, y: 401.1875, w: 857.1875, h: 157 } },
+  retentionToggles: { frame: "training/admin/retention-policy.png", rect: { x: 265.90625, y: 544.75, w: 879.1875, h: 222 } },
+  retentionTagsSwitch: { frame: "training/admin/retention-tags.png", rect: { x: 265.90625, y: 129.75, w: 879.1875, h: 78 } },
+  retentionTagsExplorer: { frame: "training/admin/retention-tags.png", rect: { x: 277.90625, y: 329.265625, w: 855.1875, h: 196.875 } },
+  retentionPreview: { frame: "training/admin/retention-preview.png", rect: { x: 174.5, y: 228.09375, w: 836, h: 398.796875 } },
+  retentionBatch: { frame: "training/admin/retention-batch.png", rect: { x: 277.90625, y: 355.015625, w: 855.1875, h: 145 } },
   accessRequestsQueue: { frame: "training/admin/access-requests.png", rect: { x: 265, y: 322, w: 881, h: 170 } },
   accessSignInHandoff: { frame: "training/admin/access-handoff.png", rect: { x: 265, y: 322, w: 881, h: 196 } },
   accessTemporaryPassword: { frame: "training/admin/access-temporary-password.png", rect: { x: 362, y: 266, w: 461, h: 323 } },
@@ -119,6 +137,56 @@ type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analyti
 export type AdminTrainingVideo = TrainingVideoBase & { icon: AdminGuideIcon };
 
 export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
+  {
+    id: "admin-model-requests",
+    audioSrc: "training/admin/admin-model-requests.mp3",
+    title: "Review model requests and explain access",
+    description: "Review pending model requests, choose the correct group, and trace the rules for an individual user.",
+    icon: "models",
+    outcomes: [
+      "Request reviewed",
+      "Group scope checked",
+      "Access traced"
+    ],
+    setupSteps: [
+      "Open Model Access and review its Access requests panel. This queue concerns models; new-account approvals remain on Users.",
+      "Read the requester, model, and server reason, then choose Grant through group.",
+      "If the selected group does not yet carry the model, approval grants it to everyone in that group. Check the full membership before confirming.",
+      "Approve or Decline, then verify the resulting server decision. An allowed model can still be unusable if its provider is offline.",
+      "On Users, choose Access in the person's Actions column to inspect their group membership and each policy gate without changing it."
+    ],
+    scenes: [
+      {
+        title: "Separate model requests from account approvals",
+        caption: "Model Access → Access requests lists people asking for a model their groups do not grant.",
+        narration: "Open Model Access and review Access requests. Each row identifies the requester, model, and the server's reason for the restriction. These are model requests from existing users. The access-request queue on Users separately handles approval to join the workspace.",
+        durationSeconds: 20,
+        focus: "maRequests"
+      },
+      {
+        title: "Choose the group with care",
+        caption: "Grant through group can add the requester and, when permitted, grant the model to the whole group.",
+        narration: "Choose Grant through group before approving. Approval adds the requester to that group. If the option says also grant model to group, every member of the group gains that model too. Review who belongs to the group and choose the narrowest appropriate one. Unavailable choices reflect your current permissions.",
+        durationSeconds: 20,
+        focus: "maRequestGroup"
+      },
+      {
+        title: "Review the result before declaring success",
+        caption: "Approve or Decline resolves the request. Model permission still depends on provider availability.",
+        narration: "Choose Approve or Decline and read the result. A successful approval changes access through the selected group, but a provider problem can still prevent replies. Ask the user to refresh model access and verify a real message. Use Refresh to reload the pending queue when other administrators are also reviewing it.",
+        durationSeconds: 22,
+        focus: "maRequests"
+      },
+      {
+        title: "Trace one person's model access",
+        caption: "Users → Actions → Access shows groups, the server reason, and each policy gate in order.",
+        narration: "On Users, choose Access in the person's Actions column you are helping. The trace lists their groups and the evaluated gates for each model. Expand a model to see why it is usable, blocked, or allowed with a provider offline. This view explains the decision; it does not change group membership or permissions.",
+        durationSeconds: 21,
+        focus: "maUserTrace",
+        calloutPlacement: "left-rail"
+      }
+    ]
+  },
   {
     id: "admin-access-onboarding",
     audioSrc: "training/admin/admin-access-onboarding.mp3",
@@ -187,6 +255,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "After approval, complete Finish sign-in setup. Share the workspace sign-in address and confirm SSO or email-and-password access; no email is sent automatically.",
       "For local access, choose Set temporary password, save the password, and share it securely with the named recipient. The password dialog shows the recipient and sign-in address.",
       "Check group membership and model access, then verify that the person can complete their first sign-in and first message.",
+      "For a lost authenticator with no unused recovery code, verify the person's identity through your organization's approved recovery process. Password resets do not reset the authenticator; the current Users screen has no authenticator-reset button.",
     ],
     description: "Create tenant accounts, manage passwords and status, and remove leavers safely.",
     icon: "users",
@@ -218,10 +287,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Passwords, removal, and the safety floor",
-        caption: "Password, Deactivate, and permanent Delete per row; the last active administrator cannot be removed.",
+        caption: "Account actions follow your permissions. A password reset does not reset two-step verification.",
         narration:
-          "Every row carries a Password reset, a Deactivate or Activate switch, and a permanent Delete that removes the account and its chat history. Administrator account actions that are not available under the current service policy remain disabled with a clear explanation.",
-        durationSeconds: 19,
+          "Each row has password, activation, and account-deletion controls allowed by your permissions. A password reset does not reset the authenticator. If someone loses both their authenticator and recovery codes, verify their identity through your organization's approved recovery process. This Users screen has no authenticator-reset button. Unavailable account actions remain disabled with an explanation.",
+        durationSeconds: 28,
         focus: "usersActions",
       },
     ],
@@ -257,6 +326,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "The Permissions tab controls chat, knowledge, agents, tools, API access, and Hermes. Separate switches grant private agent, knowledge-base, and tool authoring, plus memory access. Read each switch before changing it; service policy still limits what the group can grant.",
         durationSeconds: 19,
         focus: "groupsPermGrid",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
       },
       {
         title: "Grant agent building",
@@ -350,7 +421,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "List the email domains allowed to sign in, and register the shown redirect URI with your IdP.",
       "Create the configuration — enforcement always starts off — then run Test connection.",
       "Map IdP group values to tenant groups on the card so JIT users land with the right access.",
-      "Only enforce tenant sign-in after the test passes.",
+      "After Test connection passes, complete a fresh identity-provider sign-in and verify the callback, workspace session, and intended groups before enforcing sign-in.",
     ],
     scenes: [
       {
@@ -370,11 +441,11 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         focus: "ssoFields",
       },
       {
-        title: "Create, test, then enforce",
-        caption: "Enforcement starts off; run the live connection test and map IdP groups before requiring SSO.",
+        title: "Test discovery and complete a sign-in",
+        caption: "Enforcement starts off. Check discovery, complete a fresh user sign-in, and verify group access before enforcement.",
         narration:
-          "Create the configuration — enforcement always starts off, so nothing can lock the tenant out. From the card, run the live connection test, map identity-provider groups to tenant groups, and only enforce sign-in once the test passes.",
-        durationSeconds: 17,
+          "Create the configuration with enforcement off, then run Test connection to check discovery and signing keys. Map the identity provider's group values to tenant groups. Complete a fresh user sign-in and verify the workspace session and access before requiring SSO. A passing discovery test alone does not prove sign-in works.",
+        durationSeconds: 23,
         focus: "ssoCreate",
       },
       {
@@ -439,10 +510,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     scenes: [
       {
         title: "A collapsed, scan-friendly start",
-        caption: "Policies is always present; Policy Controls, Personalization Memory, and Memory by User all start collapsed.",
+        caption: "Policies stays available. Memory controls and counts appear only when service policy permits them.",
         narration:
-          "The Policies tab is always present. Policy Controls, Personalization Memory, and Memory by User all start collapsed, so you can scan the page and expand only the control you need.",
-        durationSeconds: 14,
+          "Policies stays available, and its sections start collapsed. When service policy allows memory, Personalization Memory and Memory by User expose its controls and counts. Otherwise, Memory governance explains why they are unavailable, while saved organization settings remain intact.",
+        durationSeconds: 20,
         focus: "policyCollapsed",
         calloutPlacement: "left-rail",
       },
@@ -463,13 +534,14 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         durationSeconds: 21,
         focus: "policyDefaults",
         calloutPlacement: "left-rail",
+        captionPlacement: "top",
       },
       {
         title: "Set the memory policy",
         caption: "Choose organization enablement, automatic learning, retention, and a one-to-two-thousand memory capacity.",
         narration:
-          "Expand Personalization Memory to decide whether this organization uses memory and whether the assistant may learn durable preferences automatically. Retention ranges from one to three thousand six hundred fifty days. Capacity ranges from one to two thousand memories per user, with two hundred as the general-purpose default.",
-        durationSeconds: 23,
+          "When service policy permits memory, expand Personalization Memory to decide whether this organization uses memory and whether the assistant may learn durable preferences automatically. Retention ranges from one to three thousand six hundred fifty days. Capacity ranges from one to two thousand memories per user, with two hundred as the general-purpose default.",
+        durationSeconds: 25,
         focus: "policyMemory",
         calloutPlacement: "left-rail",
       },
@@ -477,8 +549,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Compliance sees counts, never content",
         caption: "Memory by User shows content-free counts and purge controls; administrators cannot read another person's memory.",
         narration:
-          "Memory by User is a compliance surface, not a reading surface. Refresh it to see content-free counts and purge a person's memories when policy requires it. Administrators cannot read what another person's memory says.",
-        durationSeconds: 16,
+          "When available, Memory by User is a compliance surface, not a reading surface. Refresh it to see content-free counts and purge a person's memories when policy requires it. Administrators cannot read what another person's memory says.",
+        durationSeconds: 17,
         focus: "policyCounts",
         calloutPlacement: "left-rail",
       },
@@ -494,10 +566,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     scenes: [
       {
         title: "Posture at a glance",
-        caption: "The dashboard stays open on top — critical events lead — while the sections below start collapsed.",
+        caption: "Audit opens with the posture dashboard. Expand the sections below for detailed controls.",
         narration:
-          "The Audit tab opens on the posture dashboard — audit events, critical events, the prompt watchlist, active admins and users, connector issues, and ungrouped models — while the sections below start collapsed. Cards that need attention are highlighted.",
-        durationSeconds: 18,
+          "The Audit tab opens on the posture dashboard — audit events, critical events, the prompt watchlist, active admins and users, connector issues, and ungrouped models — while the sections below start collapsed. Cards that need attention are highlighted. Data Retention sits below Recent Governance Activity and groups schedules, tags, and legal holds.",
+        durationSeconds: 24,
         focus: "auCards",
       },
       {
@@ -507,6 +579,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "Expand User Prompt Activity to drill into saved prompts and their model responses, scoped by the section's own user and date filter. Below it, Security Alerts lists DLP and misuse flags with redacted snippets you can acknowledge or reopen — behind its own filter as well.",
         durationSeconds: 20,
         focus: "auPromptSelect",
+        captionPlacement: "top",
       },
       {
         title: "The append-only trail",
@@ -515,6 +588,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "The Audit Trail is the tenant's append-only log, newest first. Severity, category, and text search stack on top of the trail's own user and date filter, and the CSV export carries exactly the visible filtered rows, actor columns included.",
         durationSeconds: 18,
         focus: "auTrailFilters",
+        captionPlacement: "top",
       },
     ],
   },
@@ -549,6 +623,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "A rule combines action patterns like security dot star, a minimum severity, an optional watched user, a fire-when threshold within a window, and a cooldown. Email recipients are comma-separated — leave them empty and the rule logs in-app only.",
         durationSeconds: 18,
         focus: "alRuleForm",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Honest delivery statuses",
@@ -564,56 +639,87 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-retention",
     audioSrc: "training/admin/admin-retention.mp3",
     title: "Data retention and tagging",
-    description: "Turn on chat tagging, find tagged conversations, and archive or delete them in bulk.",
+    description: "Keep chats forever by default, review client labels and holds, and preview an optional retention schedule.",
     icon: "retention",
-    outcomes: ["Tagging toggles understood", "Tagged chats found", "Batch action executed safely"],
+    outcomes: ["Forever default understood", "Client labels reviewed", "Retention changes previewed"],
+    setupSteps: [
+      "Open your account menu, expand Management, and choose Admin Console.",
+      "Select Audit, then expand Data Retention below Recent Governance Activity.",
+      "Use Schedule and rules for the duration slider, client or matter sources, and Preview effect.",
+      "Use Tags and holds to find conversations, review labels, and expand Legal holds.",
+    ],
     scenes: [
       {
-        title: "The Data Retention panel",
-        caption: "Policies hosts the Data Retention panel: three tagging toggles, all off until you enable them.",
-        narration:
-          "The Policies tab hosts the Data Retention panel. Three toggles control how chats are tagged, and every one of them starts off — nothing is tagged until an administrator turns tagging on.",
-        durationSeconds: 13,
+        title: "Start in the Audit tab",
+        caption: "Admin Console → Audit. Retention lives below Recent Governance Activity.",
+        narration: "From the Admin Console, select Audit in the top row of tabs. Scroll below Recent Governance Activity to find Data Retention. Expand that panel to manage both schedules and conversation labels.",
+        durationSeconds: 15,
+        focus: "retentionNavigation",
+        calloutPlacement: "lower-left",
+      },
+      {
+        title: "Open Data Retention in Audit",
+        caption: "Schedule and rules, tags, and legal holds share one Audit panel.",
+        narration: "In either console, open Audit and expand Data Retention. Schedule and rules contains the retention policy. Tags and holds contains conversation search, label review, and legal holds. User Prompt Activity remains a separate panel for inspecting prompts.",
+        durationSeconds: 19,
+        focus: "retentionWorkspace",
+      },
+      {
+        title: "Forever until you choose",
+        caption: "Schedule and rules → Keep chats for. Forever is selected by default.",
+        narration: "Chat retention starts at Forever, with automatic deletion off. The slider offers one, five, seven, and ten years. Moving it only changes a draft. Existing chats remain stored until an administrator previews and saves an active policy.",
+        durationSeconds: 18,
         focus: "retentionPanel",
       },
       {
-        title: "Three sources of tags",
-        caption: "Tag chats that use MCP connections, chats with file uploads, and chats by subject.",
-        narration:
-          "Tag chats that use MCP connections marks any conversation that touched a connected tool, like Box. Tag chats with file uploads marks conversations carrying documents or images. And Tag chats by subject asks the chat's own model to classify each new conversation once, into a curated set of subjects like legal or financial.",
-        durationSeconds: 24,
-        focus: "retentionToggles",
-      },
-      {
-        title: "Prompts and Tags",
-        caption: "User Prompt Activity now has two views — switch to Tags to see every chat with its tags.",
-        narration:
-          "The Audit tab's User Prompt Activity panel now carries two views. Prompts is the activity list you know. Switch to Tags, and every chat in the organization appears — tagged or not.",
-        durationSeconds: 13,
-        focus: "retentionTagsSwitch",
-      },
-      {
-        title: "Read the tag chips",
-        caption: "Each row shows its tag chips — mcp, attachments, and subject — with search and a tag-type filter.",
-        narration:
-          "Each row carries its tag chips. An mcp chip names the connection the chat used, attachments distinguishes documents from images, and subject shows the model's classification. The search box and the tag-type filter narrow the list to exactly the cohort you need.",
+        title: "Give each client a stable source",
+        caption: "Schedule and rules → Clients, matters, and regulated records. Enter the name and aliases.",
+        narration: "Add a stable source for each client, matter, or regulated record category. Enter its name and known aliases. Save the definitions even while the schedule stays at Forever. Later references in saved messages can then produce suggestions for review.",
         durationSeconds: 19,
+        focus: "retentionSources",
+      },
+      {
+        title: "Sensitive data needs review",
+        caption: "Pattern matches suggest categories; they never copy raw sensitive values into labels.",
+        narration: "Sensitive data suggestions recognize email addresses, possible Social Security numbers, and payment cards in saved message text. They can miss information or produce false matches. They do not inspect original uploaded files or determine which law applies. Confirm a category only after review.",
+        durationSeconds: 21,
+        focus: "retentionSensitive",
+      },
+      {
+        title: "Scan and confirm the right chats",
+        caption: "Tags and holds → Scan existing chats. Review each match before Confirm label.",
+        narration: "In Data Retention, choose Tags and holds. Scan existing chats includes older saved conversations. Search and filter the list, preview the content, then select the intended chats and source. Confirm label makes that identity authoritative. Remove or dismiss rejects an incorrect match.",
+        durationSeconds: 21,
         focus: "retentionTagsExplorer",
       },
       {
-        title: "Preview before you act",
-        caption: "Click a chat title to read the full conversation before deciding what happens to it.",
-        narration:
-          "Click any chat title to open the full conversation preview, so you can read exactly what a chat contains before acting on it.",
-        durationSeconds: 9,
+        title: "Preserve records with a legal hold",
+        caption: "Tags and holds → Legal holds → Hold name → Hold selected chats.",
+        narration: "In Tags and holds, expand Legal holds below the label actions. A legal hold protects the selected chats from both automatic and manual deletion. Name the hold and choose Hold selected chats. For ongoing client preservation, also set that source's rule to Forever. Releasing a hold requires confirmation and gives eligible records a new review window.",
+        durationSeconds: 25,
+        focus: "retentionHolds",
+        calloutPlacement: "lower-left",
+        captionPlacement: "top",
+      },
+      {
+        title: "Preview a changed schedule",
+        caption: "Schedule and rules → Preview effect. Review the counts before saving.",
+        narration: "Return to Schedule and rules. Choose the duration, the starting clock, and a review window of at least seven days. Preview effect counts the saved chats affected by this exact draft. Shortening a policy can make older chats eligible; extending it delays deletion. Longer matching rules and legal holds win. A changed policy restarts the review window.",
+        durationSeconds: 24,
+        focus: "retentionSchedulePreview",
+      },
+      {
+        title: "Read the conversation first",
+        caption: "Tags and holds → select a chat title to open its conversation preview.",
+        narration: "Switch back to Tags and holds, then select a conversation title to inspect its saved prompts and responses. Automatic cleanup covers chats and linked uploads, search entries, and feedback. Drafts, learned memories, exports, provider copies, and backups have separate lifecycles. This is not a complete client erasure across every data store.",
+        durationSeconds: 23,
         focus: "retentionPreview",
       },
       {
-        title: "Archive or delete in bulk",
-        caption: "Select chats — or select all — then Archive or Delete with an inline confirm; legal holds are never deleted.",
-        narration:
-          "Select the chats that matter, or select them all, then choose Archive or Delete. A confirmation is always required before anything happens, and chats under an active legal hold are skipped and reported — a hold always wins.",
-        durationSeconds: 16,
+        title: "Confirm manual disposition",
+        caption: "Tags and holds → select chats → Archive selected or Delete selected.",
+        narration: "For a manual batch action, select the intended chats and choose Archive or Delete. Read the count and confirmation. Archiving preserves the stored conversation; deletion cannot be undone. Active legal holds are skipped. Choosing Forever in the policy stops automatic deletion without restoring anything already deleted.",
+        durationSeconds: 23,
         focus: "retentionBatch",
       },
     ],
@@ -641,6 +747,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "Open Analytics and expand Chat Feedback. Choose a person and date range, or a date shortcut. The summary separates total response feedback, positive ratings, negative ratings, and platform issue reports. If the scope has no matching records, the list stays empty.",
         durationSeconds: 19,
         focus: "feedbackOverview",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Read the rating and written note",
@@ -657,6 +764,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "Open the row to view Feedback and conversation. Read the user's note and the saved prompt and response around the highlighted rated exchange. If the conversation could not be loaded, the dialog says that only the saved response preview is available. Use the evidence that actually loaded.",
         durationSeconds: 20,
         focus: "feedbackConversation",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Review the reported platform problem",
@@ -665,6 +773,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "Reports submitted through Help, Report a problem appear under Reported platform issues. Open an existing report and read its subject, description, sender, and timestamp. Inspect an attached screenshot when it loads. Use these details in your team's support process, then close the preview.",
         durationSeconds: 20,
         focus: "feedbackIssueReport",
+        calloutPlacement: "left-rail",
       },
     ],
   },

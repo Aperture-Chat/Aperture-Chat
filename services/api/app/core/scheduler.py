@@ -482,6 +482,11 @@ def scheduler_pass(store: SeedStore, settings: Settings) -> None:
             )
         except Exception:  # noqa: BLE001
             logger.exception("Usage retention purge failed")
+    try:
+        from app.core.retention_governance import retention_pass
+        retention_pass(store, now)
+    except Exception:  # noqa: BLE001 - failure must stop disposition, not the scheduler
+        logger.exception("Chat retention sweep failed")
     # Release checks are cached for hours; this call is a no-op until stale.
     try:
         refresh_platform_update_check(settings)

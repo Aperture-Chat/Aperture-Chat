@@ -42,11 +42,9 @@ source files, narrated walkthroughs, and verification procedure.
 
 - `PLATFORM_OWNER` manages platform-wide providers, model availability,
   connector switches and credentials, organization settings, tenant boundaries,
-  audit controls, and branding. The Platform console opens with a **Setup**
-  tab (`/platform/setup`) that walks provider → credential → validate →
-  catalog → enable → grant, each card reporting the server's recorded state
-  (`GET /api/platform/setup-status`) with a live "Validate now" runtime test
-  (`POST /api/platform/providers/{id}/validate`).
+  audit controls, and branding. The Platform console opens in **Org Settings**.
+  Its **Documentation** center provides the owner PDF, narrated walkthroughs,
+  and an Interactive platform guide for configuration advice.
 - `TENANT_ADMIN` manages tenant users, groups, knowledge bases, tools, response actions, policies,
   analytics, and model access.
 - `USER` uses the models, knowledge, tools, and workflows assigned to them.

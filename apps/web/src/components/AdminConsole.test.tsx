@@ -1207,7 +1207,7 @@ test("policies expose neutral service availability and persist downstream defaul
   selectTab("Policies");
 
   expect(screen.getByRole("heading", { name: "Policy Controls" })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(3);
+  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(2);
   expandPanel("Policy Controls");
   expect(screen.getByText("Service policy defines which capabilities are available.", { exact: false })).toBeInTheDocument();
   expect(screen.getByText("Administrator accounts")).toBeInTheDocument();
@@ -1255,13 +1255,13 @@ test("every policy panel is collapsed by default when memory is available", () =
   expect(screen.getByRole("heading", { name: "Policy Controls" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Personalization Memory" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Memory by User" })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(4);
+  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(3);
   expect(screen.queryByText("Service policy defines which capabilities are available.", { exact: false })).not.toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: "Memory for this organization" })).not.toBeInTheDocument();
   expect(screen.queryByText("No memories stored yet")).not.toBeInTheDocument();
 });
 
-test("retention tags live in the audit prompt panel and policies keep the toggles", async () => {
+test("audit groups retention schedules and tags outside prompt activity", async () => {
   const policy = {
     tenant_id: "tenant-synthetic",
     enabled: false,
@@ -1312,9 +1312,11 @@ test("retention tags live in the audit prompt panel and policies keep the toggle
   ]);
 
   renderAdmin({ getRetentionPolicy, updateRetentionPolicy, listRetentionThreads });
+  selectTab("Policies");
+  expect(screen.queryByRole("heading", { name: "Data Retention" })).not.toBeInTheDocument();
   selectTab("Audit");
-  expandPanel("User Prompt Activity");
-  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  expandPanel("Data Retention");
+  fireEvent.click(screen.getByRole("button", { name: "Tags and holds" }));
   expect(await screen.findByText("Box contract review")).toBeInTheDocument();
   expect(screen.getByText("mcp: tool-box / Box")).toBeInTheDocument();
   // Untagged chats list too — batch actions must cover every conversation.
@@ -1343,9 +1345,7 @@ test("retention tags live in the audit prompt panel and policies keep the toggle
     target: { value: "all" },
   });
 
-  selectTab("Policies");
-  expect(await screen.findByRole("heading", { name: "Data Retention" })).toBeInTheDocument();
-  expandPanel("Data Retention");
+  fireEvent.click(screen.getByRole("button", { name: "Schedule and rules" }));
   const toggle = screen.getByRole("switch", { name: "Tag chats that use MCP connections" });
   fireEvent.click(toggle);
   await waitFor(() =>
@@ -1447,8 +1447,8 @@ test("data retention rows preview the full conversation and batch delete with co
 
   renderAdmin({ getRetentionPolicy, listRetentionThreads, listThreadPromptActivity, runRetentionBatch });
   selectTab("Audit");
-  expandPanel("User Prompt Activity");
-  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  expandPanel("Data Retention");
+  fireEvent.click(screen.getByRole("button", { name: "Tags and holds" }));
 
   fireEvent.click(
     await screen.findByRole("button", { name: "Preview the full conversation: Box contract review" }),
@@ -1486,6 +1486,7 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Users and accounts",
     "Groups and permissions",
     "Tenant model access",
+    "Review model requests and explain access",
     "Response actions and connector responsibilities",
     "Tenant SSO and provisioning",
     "Tenant analytics",
@@ -1496,10 +1497,10 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/guided video$/)).toHaveLength(12);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(13);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
-  expect(guidePdf).toHaveAttribute("href", "docs/aperture-admin-guide.pdf");
+  expect(guidePdf).toHaveAttribute("href", "/docs/aperture-admin-guide.pdf");
   expect(guidePdf).toHaveAttribute("download");
 
   fireEvent.click(screen.getByRole("button", { name: "Watch Tenant SSO and provisioning" }));
@@ -1512,7 +1513,7 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   fireEvent.click(screen.getByRole("button", { name: "Watch Policies and memory governance" }));
   expect(screen.getByRole("dialog", { name: "Policies and memory governance video" })).toBeInTheDocument();
   expect(screen.getByTestId("remotion-player")).toHaveAttribute("data-audio-src", "training/admin/admin-policies.mp3");
-  expect(screen.getByText(/all start collapsed/i)).toBeInTheDocument();
+  expect(screen.getByText(/its sections start collapsed/i)).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
   fireEvent.click(screen.getByRole("button", { name: "Close documentation" }));
@@ -2025,9 +2026,11 @@ test("prompt phrase search filters exchanges and finds chats by matter number", 
   fireEvent.change(search, { target: { value: "no-such-phrase" } });
   expect(screen.getByText("No prompts match this search.")).toBeInTheDocument();
 
-  // The Tags side shows and searches the same matter label.
-  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
-  expect(await screen.findByText("matter: Acme Corp — 12345.001 Merger")).toBeInTheDocument();
+  // Retention uses the same matter label, independently of prompt activity.
+  expandPanel("User Prompt Activity");
+  expandPanel("Data Retention");
+  fireEvent.click(screen.getByRole("button", { name: "Tags and holds" }));
+  expect(await screen.findByText("matter: Acme Corp — 12345.001 Merger", { selector: ".retention-tag-chip" })).toBeInTheDocument();
   fireEvent.change(screen.getByRole("searchbox", { name: "Search chats and tags" }), {
     target: { value: "acme" },
   });

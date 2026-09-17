@@ -131,11 +131,11 @@ SHA tag. The `test` to `main` promotion gate and release-only `latest` tags
 continue to use the existing release workflow.
 
 Version-qualified branch tags follow `v<version>-<branch>`, for example
-`v0.5.2-dev`, `v0.5.2-test`, and `v0.5.2-main`. Both the API and web package
+`v0.5.3-dev`, `v0.5.3-test`, and `v0.5.3-main`. Both the API and web package
 use these tags. They advance with subsequent commits carrying that version;
 use the recorded digest pair to pin an exact build. The workflow verifies the
 version-qualified pair before moving the plain branch aliases. Stable
-`v0.5.2` and `latest` remain exclusive to the tagged main release.
+`v0.5.3` and `latest` remain exclusive to the tagged main release.
 
 ## Persistent storage and backups
 
@@ -230,6 +230,27 @@ docker compose -f docker-compose.release.yml --profile local logs --tail=200 web
 Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
+
+## New Since v0.5.2
+
+- Added tenant-scoped chat retention governance with previewed policies, explicit
+  enablement, classification review, named legal holds, and scheduled cleanup.
+  Existing installations keep automatic deletion disabled until an administrator
+  enables it; Forever and legal holds take precedence over automatic deletion.
+- Added an atomic deletion ledger so stale workspace saves cannot restore deleted
+  conversations, while retaining uploads referenced by surviving chats.
+- Refined the owner and admin consoles, retention navigation, search-index controls,
+  and first-run routing; removed the redundant platform setup wizard.
+- Refreshed user, administrator, and owner training decks, narration, screenshots,
+  and downloadable PDF guides for the current application.
+- Includes all v0.5.2 drafting, model-access, search, and workspace improvements
+  listed below, which were previously available on the development branch.
+- Back up the complete application data volume before upgrading. This release
+  includes the retention deletion-ledger migration, plus the v0.5.2 migrations
+  when upgrading from v0.5.1. Image rollback does not undo database migrations.
+- API and web images publish as `v0.5.3-dev`, `v0.5.3-test`, and `v0.5.3-main`.
+  Stable `v0.5.3` and `latest` promote inspected test images without rebuilding.
+  See [retention scope and behavior](RETENTION.md) before enabling cleanup.
 
 ## New Since v0.5.1
 

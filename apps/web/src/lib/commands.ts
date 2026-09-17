@@ -48,7 +48,6 @@ const ADMIN_LABELS: Record<AdminSection, string> = {
 };
 
 const PLATFORM_LABELS: Record<PlatformSection, string> = {
-  setup: "Setup",
   "org-settings": "Org Settings",
   models: "Models",
   providers: "Providers",
