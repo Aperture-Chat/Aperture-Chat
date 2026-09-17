@@ -1965,9 +1965,26 @@ class RetentionRule(BaseModel):
     tag_namespace: str
     # None applies the rule to every tag in the namespace.
     tag_key: str | None = None
-    retention_days: int = Field(strict=True, ge=1, le=36_500)
+    retention_days: int = Field(strict=True, ge=0, le=36_500)
     action: Literal["purge", "archive_then_purge"] = "purge"
     note: str = ""
+
+
+class RetentionSource(BaseModel):
+    """Stable administrator-owned identity; aliases produce suggestions only."""
+
+    id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+    kind: Literal["client", "matter", "regulated"] = "client"
+    name: str = Field(min_length=2, max_length=160)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("aliases")
+    @classmethod
+    def _valid_aliases(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(value.strip() for value in values))
+        if any(len(value) < 3 or len(value) > 160 for value in cleaned):
+            raise ValueError("Aliases must contain between 3 and 160 characters")
+        return cleaned
 
 
 class TenantRetentionPolicy(BaseModel):
@@ -1976,6 +1993,11 @@ class TenantRetentionPolicy(BaseModel):
     id: str = ""
     tenant_id: str
     enabled: bool = False
+    # Separate opt-in: previously stored policy metadata must never start
+    # deleting chats merely because enforcement is deployed.
+    automation_enabled: bool = False
+    sensitive_tagging_enabled: bool = False
+    sources: list[RetentionSource] = Field(default_factory=list, max_length=100)
     # Zero keeps the tenant-wide default disabled; per-tag rules may still
     # govern individual threads. A thread matching nothing is never disposed.
     chat_retention_days: int = Field(default=0, strict=True, ge=0, le=36_500)
@@ -2004,6 +2026,10 @@ class TenantRetentionPolicy(BaseModel):
 
 
 class TenantRetentionPolicyUpdateRequest(BaseModel):
+    automation_enabled: bool | None = None
+    sensitive_tagging_enabled: bool | None = None
+    sources: list[RetentionSource] | None = Field(default=None, max_length=100)
+    preview_token: str | None = None
     enabled: bool | None = None
     chat_retention_days: int | None = Field(default=None, ge=0, le=36_500)
     retention_basis: Literal["last_activity", "created"] | None = None
@@ -2015,6 +2041,19 @@ class TenantRetentionPolicyUpdateRequest(BaseModel):
     subject_tagging_enabled: bool | None = None
     external_tags_enabled: bool | None = None
     rules: list[RetentionRule] | None = None
+
+
+class RetentionTagReviewRequest(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+    namespace: Literal["client", "matter", "regulated", "sensitive"]
+    key: str = Field(min_length=1, max_length=100)
+    action: Literal["confirm", "remove"] = "confirm"
+
+
+class RetentionHoldRequest(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=3, max_length=160)
+    reason: str = Field(default="", max_length=1000)
 
 
 class ChatThreadTag(BaseModel):
@@ -2062,6 +2101,12 @@ class RetentionTaggedThread(BaseModel):
     matter_id: str | None = None
     matter_label: str | None = None
     tags: list[ChatThreadTag] = Field(default_factory=list)
+    created_at: datetime | None = None
+    last_activity_at: datetime | None = None
+    eligible_at: datetime | None = None
+    pending_since: datetime | None = None
+    held: bool = False
+    retention_status: str = "Keep"
 
 
 class ChatFeedbackRecord(BaseModel):

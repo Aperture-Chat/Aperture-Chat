@@ -980,6 +980,14 @@ class AlertNotificationRow(Base):
         )
 
 
+class ChatRetentionTombstoneRow(Base):
+    __tablename__ = "chat_retention_tombstones"
+    thread_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    deleted_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    policy_revision: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
 class ChatThreadRow(Base):
     """Canonical chat thread; session summaries are derived from these rows."""
 

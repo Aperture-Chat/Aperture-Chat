@@ -41,6 +41,8 @@ export type TrainingScene = {
   durationSeconds: number;
   focus: string;
   calloutPlacement?: CalloutPlacement;
+  /** Keep captions clear of controls in densely filled captures. */
+  captionPlacement?: "bottom" | "top";
 };
 
 export type TrainingVideoBase = {
@@ -74,6 +76,12 @@ const CARD_ESTIMATED_HEIGHT = 118;
 // The full-frame console content begins at x261. Keep policy narration in
 // the sidebar even when a long title or caption wraps onto additional lines.
 export const TRAINING_LEFT_RAIL_CARD = { x: 34, y: 392, w: 208 };
+// Centered dialogs extend into the normal sidebar rail. Fit beside them
+// instead of hiding the leading words of the captured conversation.
+function leftRailCardForRect(rect: FocusRect) {
+  const x = Math.min(TRAINING_LEFT_RAIL_CARD.x, Math.max(8, rect.x - TRAINING_LEFT_RAIL_CARD.w - 14));
+  return { ...TRAINING_LEFT_RAIL_CARD, x, w: Math.min(TRAINING_LEFT_RAIL_CARD.w, rect.x - x - 14) };
+}
 const CARD_RECTS: Record<CalloutPlacement, FocusRect> = {
   "upper-left": { x: 292, y: 112, w: 470, h: CARD_ESTIMATED_HEIGHT },
   "upper-right": { x: TRAINING_WIDTH - 68 - 470, y: 112, w: 470, h: CARD_ESTIMATED_HEIGHT },
@@ -166,7 +174,9 @@ export function layoutForRect(rect: FocusRect, preferredPlacement?: CalloutPlace
   const caption = rect.y + rect.h > 620 && placement.startsWith("upper") ? "top" : "bottom";
   const noArrow: SceneLayout = { placement, caption, arrowStart: null, arrowEnd: null, arrowAim: null, arrowLeave: null };
 
-  const card = CARD_RECTS[placement];
+  const card = placement === "left-rail"
+    ? { ...leftRailCardForRect(rect), h: CARD_ESTIMATED_HEIGHT }
+    : CARD_RECTS[placement];
   const exit = rectExitPoint(card, target);
   if (!exit) {
     return noArrow;
@@ -316,7 +326,7 @@ export function TrainingComposition({
           <TrainingSceneCallout scene={scene} regions={regions} badge={badge} />
         </Sequence>
       ))}
-      <TrainingCaptionTrack captions={captions} placement={activeLayout.caption} />
+      <TrainingCaptionTrack captions={captions} placement={activeScene.captionPlacement ?? activeLayout.caption} />
     </AbsoluteFill>
   );
 }
@@ -332,6 +342,7 @@ function TrainingSceneCallout({
 }) {
   const frame = useCurrentFrame();
   const layout = layoutForRect(regions[scene.focus].rect, scene.calloutPlacement);
+  const railCard = leftRailCardForRect(regions[scene.focus].rect);
   const enter = interpolate(frame, [0, 12], [0.92, 1], {
     easing: Easing.bezier(0.16, 1, 0.3, 1),
     extrapolateLeft: "clamp",
@@ -363,14 +374,15 @@ function TrainingSceneCallout({
           opacity,
           transform: `translateY(${translateY}px)`,
           ...(layout.placement === "left-rail" ? {
-            left: TRAINING_LEFT_RAIL_CARD.x,
-            top: TRAINING_LEFT_RAIL_CARD.y,
-            width: TRAINING_LEFT_RAIL_CARD.w,
+            left: railCard.x,
+            top: railCard.y,
+            width: railCard.w,
+            ...(railCard.w < 180 ? { padding: "15px 12px" } : {}),
           } : {}),
         }}
       >
         <span>{badge}</span>
-        <strong>{scene.title}</strong>
+        <strong style={layout.placement === "left-rail" && railCard.w < 180 ? { fontSize: 20 } : undefined}>{scene.title}</strong>
         <p>{scene.caption}</p>
       </div>
     </>
@@ -536,7 +548,7 @@ export function GuidePdfDownload({
   tooltip: string;
 }) {
   return (
-    <a className="guide-pdf-download" href={href} download data-tooltip={tooltip}>
+    <a className="guide-pdf-download" href={staticFile(href)} download data-tooltip={tooltip}>
       <span className="guide-pdf-icon">
         <FileDown size={17} />
       </span>

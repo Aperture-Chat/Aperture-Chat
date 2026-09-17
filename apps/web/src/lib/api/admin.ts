@@ -44,6 +44,8 @@ import type {
   AlertRuleUpdateRequest,
   ChatFeedbackRecord,
   RetentionBatchRequest,
+  RetentionPreview,
+  RetentionHold,
   RetentionBatchResult,
   RetentionTaggedThread,
   SecurityAlert,
@@ -911,24 +913,51 @@ export function listAdminRetentionTaggedThreads(
   );
 }
 
-export function listAdminRetentionThreads(
+export async function listAdminRetentionThreads(
   userId: string,
   options: ApiMutationOptions & { limit?: number } = {},
 ): Promise<RetentionTaggedThread[]> {
-  const query = options.limit ? `?limit=${options.limit}` : "";
-  return apiRequest<RetentionTaggedThread[]>(userId, `/api/admin/retention/threads${query}`, {
-    signal: options.signal,
-  });
+  const limit = Math.max(1, Math.min(500, options.limit ?? 500));
+  const rows: RetentionTaggedThread[] = [];
+  let after = "";
+  while (true) {
+    const page = await apiRequest<RetentionTaggedThread[]>(userId, `/api/admin/retention/threads?limit=${limit}&after=${encodeURIComponent(after)}`, { signal: options.signal });
+    rows.push(...page);
+    if (page.length < limit) return rows;
+    const next = page[page.length - 1].thread_id;
+    if (next <= after) throw new Error("The chat list could not finish loading. Refresh and try again.");
+    after = next;
+  }
 }
 
-export function runAdminRetentionBatch(
+export async function runAdminRetentionBatch(
   userId: string,
   payload: RetentionBatchRequest,
   options: ApiMutationOptions = {},
 ): Promise<RetentionBatchResult> {
-  return apiRequest<RetentionBatchResult>(userId, "/api/admin/retention/batch", {
-    method: "POST",
-    body: payload,
-    signal: options.signal,
-  });
+  const total: RetentionBatchResult = { action: payload.action, requested: 0, disposed: 0, skipped_held: 0, skipped_missing: 0 };
+  for (let index = 0; index < payload.thread_ids.length; index += 500) {
+    const result = await apiRequest<RetentionBatchResult>(userId, "/api/admin/retention/batch", { method: "POST", body: { ...payload, thread_ids: payload.thread_ids.slice(index, index + 500) }, signal: options.signal });
+    total.requested += result.requested; total.disposed += result.disposed; total.skipped_held += result.skipped_held; total.skipped_missing += result.skipped_missing;
+  }
+  return total;
+}
+
+export function previewAdminRetentionPolicy(userId: string, payload: TenantRetentionPolicyUpdateRequest): Promise<RetentionPreview> {
+  return apiRequest(userId, "/api/admin/retention/preview", { method: "POST", body: payload });
+}
+export function scanAdminRetentionSources(userId: string, after = ""): Promise<{ scanned: number; suggestions: number; next_after: string | null }> {
+  return apiRequest(userId, `/api/admin/retention/scan?after=${encodeURIComponent(after)}`, { method: "POST" });
+}
+export function reviewAdminRetentionTags(userId: string, payload: { thread_ids: string[]; namespace: string; key: string; action: "confirm" | "remove" }): Promise<{ reviewed: number }> {
+  return apiRequest(userId, "/api/admin/retention/tags/review", { method: "POST", body: payload });
+}
+export function listAdminRetentionHolds(userId: string): Promise<RetentionHold[]> {
+  return apiRequest(userId, "/api/admin/retention/holds");
+}
+export function createAdminRetentionHold(userId: string, payload: { thread_ids: string[]; name: string; reason: string }): Promise<{ held: number }> {
+  return apiRequest(userId, "/api/admin/retention/holds", { method: "POST", body: payload });
+}
+export function releaseAdminRetentionHold(userId: string, id: string): Promise<{ released: boolean }> {
+  return apiRequest(userId, `/api/admin/retention/holds/${encodeURIComponent(id)}/release`, { method: "POST" });
 }

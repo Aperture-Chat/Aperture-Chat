@@ -26,6 +26,12 @@ describe("parsePath", () => {
     expect(parsePath("/platform")).toEqual({ kind: "platform", section: "org-settings" });
   });
 
+  test("retired Setup links resolve to Org Settings", () => {
+    const route = parsePath("/platform/setup");
+    expect(route).toEqual({ kind: "platform", section: "org-settings" });
+    expect(routeToPath(route!)).toBe("/platform/org-settings");
+  });
+
   test("ids are URL-decoded and trailing slashes are tolerated", () => {
     expect(parsePath("/chat/thread%20one/")).toEqual({ kind: "chat", threadId: "thread one" });
     expect(parsePath("/drafts/draft-9")).toEqual({ kind: "drafts", draftId: "draft-9" });
@@ -65,7 +71,7 @@ describe("routeToPath", () => {
     expect(routeToPath({ kind: "agents", section: "automations" })).toBe("/automations");
     expect(routeToPath({ kind: "library", section: "tools" })).toBe("/library/tools");
     expect(routeToPath({ kind: "admin", section: "model-access" })).toBe("/admin/model-access");
-    expect(routeToPath({ kind: "platform", section: "setup" })).toBe("/platform/setup");
+    expect(routeToPath({ kind: "platform", section: "org-settings" })).toBe("/platform/org-settings");
   });
 
   test("view keys map to and from routes", () => {

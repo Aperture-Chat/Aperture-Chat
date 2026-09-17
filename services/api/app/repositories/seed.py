@@ -4999,11 +4999,14 @@ class SeedStore:
 
     def save_chat_thread(self, thread: ChatThread) -> ChatThread:
         with self._store_lock:
-            return self.application_state_repository.upsert_chat_thread(thread)
+            saved = self.application_state_repository.upsert_chat_thread(thread)
+            from app.core.retention_governance import scan_thread
+            scan_thread(self, saved, self.tenant_retention_policy(saved.tenant_id))
+            return saved
 
     def delete_chat_thread(self, thread_id: str) -> ChatThread | None:
         with self._store_lock:
-            return self.application_state_repository.delete_chat_thread(thread_id)
+            return self.application_state_repository.delete_chat_thread(thread_id, protect_holds=True)
 
     def save_chat_attachment(self, attachment: ChatAttachment) -> ChatAttachment:
         with self._store_lock:

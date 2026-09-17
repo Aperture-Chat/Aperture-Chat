@@ -16,7 +16,7 @@ export function FirstRunWelcome({ data, onDismiss, onGuide, onNavigate, onOpenMo
   const models = usableModels(data);
   const ready = models.length > 0;
   const setupRoute: AppRoute = owner && !ready
-    ? { kind: "platform", section: "setup" }
+    ? { kind: "platform", section: "providers" }
     : { kind: "admin", section: "users" };
   return (
     <section className="first-run-welcome" aria-labelledby="first-run-title">

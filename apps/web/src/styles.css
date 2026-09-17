@@ -13265,8 +13265,8 @@ dd {
 }
 
 .owner-video-modal {
-  width: min(1120px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
+  width: min(1120px, 100%);
+  max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -15345,7 +15345,8 @@ button.owner-doc-card:hover {
   display: grid;
   flex: 1 1 260px;
   gap: 4px;
-  min-width: 240px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .retention-search-title {
@@ -15367,7 +15368,7 @@ button.owner-doc-card:hover {
 .retention-tag-search {
   flex: 1;
   width: 100%;
-  min-width: 200px;
+  min-width: 0;
   padding: 7px 11px;
   border: 1.5px solid var(--accent);
   border-radius: 9px;
@@ -15404,13 +15405,14 @@ button.owner-doc-card:hover {
   color: var(--muted);
 }
 
-.prompt-panel-view-switch {
+.retention-view-switch {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
 }
 
-.prompt-panel-view-switch .secondary-button[aria-pressed="true"] {
+.retention-view-switch .secondary-button[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -15445,8 +15447,11 @@ button.owner-doc-card:hover {
 .retention-batch-actions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .retention-tagged-list {
@@ -19366,8 +19371,8 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .owner-video-modal {
-    width: calc(100vw - 12px);
-    max-height: calc(100dvh - 12px);
+    width: 100%;
+    max-height: calc(100dvh - 40px);
     padding: 12px;
     border-radius: 14px;
   }
@@ -24921,73 +24926,18 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 .unsynced-work-footer small { color: var(--muted); }
 .unsynced-work-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* Platform › Setup wizard */
-.setup-wizard-steps {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: grid;
-  gap: 10px;
-}
-.setup-wizard-step {
-  display: grid;
-  gap: 8px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-left-width: 4px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-}
-.setup-wizard-step.is-done { border-left-color: var(--success, #1f8a4c); }
-.setup-wizard-step.is-attention { border-left-color: var(--warning, #f5b301); }
-.setup-wizard-step.is-todo { border-left-color: var(--border-strong); }
-.setup-wizard-step-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.setup-wizard-step-heading strong { font-size: 14px; color: var(--text-strong); }
-.setup-wizard-summary { margin: 0; font-size: 13px; }
-.setup-wizard-providers,
-.setup-wizard-tenants {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-  font-size: 12.5px;
-}
-.setup-wizard-providers li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: start;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-.setup-wizard-provider-copy { display: grid; gap: 2px; min-width: 0; }
-.setup-wizard-provider-copy small { color: var(--muted); }
-.setup-wizard-status-message { word-break: break-word; }
-.setup-wizard-provider-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.setup-wizard-step-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.setup-wizard-ready {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--warning, #f5b301) 12%, transparent);
-  font-size: 13px;
-}
-.setup-wizard-ready.is-ready { background: color-mix(in srgb, var(--success, #1f8a4c) 12%, transparent); }
-.setup-wizard-action-result { margin: 0 0 8px; font-size: 13px; }
-.setup-wizard-action-result.is-warning { color: var(--danger, #b42318); }
-@media (max-width: 720px) {
-  .setup-wizard-providers li { grid-template-columns: 1fr; }
-}
-
-.search-index-tenants { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.search-index-tenants { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; font-size: 13px; }
+.search-index-tenants > li { display: grid; gap: 16px; min-width: 0; }
+.search-index-tenants > li + li { border-top: 1px solid var(--border); padding-top: 20px; }
+.search-index-organization { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 20px; }
+.search-index-organization strong { font-size: 14px; }
+.search-index-status { color: var(--muted); font-size: 12px; }
+.search-index-details { display: flex; flex-wrap: wrap; gap: 16px 48px; margin: 0; }
+.search-index-details > div { display: grid; gap: 5px; min-width: 0; }
+.search-index-details dt { color: var(--muted); font-size: 12px; }
+.search-index-details dd { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.search-index-card > .panel-header { gap: 16px; }
+.search-index-card > .panel-header p { max-width: 76ch; line-height: 1.6; }
 
 /* Visible, keyboard-accessible slide choices use the same renderer as the editor. */
 .deck-design-browser { flex: 0 0 auto; min-width: 0; display: grid; gap: 8px; }
@@ -25004,3 +24954,50 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 .deck-theme-gallery button { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 4px 7px; font-size: 11px; }
 .deck-theme-gallery button[aria-pressed="true"] { border-color: var(--teal); }
 .deck-theme-gallery button > span { border-left: 3px solid; padding: 2px 5px; border-radius: 2px; }
+
+/* Retention controls use the console's existing neutral surfaces. */
+.retention-governance { display:grid; gap:20px; padding:8px 0 24px; border-bottom:1px solid var(--border); margin-bottom:20px; }
+.retention-governance-heading { display:flex; align-items:flex-start; flex-wrap:wrap; gap:12px; }
+.retention-governance-heading h3, .retention-source-section h4 { margin:0 0 8px; }
+.retention-governance p, .retention-tag-management p { margin:0; color:var(--muted); font-size:13px; line-height:1.65; }
+.retention-mode { margin-left:auto; font-size:12px; color:var(--muted); }
+.retention-schedule-fields { border:0; margin:0; padding:0; display:grid; gap:16px; min-width:0; }
+.retention-schedule-fields label, .retention-tag-management label { display:grid; gap:8px; font-size:13px; min-width:0; }
+.retention-duration-slider { width:100%; accent-color:var(--accent); padding:0; min-height:32px; }
+.retention-preset-labels { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
+.retention-preset-labels button { border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--muted); padding:10px 4px; font:inherit; font-size:12px; cursor:pointer; }
+.retention-preset-labels button[aria-pressed="true"] { color:var(--text); border-color:var(--accent); background:var(--surface-soft); }
+.retention-field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.retention-checkbox { display:flex!important; flex-direction:row; align-items:center; gap:10px!important; }
+.retention-checkbox input, .retention-tagged-row > input { width:16px; height:16px; flex:0 0 16px; }
+.retention-source-section { display:grid; gap:16px; border-top:1px solid var(--border); padding-top:24px; }
+.retention-source-section > button { justify-self:start; }
+.retention-source-row { display:flex; align-items:center; flex-wrap:wrap; gap:12px 24px; padding:16px 0; border-bottom:1px solid var(--border); }
+.retention-source-row > div { flex:1; min-width:160px; overflow-wrap:anywhere; }
+.retention-source-row small { display:block; margin-top:6px; color:var(--muted); }
+.retention-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.retention-impact { display:grid; gap:8px; padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--surface-soft); }
+.retention-tag-management { display:grid; gap:16px; margin-top:20px; padding:18px; border:1px solid var(--border); border-radius:10px; }
+.retention-tag-management details { min-width:0; }
+.retention-tag-management summary { cursor:pointer; font-size:13px; margin:0; }
+.retention-hold-content { display:grid; gap:16px; min-width:0; padding-top:12px; }
+.retention-tag-management input, .retention-governance input:not([type="checkbox"]), .retention-governance select, .retention-tag-management select { max-width:100%; min-width:0; }
+.retention-tagged-row { justify-content:flex-start; gap:16px; padding:14px; }
+.retention-tagged-title { flex:1 1 240px; overflow-wrap:anywhere; }
+.retention-tag-chips { flex:0 1 48%; }
+.retention-tag-chip { white-space:normal; overflow-wrap:anywhere; }
+@media (max-width:640px) {
+  .retention-field-grid { grid-template-columns:1fr; }
+  .retention-tagged-row { flex-wrap:wrap; }
+  .retention-tag-chips { flex:1 1 100%; justify-content:flex-start; margin-left:32px; }
+  .retention-tag-management { padding:12px; }
+  .retention-preset-labels { gap:4px; }
+}
+
+.retention-governance input:not([type="checkbox"]):not([type="range"]),
+.retention-governance select, .retention-tag-management input:not([type="checkbox"]),
+.retention-tag-management select { width:100%; min-height:40px; border:1px solid var(--border); border-radius:8px; padding:9px 12px; background:var(--surface); color:var(--text); font:inherit; font-size:13px; }
+.retention-governance input::placeholder, .retention-tag-management input::placeholder { color:var(--muted); }
+.retention-governance :is(input, select, button):focus-visible, .retention-tag-management :is(input, select, button):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.retention-tag-management .retention-actions > select { flex:1 1 220px; width:auto; }
+.retention-preset-labels button { white-space:nowrap; }

@@ -217,6 +217,12 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
     await shot("composer-agent");
     await clearComposer();
   });
+  await step("knowledge symbol menu", async () => {
+    await textarea.type("#", { delay: 60 });
+    await page.waitForTimeout(500);
+    await shot("composer-hash");
+    await clearComposer();
+  });
   await step("attach menu", async () => {
     await page.getByRole("button", { name: "Add attachment" }).click();
     await page.waitForTimeout(450);

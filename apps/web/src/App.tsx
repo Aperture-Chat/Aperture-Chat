@@ -1273,7 +1273,6 @@ export function App() {
           openDocumentationRequestKey={ownerDocumentationRequestKey}
           section={route.section}
           onSectionChange={(section) => navigate({ kind: "platform", section })}
-          onNavigate={navigateTo}
           data={effectiveData}
           onDataChange={setData}
           platformActions={platformActions}
@@ -1501,7 +1500,7 @@ export function App() {
           onDismiss={acknowledgeFirstRun}
           onNavigate={(next) => {
             acknowledgeFirstRun();
-            // The route carries the section (owners land on /platform/setup).
+            // The welcome action carries its destination section.
             navigateTo(next);
           }}
           onOpenModelCatalog={() => {

@@ -798,7 +798,6 @@ export function AdminConsole({
   const [retentionTagged, setRetentionTagged] = useState<RetentionTaggedThread[] | null>(null);
   const [retentionError, setRetentionError] = useState<string | null>(null);
   const [retentionRefreshToken, setRetentionRefreshToken] = useState(0);
-  const [promptPanelView, setPromptPanelView] = useState<"prompts" | "tags">("prompts");
   // Matter labels and retention tags per thread, folded into the prompt
   // phrase search so client/matter numbers find their conversations.
   const promptSearchExtras = useMemo(() => {
@@ -4104,12 +4103,7 @@ export function AdminConsole({
                 </div>
               </Panel>
             )}
-            <RetentionPanel
-              policy={retentionPolicy}
-              error={retentionError}
-              busy={pendingAction === "retention-policy"}
-              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
-            />
+
           </div>
         </Tabs.Content>
 
@@ -4165,6 +4159,41 @@ export function AdminConsole({
               </div>
             </Panel>
 
+            <RetentionPanel
+              actorUserId={data.me.id}
+              onPolicySaved={(saved) => { setRetentionPolicy(saved); setRetentionRefreshToken(token => token + 1); }}
+              policy={retentionPolicy}
+              error={retentionError}
+              busy={pendingAction === "retention-policy"}
+              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
+            >
+              <RetentionTagsView
+                actorUserId={data.me.id}
+                policy={retentionPolicy}
+                tagged={retentionTagged}
+                error={retentionError}
+                busy={pendingAction === "retention-batch"}
+                onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
+                loadThreadRecords={
+                  adminApi?.listThreadPromptActivity
+                    ? (threadId) =>
+                        Promise.resolve(
+                          adminApi.listThreadPromptActivity!(
+                            data.me.id,
+                            threadId,
+                            mutationContext,
+                          ),
+                        )
+                    : undefined
+                }
+                onBatchAction={
+                  adminApi?.runRetentionBatch
+                    ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
+                    : undefined
+                }
+              />
+            </RetentionPanel>
+
             <Panel
               title="User Prompt Activity"
               subtitle="Drill into saved prompts from this organization's admins and users by person, thread, model, and timestamp."
@@ -4189,26 +4218,6 @@ export function AdminConsole({
               }
               defaultCollapsed
             >
-              <div className="prompt-panel-view-switch" role="group" aria-label="Prompt panel view">
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "prompts"}
-                  onClick={() => setPromptPanelView("prompts")}
-                >
-                  Prompts
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "tags"}
-                  onClick={() => setPromptPanelView("tags")}
-                >
-                  Tags
-                </button>
-              </div>
-              {promptPanelView === "prompts" ? (
-                <>
               <SectionScopeFilter
                 label="Prompt activity filter"
                 scope={promptScope}
@@ -4271,32 +4280,7 @@ export function AdminConsole({
                   }
                 />
               )}
-                </>
-              ) : (
-                <RetentionTagsView
-                  tagged={retentionTagged}
-                  error={retentionError}
-                  busy={pendingAction === "retention-batch"}
-                  onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
-                  loadThreadRecords={
-                    adminApi?.listThreadPromptActivity
-                      ? (threadId) =>
-                          Promise.resolve(
-                            adminApi.listThreadPromptActivity!(
-                              data.me.id,
-                              threadId,
-                              mutationContext,
-                            ),
-                          )
-                      : undefined
-                  }
-                  onBatchAction={
-                    adminApi?.runRetentionBatch
-                      ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
-                      : undefined
-                  }
-                />
-              )}
+
             </Panel>
 
             <Panel

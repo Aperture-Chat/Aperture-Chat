@@ -29,7 +29,8 @@ describe("buildCommands", () => {
     expect(admin.some((label) => label.startsWith("Go to Platform"))).toBe(false);
 
     const owner = buildCommands({ role: "PLATFORM_OWNER", route: null, darkMode: true, actions: actions() }).map((c) => c.label);
-    expect(owner).toContain("Go to Platform › Setup");
+    expect(owner).toContain("Go to Platform › Org Settings");
+    expect(owner).not.toContain("Go to Platform › Setup");
     expect(owner).toContain("Go to Admin › Users");
     expect(owner).toContain("Switch to light mode");
   });
@@ -46,7 +47,7 @@ describe("buildCommands", () => {
 
   test("filterCommands matches every word against label, hint, and keywords", () => {
     const commands = buildCommands({ role: "PLATFORM_OWNER", route: null, darkMode: false, actions: actions() });
-    expect(filterCommands(commands, "platform setup").map((c) => c.label)).toEqual(["Go to Platform › Setup"]);
+    expect(filterCommands(commands, "platform org settings").map((c) => c.label)).toEqual(["Go to Platform › Org Settings"]);
     expect(filterCommands(commands, "logout").map((c) => c.label)).toEqual(["Sign out"]);
     expect(filterCommands(commands, "zzz")).toEqual([]);
   });

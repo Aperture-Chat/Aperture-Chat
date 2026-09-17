@@ -139,6 +139,7 @@ def test_empty_database_migrates_to_head_with_sqlite_safety_settings(tmp_path: P
             "automations",
             "chat_attachments",
             "chat_feedback",
+            "chat_retention_tombstones",
             "chat_folders",
             "chat_state_imports",
             "chat_thread_tags",

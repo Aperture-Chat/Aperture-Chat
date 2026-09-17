@@ -2023,8 +2023,14 @@ def _model_from_payload(
         # policies were saved. Accept only these exact legacy omissions; every
         # capability defaults off, so the backfills cannot widen a
         # deployment's surface.
-        for tagging_field in ("attachment_tagging_enabled", "subject_tagging_enabled"):
+        for tagging_field in (
+            "attachment_tagging_enabled",
+            "subject_tagging_enabled",
+            "sensitive_tagging_enabled",
+            "automation_enabled",
+        ):
             canonical_payload.setdefault(tagging_field, False)
+        canonical_payload.setdefault("sources", [])
     if model_type is ToolConfig and "owner_user_id" not in canonical_payload:
         # User-authored tool ownership shipped after the identity/config SQL
         # authority. Rows written before the field existed are admin-created

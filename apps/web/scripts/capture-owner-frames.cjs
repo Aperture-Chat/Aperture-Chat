@@ -179,15 +179,17 @@ const TOKEN = CAPTURE_AUTH.token;
   await shot("alerts-deliveries");
 
   // Retention captures inspect synthetic chats and confirmation UI only.
-  await tab("Org Settings");
+  await tab("Audit");
   await expandSection("Data Retention");
-  await page.getByText("Tag chats that use MCP connections", { exact: true }).scrollIntoViewIfNeeded();
+  await page.locator('.panel:has(.panel-header h2:text-is("Data Retention"))').evaluate(element => element.scrollIntoView({ block: "center" }));
   await shot("retention-policy");
   await tab("Audit");
-  await expandSection("User Prompt Activity");
-  await page.getByRole("button", { name: "Tags", exact: true }).click();
-  await page.locator(".retention-tags-toolbar").scrollIntoViewIfNeeded();
-  await page.locator(".retention-tagged-row").first().waitFor();
+  await expandSection("Data Retention");
+  await page.getByRole("button", { name: "Tags and holds", exact: true }).click();
+  await page.locator(".retention-tag-chip:not(.is-archived):not(.is-matter)").first().waitFor();
+  await page.locator(".retention-view-switch").evaluate(element => element.scrollIntoView({ block: "start" }));
+  const tagBox = await page.locator(".retention-tag-chip:not(.is-archived):not(.is-matter)").first().boundingBox();
+  if (!tagBox || tagBox.y < 0 || tagBox.y + tagBox.height > 855) throw new Error("Synthetic tag chips must be fully visible before capture.");
   await shot("retention-tags");
   await page.getByRole("button", { name: /^Preview the full conversation:/ }).first().click();
   await page.getByRole("dialog", { name: "Tagged conversation" }).waitFor();
@@ -214,7 +216,7 @@ const TOKEN = CAPTURE_AUTH.token;
   await shot("analytics-usage-users");
 
   await tab("Audit");
-  await expandSection("User Prompt Activity");
+  await expandSection("Data Retention");
   fs.writeFileSync(path.join(OUT, "measured-rects.json"), JSON.stringify(measured, null, 2));
   console.log("wrote measured-rects.json");
 

@@ -45,8 +45,9 @@ const SECTIONS = [
       table(
         ["Guide", "Who it is for", "What it covers"],
         [
-          ["User Guide", "Everyone", "Chat, cross-session personalization memory, Drafts, slide decks, Agents/Automations, Knowledge/Tools, search, folders, appearance, and installing the app on your phone."],
+          ["User Guide", "Everyone", "Chat, model access requests, personalization memory, documents and decks, account sync, agents, knowledge and tools, search and commands, appearance, and account security."],
           ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, audit, and alerts."],
+          ["Platform Owner Guide", "Platform owners", "Everything in the other guides, plus setup readiness, providers and keys, organization policy, shared connectors, branding, releases, search indexing, and platform governance."],
         ],
       ),
       note(
@@ -103,7 +104,7 @@ const SECTIONS = [
     title: "Two-step verification and recovery codes",
     summary: "Set up an authenticator, complete required verification, and manage recovery codes.",
     blocks: [
-      p("To add an authenticator after signing in with a local password, open your account drawer, choose Manage security, and select Set up authenticator. Confirm your current password, add the QR code or setup key to your authenticator, acknowledge that you added it, and verify a current code. Copy the one-time recovery codes into secure storage, acknowledge that you saved them, and choose Done. Copying alone does not store them for you; finish verification and code storage before leaving the panel."),
+      p("To add an authenticator after signing in with a local password, open your account drawer, find Security, choose Manage security, and select Set up authenticator. Confirm your current password, add the QR code or setup key to your authenticator, acknowledge that you added it, and choose Verify authenticator with a current six-digit code. Copy the one-time recovery codes into secure storage, acknowledge that you saved them, and choose Done. Copying alone does not store them for you; finish verification and code storage before leaving the panel."),
       steps([
         "If sign-in asks you to set up an authenticator, choose Begin authenticator setup. Add the displayed QR code or setup secret to your authenticator app.",
         "Confirm that you added the account, enter the current six-digit Authenticator code, and choose Verify and enable MFA before the setup expires.",
@@ -113,6 +114,8 @@ const SECTIONS = [
       ]),
       p("When verification is enabled, the account card shows how many recovery codes remain. Replace recovery codes requires a fresh authenticator code or an unused recovery code; after replacement, all previous recovery codes stop working. Save the new set before leaving the dialog."),
       p("Turn off verification appears only when your organization's policy allows it. Confirm with an authenticator or recovery code; successful removal signs you out. Organization-required verification cannot be turned off here."),
+      p("If you lose both the authenticator and all unused recovery codes, contact your administrator for the organization's verified recovery process. A new password does not remove the authenticator requirement. For identity-provider MFA, use that provider's recovery process."),
+      note("tip", "Use the code currently shown for this workspace in your authenticator app. If it expires while you are typing, use the next code. Read the attempts, expiry, and any cooldown shown; wait for a cooldown to finish before trying again. If Security cannot load, choose Retry security settings. Keep setup keys and recovery codes out of shared documents, videos, and support attachments."),
       note("info", "SSO accounts manage voluntary authenticator setup in their identity-provider settings. Your identity provider may also require its own verification during SSO. Follow the provider's screen for that check; these instructions describe Aperture Chat's authenticator screens."),
     ],
   },
@@ -151,7 +154,7 @@ const SECTIONS = [
       p("Use Tab and Shift+Tab to move between controls and Enter or Space to activate the focused control. In a dialog, keyboard focus stays with that dialog. Use its Close or Cancel button, or Escape when available, to return to the control that opened it. Confirmations explain when an action is permanent before you commit it."),
       sub("The bottom of the sidebar"),
       list([
-        "Search — opens a search box over your past work: chats (including archived ones), agents, drafts, and indexed documents. The keyboard shortcut is Ctrl+K (Windows) or ⌘K (Mac).",
+        "Search — opens Search past work for chats, documents and decks, agents, and indexed documents. It also offers commands. The keyboard shortcut is Ctrl+K (Windows) or ⌘K (Mac).",
         "Help — opens the guided walkthrough videos and this downloadable guide.",
         "Dark mode / Light mode — switches the appearance instantly (see “Light and dark mode” later in this guide).",
         "Install app — appears on phones and tablets, and adds the workspace to your home screen (see “Install the app on your phone”).",
@@ -161,6 +164,8 @@ const SECTIONS = [
       p(
         "Administrators open the Admin console from the account drawer: click your account card, expand the Management section, and choose Admin console. Regular users simply do not have a Management section. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
       ),
+      sub("Returning to a view"),
+      p("The browser address follows the workspace view and console tab. Browser Back and Forward return to those views; opening a saved chat or draft link still checks your account's access. A link does not share private content or grant permission to another person."),
     ],
   },
   {
@@ -200,17 +205,20 @@ const SECTIONS = [
     part: "basics",
     minRole: "user",
     title: "Searching everything",
-    summary: "One search box over chats, agents, drafts, and indexed documents.",
+    summary: "Find saved work, preview a result, or run an available command.",
     blocks: [
       steps([
         "Click Search near the bottom of the sidebar, or press Ctrl+K (Windows) or ⌘K (Mac) from anywhere.",
-        "The Search past work box opens. Type a few words from what you remember — a chat title, a phrase from a message, an agent or draft name, or text from an indexed document.",
-        "Results are grouped by kind. Chat results lead, and archived conversations are labeled explicitly so you know where a result will reopen.",
-        "Click a result to jump straight to it.",
+        "The Search past work box opens. Type a few words from what you remember: a chat title, message text, an agent or draft name, slide text, or text from an indexed document.",
+        "Results are grouped by kind. Chat results lead, matching text is highlighted, and archived conversations are labeled explicitly. Saved documents and decks open in their matching editor.",
+        "Hover over or keyboard-focus a supported chat or draft result to preview it. The chat row also offers folder, pin, and archive or restore actions when that conversation is available in the current workspace.",
+        "Click a result to open it, or use Up and Down followed by Enter. Escape closes search. Recently opened results are available when the query is empty.",
       ]),
+      sub("Commands and saved work"),
+      p("Commands appear in a separate section from search results. Type > at the start of this search box to see all commands available to your role and permissions, then keep typing to narrow them. Commands can open workspace views and permitted actions; an unavailable feature does not become accessible through search. The same > symbol inside a chat message has a different purpose: choosing an automation for that message."),
       note(
         "info",
-        "Search covers every chat title and message you can access — archived chats included — plus agents, drafts, and documents indexed in your knowledge bases. Sections with no matches simply do not appear; nothing is padded with placeholders.",
+        "Search includes only work your account can access. If the panel says Indexing your workspace, results may be incomplete until indexing finishes; try again after it completes. A missing result is not proof the work was deleted. Unsaved device-only changes may need saving to your account before server search can find them.",
       ),
     ],
   },
@@ -233,11 +241,11 @@ const SECTIONS = [
       p(
         "The model selector sits in the top bar of every chat. Click it to choose which AI model answers this conversation. Each chat remembers its own choice, and the list only ever shows models your workspace has approved for you.",
       ),
-      p("Use the arrow keys, Home, End, or type a model name to move through available models; Enter selects the highlighted model. Use as default for new chats is a separate action for the highlighted model. Choosing a model for this conversation does not by itself change that default."),
+      p("Use the arrow keys, Home, End, or type a model name to move through available models; Enter selects the highlighted model. Each row has its own star: Set [model name] as default model selects that model and remembers it for new chats. The filled star marks the single current default. Selecting a row without its star changes this conversation's model without changing the default. Drafts has a separate default drafting model, set with the star beside a row in its own selector."),
       sub("Web search and the active-tools chip"),
       list([
         "When the selected model supports it, public web search starts turned on. A chip at the bottom of the composer shows what is active: with one tool on it names it — for example Web search — and with several on it reads Tools with a count.",
-        "Click the small × on that chip to turn off every active tool — Knowledge, Web, and Agent — for your next message. Every new chat starts with web search on again when the model supports it.",
+        "Click the small × on that chip to clear the next message's active tools: Knowledge, Web, and Agent, selected MCP connections, and queued automations. Every new chat starts with web search on again when the model supports it.",
         "Replies that used the web come back with citations you can click, and every source is listed in the session details panel (covered below).",
       ]),
       sub("Sending"),
@@ -251,6 +259,22 @@ const SECTIONS = [
         "Click the button again — it becomes a stop square — and your words are transcribed and inserted into the composer as editable text. Nothing sends until you press Enter.",
         "If the microphone is blocked or no speech was heard, the composer says so plainly so you can fix the problem and try again. The Drafts workspace has the same dictation button for drafting instructions.",
       ]),
+    ],
+  },
+  {
+    id: "model-access-requests",
+    part: "chat",
+    minRole: "user",
+    title: "Understand model availability and request access",
+    summary: "Read the server's reason, ask for a model when permitted, and follow its request status.",
+    blocks: [
+      steps([
+        "Open the chat model selector and choose Why isn't a model listed? If no model is usable, the No models available control opens the same explanation.",
+        "Models in your organization separates Usable now from Not available to you. Read the reason on the model row: Locked describes an access restriction; Provider offline means you already have access but the provider needs attention.",
+        "Choose Request access only where it is enabled. The request goes to an administrator for review; sending it does not grant immediate access.",
+        "While a request is pending, the row shows its date and Withdraw request. Use Refresh model access after your administrator resolves it, then select the usable model in the chat picker.",
+      ]),
+      note("info", "Your organization may show only models you can already use. Its browsing policy controls whether you can inspect other enabled models and request access. Some restrictions cannot be lifted by a request; ask your administrator about the stated reason. An offline provider needs a platform-owner repair, not another group-access request."),
     ],
   },
   {
@@ -303,7 +327,7 @@ const SECTIONS = [
     summary: "Five characters that insert prompts, agents, knowledge, skills, and automations.",
     blocks: [
       p(
-        "Start a word in the composer with one of five symbols and a menu opens with matching items. Use the Composer shortcuts information button to open the cheat sheet without changing your message.",
+        "Start a word in the composer with one of five symbols and a menu opens with matching items. You can also choose Send options → Resources to browse without memorizing a symbol. The Reply settings tab's MCP connections and resources button opens the same resource browser.",
       ),
       table(
         ["Type", "What it opens"],
@@ -320,6 +344,9 @@ const SECTIONS = [
         "Use the ↑ and ↓ arrow keys to move through the menu.",
         "Press Enter to insert the highlighted item, Tab to complete it, or Escape to dismiss the menu.",
       ]),
+      sub("Browse resources"),
+      p("On the Resources tab, use Find a resource to search by name, or select All, Knowledge bases, Files in knowledge sources, MCP connections, Prompts, Agents, Skill files, or Automations. A selected connection or automation shows a check; choose it again to remove it. Read an empty or failed-loading state before retrying. The Type shortcuts in chat reference explains each symbol below the results."),
+      note("tip", "The expanded composer focuses on editing a longer message. Return to the normal composer to browse resources, adjust send options, and send with the visible controls."),
     ],
   },
   {
@@ -368,7 +395,7 @@ const SECTIONS = [
         [
           ["Knowledge", "The reply searches your enabled knowledge bases and cites what it finds, with links back to the sources. A picker lets you choose which bases to use."],
           ["Web", "The reply uses public web search. Results come back as clickable citations, and the sources are listed in session details. Available when the selected model supports it."],
-          ["Agent", "The reply may use the tools your workspace has enabled. Pair it with an agent profile (type @) to route through a purpose-built configuration."],
+          ["Agent", "The reply uses the selected agent profile and its permitted tools. Turning this on can choose the first available profile if none is selected; confirm the Agent profile field before sending, or choose a profile with @."],
         ],
       ),
       sub("Reasoning level"),
@@ -376,8 +403,9 @@ const SECTIONS = [
         "The Reasoning group at the bottom of the menu is a three-position slider from Fast to Smart. Fast favors quicker answers; Smart makes the model think longer for more detailed output; the middle is a balanced default. The slider is only active when the selected model supports reasoning levels — otherwise it is disabled and says so.",
       ),
       p(
-        "Whenever tools are on, the active-tools chip appears next to the paperclip — the single tool's name, or Tools with a count. Click the × on that chip to turn Knowledge, Web, and Agent all off for the next message.",
+        "Whenever tools are on, the active-tools chip appears next to the paperclip: the single tool's name, or Tools with a count. Click its × to turn off Knowledge, Web, and Agent and clear selected MCP connections and queued automations for the next message.",
       ),
+      p("On the Reply settings tab, Stream replies controls whether text appears as the model produces it or only after the reply finishes. The Resources tab opens the searchable resource picker; MCP connections and resources also opens it from Reply settings. These controls change how the next reply is prepared or displayed; they do not supply missing provider or connector access."),
     ],
   },
   {
@@ -392,11 +420,12 @@ const SECTIONS = [
         "The session details panel opens for the current chat.",
       ]),
       list([
-        "Messages and model — how many messages the chat holds and which model is active.",
-        "Token usage — shown only when the model provider reported real numbers. Otherwise the panel says “Not reported by the provider”.",
+        "Current chat and Model — the user-message and response counts, and which model is active.",
+        "Tokens used — shown only when the model provider reported real numbers. Otherwise the panel says “Not reported by the provider”.",
         "Tools — exactly what is switched on for your next message: web search, knowledge, agent mode, plus any automations or MCP connections you added in the composer. “Off” means nothing is active.",
         "Sources gathered — every web source (as clickable links) and workspace citation collected during this conversation.",
       ]),
+      p("The Context window meter describes how much context this conversation uses. For older conversations without provider counts it can show ≈ and estimated from message length. Treat that as an estimate; Tokens used remains based on actual provider reports. When the context window fills, start a new chat and include the details it needs to continue reliably."),
     ],
   },
 
@@ -421,16 +450,22 @@ const SECTIONS = [
       ]),
       sub("Editing like a document"),
       p(
-        "The editor toolbar covers real document formatting: undo and redo arrows, block styles (paragraph, headings, quote), a Text size selector, bold and italics, Superscript and Subscript, colors, a Highlight color, bulleted and numbered lists, links, citations, and Clear formatting to strip styling from the selected text.",
+        "The main toolbar keeps undo and redo, block style, bold, italic, underline, and inline AI editing close at hand. Text opens font, size, advanced styles, color, highlighting, and Clear formatting. Paragraph opens alignment, lists, and quotes. More opens Copy, AI edit trail, and word count. Select the intended text before opening a panel; Escape returns to the editor.",
       ),
       list([
-        "The plus (+) insert button opens an insert menu: Web image finds a real image from the web, Chart drops in an editable chart, Table inserts a fillable table, Divider adds a horizontal rule, and Page break starts a new page at your cursor.",
+        "The plus (+) Insert button opens links and citations alongside Web image, Chart, Table, Divider, and Page break. A manual page break starts a new page at your cursor; the editor also paginates longer documents automatically.",
         "Inline AI edit rewrites just the text you have selected: select a passage, click the AI pen, type an instruction, and review the change.",
       ]),
+      sub("Revise the document you already have"),
+      p("Describe the change in the assistant: shorten a section, change tone, apply a template, or transform the existing paper. Revision requests work from the current document. Ask explicitly to start over, replace, or clear it when that is your intention. The editor keeps instructions separate from the deliverable; review the resulting document and use Undo or a saved version when a change needs correction."),
+      p("For an existing paper, Assistant settings → Apply MLA layout applies double-spaced 12-point Times New Roman, a student heading, centered title, body and reference indents, and a separate Works Cited page without asking a model. It preserves the paper's text and supports Undo. Fill missing student details and verify quotations and sources yourself; formatting is not citation verification."),
+      p("The page navigator shows the current sheet and total pages outside the document text. Older drafts are paginated when opened, and manual edits reflow after you leave the editor. Page labels do not become part of the exported body."),
       sub("Versions and comparing"),
       list([
         "Click Save version whenever the draft reaches a good state. You can restore an earlier version at any time from the draft's history.",
         "Compare versions opens a read-only visual redline of two saved versions, so you can see exactly what changed between them. It needs two genuinely different saved versions before it activates.",
+        "Open Document history to browse saved documents and decks. Hover or keyboard-focus an entry for a preview. Archive moves finished work into Archived, where Unarchive restores it; Delete requires confirmation and permanently removes the saved item and revisions.",
+        "Read the save status: account-backed documents and decks can be reopened after sign-in on another device. A pending or failed save stays a working copy in this browser. If the account version changed elsewhere, resolve the reported conflict before treating the save as complete.",
       ]),
       sub("Leaving with unsaved changes"),
       p("When you leave an edited draft through workspace navigation, open another chat or draft, or choose Sign out, the unsaved-changes dialog lets you Keep editing, Save copy and continue, or Discard and continue. The saved copy goes into local document history in this browser. If browser storage fails, the app keeps you in the draft so you can recover it. A forced security sign-out can still interrupt work; save important changes regularly."),
@@ -438,6 +473,7 @@ const SECTIONS = [
       list([
         "Click Export to open the export panel. In document mode it offers a Word document (an editable Word file with preview page breaks and embedded images), Markdown (best for plain text or web publishing), and Print / Save as PDF, which opens your browser's print dialog with the saved version — choose “Save as PDF” there to keep a PDF copy.",
         "Exports always run from a saved version. If you have unsaved edits, the panel says Save your edits first and offers a one-click Save version and export (or Save version and print) button.",
+        "When your browser supports it, choose Choose a location to select a destination, or Browser downloads to use its download folder. Word and print retain document formatting; Markdown preserves the text without its typography. Exporting a file does not by itself upload pending work to your account.",
       ]),
       note(
         "tip",
@@ -463,13 +499,13 @@ const SECTIONS = [
       ]),
       sub("Slide layouts"),
       p(
-        "Seven layouts are available today: Title, Title + bullets, Two columns, Image + caption, Quote, Section, and Closing. (An eighth, Chart, is defined in the deck format but not yet offered in the editor.) The layout button in the toolbar switches the selected slide's layout at any time.",
+        "Seven layout previews are available: Title, Title + bullets, Two columns, Image + caption, Quote, Section, and Closing. Open the layout gallery to scroll through them and switch the selected slide's arrangement. The deck color controls offer five palettes; palette changes keep slide text, media, and layout and can be undone.",
       ),
       sub("Editing slide text"),
       list([
         "Click any text region on a slide to edit it in place. The deck toolbar carries the same rich formatting controls as documents — undo and redo, bold, italics, and more.",
         "Inside bullet lists, press Tab to indent a bullet one level and Shift+Tab to outdent it.",
-        "Edit selection with AI rewrites highlighted slide text: select the text, click the AI pen, type what should change, and press Apply AI edit.",
+        "Edit selection with AI rewrites highlighted slide text: select the text, click the AI pen, type what should change, and choose Replace highlight.",
       ]),
       sub("Starter templates and your brand template"),
       list([
@@ -497,10 +533,28 @@ const SECTIONS = [
       ]),
       sub("Saving and exporting"),
       list([
-        "Decks are stored on this device, not on the server — the save state chip says so, and the Save version tooltip spells it out: “Save a version on this device — decks stay local until you export them.”",
+        "Save version stores decks to your account with revision history, like documents. Read the status to confirm the save reached the server. A local working copy or pending save remains only in this browser until synchronization succeeds; use the Only on this device reminder to find unfinished saves.",
+        "Document history includes decks. Preview, reopen, archive, unarchive, and confirmed deletion use the same account controls as documents. A concurrent account edit can prevent a stale save or deletion; read the conflict message before retrying.",
         "Click Export to open the Export deck panel: PowerPoint deck produces an editable .pptx that mirrors the slides on screen — speaker notes included in each slide\u2019s notes pane — and Markdown outline exports slide titles, bullets, and speaker notes as text.",
         "Limits: a deck holds up to 100 slides and 8 MB of content. The editor tells you plainly if a deck exceeds them.",
       ]),
+    ],
+  },
+  {
+    id: "unsynced-work",
+    part: "workspace",
+    minRole: "user",
+    title: "Recover work kept only on this device",
+    summary: "Distinguish a browser working copy from a completed account save.",
+    blocks: [
+      p("The sidebar's Only on this device reminder appears when work has changes kept in this browser that have not reached your account. It can include chats whose last save failed, documents or decks with unsent changes, and older history from before account sync."),
+      steps([
+        "Open the reminder to review the named items. For chats whose last save failed, choose Retry all and check the resulting save state.",
+        "For documents and decks, choose Open Drafts, open the item, and save it to your account. Review any load, quota, connection, or conflict error before leaving the browser.",
+        "Older browser history remains separate until you explicitly import each item from Drafts → Draft history with Import to my account. Confirm the item belongs in this account before importing.",
+        "Archive finished drafts when you want them out of the active list. Account archives remain recoverable; archiving a browser-only item does not prove it has been uploaded.",
+      ]),
+      note("info", "Clear list dismisses these reminders without deleting or uploading work. New edits may appear again. Hide this reminder turns off this account's sidebar notice in this browser; save status remains in Drafts and chats. Downloading an export also leaves pending account saves to be resolved."),
     ],
   },
   {
@@ -523,7 +577,7 @@ const SECTIONS = [
       sub("Using an agent in chat"),
       list([
         "Type @ in the composer and pick an available profile to use its configured model route, instructions, knowledge, and tools.",
-        "The Agent option in send options separately permits enabled tools; it does not choose an agent profile.",
+        "The Agent switch in Send options can choose the first available profile when none is selected. Check Agent profile and select the intended configuration before sending.",
         "If no profiles appear, ask your administrator to check that a ready profile is available to your account.",
       ]),
       p(
@@ -601,7 +655,7 @@ const SECTIONS = [
         "Click Agents/Automations in the sidebar, then the Automations tab, then New automation.",
         "Name it — for example “Monday client digest”.",
         "Choose what it runs against: chat or draft.",
-        "Pick a trigger: Weekly (a day and a time), Once (a specific date and time), or Cron expression (such as 0 9 * * 1 for 9:00 every Monday, in UTC).",
+        "Pick a trigger: Daily (a time each day), Weekly (a day and time), Once (a specific date and time), or Cron expression (such as 0 9 * * 1 for 9:00 every Monday, in UTC).",
         "Write the initial input — what the first step should work on.",
         "Build the model chain: each step has a model and an instruction, and each step's output feeds into the next step. Use Add step for multi-step chains and the × to remove a step.",
         "Click Save automation.",
@@ -610,7 +664,7 @@ const SECTIONS = [
       list([
         "Models — every step must use a model you can actually access. If a model is missing, your admin may need to approve it for your group.",
         "Context — write the initial input as if the automation will run without you watching. Include the matter, audience, date range, source expectations, and desired output format.",
-        "Cadence — use Once for a single future run, Weekly for normal recurring work, and a cron expression only when your administrator gave you an exact one. All times are UTC.",
+        "Cadence — use Once for a single future run, Daily or Weekly for regular recurring work, or a reviewed Cron expression for another schedule. All times are UTC; check the intended local-time equivalent before saving.",
         "Ownership — name the automation so another person can tell what it does later.",
       ]),
       sub("Running and managing"),
@@ -634,13 +688,15 @@ const SECTIONS = [
     part: "account",
     minRole: "user",
     title: "Light and dark mode",
-    summary: "Switch the whole platform's appearance with one click.",
+    summary: "Switch appearance now or schedule it for this browser.",
     blocks: [
       steps([
         "Find the appearance row near the bottom of the sidebar — it reads Dark mode with a moon icon in light mode, and Light mode with a sun icon in dark mode.",
         "Click it. The entire platform switches immediately — no reload, nothing to save.",
         "Click it again to switch back.",
       ]),
+      sub("Schedule light and dark mode"),
+      p("Choose the clock button beside the appearance row to open Theme schedule. Enable Switch automatically, set different Light mode at and Dark mode at times, then choose Save schedule. The schedule uses this device's local time every day and is saved in this browser. You can still switch manually until the next scheduled change; disable the switch to stop automatic changes."),
     ],
   },
   {
@@ -717,12 +773,12 @@ const SECTIONS = [
     summary: "Put your workspace on the home screen with its own icon and name.",
     blocks: [
       p(
-        "On a phone or tablet, an Install app row appears near the bottom of the sidebar. Tap it and a dialog titled with “Add … to your home screen” opens, previewing exactly the icon and name that will be installed — your organization's own branding, not a generic one.",
+        "On a phone or tablet, tap Install app near the bottom of the sidebar. The “Add … to your home screen” dialog previews your organization's app name and icon.",
       ),
       list([
-        "On Android, when the browser supports one-tap install, an Install app button opens the phone's native install sheet directly. Otherwise the dialog shows the honest manual route: open your browser's menu and choose “Add to Home screen” or “Install app”.",
-        "On iPhone and iPad, Apple only allows installs through the browser's share menu, so the dialog walks you through it: tap the Share button, scroll the share sheet, choose “Add to Home Screen”, then tap Add.",
-        "Once installed, the app opens full-screen from its own home-screen icon, signed in to the same workspace.",
+        "On Android, choose Install app if offered, then follow the native install sheet. Otherwise open your browser's menu and choose “Add to Home screen” or “Install app”.",
+        "On iPhone and iPad, tap the browser's Share button, scroll the share sheet, choose “Add to Home Screen”, then tap Add.",
+        "Open the new home-screen icon to return to the same workspace in a full-screen app.",
       ]),
     ],
   },
@@ -734,8 +790,7 @@ const SECTIONS = [
     summary: "Walkthrough videos and this guide, always one click away.",
     blocks: [
       list([
-        "Click Help at the bottom of the sidebar for guided videos, captions, transcripts, and this downloadable PDF. The guide also covers procedures without a dedicated video.",
-        "The Personalization memory video demonstrates the account menu, memory switches, and saving and recalling preferences across sessions.",
+        "Click Help at the bottom of the sidebar for guided videos, captions, transcripts, and this PDF. The guide also covers additional procedures.",
         "Administrators can also open Documentation inside the console for role-specific videos and a printable guide.",
         "Choose Report a problem in Help to describe a problem, the affected screen, and the expected result. Share only permitted details with your administrators; omit passwords, keys, and recovery codes.",
       ]),
@@ -794,12 +849,14 @@ const SECTIONS = [
         "Check the person's group membership and model access, then ask them to sign in and complete a first message. Approval alone does not establish every resource permission.",
       ]),
       sub("Per-row actions"),
-      p("Every row has an Actions column with three controls:"),
+      p("Every row has an Actions column with account controls:"),
       list([
+        "Access — opens the read-only Model access trace for this person, with their groups, each model's status, and the gates that explain it. See Resolve model requests and trace access for the full workflow.",
         "Password — opens the password dialog for that person: type a password or click Generate for a strong random one, optionally mark it a Temporary password (they must choose their own at first sign-in), and click Set password. The password is shown only here — share it over a safe channel.",
         "Deactivate / Activate — ends or restores sign-in access immediately, keeping the account's audit history intact. You can also select several accounts with their checkboxes and use the Deactivate button at the top.",
         "Delete (trash icon) — permanently deletes an eligible account and its chat history. The tooltip spells it out per person: “Permanently delete … and their chat history”. Administrator-account actions that are unavailable under current service policy remain disabled with an explanation.",
       ]),
+      note("info", "Password reset and authenticator recovery are separate. The current Users screen has no authenticator-reset action. If someone has lost their authenticator and recovery codes, verify their identity and follow the organization's authorized recovery process; setting a temporary password alone does not clear MFA. Identity-provider recovery remains with the SSO provider."),
       note(
         "info",
         "Administrative continuity rules are enforced by the service. When an account action would violate them, the console blocks the action and explains that it is restricted by administrative continuity policy.",
@@ -870,6 +927,30 @@ const SECTIONS = [
     ],
   },
   {
+    id: "admin-model-requests",
+    part: "admin",
+    minRole: "admin",
+    title: "Resolve model requests and trace access",
+    summary: "Review requests through groups and diagnose each user's actual model access.",
+    blocks: [
+      sub("Review a pending request"),
+      steps([
+        "Open Model Access and review Access requests. Refresh reloads pending requests for your tenant. Each row names the requester and model and shows the server's access reason.",
+        "Choose Grant through group carefully. An eligible existing group already carries the model. If the option says also grant model to group, approval grants the model to every member of that group as well as adding the requester.",
+        "Choose Approve or Decline, then read the recorded outcome. A permission or provider restriction can still require attention after the request is resolved; a submitted decision is not a successful model response.",
+      ]),
+      note("warning", "Approval changes group membership. When the chosen group does not carry the model yet, it can also widen that model's availability for all group members. Review the group's purpose and members before approving."),
+      sub("Trace one person's access"),
+      steps([
+        "Open Users and choose Access in that person's Actions column. On a narrow table, scroll to expose the actions.",
+        "Model access trace lists the person's groups and each enabled model. Expand a model to inspect the policy gates in order and the reason for its result.",
+        "Usable means both access and provider readiness pass. Allowed, provider offline needs a platform-owner connection repair. Blocked requires the indicated account, group, model, or policy issue to be resolved.",
+        "Close the trace, make the authorized correction in Users, Groups, or Model Access, and reopen Access to verify the current server result. Ask the user to refresh model access and try the intended model.",
+      ]),
+      note("info", "The trace is read-only and scoped to users you can administer. It explains existing permissions; opening it does not grant access, change a role, or bypass the organization's model ceiling."),
+    ],
+  },
+  {
     id: "admin-tools",
     part: "admin",
     minRole: "admin",
@@ -935,11 +1016,11 @@ const SECTIONS = [
         "Click create. Enforcement always starts off, so nothing can lock the tenant out.",
         "On the new configuration's card, click Test connection — it performs a real discovery and key check against the provider.",
         "Map identity-provider group values to tenant groups on the card, so JIT users land with the right access.",
-        "Only enforce tenant sign-in after the test passes.",
+        "After the discovery and key test passes, complete a real sign-in with a permitted test account. Verify the redirect back to this workspace, the resulting account and group access, and any required MFA. Only then consider enforcement.",
       ]),
       note(
         "warning",
-        "Enforcement blocks password sign-in for the allowed domains. Treat it as the very last step: if the provider is misconfigured, enforcement is what locks people out.",
+        "Enforcement blocks password sign-in for the allowed domains. A passing Test connection checks discovery and keys; it does not prove the client-secret exchange, callback, user session, or group mapping. Validate those in a real login before making enforcement the last step.",
       ),
     ],
   },
@@ -975,7 +1056,7 @@ const SECTIONS = [
     summary: "Apply downstream tenant defaults, configure memory, and govern by count without reading content.",
     blocks: [
       p(
-        "The Policies tab is always present. Policy Controls, Personalization Memory, and Memory by User all start collapsed, so the page stays easy to scan. Expand only the panel you need; organization administrators can narrow available capabilities, while anything unavailable under service policy remains locked.",
+        "The Policies tab is always present. Policy Controls starts collapsed. When service policy enables memory, Personalization Memory and Memory by User also appear collapsed. Otherwise, Memory governance explains the restriction; saved organization settings remain intact. Expand the panel you need; administrators can narrow available capabilities, while unavailable settings remain locked.",
       ),
       sub("Policy Controls: read service availability"),
       list([
@@ -989,7 +1070,7 @@ const SECTIONS = [
       ),
       sub("Personalization Memory"),
       steps([
-        "Expand Personalization Memory and turn on Memory for this organization. This makes the account-level Personalization memory row available to eligible users; existing memories stay saved but are not applied while this switch is off.",
+        "When service policy permits memory, expand Personalization Memory and turn on Memory for this organization. This makes the account-level Personalization memory row available to eligible users; existing memories stay saved but are not applied while this switch is off.",
         "Choose whether to allow Learn from conversations automatically. When off, only explicit requests such as “remember that …” and direct additions in the memory manager create memories. Every user can still opt out of automatic learning individually.",
         "Set Retention (days), from 1 through 3650. Older memories retire automatically when they pass this policy.",
         "Set Maximum memories per user, from 1 through 2000. The default is 200, which is a practical general-purpose limit; raise or lower it only when your retention, compliance, or workload policy calls for a different capacity. When the cap is passed, the least useful unpinned memories retire first.",
@@ -1009,12 +1090,18 @@ const SECTIONS = [
     summary: "Find tagged conversations, inspect their contents, and review batch actions.",
     blocks: [
       steps([
-        "Open Policies and expand Data Retention. The switches control tagging for MCP connections, file uploads, and conversation subjects. Read each switch's description before changing it.",
-        "To inspect chats, open Audit, expand User Prompt Activity, and select Tags. This list includes tagged and untagged conversations available in your administrative scope.",
+        "Open Audit and expand Data Retention, then choose Schedule and rules. Forever is the default: automatic deletion is off until an administrator previews and saves a schedule. Choose 1, 5, 7, or 10 years, or keep Forever. One year means 365 days.",
+        "Choose whether age starts at chat creation or the last message change. Renaming or archiving a chat does not restart its clock. Select a review window of at least 7 days. Saving a changed policy restarts that window for eligible chats.",
+        "Add a stable client, matter, or regulated-record source and its aliases. A source can have a longer retention rule or Forever. Choose Apply time limits only to labels with a rule to leave all other chats stored indefinitely. The longest applicable duration wins; a matching Forever rule or active legal hold prevents automatic deletion.",
+        "Save the source definitions, then use Scan existing chats in Data Retention → Tags and holds. New message saves also look for source mentions. Detected mentions are suggestions only: select the correct chats and source, then Confirm label. Remove / dismiss label rejects a false match. The label records who confirmed it and when.",
+        "Optional sensitive-data suggestions check saved message text for email addresses, possible Social Security numbers, and payment cards. They do not detect every form of PII or regulated record, or inspect original uploaded files. Raw matched values are never copied into labels. Review before confirming a category.",
+        "Choose Preview effect to see counts across all saved chats, including legal holds and chats without a deadline. Saving the policy recalculates existing and future chats. A shorter duration can make old chats eligible, but they still receive the review window. A longer duration delays deletion; it cannot restore deleted content. Saving Forever stops automatic deletion.",
+        "To inspect chats, open Audit, expand Data Retention, and choose Tags and holds. This list includes tagged and untagged conversations available in your administrative scope.",
         "Use Search chats and tags to find titles, people, tags, or client/matter identifiers. Filter by tag type when you need a narrower set.",
         "Click a conversation title to open Tagged conversation and review its saved prompts and outputs. Close the preview to return to the same list.",
         "Select the intended chats. Archive selected keeps them stored and searchable but removes them from the active list. Delete selected opens a permanent-deletion confirmation; it does not delete until you choose Yes, delete.",
-        "Read the completed action status. Chats under an active hold are skipped by deletion. A failure or skipped record needs review; do not assume every selected row was deleted.",
+        "Under Legal holds, name a hold and choose Hold selected chats. This hold protects the selected records, including against manual deletion. For ongoing preservation of a client, also set that source's rule to Forever. Load active holds to review them; releasing a hold requires a second confirmation.",
+        "Read the completed action status. Chats under an active hold are skipped by deletion. A failure or skipped record needs review; do not assume every selected row was deleted. The background scheduler handles automatic cleanup in bounded batches and writes an audit record per deleted chat.",
       ]),
       note("warning", "Permanent deletion removes the selected conversations and their attachments and cannot be undone. Preview contents and check the selected count before confirming. A tagging switch records classification; it is not a scheduled deletion rule or an action that places a hold."),
     ],
@@ -1095,7 +1182,7 @@ const SECTIONS = [
       steps([
         "Click your account card at the bottom of the sidebar to open the account drawer.",
         "Expand the Management section and click Platform owner console. (Only platform owners see it.)",
-        "The console opens with six tabs: Org Settings, Models, Providers, Analytics, Audit, and Alerts. Org Settings comes first and is where the console lands; API keys live on each provider's card under the Providers tab.",
+        "The console has six tabs: Org Settings, Models, Providers, Analytics, Audit, and Alerts. Org Settings holds organization configuration; API keys live on each provider's card under Providers.",
       ]),
       p("Keep the three role ceilings in mind — they explain who can touch what across the entire platform:"),
       table(
@@ -1112,7 +1199,7 @@ const SECTIONS = [
       ),
       note(
         "tip",
-        "The Documentation button at the top of the console opens narrated walkthroughs of every tab, plus this guide as a PDF.",
+        "The Documentation button opens owner walkthroughs and this PDF. Its Admin documentation and Chat help links open the other role libraries. Interactive platform guide opens the public digital walkthrough at https://aperturechat.com/guide.html in a new tab for additional platform setup and configuration guidance.",
       ),
     ],
   },
@@ -1125,14 +1212,17 @@ const SECTIONS = [
     blocks: [
       steps([
         "On a new installation with no active owner, complete Create the first platform owner with your display name, work email, and a password of at least 12 characters. Confirm the password and choose Create platform owner.",
-        "The Getting started card offers Set up models when no usable model is available, or Manage access when models are ready. Open owner guide opens this role's documentation. Choose an action or explicitly dismiss the card; merely loading the workspace does not mark it reviewed.",
-        "Open the account drawer, expand Management, and choose Platform owner console. Review Org Settings before changing organization-wide policy or branding.",
+        "The Getting started card offers the setup action for your role. Open owner guide opens this role's documentation. Choose an action or explicitly dismiss the card; merely loading the workspace does not mark it reviewed.",
+        "Open the account drawer, expand Management, and choose Platform owner console. Documentation opens the owner guide, narrated lessons, and the Interactive platform guide for step-by-step configuration advice.",
         "Open Providers, register the intended gateway, and save its real credential in API Keys. A successful save confirms configuration storage; Needs validation still requires a successful runtime check.",
-        "Sync Models and inspect the result. In Models, enable only the models you intend to offer. Check the provider's runtime support and status if a model is unavailable.",
+        "For a provider that supports catalog discovery, choose Sync Models on its card. This refreshes the catalog and tests a small live model request. Read the returned status and correct credential or runtime failures before relying on the connection.",
+        "In Models, review the resulting catalog and enable only the models you intend to offer. Providers with manually managed catalogs need their model configuration checked separately.",
         "Open Admin console to configure the team's groups, model access, and any permitted knowledge or tools. Approve access requests or create accounts, then complete the sign-in handoff described in Users.",
         "Verify a real first message with a synthetic standard-user account. Confirm the intended model works, restricted resources stay unavailable, and any temporary password or authenticator requirement completes correctly.",
-        "If you will use SSO, test the provider configuration before enforcing it. Keep an authorized administrative sign-in path available while validating the setup.",
+        "If you will use SSO, complete discovery testing and a real end-to-end sign-in before enforcing it. Keep an authorized administrative sign-in path available while validating the setup.",
       ]),
+      note("info", "Before inviting a team, verify the intended provider, enabled models, group memberships, and model grants. Test each intended user role; a working owner account does not prove that a standard user has access."),
+      p("Use Providers and Models for service configuration, then Admin Console → Model Access and Groups for tenant access. Use Org Settings for SSO, branding, connector availability, policy, and budgets."),
     ],
   },
   {
@@ -1209,7 +1299,7 @@ const SECTIONS = [
     summary: "Create accounts at any level, set passwords, and rely on the account floors.",
     blocks: [
       p(
-        "The Org Settings tab — the console's first tab, and where it opens — gathers the organization-level controls: roles and accounts, single sign-on, branding, policies, budgets, and platform connectors. Each section starts collapsed behind a descriptive header; click a header (or its chevron) to expand it. Expand Role Boundary for the account tools.",
+        "The Org Settings tab gathers organization-level controls: roles and accounts, single sign-on, branding, policies and budgets, platform connectors, and search index readiness. Most sections start collapsed behind a descriptive header; click a header (or its chevron) to expand it. Search index starts open. Expand Role Boundary for the account tools.",
       ),
       steps([
         "In the create form, enter a display name and email, and pick a role: User, Admin, or Platform owner.",
@@ -1256,22 +1346,24 @@ const SECTIONS = [
     part: "owner",
     minRole: "owner",
     title: "Org Settings: SSO claims, MFA, and go-live",
-    summary: "Map claims, document MFA, provision on first sign-in, and test before enforcing.",
+    summary: "Separate identity-provider MFA from the platform authenticator and verify the complete sign-in path.",
     blocks: [
       list([
         "Role and group claims — tell the platform which token attributes carry your identity provider's role and group assignments.",
         "MFA documentation — the Authenticator app select records which app your organization uses (Microsoft Authenticator, Duo Mobile, or Identity provider), alongside the MFA methods the provider enforces, so the sign-in experience is documented where admins look for it.",
         "Enrollment QR — add an enrollment URI (a standards-based TOTP link or a Duo enrollment URL) and the panel renders it as a scannable QR code for authenticator setup.",
+        "Require the platform authenticator after SSO — off trusts the identity provider's MFA; on also requires users to enroll and verify with Aperture Chat's authenticator. Choose deliberately to avoid an unintended second challenge. Recording an authenticator name or enrollment link alone does not enable this requirement.",
         "Just-in-time provisioning — creates new accounts automatically the first time someone on an allowed domain signs in. They arrive with the User role until you promote them.",
       ]),
       steps([
         "Click Save SSO.",
         "Click Test connection — it performs a real discovery and key check against the provider. The test requires the OIDC protocol; with SAML or SCIM selected the button is disabled and its tooltip says to switch to OIDC.",
-        "Only after a passing test, consider enforcement.",
+        "Complete a real sign-in with a permitted test account, including client-secret exchange, redirect back to the workspace, session creation, role/group mapping, and any required authenticator challenge.",
+        "Only after that full sign-in succeeds, consider enforcement and confirm users know which sign-in and recovery path to use.",
       ]),
       note(
         "warning",
-        "Enforce SSO blocks local password sign-in for every allowed domain. Treat it as the last step: if the provider is misconfigured, enforcement is what locks people out — including administrators on those domains.",
+        "Enforce SSO blocks local password sign-in for every allowed domain. Test connection proves discovery and keys, not a completed login. Treat enforcement as the last step after the real login succeeds; a misconfigured provider can lock out administrators on those domains too.",
       ),
     ],
   },
@@ -1305,7 +1397,7 @@ const SECTIONS = [
     blocks: [
       sub("Policy Controls"),
       p(
-        "Org Settings panels start collapsed. Expand Policy Controls when you need it. The first row is not a toggle at all: “Only owners can create platform owners” carries an Always on pill because the platform enforces it unconditionally. Below it are seven real switches:",
+        "Expand Policy Controls in Org Settings when you need it. The first row is not a toggle at all: “Only owners can create platform owners” carries an Always on pill because the platform enforces it unconditionally. Below it are eight real switches:",
       ),
       table(
         ["Policy", "What it allows when on"],
@@ -1317,6 +1409,7 @@ const SECTIONS = [
           ["Default group for enabled models", "Newly enabled models automatically include the protected Default Users group, so admins do not need a second step per model."],
           ["Users can build their own agents", "The first half of a two-part gate: with this on, admins can grant Can build agents to a group, and those users can build private, self-owned agents. Publishing to the organization stays admin-only. Both halves default off."],
           ["Personalization memory", "Enables the tenant-admin handoff. Admins may then turn memory on for their organization and grant Default Users access. Off locks both downstream controls while preserving saved grants. Admins and owners see counts and purge controls only, never memory content."],
+          ["Users can browse the model catalog", "Users can inspect all models enabled for their organization, read availability reasons, and request access where permitted. Off shows only already-usable models and refuses access requests. This does not reveal private prompts or notes."],
         ],
       ),
       note(
@@ -1370,6 +1463,22 @@ const SECTIONS = [
     ],
   },
   {
+    id: "owner-search-index",
+    part: "owner",
+    minRole: "owner",
+    title: "Org Settings: search index readiness",
+    summary: "Review index coverage and rebuild from live records when search needs maintenance.",
+    blocks: [
+      steps([
+        "Open Org Settings and find Search index, which starts open. This supports Search past work for chats and saved documents and decks; it is separate from knowledge-source ingestion.",
+        "Read the per-organization status: Ready or Backfilling, entry count, index mode, and completion time when available. While backfilling, the user search panel may warn that results are incomplete.",
+        "Use Rebuild index when the stored index needs rebuilding from current records. Wait for the completed result and refreshed entry count. A failure message requires review; a button click is not a completed rebuild.",
+        "Verify representative search terms with an account that is allowed to see the underlying work. Rebuilding does not broaden permissions: every search hit is checked against its live record and the requesting account.",
+      ]),
+      note("info", "If indexing is disabled for this deployment, the panel explains that searches scan records on each request and disables Rebuild index. An index entry count is a coverage signal, not a count of items every user may access."),
+    ],
+  },
+  {
     id: "owner-platform-updates",
     part: "owner",
     minRole: "owner",
@@ -1395,14 +1504,14 @@ const SECTIONS = [
     title: "Organization retention and tagging",
     summary: "Set the tagging policy and govern conversations within owner access.",
     blocks: [
-      p("In Platform owner console, expand Data Retention under Org Settings to control MCP, upload, and subject tagging. The controls follow the same behavior as the administrator chapter, within the owner's permitted scope."),
+      p("In Platform owner console, open Audit, expand Data Retention, and choose Schedule and rules. The default is Forever, with automatic deletion off. Use the duration slider, review window, client and matter sources, and Preview effect exactly as described in the administrator retention chapter. Deployment never activates an existing metadata-only policy."),
       steps([
-        "Open Audit, expand User Prompt Activity, and select Tags. Search and filter the conversations before selecting rows.",
+        "Open Audit, expand Data Retention, and choose Tags and holds. Search and filter the conversations before selecting rows.",
         "Preview the saved prompts and model outputs for a conversation. If the data cannot load, resolve the error before deciding on an action.",
         "Review the selected count and choose Archive selected or Delete selected. Read the confirmation carefully; archival preserves stored conversations, while confirmed deletion permanently removes eligible chats and attachments.",
-        "Inspect the resulting action status and skipped records. Active holds prevent deletion. The page does not provide a control to invent or silently override a hold.",
+        "Inspect the resulting action status and skipped records. Under Legal holds, create a named hold for the selected chats or review active holds. Releasing a hold requires confirmation and starts a new review window before eligible records can be deleted.",
       ]),
-      note("warning", "Tagging is a way to identify conversations. Enabling tags does not prove a retention schedule has run, create a hold, or authorize deletion. Use the explicit batch confirmation only after checking the selected records."),
+      note("warning", "A suggested client or sensitive-data label is not a confirmed retention source. Automatic cleanup covers saved chats, linked uploads and image previews, search entries, and chat feedback. Draft documents, learned memories, audit and usage records, generated-media storage, backups, external providers, and exported files have separate lifecycles; this control is not a complete client-erasure or regulatory-compliance guarantee."),
     ],
   },
   {
@@ -1507,21 +1616,21 @@ const GUIDES = {
     docTitle: "User Guide",
     badge: "For every user",
     subtitle:
-      "Everything you need to work in Aperture Chat — chat, cross-session personalization memory, drafts, slide decks, agents, knowledge and tools, automations, search, and your account. No prior knowledge assumed.",
+      "Everything you need to work in Aperture Chat: chat, model access, personalization memory, documents and decks, account sync, agents, knowledge and tools, automations, search, and account security. No prior knowledge assumed.",
   },
   admin: {
     file: "aperture-admin-guide",
     docTitle: "Administrator Guide",
     badge: "For workspace administrators",
     subtitle:
-      "The complete User Guide, plus the Admin console: accounts, groups, model access, response actions, single sign-on, analytics, token budgets, the tenant audit trail, and alerts. No prior knowledge assumed.",
+      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, response actions, single sign-on, analytics, token budgets, the tenant audit trail, and alerts. No prior knowledge assumed.",
   },
   owner: {
     file: "aperture-owner-guide",
     docTitle: "Platform Owner Guide",
     badge: "For platform owners",
     subtitle:
-      "The complete User and Administrator Guides, plus provider and shared-connector configuration, the API key vault, organization model availability, SSO, branding, policies, usage budgets, platform releases, analytics, audit, and alerts. No prior knowledge assumed.",
+      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, releases, analytics, audit, and alerts. No prior knowledge assumed.",
   },
 };
 
