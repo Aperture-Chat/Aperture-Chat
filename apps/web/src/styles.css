@@ -1177,6 +1177,14 @@ button:disabled {
     color var(--speed) var(--ease);
 }
 
+/* Rail destinations are real links; keep them visually identical to buttons. */
+a.nav-item {
+  text-decoration: none;
+  box-sizing: border-box;
+  font: inherit;
+  cursor: pointer;
+}
+
 .nav-item svg,
 .minor-row svg {
   flex: 0 0 auto;
@@ -13257,8 +13265,8 @@ dd {
 }
 
 .owner-video-modal {
-  width: min(1120px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
+  width: min(1120px, 100%);
+  max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -15337,7 +15345,8 @@ button.owner-doc-card:hover {
   display: grid;
   flex: 1 1 260px;
   gap: 4px;
-  min-width: 240px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .retention-search-title {
@@ -15359,7 +15368,7 @@ button.owner-doc-card:hover {
 .retention-tag-search {
   flex: 1;
   width: 100%;
-  min-width: 200px;
+  min-width: 0;
   padding: 7px 11px;
   border: 1.5px solid var(--accent);
   border-radius: 9px;
@@ -15396,13 +15405,14 @@ button.owner-doc-card:hover {
   color: var(--muted);
 }
 
-.prompt-panel-view-switch {
+.retention-view-switch {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
 }
 
-.prompt-panel-view-switch .secondary-button[aria-pressed="true"] {
+.retention-view-switch .secondary-button[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -15437,8 +15447,11 @@ button.owner-doc-card:hover {
 .retention-batch-actions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .retention-tagged-list {
@@ -19290,7 +19303,8 @@ button.retention-tagged-title:focus-visible strong {
     min-height: 40px;
     grid-auto-flow: column;
     grid-template-columns: auto auto auto;
-    top: 112px;
+    /* Sit below the ruler, rather than floating over the first heading. */
+    top: 28px;
     margin: 0 0 12px;
   }
 
@@ -19357,8 +19371,8 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .owner-video-modal {
-    width: calc(100vw - 12px);
-    max-height: calc(100dvh - 12px);
+    width: 100%;
+    max-height: calc(100dvh - 40px);
     padding: 12px;
     border-radius: 14px;
   }
@@ -24847,16 +24861,143 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
   .composer-resource-results { max-height: none; overflow: visible; }
 }
 
+/* Per-model access requests (Admin › Model Access) */
+.model-access-request-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.model-access-request-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 1fr);
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+.model-access-request-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 13px;
+}
+.model-access-request-copy small,
+.model-access-requests-panel .muted-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+.model-access-request-actions {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.model-access-request-actions select {
+  width: 100%;
+}
+.model-access-request-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (max-width: 720px) {
+  .model-access-request-row { grid-template-columns: 1fr; }
+}
+
 /* "Only on this device" rail badge (unsynced chats, drafts, legacy history) */
 .unsynced-work-badge {
-  color: var(--warning-ink, #8a5a00);
-  background: color-mix(in srgb, var(--warning, #f5b301) 14%, transparent);
+  color: var(--muted);
+  background: transparent;
 }
 .unsynced-work-badge:hover {
-  background: color-mix(in srgb, var(--warning, #f5b301) 24%, transparent);
-  color: var(--warning-ink, #8a5a00);
+  color: var(--text);
+  background: var(--surface-soft);
 }
-.sidebar-dark .unsynced-work-badge {
-  color: #ffd98a;
-  background: rgba(245, 179, 1, 0.16);
+.unsynced-work-footer {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
+.unsynced-work-footer small { color: var(--muted); }
+.unsynced-work-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.search-index-tenants { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; font-size: 13px; }
+.search-index-tenants > li { display: grid; gap: 16px; min-width: 0; }
+.search-index-tenants > li + li { border-top: 1px solid var(--border); padding-top: 20px; }
+.search-index-organization { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 20px; }
+.search-index-organization strong { font-size: 14px; }
+.search-index-status { color: var(--muted); font-size: 12px; }
+.search-index-details { display: flex; flex-wrap: wrap; gap: 16px 48px; margin: 0; }
+.search-index-details > div { display: grid; gap: 5px; min-width: 0; }
+.search-index-details dt { color: var(--muted); font-size: 12px; }
+.search-index-details dd { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.search-index-card > .panel-header { gap: 16px; }
+.search-index-card > .panel-header p { max-width: 76ch; line-height: 1.6; }
+
+/* Visible, keyboard-accessible slide choices use the same renderer as the editor. */
+.deck-design-browser { flex: 0 0 auto; min-width: 0; display: grid; gap: 8px; }
+.deck-design-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.deck-layout-gallery { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scroll-snap-type: x proximity; }
+.deck-layout-gallery > button { flex: 0 0 112px; display: grid; gap: 5px; padding: 6px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font-size: 11px; scroll-snap-align: start; text-align: left; }
+.deck-layout-gallery > button[aria-pressed="true"] { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 12%, var(--surface)); }
+.deck-layout-gallery > button:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.deck-layout-preview { position: relative; display: block; width: 98px; height: 55px; overflow: hidden; border-radius: 4px; background: white; }
+.deck-layout-preview .deck-thumb-scale .deck-slide-canvas { transform: scale(0.10208); }
+.deck-layout-menu { min-width: min(300px, 100%); max-width: 100%; max-height: min(340px, 45vh); overflow-y: auto; }
+
+.deck-theme-gallery { display: flex; gap: 6px; overflow-x: auto; padding: 2px; }
+.deck-theme-gallery button { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 4px 7px; font-size: 11px; }
+.deck-theme-gallery button[aria-pressed="true"] { border-color: var(--teal); }
+.deck-theme-gallery button > span { border-left: 3px solid; padding: 2px 5px; border-radius: 2px; }
+
+/* Retention controls use the console's existing neutral surfaces. */
+.retention-governance { display:grid; gap:20px; padding:8px 0 24px; border-bottom:1px solid var(--border); margin-bottom:20px; }
+.retention-governance-heading { display:flex; align-items:flex-start; flex-wrap:wrap; gap:12px; }
+.retention-governance-heading h3, .retention-source-section h4 { margin:0 0 8px; }
+.retention-governance p, .retention-tag-management p { margin:0; color:var(--muted); font-size:13px; line-height:1.65; }
+.retention-mode { margin-left:auto; font-size:12px; color:var(--muted); }
+.retention-schedule-fields { border:0; margin:0; padding:0; display:grid; gap:16px; min-width:0; }
+.retention-schedule-fields label, .retention-tag-management label { display:grid; gap:8px; font-size:13px; min-width:0; }
+.retention-duration-slider { width:100%; accent-color:var(--accent); padding:0; min-height:32px; }
+.retention-preset-labels { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
+.retention-preset-labels button { border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--muted); padding:10px 4px; font:inherit; font-size:12px; cursor:pointer; }
+.retention-preset-labels button[aria-pressed="true"] { color:var(--text); border-color:var(--accent); background:var(--surface-soft); }
+.retention-field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.retention-checkbox { display:flex!important; flex-direction:row; align-items:center; gap:10px!important; }
+.retention-checkbox input, .retention-tagged-row > input { width:16px; height:16px; flex:0 0 16px; }
+.retention-source-section { display:grid; gap:16px; border-top:1px solid var(--border); padding-top:24px; }
+.retention-source-section > button { justify-self:start; }
+.retention-source-row { display:flex; align-items:center; flex-wrap:wrap; gap:12px 24px; padding:16px 0; border-bottom:1px solid var(--border); }
+.retention-source-row > div { flex:1; min-width:160px; overflow-wrap:anywhere; }
+.retention-source-row small { display:block; margin-top:6px; color:var(--muted); }
+.retention-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.retention-impact { display:grid; gap:8px; padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--surface-soft); }
+.retention-tag-management { display:grid; gap:16px; margin-top:20px; padding:18px; border:1px solid var(--border); border-radius:10px; }
+.retention-tag-management details { min-width:0; }
+.retention-tag-management summary { cursor:pointer; font-size:13px; margin:0; }
+.retention-hold-content { display:grid; gap:16px; min-width:0; padding-top:12px; }
+.retention-tag-management input, .retention-governance input:not([type="checkbox"]), .retention-governance select, .retention-tag-management select { max-width:100%; min-width:0; }
+.retention-tagged-row { justify-content:flex-start; gap:16px; padding:14px; }
+.retention-tagged-title { flex:1 1 240px; overflow-wrap:anywhere; }
+.retention-tag-chips { flex:0 1 48%; }
+.retention-tag-chip { white-space:normal; overflow-wrap:anywhere; }
+@media (max-width:640px) {
+  .retention-field-grid { grid-template-columns:1fr; }
+  .retention-tagged-row { flex-wrap:wrap; }
+  .retention-tag-chips { flex:1 1 100%; justify-content:flex-start; margin-left:32px; }
+  .retention-tag-management { padding:12px; }
+  .retention-preset-labels { gap:4px; }
+}
+
+.retention-governance input:not([type="checkbox"]):not([type="range"]),
+.retention-governance select, .retention-tag-management input:not([type="checkbox"]),
+.retention-tag-management select { width:100%; min-height:40px; border:1px solid var(--border); border-radius:8px; padding:9px 12px; background:var(--surface); color:var(--text); font:inherit; font-size:13px; }
+.retention-governance input::placeholder, .retention-tag-management input::placeholder { color:var(--muted); }
+.retention-governance :is(input, select, button):focus-visible, .retention-tag-management :is(input, select, button):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.retention-tag-management .retention-actions > select { flex:1 1 220px; width:auto; }
+.retention-preset-labels button { white-space:nowrap; }

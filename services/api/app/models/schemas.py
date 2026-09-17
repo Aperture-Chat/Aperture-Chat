@@ -235,6 +235,9 @@ class PlatformSettings(BaseModel):
     # Top of the memory enablement cascade. Off by default so existing
     # deployments keep byte-identical prompts until an owner opts in.
     memory_enabled: bool = False
+    # Owner kill switch for the "Why can't I use this model?" catalog. When off,
+    # users see only the models they can already use, exactly as before.
+    users_can_browse_model_catalog: bool = True
 
 
 class PlatformSettingsUpdateRequest(BaseModel):
@@ -247,6 +250,7 @@ class PlatformSettingsUpdateRequest(BaseModel):
     audit_retention_days: int | None = Field(default=None, strict=True, ge=0, le=36_500)
     usage_retention_days: int | None = Field(default=None, strict=True, ge=0, le=36_500)
     memory_enabled: bool | None = None
+    users_can_browse_model_catalog: bool | None = None
 
 
 class User(BaseModel):
@@ -580,6 +584,13 @@ class Provider(BaseModel):
     enabled_model_count: int = 0
     last_sync: str = "1 minute ago"
     status_message: str | None = None
+    # Machine-readable outcomes of the last runtime validation and catalog
+    # sync (ISO-8601 UTC). The display strings above stay for compatibility;
+    # the setup wizard reads these to say what really happened and when.
+    last_validated_at: str | None = None
+    last_validation_status: Literal["passed", "auth_failed", "failed"] | None = None
+    last_validation_model_id: str | None = None
+    last_synced_at: str | None = None
 
 
 class ProviderCreateRequest(BaseModel):
@@ -704,6 +715,132 @@ class ModelUpdateRequest(BaseModel):
 
 class AdminModelAccessUpdateRequest(BaseModel):
     group_ids: list[str]
+
+
+class ModelAccessGateResponse(BaseModel):
+    key: str
+    passed: bool
+    detail: str
+
+
+class ModelAccessDecisionResponse(BaseModel):
+    """Serialized :class:`app.core.policy.ModelAccessDecision`."""
+
+    allowed: bool
+    usable: bool
+    reason_code: str | None = None
+    reason: str
+    gates: list[ModelAccessGateResponse] = Field(default_factory=list)
+    # Whether "Request access" makes sense for this outcome (false for
+    # structural gates such as tenant scope or the temporary-user contract).
+    requestable: bool = False
+
+
+ModelAccessRequestStatus = Literal["pending", "approved", "declined", "withdrawn"]
+MAX_MODEL_ACCESS_REQUEST_NOTE = 500
+
+
+class ModelAccessRequest(BaseModel):
+    id: str
+    tenant_id: str
+    user_id: str
+    model_id: str
+    status: ModelAccessRequestStatus = "pending"
+    note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    resolved_by_user_id: str | None = None
+    resolution_note: str | None = None
+    granted_group_id: str | None = None
+
+
+class ModelAccessRequestCreate(BaseModel):
+    model_id: str = Field(min_length=1, max_length=255)
+    note: str | None = Field(default=None, max_length=MAX_MODEL_ACCESS_REQUEST_NOTE)
+
+    @field_validator("note")
+    @classmethod
+    def _strip_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ModelAccessRequestResolve(BaseModel):
+    group_id: str | None = Field(default=None, max_length=255)
+    note: str | None = Field(default=None, max_length=MAX_MODEL_ACCESS_REQUEST_NOTE)
+
+    @field_validator("note")
+    @classmethod
+    def _strip_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ModelCatalogModel(BaseModel):
+    """Redacted model card for people who are not administrators.
+
+    Prompts and operator notes never leave the server for a user-facing list;
+    the decision beside each card is what the person is entitled to know.
+    """
+
+    id: str
+    name: str
+    provider_id: str
+    provider_name: str
+    upstream_model_id: str | None = None
+    platform_enabled: bool = True
+    is_custom: bool = False
+    visibility: str = "organization"
+    context_window: int | None = None
+
+
+class ModelCatalogEntry(BaseModel):
+    model: ModelCatalogModel
+    decision: ModelAccessDecisionResponse
+    open_request: ModelAccessRequest | None = None
+
+
+class ModelCatalogResponse(BaseModel):
+    entries: list[ModelCatalogEntry] = Field(default_factory=list)
+    # False when the owner has switched off catalog browsing for users; the UI
+    # then explains that models are hidden by organization policy.
+    browsing_enabled: bool = True
+
+
+class AdminModelAccessRequestView(BaseModel):
+    request: ModelAccessRequest
+    requester_display_name: str
+    requester_email: str
+    requester_group_ids: list[str] = Field(default_factory=list)
+    model_name: str
+    model_provider_name: str
+    # Groups in the actor's tenant that already carry the model; approving into
+    # one of these never widens the model itself.
+    eligible_group_ids: list[str] = Field(default_factory=list)
+    # Whether the actor may also grant the model to a new group while approving.
+    can_grant_new_group: bool = False
+    decision: ModelAccessDecisionResponse
+
+
+class ModelAccessRequestResolution(BaseModel):
+    request: ModelAccessRequest
+    decision: ModelAccessDecisionResponse
+
+
+class UserModelAccessTraceEntry(BaseModel):
+    model: ModelCatalogModel
+    decision: ModelAccessDecisionResponse
+
+
+class UserModelAccessTrace(BaseModel):
+    user_id: str
+    display_name: str
+    group_ids: list[str] = Field(default_factory=list)
+    entries: list[UserModelAccessTraceEntry] = Field(default_factory=list)
 
 
 class ContentFilterRule(BaseModel):
@@ -859,6 +996,60 @@ class ProviderModelSyncResponse(BaseModel):
     removed_count: int = 0
     source: str
     message: str
+
+
+class ProviderValidationResponse(BaseModel):
+    """Result of a live runtime test against one provider (no discovery)."""
+
+    provider: Provider
+    model_id: str
+    model_name: str
+    latency_ms: int
+
+
+SetupStepState = Literal["done", "todo", "attention"]
+
+
+class PlatformSetupProviderStatus(BaseModel):
+    id: str
+    name: str
+    kind: str
+    connected: bool
+    has_active_platform_key: bool
+    supports_model_sync: bool
+    model_count: int
+    last_validation_status: Literal["passed", "auth_failed", "failed"] | None = None
+    last_validated_at: str | None = None
+    last_validation_model_id: str | None = None
+    last_synced_at: str | None = None
+    # Passed through the audit redaction helper so an upstream error body can
+    # never leak a secret into the wizard.
+    status_message: str | None = None
+
+
+class PlatformSetupTenantGrant(BaseModel):
+    tenant_id: str
+    tenant_name: str
+    groups_total: int
+    groups_with_any_model: int
+    active_users: int
+    active_users_with_model: int
+    pending_access_requests: int
+
+
+class PlatformSetupStep(BaseModel):
+    key: Literal["provider", "credential", "validate", "catalog", "enable", "grant"]
+    state: SetupStepState
+    summary: str
+    counts: dict[str, int] = Field(default_factory=dict)
+    providers: list[PlatformSetupProviderStatus] = Field(default_factory=list)
+    per_tenant: list[PlatformSetupTenantGrant] = Field(default_factory=list)
+
+
+class PlatformSetupStatus(BaseModel):
+    steps: list[PlatformSetupStep]
+    ready_for_users: bool
+    generated_at: str
 
 
 class ProviderKey(BaseModel):
@@ -1774,9 +1965,26 @@ class RetentionRule(BaseModel):
     tag_namespace: str
     # None applies the rule to every tag in the namespace.
     tag_key: str | None = None
-    retention_days: int = Field(strict=True, ge=1, le=36_500)
+    retention_days: int = Field(strict=True, ge=0, le=36_500)
     action: Literal["purge", "archive_then_purge"] = "purge"
     note: str = ""
+
+
+class RetentionSource(BaseModel):
+    """Stable administrator-owned identity; aliases produce suggestions only."""
+
+    id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+    kind: Literal["client", "matter", "regulated"] = "client"
+    name: str = Field(min_length=2, max_length=160)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("aliases")
+    @classmethod
+    def _valid_aliases(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(value.strip() for value in values))
+        if any(len(value) < 3 or len(value) > 160 for value in cleaned):
+            raise ValueError("Aliases must contain between 3 and 160 characters")
+        return cleaned
 
 
 class TenantRetentionPolicy(BaseModel):
@@ -1785,6 +1993,11 @@ class TenantRetentionPolicy(BaseModel):
     id: str = ""
     tenant_id: str
     enabled: bool = False
+    # Separate opt-in: previously stored policy metadata must never start
+    # deleting chats merely because enforcement is deployed.
+    automation_enabled: bool = False
+    sensitive_tagging_enabled: bool = False
+    sources: list[RetentionSource] = Field(default_factory=list, max_length=100)
     # Zero keeps the tenant-wide default disabled; per-tag rules may still
     # govern individual threads. A thread matching nothing is never disposed.
     chat_retention_days: int = Field(default=0, strict=True, ge=0, le=36_500)
@@ -1813,6 +2026,10 @@ class TenantRetentionPolicy(BaseModel):
 
 
 class TenantRetentionPolicyUpdateRequest(BaseModel):
+    automation_enabled: bool | None = None
+    sensitive_tagging_enabled: bool | None = None
+    sources: list[RetentionSource] | None = Field(default=None, max_length=100)
+    preview_token: str | None = None
     enabled: bool | None = None
     chat_retention_days: int | None = Field(default=None, ge=0, le=36_500)
     retention_basis: Literal["last_activity", "created"] | None = None
@@ -1824,6 +2041,19 @@ class TenantRetentionPolicyUpdateRequest(BaseModel):
     subject_tagging_enabled: bool | None = None
     external_tags_enabled: bool | None = None
     rules: list[RetentionRule] | None = None
+
+
+class RetentionTagReviewRequest(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+    namespace: Literal["client", "matter", "regulated", "sensitive"]
+    key: str = Field(min_length=1, max_length=100)
+    action: Literal["confirm", "remove"] = "confirm"
+
+
+class RetentionHoldRequest(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=3, max_length=160)
+    reason: str = Field(default="", max_length=1000)
 
 
 class ChatThreadTag(BaseModel):
@@ -1871,6 +2101,12 @@ class RetentionTaggedThread(BaseModel):
     matter_id: str | None = None
     matter_label: str | None = None
     tags: list[ChatThreadTag] = Field(default_factory=list)
+    created_at: datetime | None = None
+    last_activity_at: datetime | None = None
+    eligible_at: datetime | None = None
+    pending_since: datetime | None = None
+    held: bool = False
+    retention_status: str = "Keep"
 
 
 class ChatFeedbackRecord(BaseModel):

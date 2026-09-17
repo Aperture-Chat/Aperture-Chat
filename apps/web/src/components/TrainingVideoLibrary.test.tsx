@@ -38,7 +38,7 @@ test("the workspace Help playlist starts with chatting and excludes pre-sign-in 
   render(<UserGuidePlaylist />);
   expect(screen.queryByRole("button", { name: /Request access and enter/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Start chatting/ })).toBeVisible();
-  expect(screen.getByText(/18 guided walkthroughs/)).toBeVisible();
+  expect(screen.getByText(/21 guided walkthroughs/)).toBeVisible();
 });
 
 test("fullscreen falls back to an expanded player when the browser rejects it and can be exited", async () => {

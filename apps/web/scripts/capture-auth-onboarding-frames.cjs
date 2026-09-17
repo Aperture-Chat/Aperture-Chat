@@ -7,6 +7,7 @@
  *   CAPTURE_SESSION_FILE: private actual tenant-admin sign-in response, or
  *     CAPTURE_USER_ID and CAPTURE_SESSION_TOKEN
  *   CAPTURE_AUTH_PRIVATE_STATE_FILE: new private recovery-state file
+ *   CAPTURE_CHROMIUM_EXECUTABLE_PATH: optional installed Chromium executable
  *
  * This creates and approves one reserved-domain account, sets its temporary
  * and permanent passwords, enrolls an authenticator, replaces recovery codes,
@@ -28,6 +29,7 @@ const EXPECTED = [
   "access-handoff", "access-temporary-password", "access-own-password", "access-welcome",
   "account-security-overview", "account-authenticator-start", "account-authenticator-verify",
   "account-recovery-save", "account-recovery-replace", "account-security-enabled",
+  "sign-in-verification",
 ];
 const WORK = path.join(__dirname, "../../../tmp/training-captures");
 let stage = "validate inputs";
@@ -177,7 +179,11 @@ async function main() {
     newPassword: crypto.randomBytes(28).toString("base64url"),
   };
   save();
-  browser = await chromium.launch();
+  browser = await chromium.launch({
+    ...(process.env.CAPTURE_CHROMIUM_EXECUTABLE_PATH
+      ? { executablePath: process.env.CAPTURE_CHROMIUM_EXECUTABLE_PATH }
+      : {}),
+  });
   const page = await contextFor(app, apiOrigin);
   stage = "access request";
   await page.getByRole("button", { name: "Request access", exact: true }).click();
@@ -285,14 +291,38 @@ async function main() {
   await page.locator(".account-security").scrollIntoViewIfNeeded();
   await shot(page, "account-security-enabled", { security: ".account-security" });
 
+  stage = "later sign-in verification";
+  const signIn = await contextFor(app, apiOrigin);
+  await signIn.locator(".auth-panel").waitFor();
+  const passwordMethod = signIn.getByRole("button", { name: "Email & password", exact: true });
+  if (await passwordMethod.isVisible()) await passwordMethod.click();
+  await signIn.getByLabel("Email", { exact: true }).fill(state.email);
+  await signIn.getByLabel("Password", { exact: true }).fill(state.newPassword);
+  await response(signIn, /^\/api\/auth\/login$/, () => signIn.getByRole("button", { name: "Sign in", exact: true }).click(), 202);
+  await signIn.getByRole("heading", { name: "Two-step verification", exact: true }).waitFor();
+  await shot(signIn, "sign-in-verification", {
+    panel: ".auth-panel",
+    proof: 'input[autocomplete="one-time-code"]',
+    actions: ".auth-actions",
+  });
+  await signIn.getByRole("button", { name: "Use a recovery code instead", exact: true }).click();
+  await signIn.getByLabel("Recovery code", { exact: true }).fill(state.replacementCodes[2]);
+  const laterLogin = await response(signIn, /^\/api\/auth\/mfa\/preauth\/verify$/, () => signIn.getByRole("button", { name: "Verify and continue", exact: true }).click(), 200);
+  check(laterLogin.session.mfa_assured, "later_browser_sign_in_is_verified");
+  state.challengeMfaToken = laterLogin.session.token;
+  await signIn.getByRole("navigation", { name: "Primary" }).waitFor();
+  save();
+
   stage = "disable verification and revoke sessions";
   await page.getByRole("button", { name: "Turn off verification", exact: true }).click();
   await page.getByRole("button", { name: "Use a recovery code instead" }).click();
   await page.getByLabel("Recovery code", { exact: true }).fill(state.replacementCodes[1]);
   await response(page, /^\/api\/auth\/mfa\/disable$/, () => page.getByRole("button", { name: "Turn off and sign out" }).click(), 200);
-  await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
+  // The default method may be organization SSO, whose submit button reads
+  // Continue with SSO. The signed-out panel is the invariant after disabling.
+  await page.locator(".auth-panel").waitFor();
   check(await page.evaluate(() => localStorage.getItem("aperture-session-token")) === null, "disabling_verification_clears_browser_session");
-  for (const key of ["mfaToken", "secondMfaToken"]) check((await api(apiOrigin, "GET", "/api/auth/session", undefined, state[key])).status === 401, `${key}_revoked_after_disable`);
+  for (const key of ["mfaToken", "secondMfaToken", "challengeMfaToken"]) check((await api(apiOrigin, "GET", "/api/auth/session", undefined, state[key])).status === 401, `${key}_revoked_after_disable`);
   const finalLogin = await api(apiOrigin, "POST", "/api/auth/login", { email: state.email, auth_method: "local", password: state.newPassword });
   check(finalLogin.status === 200 && !finalLogin.data.session.mfa_assured, "fresh_password_login_works_after_disable");
   state.finalToken = finalLogin.data.session.token;

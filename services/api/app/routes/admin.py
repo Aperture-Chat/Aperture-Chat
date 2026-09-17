@@ -18,6 +18,7 @@ from app.core.alerting import (
 from app.core.audit_severity import decorate_audit_events
 from app.core.mailer import email_configured
 from app.core.retention import batch_dispose_threads
+from app.core.retention_governance import merged_policy, preview as retention_preview, scan_thread, SENSITIVE_LABELS
 from app.core.usage_analytics import build_usage_summary
 from app.core.usage_budget import UsageBudgetError, UsageBudgetUnavailable, utc_usage_date
 from app.core.usage_budget_runtime import (
@@ -114,7 +115,10 @@ from app.models.schemas import (
     ChatFeedbackRecord,
     RetentionBatchRequest,
     RetentionBatchResult,
-    RetentionRule,
+    RetentionTagReviewRequest,
+    RetentionHoldRequest,
+    RetentionHold,
+    ChatThreadTag,
     RetentionTaggedThread,
     TenantRetentionPolicy,
     TenantRetentionPolicyUpdateRequest,
@@ -2555,26 +2559,95 @@ def update_retention_policy(
     store: SeedStore = Depends(get_store),
 ) -> TenantRetentionPolicy:
     tenant_id = _memory_admin_tenant_id(actor, store)
-    updates = payload.model_dump(exclude_unset=True)
+    with store._store_lock:
+        current = store.tenant_retention_policy(tenant_id)
+        try:
+            policy = merged_policy(current, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        changed = list(payload.model_dump(exclude_unset=True, exclude={"preview_token"}))
+        disposition_fields = {"enabled", "automation_enabled", "chat_retention_days", "retention_basis", "rules", "action", "grace_days"}
+        if policy.enabled and policy.automation_enabled and disposition_fields.intersection(changed):
+            expected = retention_preview(store, policy)["preview_token"]
+            if payload.preview_token != expected:
+                raise HTTPException(status_code=409, detail="Preview this exact policy again before saving; the policy or affected chats changed.")
+        policy.updated_at = clock.now_iso()
+        policy.updated_by = actor.id
+        saved = store.save_tenant_retention_policy(policy)
+        store.record_audit(actor, "retention.policy_updated", tenant_id, {"changed": changed, "enabled": saved.enabled, "automatic": saved.automation_enabled})
+        return saved
+
+
+@router.post("/retention/preview")
+def preview_retention_policy(payload: TenantRetentionPolicyUpdateRequest, actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    try:
+        policy = merged_policy(store.tenant_retention_policy(tenant_id), payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return retention_preview(store, policy)
+
+
+@router.post("/retention/scan")
+def scan_retention_sources(after: str = "", actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict:
+    tenant_id = _memory_admin_tenant_id(actor, store)
     policy = store.tenant_retention_policy(tenant_id)
-    changed: list[str] = []
-    for field, value in updates.items():
-        if value is None:
-            continue
-        if field == "rules":
-            value = [RetentionRule.model_validate(item) for item in value]
-        setattr(policy, field, value)
-        changed.append(field)
-    policy.updated_at = clock.now_iso()
-    policy.updated_by = actor.id
-    saved = store.save_tenant_retention_policy(policy)
-    store.record_audit(
-        actor,
-        "retention.policy_updated",
-        tenant_id,
-        {"changed": changed, "enabled": saved.enabled},
-    )
-    return saved
+    threads = store.application_state_repository.retention_scan_page(tenant_id, after=after)
+    count = sum(scan_thread(store, thread, policy) for thread in threads)
+    store.record_audit(actor, "retention.sources_scanned", tenant_id, {"scanned": len(threads), "suggestions": count}, runtime_state_changed=False)
+    return {"scanned": len(threads), "suggestions": count, "next_after": threads[-1].id if len(threads) == 100 else None}
+
+
+@router.post("/retention/tags/review")
+def review_retention_tags(payload: RetentionTagReviewRequest, actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    with store._store_lock:
+        policy = store.tenant_retention_policy(tenant_id)
+        labels = {(source.kind, source.id): source.name for source in policy.sources}
+        labels.update({("sensitive", key): value for key, value in SENSITIVE_LABELS.items()})
+        labels.update({("matter", key): value for key, value in store.application_state_repository.matter_labels_for_tenant(tenant_id).items()})
+        label = labels.get((payload.namespace, payload.key))
+        if label is None:
+            raise HTTPException(status_code=422, detail="Choose an existing retention source.")
+        count = 0
+        for thread_id in dict.fromkeys(payload.thread_ids):
+            thread = store.chat_threads.get(thread_id)
+            if thread is None or thread.tenant_id != tenant_id:
+                continue
+            for namespace in (payload.namespace, f"suggested_{payload.namespace}", f"dismissed_{payload.namespace}"):
+                store.remove_chat_thread_tag(thread_id, namespace, payload.key)
+            namespace = payload.namespace if payload.action == "confirm" else f"dismissed_{payload.namespace}"
+            store.apply_chat_thread_tag(ChatThreadTag(id=f"tag-{uuid4()}", tenant_id=tenant_id, thread_id=thread_id, namespace=namespace, key=payload.key, value=label, source="manual", applied_at=clock.now(), applied_by=actor.id))
+            count += 1
+        store.application_state_repository.reset_retention_review(payload.thread_ids, tenant_id)
+        store.record_audit(actor, "retention.tags_reviewed", tenant_id, {"count": count, "namespace": payload.namespace, "key": payload.key, "action": payload.action}, runtime_state_changed=False)
+        return {"reviewed": count}
+
+
+@router.get("/retention/holds")
+def list_retention_holds(actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> list:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    return store.application_state_repository.list_retention_holds(tenant_id=tenant_id, active_only=True)
+
+
+@router.post("/retention/holds")
+def create_retention_hold(payload: RetentionHoldRequest, actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    with store._store_lock:
+        hold, ids = store.application_state_repository.create_retention_hold(RetentionHold(id=f"hold-{uuid4()}", tenant_id=tenant_id, name=payload.name, reason=payload.reason, created_by=actor.id, created_at=clock.now()), payload.thread_ids)
+        store.record_audit(actor, "retention.hold_created", hold.id, {"threads": len(ids)}, runtime_state_changed=False)
+        return {"id": hold.id, "held": len(ids)}
+
+
+@router.post("/retention/holds/{hold_id}/release")
+def release_retention_hold(hold_id: str, actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict:
+    tenant_id = _memory_admin_tenant_id(actor, store)
+    with store._store_lock:
+        hold = store.application_state_repository.release_retention_hold(hold_id, tenant_id=tenant_id, released_by=actor.id, released_at=clock.now())
+        if hold is None:
+            raise HTTPException(status_code=404, detail="Unknown hold.")
+        store.record_audit(actor, "retention.hold_released", hold.id, {}, runtime_state_changed=False)
+        return {"released": True}
 
 
 @router.get("/retention/tagged-threads")
@@ -2610,6 +2683,7 @@ def retention_tagged_threads(
 @router.get("/retention/threads")
 def retention_threads(
     limit: int = Query(default=200, ge=1, le=500),
+    after: str = "",
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[RetentionTaggedThread]:
@@ -2624,9 +2698,8 @@ def retention_threads(
     for tag in store.list_chat_thread_tags(tenant_id=tenant_id):
         tags_by_thread.setdefault(tag.thread_id, []).append(tag)
     matter_labels = store.application_state_repository.matter_labels_for_tenant(tenant_id)
-    threads = store.application_state_repository.list_chat_threads(
-        tenant_id=tenant_id, newest_first=True, limit=limit
-    )
+    threads = store.application_state_repository.retention_scan_page(tenant_id, after=after, limit=limit)
+    overview = store.application_state_repository.retention_overview(store.tenant_retention_policy(tenant_id))
     rows = [
         RetentionTaggedThread(
             thread_id=thread.id,
@@ -2635,14 +2708,11 @@ def retention_threads(
             archived=thread.archived,
             matter_id=thread.matter_id,
             matter_label=matter_labels.get(thread.matter_id) if thread.matter_id else None,
-            tags=tags_by_thread.pop(thread.id, []),
+            tags=[tag for tag in tags_by_thread.pop(thread.id, []) if not tag.namespace.startswith("dismissed_")],
+            **{key: value for key, value in overview.get(thread.id, {}).items() if key in RetentionTaggedThread.model_fields},
         )
         for thread in threads
     ]
-    # Tags whose thread fell outside the page (or was deleted) stay visible
-    # so cleanup is never hidden by pagination.
-    for thread_id, thread_tags in tags_by_thread.items():
-        rows.append(RetentionTaggedThread(thread_id=thread_id, tags=thread_tags))
     return rows
 
 

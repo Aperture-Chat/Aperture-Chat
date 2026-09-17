@@ -1,0 +1,10 @@
+{
+  "schema": "aperture-deck-v1",
+  "sanitizer_version": "deck-json-v1",
+  "max_content_bytes": 8000000,
+  "max_slides": 100,
+  "max_bullets_per_slide": 8,
+  "max_slide_background_chars": 900000,
+  "max_background_library_entries": 60,
+  "layouts": ["title", "title-bullets", "two-column", "image-caption", "quote", "section", "chart", "closing"]
+}

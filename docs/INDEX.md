@@ -42,7 +42,9 @@ source files, narrated walkthroughs, and verification procedure.
 
 - `PLATFORM_OWNER` manages platform-wide providers, model availability,
   connector switches and credentials, organization settings, tenant boundaries,
-  audit controls, and branding.
+  audit controls, and branding. The Platform console opens in **Org Settings**.
+  Its **Documentation** center provides the owner PDF, narrated walkthroughs,
+  and an Interactive platform guide for configuration advice.
 - `TENANT_ADMIN` manages tenant users, groups, knowledge bases, tools, response actions, policies,
   analytics, and model access.
 - `USER` uses the models, knowledge, tools, and workflows assigned to them.
@@ -50,6 +52,16 @@ source files, narrated walkthroughs, and verification procedure.
 Model access is layered through platform availability, tenant availability,
 group or user grants, and explicit denials. Provider secrets are masked by
 default and require platform-owner authorization to manage.
+
+Every one of those gates is explainable: the model picker's "Why isn't a model
+listed?" entry (`GET /api/me/model-catalog`) shows a signed-in person each
+enabled model in their organization with the server's reason it is or is not
+usable, and offers "Request access" where an administrator could change the
+outcome. Requests (`/api/me/model-access-requests`) are advisory records, never
+a grant. Administrators review them under Admin › Model Access, approving into
+a group of their own tenant under the existing delegation ceiling, and can open
+a read-only per-user access trace from Admin › Users. Platform owners can turn
+catalog browsing off for users in Org Settings.
 
 ## Development Checks
 

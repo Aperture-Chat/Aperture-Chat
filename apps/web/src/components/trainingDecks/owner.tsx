@@ -52,6 +52,12 @@ export type OwnerFocus =
   | "alertRules"
   | "alertTemplates"
   | "alertDeliveries"
+  | "retentionNavigation"
+  | "retentionWorkspace"
+  | "retentionSources"
+  | "retentionSensitive"
+  | "retentionHolds"
+  | "retentionSchedulePreview"
   | "retentionPanel"
   | "retentionToggles"
   | "retentionTagsSwitch"
@@ -62,12 +68,16 @@ export type OwnerFocus =
   | "firstOwnerWelcome"
   | "firstProviderValidated"
   | "firstWorkspaceAccess"
-  | "firstWorkspaceReply";
+  | "firstWorkspaceReply"
+  | "searchIndex"
+  | "modelBrowsingPolicy";
 
 export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
+  searchIndex: { frame: "training/owner/search-index.png", rect: { x: 261, y: 246, w: 889, h: 226 } },
+  modelBrowsingPolicy: { frame: "training/owner/model-browsing-policy.png", rect: { x: 285.90625, y: 405.75, w: 839.1875, h: 44 } },
   addProvider: { frame: "training/owner/providers.png", rect: { x: 940, y: 279, w: 141, h: 45 } },
   providerCard: { frame: "training/owner/providers.png", rect: { x: 282, y: 382, w: 420, h: 340 } },
-  providerStats: { frame: "training/owner/providers.png", rect: { x: 376, y: 431, w: 308, h: 119 } },
+  providerStats: { frame: "training/owner/provider-catalog.png", rect: { x: 376, y: 706, w: 308, h: 87 } },
   providerCardActions: { frame: "training/owner/providers.png", rect: { x: 376, y: 613, w: 308, h: 91 } },
   // vault/audit/alerts frames are local-stack re-captures with staged synthetic
   // keys, events, rules, and deliveries; rects measured from the live DOM.
@@ -91,20 +101,20 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   brandPreview: { frame: "training/owner/branding.png", rect: { x: 282, y: 85, w: 847, h: 87 } },
   brandFields: { frame: "training/owner/branding.png", rect: { x: 282, y: 186, w: 847, h: 539 } },
   brandThemeColors: { frame: "training/owner/branding.png", rect: { x: 282, y: 370, w: 847, h: 255 } },
-  brandActions: { frame: "training/owner/branding.png", rect: { x: 282, y: 630, w: 847, h: 45 } },
+  brandActions: { frame: "training/owner/branding-actions.png", rect: { x: 285.90625, y: 358.75, w: 839.1875, h: 88 } },
   // A 4:3 camera zoom removes the capture tool's unused right/bottom canvas
   // while preserving the native console text. Expanded sections use dedicated
   // scrolled frames, and rects are measured in the final zoomed composition.
-  policyCollapsed: { frame: "training/owner/policies-current-collapsed.png", rect: { x: 261, y: 380, w: 889, h: 98 } },
+  policyCollapsed: { frame: "training/owner/policies-current-collapsed.png", rect: { x: 261, y: 528, w: 889, h: 98 } },
   // The enforced-floor row sits above the toggle stack in the toggles frame,
   // inside the readable-viewport envelope pinned by trainingVideoKit.test.ts;
   // sharing the frame with policyToggles glides the highlight down the stack.
-  policyFloor: { frame: "training/owner/policies-toggles-current.png", rect: { x: 282, y: 217, w: 847, h: 51 } },
-  policyToggles: { frame: "training/owner/policies-toggles-current.png", rect: { x: 262, y: 197, w: 887, h: 462 } },
-  budgetControls: { frame: "training/owner/policies-budget-current.png", rect: { x: 283, y: 280, w: 845, h: 94 } },
+  policyFloor: { frame: "training/owner/policies-toggles-current.png", rect: { x: 282, y: 190, w: 847, h: 51 } },
+  policyToggles: { frame: "training/owner/policies-toggles-current.png", rect: { x: 262, y: 170, w: 887, h: 515 } },
+  budgetControls: { frame: "training/owner/policies-budget-current.png", rect: { x: 283, y: 390, w: 845, h: 94 } },
   // The legacy filename is retained; recapture the new owner Connectors panel
   // and apply its measured bounds before publishing the reconciled UI.
-  sharedConnectors: { frame: "training/owner/policies-callout-current.png", rect: { x: 261, y: 0, w: 889, h: 855 } },
+  sharedConnectors: { frame: "training/owner/policies-callout-current.png", rect: { x: 262, y: 382, w: 887, h: 91 } },
   analyticsFilters: { frame: "training/owner/analytics.png", rect: { x: 276, y: 98, w: 859, h: 154 } },
   runtimeScorecards: { frame: "training/owner/analytics.png", rect: { x: 262, y: 245, w: 887, h: 156 } },
   runtimeRows: { frame: "training/owner/analytics.png", rect: { x: 262, y: 408, w: 887, h: 447 } },
@@ -115,18 +125,24 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   auditCriticalTile: { frame: "training/owner/audit.png", rect: { x: 282, y: 342, w: 166, h: 139 } },
   auditTileGrid: { frame: "training/owner/audit.png", rect: { x: 262, y: 322, w: 887, h: 467 } },
   auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 276, y: 419, w: 859, h: 154 } },
-  trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 262, y: 224, w: 887, h: 85 } },
-  trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 262, y: 314, w: 887, h: 527 } },
+  trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 262, y: 742, w: 887, h: 85 } },
+  trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 895, y: 518, w: 81, h: 45 } },
   alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 261, y: 234, w: 889, h: 459 } },
   alertRules: { frame: "training/owner/alerts-deliveries.png", rect: { x: 261, y: 0, w: 889, h: 302 } },
   alertTemplates: { frame: "training/owner/alerts-deliveries.png", rect: { x: 726, y: 31, w: 403, h: 45 } },
   alertDeliveries: { frame: "training/owner/alerts-deliveries.png", rect: { x: 262, y: 419, w: 887, h: 436 } },
-  retentionPanel: { frame: "training/owner/retention-policy.png", rect: { x: 261, y: 479, w: 889, h: 338 } },
+  retentionNavigation: { frame: "training/owner/retention-navigation.png", rect: { x: 649, y: 163, w: 61, h: 53 } },
+  retentionWorkspace: { frame: "training/owner/retention-workspace.png", rect: { x: 257.90625, y: 382.75, w: 895.1875, h: 90 } },
+  retentionSources: { frame: "training/owner/retention-sources.png", rect: { x: 277.90625, y: 413.0625, w: 855.1875, h: 308.875 } },
+  retentionSensitive: { frame: "training/owner/retention-sensitive.png", rect: { x: 277.90625, y: 410.9375, w: 855.1875, h: 34 } },
+  retentionHolds: { frame: "training/owner/retention-holds.png", rect: { x: 296.90625, y: 318.703125, w: 817.1875, h: 216.875 } },
+  retentionSchedulePreview: { frame: "training/owner/retention-schedule-preview.png", rect: { x: 277.90625, y: 367.25, w: 855.1875, h: 178.875 } },
+  retentionPanel: { frame: "training/owner/retention-policy.png", rect: { x: 277.90625, y: 401.1875, w: 857.1875, h: 157 } },
   retentionToggles: { frame: "training/owner/retention-policy.png", rect: { x: 262, y: 587, w: 887, h: 229 } },
-  retentionTagsSwitch: { frame: "training/owner/retention-tags.png", rect: { x: 262, y: 385, w: 887, h: 85 } },
-  retentionTagsExplorer: { frame: "training/owner/retention-tags.png", rect: { x: 262, y: 475, w: 887, h: 380 } },
-  retentionPreview: { frame: "training/owner/retention-preview.png", rect: { x: 179, y: 98, w: 827, h: 659 } },
-  retentionBatch: { frame: "training/owner/retention-batch.png", rect: { x: 262, y: 599, w: 887, h: 87 } },
+  retentionTagsSwitch: { frame: "training/owner/retention-tags.png", rect: { x: 265.90625, y: 149.75, w: 879.1875, h: 78 } },
+  retentionTagsExplorer: { frame: "training/owner/retention-tags.png", rect: { x: 277.90625, y: 329.265625, w: 855.1875, h: 196.875 } },
+  retentionPreview: { frame: "training/owner/retention-preview.png", rect: { x: 174.5, y: 228.09375, w: 836, h: 398.796875 } },
+  retentionBatch: { frame: "training/owner/retention-batch.png", rect: { x: 277.90625, y: 355.015625, w: 855.1875, h: 145 } },
   firstOwnerSetup: { frame: "training/owner/first-owner-setup.png", rect: { x: 104, y: 362, w: 399, h: 443 } },
   firstOwnerWelcome: { frame: "training/owner/first-owner-welcome.png", rect: { x: 261, y: 24, w: 889, h: 272 } },
   firstProviderValidated: { frame: "training/owner/first-provider-validated.png", rect: { x: 713, y: 386, w: 413, h: 333 } },
@@ -150,7 +166,39 @@ type OwnerGuideIcon =
 
 export type OwnerTrainingVideo = TrainingVideoBase & { icon: OwnerGuideIcon };
 
-const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
+export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
+  {
+    id: "search-index",
+    audioSrc: "training/owner/search-index.mp3",
+    title: "Review workspace search readiness",
+    description: "Check organization search status and rebuild the index from current records when needed.",
+    icon: "audit",
+    outcomes: [
+      "Search status reviewed",
+      "Rebuild result understood"
+    ],
+    setupSteps: [
+      "Open Org Settings and find Search index. Read each organization's Ready or Backfilling status and entry count.",
+      "Rebuild index reconstructs the index from live records. Read the completion message or error before assuming it finished.",
+      "Search still verifies every hit against the live record and current permissions. Rebuilding does not grant access or restore deleted content."
+    ],
+    scenes: [
+      {
+        title: "Check whether search has caught up",
+        caption: "Org Settings → Search index shows Ready or Backfilling for each organization.",
+        narration: "Open Org Settings and review Search index. Each organization shows its entry count and whether indexing is Ready or Backfilling. While backfilling, search results may be incomplete. If indexing is disabled, the panel explains that searches scan records directly instead.",
+        durationSeconds: 20,
+        focus: "searchIndex"
+      },
+      {
+        title: "Rebuild from current records",
+        caption: "Rebuild index reports its result. Search permissions continue to apply to every result.",
+        narration: "When the index needs rebuilding, choose Rebuild index and wait for its result. The rebuild uses current live records. An error does not confirm completion. Search verifies every result against its live record and your permissions, so rebuilding cannot grant access, restore deleted work, or expose another person's private content.",
+        durationSeconds: 23,
+        focus: "searchIndex"
+      }
+    ]
+  },
   {
     id: "owner-first-workspace",
     audioSrc: "training/owner/owner-first-workspace.mp3",
@@ -182,6 +230,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "After sign-in, Getting started shows account and model readiness. Without a model, Drafts still supports editing, importing, saving, and exporting; AI drafting is unavailable. Choose Set up models, then open Providers. Open owner guide supplies the detailed setup instructions.",
         durationSeconds: 20,
+        calloutPlacement: "left-rail",
         focus: "firstOwnerWelcome",
       },
       {
@@ -198,7 +247,9 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Enable the intended organization models, then use Admin console to review accounts, groups, and Model Access. Approved users need an active account, the right platform group, and a model assigned to that group. Arrange SSO or a temporary password and share the workspace address; approval sends no automatic email.",
         durationSeconds: 23,
+        captionPlacement: "top",
         focus: "firstWorkspaceAccess",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Verify a new conversation",
@@ -206,6 +257,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Finish with a new sign-in by an intended user. Complete any password or authenticator steps, select an available model, and send a fresh message. Confirm that the provider returns a response. This verifies that account setup, group access, model availability, and the connection work together.",
         durationSeconds: 21,
+        calloutPlacement: "left-rail",
         focus: "firstWorkspaceReply",
       },
     ],
@@ -218,7 +270,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     icon: "provider",
     outcomes: ["Provider registered", "Badge read honestly", "Catalog synced"],
     setupSteps: [
-      "Open the account drawer, then Management, then Platform owner console; it opens on Org Settings — switch to the Providers tab.",
+      "Open the account drawer, then Management, then Platform owner console. Open Providers for connection settings or Documentation for step-by-step advice.",
       "Add Provider registers OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP Gemini, Bedrock, Open WebUI, OpenRouter, Ollama, OpenAI-compatible, or local gateways.",
       "Save the base URL, auth type, region, and first key label with the connection. A successful save records configuration; it does not prove the provider responds.",
       "Open API Keys on the card to add or replace that provider's vaulted secrets.",
@@ -230,8 +282,9 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Register a gateway",
         caption: "Add Provider covers OpenAI, Anthropic, Azure, Foundry, GCP Gemini, Bedrock, OpenRouter, Ollama, and more.",
         narration:
-          "Start in the Providers tab. Add Provider registers OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP Gemini, Bedrock, Open WebUI, OpenRouter, Ollama, OpenAI-compatible gateways, and local runtimes.",
-        durationSeconds: 17,
+          "Open the Providers tab in the platform owner console. Add Provider registers OpenAI, Anthropic, Azure OpenAI, Azure Foundry, GCP Gemini, Bedrock, Open WebUI, OpenRouter, Ollama, OpenAI-compatible gateways, and local runtimes.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
         focus: "addProvider",
       },
       {
@@ -316,6 +369,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "The funnel icons in the header filter each column: check off providers, check off model labs, or type text to match runtime routes.",
         durationSeconds: 10,
+        calloutPlacement: "left-rail",
         focus: "modelsColumnFilters",
       },
       {
@@ -344,10 +398,11 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     scenes: [
       {
         title: "The Role Boundary panel",
-        caption: "Org Settings is the console's first tab; expand the Role Boundary section to manage every account.",
+        caption: "Open Org Settings and expand Role Boundary to manage accounts at the permitted role level.",
         narration:
-          "Org Settings is the console's first tab, and each section starts collapsed behind a descriptive header. Expand Role Boundary to manage accounts: owners create owners, admins, and users, while tenant-admin delegation stays policy-controlled.",
-        durationSeconds: 18,
+          "Open Org Settings from the platform owner console. Expand Role Boundary to manage accounts: owners create owners, admins, and users, while tenant-admin delegation stays policy-controlled. Use Documentation for step-by-step configuration guidance.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
         focus: "rolesDisclosure",
       },
       {
@@ -364,6 +419,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Every account row carries a set-password action. Generate a strong password, mark it temporary so the person picks their own at first sign-in, and copy it now — it is shown only once.",
         durationSeconds: 14,
+        calloutPlacement: "left-rail",
         focus: "rolesSetPassword",
       },
       {
@@ -384,13 +440,13 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     icon: "identity",
     outcomes: ["Issuer configured", "Redirect registered"],
     setupSteps: [
-      "Open Org Settings — the console's first tab — and expand the Single Sign-On section.",
+      "Open Org Settings and expand the Single Sign-On section.",
       "Keep the protocol on OIDC — SAML is stored but deferred, and SCIM covers provisioning.",
       "Pick a preset — Microsoft Entra ID, Google Workspace, or Okta — or enter any OIDC issuer URL.",
       "For Entra, replace {tenant-id} in the issuer with your directory ID.",
       "Paste the client ID and client secret from your identity provider app registration.",
       "Copy the redirect URI shown in the panel into that app registration.",
-      "Save SSO, then run Test connection before turning on enforcement.",
+      "Save SSO, then run Test connection, then complete a fresh OIDC sign-in and verify the workspace session and access before turning on enforcement.",
     ],
     scenes: [
       {
@@ -399,6 +455,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "The Single Sign-On panel configures live OIDC. Users are redirected to your identity provider, and the returned ID tokens are cryptographically verified before a session is issued.",
         durationSeconds: 14,
+        calloutPlacement: "left-rail",
         focus: "ssoIntro",
       },
       {
@@ -407,6 +464,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "The protocol selector tells the truth: OIDC is the supported sign-in path, SAML settings are stored but deferred rather than live, and SCIM exists for provisioning.",
         durationSeconds: 14,
+        calloutPlacement: "left-rail",
         focus: "ssoProtocol",
       },
       {
@@ -415,7 +473,9 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Presets for Entra, Google Workspace, and Okta prefill the issuer, and discovery runs from its well-known configuration path. Paste the client ID and secret — the secret is vaulted server-side and never returned to the browser.",
         durationSeconds: 17,
+        captionPlacement: "top",
         focus: "ssoFields",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Register the redirect URI",
@@ -431,32 +491,43 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "sso-security",
     audioSrc: "training/owner/sso-security.mp3",
     title: "SSO provisioning and go-live",
-    description: "Provision on first sign-in, test the connection for real, and only then enforce SSO.",
+    description: "Choose provisioning and MFA behavior, check discovery, and verify an actual sign-in before enforcing SSO.",
     icon: "mfa",
-    outcomes: ["JIT decided", "Tested before enforced"],
+    outcomes: ["JIT and MFA decided", "Complete sign-in verified"],
     scenes: [
       {
-        title: "JIT and enforcement toggles",
-        caption: "JIT creates accounts on allowed domains with the USER role; enforcement gates the same domains.",
+        title: "Choose account provisioning",
+        caption: "JIT creates accounts on allowed domains with the USER role; groups determine their access.",
         narration:
-          "Two toggles govern go-live. Just-in-time provisioning creates accounts automatically for allowed domains — they arrive with the USER role — and enforcement controls whether those domains can still use passwords.",
-        durationSeconds: 15,
+          "Just-in-time provisioning creates accounts automatically for allowed domains. New accounts arrive with the USER role, and their group assignments determine access. Decide who should be provisioned before enabling this option. Keep SSO enforcement off while checking the complete sign-in path.",
+        durationSeconds: 20,
+        calloutPlacement: "left-rail",
         focus: "ssoToggles",
       },
       {
-        title: "Save, then test for real",
-        caption: "Save SSO, then Test connection — a real discovery and key check that requires OIDC.",
+        title: "Choose the platform MFA requirement",
+        caption: "Require the platform authenticator after SSO adds an Aperture Chat verification step to identity-provider sign-in.",
         narration:
-          "Save SSO, then run Test connection. It performs a real discovery and signing-key check against your provider, and it requires the protocol to be OIDC.",
-        durationSeconds: 13,
+          "Require the platform authenticator after SSO is a separate decision. Off trusts the identity provider's own verification. On requires users to enroll and verify with the platform authenticator too. Recording an authenticator name or an enrollment link does not enable this requirement. Test the intended sign-in experience before requiring it for the team.",
+        durationSeconds: 25,
+        calloutPlacement: "left-rail",
+        focus: "ssoToggles",
+      },
+      {
+        title: "Check discovery and signing keys",
+        caption: "Test connection checks discovery and signing keys; it does not complete a user sign-in.",
+        narration:
+          "Save SSO, then run Test connection. It checks the provider's discovery document and signing keys. A passing result does not verify the client-secret exchange, callback, user claims, or a completed workspace session. Test an actual sign-in before enforcing SSO.",
+        durationSeconds: 20,
         focus: "ssoSaveTest",
       },
       {
-        title: "Enforcement locks the door",
-        caption: "Enforce SSO blocks local password sign-in for allowed domains — pass the test first.",
+        title: "Verify sign-in before enforcement",
+        caption: "Complete a fresh OIDC sign-in and verify the intended user's access before enforcing SSO.",
         narration:
-          "Enforce SSO blocks local password sign-in for every allowed domain. It is the step that can lock people out, so treat a passing test as the prerequisite.",
-        durationSeconds: 12,
+          "Before enforcing SSO, complete a fresh sign-in through the identity provider and confirm the user reaches the workspace with the intended groups and models. Test connection alone is insufficient. Enforce SSO blocks local password sign-in for allowed domains, so retain your approved recovery access path.",
+        durationSeconds: 22,
+        calloutPlacement: "left-rail",
         focus: "ssoEnforce",
       },
     ],
@@ -475,6 +546,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Platform Branding opens with a live preview: the logo, the platform name, and an Interface text sample rendered exactly as users will see them.",
         durationSeconds: 11,
+        calloutPlacement: "left-rail",
         focus: "brandPreview",
       },
       {
@@ -484,6 +556,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
           "The fields cover the platform name, the logo URL, the browser icon, and the platform domain. The domain is recorded for admins and the API — saving it here does not change routing.",
         durationSeconds: 14,
         focus: "brandFields",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Theme colors",
@@ -499,6 +572,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Upload PNG stores the image with your tenant settings, so nothing needs hosting elsewhere — PNG uploads cap at four megabytes. Apply branding rolls the change out everywhere the brand appears, including the tenant's installable home-screen icon and manifest.",
         durationSeconds: 19,
+        calloutPlacement: "left-rail",
         focus: "brandActions",
       },
     ],
@@ -513,9 +587,9 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     scenes: [
       {
         title: "A collapsed, scan-friendly start",
-        caption: "Every Org Settings panel starts collapsed; expand only the policy, budget, or connector surface you need.",
+        caption: "Org Settings groups related controls into expandable panels; expand only the policy, budget, or connector surface you need.",
         narration:
-          "Org Settings opens with every panel collapsed. Role Boundary, SSO, Branding, Policy Controls, the workspace budget, connectors, and Elastic Analytics stay easy to scan until you expand the section you need.",
+          "Org Settings groups controls into panels. Expand Role Boundary, SSO, Branding, Policy Controls, the workspace budget, connectors, or Elastic Analytics as needed. Search index shows its status near the top.",
         durationSeconds: 16,
         focus: "policyCollapsed",
         calloutPlacement: "left-rail",
@@ -530,13 +604,21 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         calloutPlacement: "left-rail",
       },
       {
-        title: "Seven organization toggles",
-        caption: "API, admin creation, SSO, model defaults, user-built agents, and personalization memory set the ceiling.",
+        title: "Set the organization policy ceiling",
+        caption: "API, administrator roles, SSO, model defaults, agents, memory, and model browsing define the policy ceiling.",
         narration:
-          "Seven toggles set the ceiling: downstream API access, tenant admins creating admins, requiring SSO for admins, admin-managed SSO mappings, the Default group for enabled models, users building their own agents, and personalization memory. The last three still flow through tenant-admin and group-level controls downstream.",
+          "Policy controls set the organization ceiling for API access, administrator creation, SSO requirements and delegation, default model groups, user-built agents, personalization memory, and model catalog browsing. Tenant and group controls operate inside these boundaries. Review each control's explanation before changing it.",
         durationSeconds: 24,
         focus: "policyToggles",
         calloutPlacement: "left-rail",
+      },
+      {
+        title: "Choose whether users can browse models",
+        caption: "Users can browse the model catalog controls unavailable-model explanations and access requests.",
+        narration: "When Users can browse the model catalog is on, users can inspect enabled organization models, see why a model is unavailable, and request access when permitted. Turning it off shows only models they can already use and refuses new access requests. This policy does not grant model access; groups still control that.",
+        durationSeconds: 22,
+        focus: "modelBrowsingPolicy",
+        calloutPlacement: "left-rail"
       },
       {
         title: "The workspace usage budget",
@@ -572,6 +654,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Analytics sections start collapsed behind descriptive headers. Expand one and it carries its own filter — a user picker beside a date range with presets — so scoping runtime events never hides feedback, activity, or usage in another panel.",
         durationSeconds: 18,
+        calloutPlacement: "left-rail",
         focus: "analyticsFilters",
       },
       {
@@ -580,6 +663,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Runtime Clock Metadata totals executions with authoritative timestamps captured from chat and draft completion events, split across the scorecards — these are recorded times, not client guesses.",
         durationSeconds: 14,
+        calloutPlacement: "left-rail",
         focus: "runtimeScorecards",
       },
       {
@@ -588,7 +672,9 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Each row lists who ran the execution, which provider served it, and the exact start time. The CSV export opens a popover with its own date range, and the file carries actor columns.",
         durationSeconds: 14,
+        captionPlacement: "top",
         focus: "runtimeRows",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Model activity",
@@ -596,6 +682,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Model Activity charts prompts by model and the daily trend, and Users by prompt activity ranks who is actually running them — all inside this section's own date and user filter.",
         durationSeconds: 13,
+        calloutPlacement: "left-rail",
         focus: "activityCharts",
       },
       {
@@ -604,6 +691,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "User Usage is durable per-user usage from real completions — chat, drafts, agents, automations, and the API gateway all record here as they run.",
         durationSeconds: 12,
+        calloutPlacement: "left-rail",
         focus: "usageScorecards",
       },
       {
@@ -628,8 +716,8 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Critical events lead",
         caption: "The posture dashboard stays open on top; the sections below it start collapsed.",
         narration:
-          "The Audit tab opens on the posture dashboard while the sections below start collapsed. The grid leads with Critical events — high-severity audit events surfaced before anything else, so incidents come first.",
-        durationSeconds: 15,
+          "The Audit tab opens on the posture dashboard while the sections below start collapsed. The grid leads with Critical events — high-severity audit events surfaced before anything else, so incidents come first. Data Retention sits below Recent Governance Activity and groups schedules, tags, and legal holds.",
+        durationSeconds: 21,
         focus: "auditCriticalTile",
       },
       {
@@ -663,6 +751,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
           "The CSV export takes exactly the rows you can see — nothing hidden is added back — and every event carries the actor's id, name, and role.",
         durationSeconds: 11,
         focus: "trailRows",
+        calloutPlacement: "upper-right",
       },
     ],
   },
@@ -681,6 +770,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
           "Email Delivery holds real SMTP settings — host, port, STARTTLS, SSL, or none, and the from address. The password is stored in the encrypted vault and never shown again, and alerts are always logged in-app even without email.",
         durationSeconds: 18,
         focus: "alertSmtp",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Rules and their scope",
@@ -688,6 +778,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "Alert rules watch audit activity. Rules you create here are platform-wide, and tenant rules created by admins are listed alongside them, each labeled with its scope.",
         durationSeconds: 13,
+        calloutPlacement: "left-rail",
         focus: "alertRules",
       },
       {
@@ -696,6 +787,7 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "The Suspicious-activity template prefills a rule that watches security flags and elevated-severity events, and New rule starts a custom one from scratch.",
         durationSeconds: 11,
+        calloutPlacement: "left-rail",
         focus: "alertTemplates",
       },
       {
@@ -712,56 +804,87 @@ const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "owner-retention",
     audioSrc: "training/owner/owner-retention.mp3",
     title: "Data retention and tagging",
-    description: "Enable chat tagging for the organization, review tagged chats, and govern them in bulk.",
+    description: "Keep chats forever by default, review client labels and holds, and preview an optional retention schedule.",
     icon: "retention",
-    outcomes: ["Tagging toggles understood", "Tagged chats reviewed", "Batch action executed safely"],
+    outcomes: ["Forever default understood", "Client labels reviewed", "Retention changes previewed"],
+    setupSteps: [
+      "Open your account menu, expand Management, and choose Platform Owner Console.",
+      "Select Audit, then expand Data Retention below Recent Governance Activity.",
+      "Use Schedule and rules for the duration slider, client or matter sources, and Preview effect.",
+      "Use Tags and holds to find conversations, review labels, and expand Legal holds.",
+    ],
     scenes: [
       {
-        title: "The Data Retention panel",
-        caption: "Org Settings hosts the Data Retention panel: three tagging toggles, all off until you enable them.",
-        narration:
-          "The Org Settings tab hosts the Data Retention panel. Three toggles control how chats are tagged, and every one of them starts off — nothing is tagged until you or a tenant admin turns tagging on.",
-        durationSeconds: 14,
+        title: "Start in the Audit tab",
+        caption: "Platform Owner Console → Audit. Retention lives below Recent Governance Activity.",
+        narration: "From the Platform Owner Console, select Audit in the top row of tabs. Scroll below Recent Governance Activity to find Data Retention. Expand that panel to manage both schedules and conversation labels.",
+        durationSeconds: 15,
+        focus: "retentionNavigation",
+        calloutPlacement: "lower-left",
+      },
+      {
+        title: "Open Data Retention in Audit",
+        caption: "Schedule and rules, tags, and legal holds share one Audit panel.",
+        narration: "In either console, open Audit and expand Data Retention. Schedule and rules contains the retention policy. Tags and holds contains conversation search, label review, and legal holds. User Prompt Activity remains a separate panel for inspecting prompts.",
+        durationSeconds: 19,
+        focus: "retentionWorkspace",
+      },
+      {
+        title: "Forever until you choose",
+        caption: "Schedule and rules → Keep chats for. Forever is selected by default.",
+        narration: "Chat retention starts at Forever, with automatic deletion off. The slider offers one, five, seven, and ten years. Moving it only changes a draft. Existing chats remain stored until an administrator previews and saves an active policy.",
+        durationSeconds: 18,
         focus: "retentionPanel",
       },
       {
-        title: "Three sources of tags",
-        caption: "Tag chats that use MCP connections, chats with file uploads, and chats by subject.",
-        narration:
-          "Tag chats that use MCP connections marks any conversation that touched a connected tool, like Box. Tag chats with file uploads marks conversations carrying documents or images. And Tag chats by subject asks the chat's own model to classify each new conversation once, into a curated set of subjects like legal or financial.",
-        durationSeconds: 24,
-        focus: "retentionToggles",
-      },
-      {
-        title: "Prompts and Tags",
-        caption: "User Prompt Activity now has two views — switch to Tags to see every chat with its tags.",
-        narration:
-          "The Audit tab's User Prompt Activity panel now carries two views. Prompts is the activity list you know. Switch to Tags, and every chat in the organization appears — tagged or not.",
-        durationSeconds: 13,
-        focus: "retentionTagsSwitch",
-      },
-      {
-        title: "Read the tag chips",
-        caption: "Each row shows its tag chips — mcp, attachments, and subject — with search and a tag-type filter.",
-        narration:
-          "Each row carries its tag chips. An mcp chip names the connection the chat used, attachments distinguishes documents from images, and subject shows the model's classification. The search box and the tag-type filter narrow the list to exactly the cohort you need.",
+        title: "Give each client a stable source",
+        caption: "Schedule and rules → Clients, matters, and regulated records. Enter the name and aliases.",
+        narration: "Add a stable source for each client, matter, or regulated record category. Enter its name and known aliases. Save the definitions even while the schedule stays at Forever. Later references in saved messages can then produce suggestions for review.",
         durationSeconds: 19,
+        focus: "retentionSources",
+      },
+      {
+        title: "Sensitive data needs review",
+        caption: "Pattern matches suggest categories; they never copy raw sensitive values into labels.",
+        narration: "Sensitive data suggestions recognize email addresses, possible Social Security numbers, and payment cards in saved message text. They can miss information or produce false matches. They do not inspect original uploaded files or determine which law applies. Confirm a category only after review.",
+        durationSeconds: 21,
+        focus: "retentionSensitive",
+      },
+      {
+        title: "Scan and confirm the right chats",
+        caption: "Tags and holds → Scan existing chats. Review each match before Confirm label.",
+        narration: "In Data Retention, choose Tags and holds. Scan existing chats includes older saved conversations. Search and filter the list, preview the content, then select the intended chats and source. Confirm label makes that identity authoritative. Remove or dismiss rejects an incorrect match.",
+        durationSeconds: 21,
         focus: "retentionTagsExplorer",
       },
       {
-        title: "Preview before you act",
-        caption: "Click a chat title to read the full conversation before deciding what happens to it.",
-        narration:
-          "Click any chat title to open the full conversation preview, so you can read exactly what a chat contains before acting on it.",
-        durationSeconds: 9,
+        title: "Preserve records with a legal hold",
+        caption: "Tags and holds → Legal holds → Hold name → Hold selected chats.",
+        narration: "In Tags and holds, expand Legal holds below the label actions. A legal hold protects the selected chats from both automatic and manual deletion. Name the hold and choose Hold selected chats. For ongoing client preservation, also set that source's rule to Forever. Releasing a hold requires confirmation and gives eligible records a new review window.",
+        durationSeconds: 25,
+        focus: "retentionHolds",
+        calloutPlacement: "lower-left",
+        captionPlacement: "top",
+      },
+      {
+        title: "Preview a changed schedule",
+        caption: "Schedule and rules → Preview effect. Review the counts before saving.",
+        narration: "Return to Schedule and rules. Choose the duration, the starting clock, and a review window of at least seven days. Preview effect counts the saved chats affected by this exact draft. Shortening a policy can make older chats eligible; extending it delays deletion. Longer matching rules and legal holds win. A changed policy restarts the review window.",
+        durationSeconds: 24,
+        focus: "retentionSchedulePreview",
+      },
+      {
+        title: "Read the conversation first",
+        caption: "Tags and holds → select a chat title to open its conversation preview.",
+        narration: "Switch back to Tags and holds, then select a conversation title to inspect its saved prompts and responses. Automatic cleanup covers chats and linked uploads, search entries, and feedback. Drafts, learned memories, exports, provider copies, and backups have separate lifecycles. This is not a complete client erasure across every data store.",
+        durationSeconds: 23,
         focus: "retentionPreview",
       },
       {
-        title: "Archive or delete in bulk",
-        caption: "Select chats — or select all — then Archive or Delete with an inline confirm; legal holds are never deleted.",
-        narration:
-          "Select the chats that matter, or select them all, then choose Archive or Delete. A confirmation is always required before anything happens, and chats under an active legal hold are skipped and reported — a hold always wins.",
-        durationSeconds: 16,
+        title: "Confirm manual disposition",
+        caption: "Tags and holds → select chats → Archive selected or Delete selected.",
+        narration: "For a manual batch action, select the intended chats and choose Archive or Delete. Read the count and confirmation. Archiving preserves the stored conversation; deletion cannot be undone. Active legal holds are skipped. Choosing Forever in the policy stops automatic deletion without restoring anything already deleted.",
+        durationSeconds: 23,
         focus: "retentionBatch",
       },
     ],
@@ -813,8 +936,7 @@ export function OwnerDocumentationModal({
     handler();
   };
 
-  const headerLinks =
-    onOpenAdminDocumentation || onOpenUserHelp ? (
+  const headerLinks = (
       <div className="doc-header-links" aria-label="Related documentation">
         {onOpenAdminDocumentation && (
           <button
@@ -835,8 +957,19 @@ export function OwnerDocumentationModal({
             Chat help
           </button>
         )}
+        {(onOpenAdminDocumentation || onOpenUserHelp) && (
+          <span className="doc-header-link-divider" aria-hidden="true">/</span>
+        )}
+        <a
+          className="doc-header-link"
+          href="https://aperturechat.com/guide.html"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Interactive platform guide
+        </a>
       </div>
-    ) : undefined;
+    );
 
   return (
     <TrainingDocumentationModal
@@ -844,7 +977,7 @@ export function OwnerDocumentationModal({
       docTitleId="owner-doc-title"
       videoTitleId="owner-video-title"
       title="Platform owner documentation"
-      description="Narrated walkthroughs of the current console: providers, keys, models, roles, SSO, branding, policies and budgets, analytics, audit, and alerts."
+      description="Narrated walkthroughs of the current console: providers, keys, models, roles, SSO, branding, policies and budgets, search, analytics, audit, and alerts."
       backTooltip="Return to the full list of training videos"
       headerLinks={headerLinks}
       onClose={onClose}

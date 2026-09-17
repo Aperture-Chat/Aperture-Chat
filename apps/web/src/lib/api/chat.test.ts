@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { sendChatStream } from "./chat";
+import { saveChatThread, sendChatStream } from "./chat";
 import { ChatRequestError } from "./http";
 
 
@@ -228,5 +228,30 @@ describe("sendChatStream resume hardening", () => {
 
     expect(reply.content).toBe("Recovered after stall.");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe("saveChatThread", () => {
+  test("never sends the browser-only syncPending flag", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "thread-1", messages: [] }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await saveChatThread("user-1", {
+      id: "thread-1",
+      owner_user_id: "user-1",
+      title: "T",
+      model_id: "m",
+      group_id: null,
+      pinned: false,
+      used_agent: false,
+      updated_at: "now",
+      messages: [],
+      syncPending: true,
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as Record<string, unknown>;
+    expect("syncPending" in body).toBe(false);
+    expect("id" in body).toBe(false);
   });
 });

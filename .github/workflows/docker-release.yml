@@ -116,6 +116,7 @@ jobs:
             infra/updater/updater.sh \
             scripts/install-release.py \
             docs/DOCKER_RELEASE.md \
+            docs/RETENTION.md \
             README.md \
             LICENSE.md \
             NOTICE.md

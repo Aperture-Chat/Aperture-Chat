@@ -208,10 +208,15 @@ def batch_dispose_threads(
         deletable = [thread_id for thread_id in valid_ids if thread_id not in held]
         skipped_held = len(valid_ids) - len(deletable)
         disposed = 0
+        disposed_ids = []
         for thread_id in deletable:
             if store.delete_chat_thread(thread_id) is not None:
                 disposed += 1
-        disposed_ids = deletable
+                disposed_ids.append(thread_id)
+            elif thread_id in store.thread_ids_under_active_hold(tenant_id):
+                skipped_held += 1
+            else:
+                skipped_missing += 1
     else:
         disposed = store.set_chat_threads_archived(valid_ids, tenant_id=tenant_id)
         disposed_ids = valid_ids
@@ -316,6 +321,8 @@ def effective_retention_days(
         elif (rule.tag_namespace, rule.tag_key) in tag_pairs:
             candidates.append(rule.retention_days)
     if not candidates:
+        return None
+    if 0 in candidates:
         return None
     if matter_retention_days is not None and matter_retention_days > 0:
         candidates.append(matter_retention_days)

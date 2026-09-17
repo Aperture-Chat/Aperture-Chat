@@ -41,6 +41,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { AdminSection } from "../lib/appRoute";
+import { ModelAccessRequestsPanel } from "./ModelAccessRequestsPanel";
+import { UserModelAccessTrace } from "./UserModelAccessTrace";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
 
@@ -711,12 +714,21 @@ export function AdminConsole({
   onDataChange,
   adminApi,
   openDocumentationRequestKey,
+  section,
+  onSectionChange,
 }: {
   data: BootstrapData;
   onDataChange: (updater: (current: BootstrapData) => BootstrapData) => void;
   adminApi?: AdminConsoleApi;
   openDocumentationRequestKey?: number;
+  /** Route-driven section; when provided the tabs are controlled by the URL. */
+  section?: AdminSection;
+  onSectionChange?: (section: AdminSection) => void;
 }) {
+  const [localSection, setLocalSection] = useState<AdminSection>(section ?? "users");
+  const activeSection: AdminSection = section ?? localSection;
+  /** User whose per-model access trace is open, if any. */
+  const [traceUser, setTraceUser] = useState<{ id: string; name: string } | null>(null);
   // Mirrors the committed data so a mutation can capture the pre-optimistic
   // state synchronously and put it back when the server refuses the change.
   const dataRef = useRef(data);
@@ -786,7 +798,6 @@ export function AdminConsole({
   const [retentionTagged, setRetentionTagged] = useState<RetentionTaggedThread[] | null>(null);
   const [retentionError, setRetentionError] = useState<string | null>(null);
   const [retentionRefreshToken, setRetentionRefreshToken] = useState(0);
-  const [promptPanelView, setPromptPanelView] = useState<"prompts" | "tags">("prompts");
   // Matter labels and retention tags per thread, folded into the prompt
   // phrase search so client/matter numbers find their conversations.
   const promptSearchExtras = useMemo(() => {
@@ -2516,7 +2527,14 @@ export function AdminConsole({
         </div>
       )}
 
-      <Tabs.Root defaultValue="users" className="tabs-root">
+      <Tabs.Root
+        value={activeSection}
+        onValueChange={(value) => {
+          setLocalSection(value as AdminSection);
+          onSectionChange?.(value as AdminSection);
+        }}
+        className="tabs-root"
+      >
         <Tabs.List className="tabs-list management-console-tabs" aria-label="Admin sections">
           {adminTabs.map((tab) => (
             <Tabs.Trigger
@@ -2840,6 +2858,16 @@ export function AdminConsole({
                             <button
                               className="secondary-button compact"
                               type="button"
+                              aria-label={`Model access for ${user.display_name}`}
+                              data-tooltip={`See which models ${user.display_name} can use and why`}
+                              onClick={() => setTraceUser({ id: user.id, name: user.display_name })}
+                            >
+                              <ShieldCheck size={14} />
+                              Access
+                            </button>
+                            <button
+                              className="secondary-button compact"
+                              type="button"
                               aria-label={`Password for ${user.display_name}`}
                               data-tooltip={
                                 user.id === data.me.id
@@ -2930,6 +2958,11 @@ export function AdminConsole({
         </Tabs.Content>
 
         <Tabs.Content value="model-access" className="tab-content">
+          <ModelAccessRequestsPanel
+            actorUserId={data.me.id}
+            groups={data.groups}
+            tenantSlug={data.me.role === "PLATFORM_OWNER" ? data.currentTenant.slug : undefined}
+          />
           <Panel
             className="model-access-panel"
             title="Model Access"
@@ -4070,12 +4103,7 @@ export function AdminConsole({
                 </div>
               </Panel>
             )}
-            <RetentionPanel
-              policy={retentionPolicy}
-              error={retentionError}
-              busy={pendingAction === "retention-policy"}
-              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
-            />
+
           </div>
         </Tabs.Content>
 
@@ -4131,6 +4159,41 @@ export function AdminConsole({
               </div>
             </Panel>
 
+            <RetentionPanel
+              actorUserId={data.me.id}
+              onPolicySaved={(saved) => { setRetentionPolicy(saved); setRetentionRefreshToken(token => token + 1); }}
+              policy={retentionPolicy}
+              error={retentionError}
+              busy={pendingAction === "retention-policy"}
+              onPolicyChange={(patch) => void saveRetentionPolicy(patch)}
+            >
+              <RetentionTagsView
+                actorUserId={data.me.id}
+                policy={retentionPolicy}
+                tagged={retentionTagged}
+                error={retentionError}
+                busy={pendingAction === "retention-batch"}
+                onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
+                loadThreadRecords={
+                  adminApi?.listThreadPromptActivity
+                    ? (threadId) =>
+                        Promise.resolve(
+                          adminApi.listThreadPromptActivity!(
+                            data.me.id,
+                            threadId,
+                            mutationContext,
+                          ),
+                        )
+                    : undefined
+                }
+                onBatchAction={
+                  adminApi?.runRetentionBatch
+                    ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
+                    : undefined
+                }
+              />
+            </RetentionPanel>
+
             <Panel
               title="User Prompt Activity"
               subtitle="Drill into saved prompts from this organization's admins and users by person, thread, model, and timestamp."
@@ -4155,26 +4218,6 @@ export function AdminConsole({
               }
               defaultCollapsed
             >
-              <div className="prompt-panel-view-switch" role="group" aria-label="Prompt panel view">
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "prompts"}
-                  onClick={() => setPromptPanelView("prompts")}
-                >
-                  Prompts
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button compact"
-                  aria-pressed={promptPanelView === "tags"}
-                  onClick={() => setPromptPanelView("tags")}
-                >
-                  Tags
-                </button>
-              </div>
-              {promptPanelView === "prompts" ? (
-                <>
               <SectionScopeFilter
                 label="Prompt activity filter"
                 scope={promptScope}
@@ -4237,32 +4280,7 @@ export function AdminConsole({
                   }
                 />
               )}
-                </>
-              ) : (
-                <RetentionTagsView
-                  tagged={retentionTagged}
-                  error={retentionError}
-                  busy={pendingAction === "retention-batch"}
-                  onRefresh={() => setRetentionRefreshToken((token) => token + 1)}
-                  loadThreadRecords={
-                    adminApi?.listThreadPromptActivity
-                      ? (threadId) =>
-                          Promise.resolve(
-                            adminApi.listThreadPromptActivity!(
-                              data.me.id,
-                              threadId,
-                              mutationContext,
-                            ),
-                          )
-                      : undefined
-                  }
-                  onBatchAction={
-                    adminApi?.runRetentionBatch
-                      ? (action, threadIds) => runRetentionBatchAction(action, threadIds)
-                      : undefined
-                  }
-                />
-              )}
+
             </Panel>
 
             <Panel
@@ -4512,6 +4530,15 @@ export function AdminConsole({
           <AlertsConsole variant="admin" api={alertsApi} actorOptions={alertActorOptions} />
         </Tabs.Content>
       </Tabs.Root>
+      {traceUser && (
+        <UserModelAccessTrace
+          actorUserId={data.me.id}
+          targetUserId={traceUser.id}
+          targetName={traceUser.name}
+          groups={data.groups}
+          onClose={() => setTraceUser(null)}
+        />
+      )}
     </div>
   );
 }

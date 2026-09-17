@@ -26,6 +26,7 @@ import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 type UserFocus =
   | "homeComposer"
   | "modelSelector"
+  | "modelFavorites"
   | "toolsChip"
   | "sendButtonsHome"
   | "micButton"
@@ -45,6 +46,7 @@ type UserFocus =
   | "sendWeb"
   | "sendAgent"
   | "sendReasoning"
+  | "sendStreaming"
   | "sessionSummary"
   | "contextWindow"
   | "imageReply"
@@ -55,6 +57,7 @@ type UserFocus =
   | "draftComposer"
   | "draftModel"
   | "draftToolbar"
+  | "draftSettings"
   | "draftVersions"
   | "deckModeToggle"
   | "deckFilmstrip"
@@ -104,14 +107,38 @@ type UserFocus =
   | "mobileInstall"
   | "helpLibrary"
   | "helpReportForm"
-  | "helpReportReceived";
+  | "helpReportReceived"
+  | "modelAccessOverview"
+  | "modelAccessRequest"
+  | "modelAccessPending"
+  | "searchCommands"
+  | "searchRecent"
+  | "draftSaveState"
+  | "draftHistory"
+  | "draftHistoryPreview"
+  | "unsyncedWork"
+  | "themeSchedule"
+  | "securitySignIn";
 
 export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
-  homeComposer: { frame: "training/user/chat-home.png", rect: { x: 292, y: 291, w: 827, h: 199 } },
-  modelSelector: { frame: "training/user/chat-home.png", rect: { x: 867, y: 10, w: 249, h: 45 } },
-  toolsChip: { frame: "training/user/chat-home.png", rect: { x: 387, y: 431, w: 137, h: 39 } },
-  sendButtonsHome: { frame: "training/user/chat-home.png", rect: { x: 1021, y: 430, w: 79, h: 41 } },
-  micButton: { frame: "training/user/chat-home.png", rect: { x: 948, y: 431, w: 39, h: 39 } },
+  // Captured and measured by the current training refresh pipeline.
+  modelFavorites: { frame: "training/user/model-favorites.png", rect: { x: 926.609375, y: 57.5, w: 258.390625, h: 102 } },
+  modelAccessOverview: { frame: "training/user/model-access.png", rect: { x: 252.5, y: 85.5, w: 680, h: 649.796875 } },
+  modelAccessRequest: { frame: "training/user/model-access.png", rect: { x: 265.5, y: 637.5, w: 654, h: 91 } },
+  modelAccessPending: { frame: "training/user/model-access-pending.png", rect: { x: 265.5, y: 626.5, w: 654, h: 108 } },
+  searchCommands: { frame: "training/user/search-commands.png", rect: { x: 282.5, y: 102.59375, w: 620, h: 581.390625 } },
+  searchRecent: { frame: "training/user/search-recent.png", rect: { x: 282.5, y: 102.59375, w: 620, h: 581.390625 } },
+  draftSaveState: { frame: "training/user/draft-save-state.png", rect: { x: 456, y: 0, w: 729, h: 249.375 } },
+  draftHistory: { frame: "training/user/draft-history.png", rect: { x: 101, y: 233.109375, w: 329, h: 432.890625 } },
+  draftHistoryPreview: { frame: "training/user/draft-history.png", rect: { x: 438, y: 279.109375, w: 300, h: 120 } },
+  unsyncedWork: { frame: "training/user/unsynced-work.png", rect: { x: 312.5, y: 119.6875, w: 560, h: 293 } },
+  themeSchedule: { frame: "training/user/theme-schedule.png", rect: { x: 362.5, y: 260.984375, w: 460, h: 333.015625 } },
+  securitySignIn: { frame: "training/user/sign-in-verification.png", rect: { x: 59.25, y: 146.671875, w: 488, h: 561.640625 } },
+  homeComposer: { frame: "training/user/chat-home.png", rect: { x: 295.5, y: 294.375, w: 820, h: 192 } },
+  modelSelector: { frame: "training/user/chat-home.png", rect: { x: 926.8125, y: 13.5, w: 186.1875, h: 38 } },
+  toolsChip: { frame: "training/user/chat-home.png", rect: { x: 352.5, y: 434.375, w: 128.359375, h: 32 } },
+  sendButtonsHome: { frame: "training/user/chat-home.png", rect: { x: 1024.5, y: 433.375, w: 72, h: 34 } },
+  micButton: { frame: "training/user/chat-home.png", rect: { x: 951.5, y: 434.375, w: 32, h: 32 } },
   // chat-thread.png shows a scrolled, completed answer with no trace bar, so
   // the collapsed-trace scene targets the summary header row of the Work trace
   // card instead; sharing the frame with traceExpanded also glides the
@@ -120,29 +147,31 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   traceExpanded: { frame: "training/user/chat-trace-expanded.png", rect: { x: 315, y: 256, w: 518, h: 231 } },
   responseActions: { frame: "training/user/chat-response-actions.png", rect: { x: 315, y: 504, w: 686, h: 35 } },
   transferDraft: { frame: "training/user/chat-response-actions.png", rect: { x: 1006, y: 499, w: 148, h: 42 } },
-  slashMenu: { frame: "training/user/composer-slash.png", rect: { x: 258, y: 497, w: 574, h: 137 } },
-  agentMenu: { frame: "training/user/composer-agent.png", rect: { x: 258, y: 549, w: 574, h: 85 } },
-  composerField: { frame: "training/user/composer-slash.png", rect: { x: 257, y: 635, w: 576, h: 198 } },
+  slashMenu: { frame: "training/user/composer-slash.png", rect: { x: 261, y: 282, w: 889, h: 319 } },
+  agentMenu: { frame: "training/user/composer-agent.png", rect: { x: 261, y: 470, w: 889, h: 131 } },
+  composerField: { frame: "training/user/composer-hash.png", rect: { x: 260, y: 608, w: 891, h: 192 } },
   attachButton: { frame: "training/user/composer-attach.png", rect: { x: 314, y: 775, w: 38, h: 38 } },
   attachUpload: { frame: "training/user/composer-attach.png", rect: { x: 320, y: 496, w: 246, h: 45 } },
   attachWebLink: { frame: "training/user/composer-attach.png", rect: { x: 320, y: 535, w: 246, h: 45 } },
   attachConnectors: { frame: "training/user/composer-attach.png", rect: { x: 320, y: 585, w: 246, h: 182 } },
-  sendOptionsButton: { frame: "training/user/composer-send-options.png", rect: { x: 774, y: 744, w: 40, h: 41 } },
-  sendKnowledge: { frame: "training/user/composer-send-options.png", rect: { x: 556, y: 500, w: 252, h: 45 } },
-  sendWeb: { frame: "training/user/composer-send-options.png", rect: { x: 556, y: 539, w: 252, h: 46 } },
-  sendAgent: { frame: "training/user/composer-send-options.png", rect: { x: 556, y: 579, w: 252, h: 45 } },
-  sendReasoning: { frame: "training/user/composer-send-options.png", rect: { x: 556, y: 667, w: 252, h: 43 } },
+  sendOptionsButton: { frame: "training/user/chat-home.png", rect: { x: 1062.5, y: 433.375, w: 34, h: 34 } },
+  sendKnowledge: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 341.5, w: 434, h: 44 } },
+  sendWeb: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 385.5, w: 434, h: 44 } },
+  sendAgent: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 429.5, w: 434, h: 44 } },
+  sendReasoning: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 482.5, w: 434, h: 36 } },
+  sendStreaming: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 518.5, w: 434, h: 26 } },
   sessionSummary: { frame: "training/user/chat-session-panel.png", rect: { x: 881, y: 69, w: 289, h: 325 } },
   contextWindow: { frame: "training/user/chat-session-panel.png", rect: { x: 881, y: 400, w: 289, h: 236 } },
   imageReply: { frame: "training/user/chat-images.png", rect: { x: 316, y: 342, w: 516, h: 513 } },
   imageDownload: { frame: "training/user/chat-images-download.png", rect: { x: 715, y: 476, w: 106, h: 34 } },
   mermaidFigure: { frame: "training/user/chat-mermaid.png", rect: { x: 315, y: 302, w: 518, h: 231 } },
-  searchPalette: { frame: "training/user/search-palette.png", rect: { x: 279, y: 99, w: 627, h: 224 } },
-  draftModeToggle: { frame: "training/user/drafts.png", rect: { x: 481, y: 13, w: 200, h: 40 } },
-  draftComposer: { frame: "training/user/drafts.png", rect: { x: 91, y: 686, w: 349, h: 150 } },
-  draftModel: { frame: "training/user/drafts.png", rect: { x: 481, y: 61, w: 252, h: 48 } },
-  draftToolbar: { frame: "training/user/drafts.png", rect: { x: 453, y: 168, w: 732, h: 162 } },
-  draftVersions: { frame: "training/user/drafts.png", rect: { x: 481, y: 21, w: 679, h: 138 } },
+  searchPalette: { frame: "training/user/search-palette.png", rect: { x: 282.5, y: 102.59375, w: 620, h: 362 } },
+  draftModeToggle: { frame: "training/user/drafts.png", rect: { x: 484.4375, y: 14, w: 233.5, h: 44 } },
+  draftComposer: { frame: "training/user/drafts.png", rect: { x: 94, y: 689, w: 343, h: 144 } },
+  draftModel: { frame: "training/user/drafts.png", rect: { x: 484.4375, y: 70, w: 320, h: 42 } },
+  draftToolbar: { frame: "training/user/drafts.png", rect: { x: 456, y: 177, w: 729, h: 78 } },
+  draftSettings: { frame: "training/user/draft-settings.png", rect: { x: 101, y: 471, w: 329, h: 195 } },
+  draftVersions: { frame: "training/user/drafts.png", rect: { x: 456, y: 0, w: 729, h: 177 } },
   deckModeToggle: { frame: "training/user/deck-editor.png", rect: { x: 481, y: 13, w: 200, h: 40 } },
   deckFilmstrip: { frame: "training/user/deck-editor.png", rect: { x: 453, y: 288, w: 174, h: 567 } },
   deckLayoutMenu: { frame: "training/user/deck-layouts.png", rect: { x: 773, y: 450, w: 370, h: 181 } },
@@ -182,11 +211,11 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   securityStart: { frame: "training/user/account-authenticator-start.png", rect: { x: 793, y: 326, w: 350, h: 243.59375 } },
   securityVerify: { frame: "training/user/account-authenticator-verify.png", rect: { x: 793, y: 741.578125, w: 350, h: 100 } },
   securityRecovery: { frame: "training/user/account-recovery-save.png", rect: { x: 793, y: 309.375, w: 350, h: 532.1875 } },
-  securityReplace: { frame: "training/user/account-recovery-replace.png", rect: { x: 793, y: 172, w: 350, h: 328.59375 } },
+  securityReplace: { frame: "training/user/account-recovery-replace.png", rect: { x: 793, y: 243, w: 350, h: 328.59375 } },
   securityPassword: { frame: "training/user/account-password-form.png", rect: { x: 780, y: 338, w: 376, h: 307 } },
   profileEditor: { frame: "training/user/account-profile-form.png", rect: { x: 780, y: 181, w: 376, h: 661 } },
   appearanceControl: { frame: "training/user/appearance-control.png", rect: { x: 12, y: 649, w: 201, h: 184 } },
-  composerShortcuts: { frame: "training/user/composer-shortcuts-help.png", rect: { x: 297, y: 111, w: 818, h: 174 } },
+  composerShortcuts: { frame: "training/user/composer-shortcuts-help.png", rect: { x: 659.5, y: 58, w: 456, h: 738.5 } },
   mobileNavigation: { frame: "training/user/mobile-navigation.png", rect: { x: 394.958531, y: 0, w: 303.909953, h: 855 }, fit: "contain" },
   mobileInstall: { frame: "training/user/mobile-install-ios.png", rect: { x: 415.219194, y: 245.154028, w: 354.561611, h: 363.67891 }, fit: "contain" },
   helpLibrary: { frame: "training/user/help-library.png", rect: { x: 763, y: 12, w: 410, h: 831 } },
@@ -257,6 +286,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         narration: "If your administrator gave you a temporary password, complete any required verification and follow Set a new password when it appears. Choose a password with at least twelve characters, enter it again, then select Set password and continue. After a successful change, the workspace continues with your new sign-in session.",
         durationSeconds: 21,
         focus: "accessOwnPassword",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Start with the welcome card",
@@ -278,7 +308,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       "On your first visit, the Getting started card shows account and model readiness. Open quick-start guide for help, or explicitly choose I'll explore on my own to dismiss it.",
       "Select an available model and send a short first message. Ask your administrator about group or model access if no model is available.",
       "Explore an idea, Compare options, and Draft a message put an editable starter in the composer. Review it and send when ready; selecting a starter does not send a message.",
-      "The Composer shortcuts information button opens shortcut help. It does not change your message.",
+      "Send options → Resources opens the searchable resource browser and symbol guide. Opening it does not send your message.",
       "Use Tab and Shift+Tab to move through controls. Close dialogs with their Close or Cancel control, or Escape when available, to return to your previous control.",
     ],
     description: "Send your first message, pick a model, and control the active tools.",
@@ -303,10 +333,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "One chip for active tools",
-        caption: "The chip names a single active tool — like Web search — or shows Tools with a count; × clears them.",
+        caption: "The chip summarizes selected tools. × also clears selected MCP connections and queued automations.",
         narration:
-          "This chip shows what will run with your next message: a single tool by name, like Web search, or Tools with a count when more are on. Click the X to turn off Knowledge, Web, and Agent for the next message.",
-        durationSeconds: 14,
+          "This chip summarizes the tools selected for your next message. It names a single tool or shows Tools with a count. The X turns off Knowledge, Web, and Agent, clears selected MCP connections, and removes queued automations. Review the remaining context before sending.",
+        durationSeconds: 19,
         focus: "toolsChip",
       },
       {
@@ -318,6 +348,56 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         focus: "sendButtonsHome",
       },
     ],
+  },
+  {
+    id: "model-access",
+    audioSrc: "training/user/model-access.mp3",
+    title: "Choose models and request access",
+    description: "Understand availability, request a model through your administrator, and choose a default.",
+    icon: "chat",
+    outcomes: [
+      "Availability explained",
+      "Request managed",
+      "Default selected"
+    ],
+    setupSteps: [
+      "Open the model selector and choose Why isn't a model listed? If no model is connected, use its access-help control.",
+      "Read the server-provided reason. A group restriction and an unavailable provider need different action.",
+      "Choose Request access when offered. Review Request pending or choose Withdraw request. Submission does not grant access.",
+      "After your administrator reviews the request, refresh the dialog and choose an available model. Organization policy may show only models you can already use.",
+      "Use the star beside a model to set the default for new chats. Drafts has a separate default drafting-model star."
+    ],
+    scenes: [
+      {
+        title: "Read why a model is available",
+        caption: "Models in your organization separates Usable now from models that are unavailable.",
+        narration: "Open the model selector and choose Why isn't a model listed? Models in your organization shows the server's current reason for each visible model. Available means usable now. Locked means an access rule blocks it. Provider offline means permission alone cannot make the connection work.",
+        durationSeconds: 20,
+        focus: "modelAccessOverview",
+        calloutPlacement: "left-rail"
+      },
+      {
+        title: "Request the access you need",
+        caption: "Request access sends a model request for administrator review; it does not unlock the model.",
+        narration: "When Request access is available, choose it to ask an administrator to review your group access. Some restrictions cannot be lifted by a request. If organization policy limits catalog browsing, you see only models you can already use and should contact your administrator about other choices.",
+        durationSeconds: 20,
+        focus: "modelAccessRequest"
+      },
+      {
+        title: "Review or withdraw a pending request",
+        caption: "Request pending confirms submission. Withdraw request cancels the pending request.",
+        narration: "A pending request remains visible with its date until it is reviewed or withdrawn. Choose Withdraw request if you no longer need it. After review, use Refresh model access to check the current server decision. A successful access grant still needs a working provider before the model can answer.",
+        durationSeconds: 20,
+        focus: "modelAccessPending"
+      },
+      {
+        title: "Choose a model when access is ready",
+        caption: "Choose an available model for this chat. The selector also provides a star to set your default.",
+        narration: "Back in the model selector, choose a row to use that model in this chat. The star beside each row selects it and sets your default for new chats. Drafts has its own default drafting model. Stars remember a preference; they do not grant access or reconnect an unavailable provider.",
+        durationSeconds: 19,
+        focus: "modelFavorites"
+      }
+    ]
   },
   {
     id: "work-traces",
@@ -378,12 +458,13 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     ],
     scenes: [
       {
-        title: "The cheat sheet",
-        caption: "Open Composer shortcuts from the information button for all five symbols.",
+        title: "Browse resources and symbols",
+        caption: "Send options → Resources includes search, category filters, and a guide to all five symbols.",
         narration:
-          "Open the Composer shortcuts information button to see the cheat sheet: slash for prompts and MCP tools, at for agents, hash for knowledge, dollar for skill files, and the angle bracket for automations. Opening help does not change or send your message.",
-        durationSeconds: 18,
-        focus: "composerField",
+          "Open Send options, then choose Resources to search the available resources and read the symbol guide. Use slash for prompts and MCP connections, at for agents, hash for knowledge, dollar for skill files, and greater-than for automations. Opening the browser does not send your message.",
+        durationSeconds: 20,
+        focus: "composerShortcuts",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Slash for prompts and tools",
@@ -497,8 +578,8 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
   {
     id: "send-options",
     audioSrc: "training/user/send-options.mp3",
-    title: "Knowledge, Web, Agent, and reasoning",
-    description: "Control what the model can use — and how hard it thinks — for each reply.",
+    title: "Knowledge, Web, Agent, and reply settings",
+    description: "Choose sources, tools, reasoning, and whether replies stream as they are written.",
     icon: "send",
     outcomes: ["Toggles mastered", "Reasoning level set"],
     scenes: [
@@ -527,10 +608,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Agent",
-        caption: "Agent lets the reply use the tools your workspace has enabled.",
+        caption: "Agent enables profile mode. Confirm the selected Agent profile before sending.",
         narration:
-          "Agent mode lets the reply use enabled tools. Pair it with an agent profile to route through a purpose-built configuration.",
-        durationSeconds: 10,
+          "Turn on Agent to use a profile and its enabled tools. If no profile was selected, the first available one can be chosen automatically. Review the Agent profile selector and choose the intended profile before sending; its knowledge and tool counts appear underneath.",
+        durationSeconds: 19,
         focus: "sendAgent",
       },
       {
@@ -540,6 +621,14 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
           "The same menu carries a reasoning level slider. For models that support it, slide toward fast for quick answers or smart for deeper thinking — it stays off for models without real reasoning control.",
         durationSeconds: 14,
         focus: "sendReasoning",
+      },
+      {
+        title: "Choose how replies appear",
+        caption: "Stream replies shows the answer as it arrives. Turn it off to display the completed reply.",
+        narration:
+          "Stream replies controls how the answer appears. Leave it on to watch the response arrive as it is written. Turn it off to wait for the finished reply. This preference is saved for later chats.",
+        durationSeconds: 14,
+        focus: "sendStreaming",
       },
     ],
   },
@@ -553,18 +642,18 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     scenes: [
       {
         title: "The session summary",
-        caption: "The info button opens session details: messages, tokens, model, knowledge, tools, and agent.",
+        caption: "Session details separates provider-reported usage from the context-window meter, which can be labeled estimated.",
         narration:
-          "The info button in the top bar opens session details: message counts, provider-reported token usage, the active model, plus whether knowledge, tools, and an agent profile are on. Only real numbers — never an estimate dressed up as real.",
-        durationSeconds: 17,
+          "The info button opens session details: message counts, the active model, and selected knowledge, tools, and agent profile. Tokens used shows provider-reported usage, or Not reported by the provider. The separate context-window meter may use a clearly labeled estimate when older messages have no reported token data.",
+        durationSeconds: 23,
         focus: "sessionSummary",
       },
       {
         title: "Watch the context window",
-        caption: "The context window card shows how much of the chat the model keeps in view — and warns as it fills.",
+        caption: "The context card warns as it fills. ≈ and estimated distinguish a message-length estimate from reported token data.",
         narration:
-          "The context window card shows how full the model's memory is — how much of this chat, attachments, and sources it can keep in view. As it fills, the card warns you, and at one hundred percent a new chat is usually more reliable.",
-        durationSeconds: 16,
+          "The context window shows how much material the model can keep in view for an answer. If you see the approximate symbol or estimated, the meter is based on message length, not a measured usage total. It warns as the window fills; at one hundred percent, a new chat is usually more reliable.",
+        durationSeconds: 20,
         focus: "contextWindow",
       },
     ],
@@ -578,11 +667,11 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     outcomes: ["Document prepared", "Version saved", "Export ready"],
     scenes: [
       {
-        title: "Two formats, one draft",
+        title: "Choose Document or Deck",
         caption: "The Draft format switch at the top toggles between Document and Deck.",
         narration:
-          "Drafts now holds two formats. The Draft format switch at the top toggles between Document and Deck, and one draft can carry both.",
-        durationSeconds: 10,
+          "Drafts supports documents and slide decks. Use the Draft format switch to choose Document or Deck. Each format keeps its own saved account draft, so a deck does not overwrite the document it came from.",
+        durationSeconds: 15,
         focus: "draftModeToggle",
       },
       {
@@ -602,11 +691,18 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Format like a document",
-        caption: "Block styles, text size, highlights, lists, links, citations, an Insert menu, and inline AI edit.",
+        caption: "Text, Paragraph, and More organize formatting alongside block styles, Insert, and inline AI edit.",
         narration:
-          "The toolbar covers real document formatting: block styles, text size, colors and highlights, lists, links, and citations, plus an Insert menu for images, charts, tables, and page breaks — and an inline AI edit for selected text.",
-        durationSeconds: 17,
+          "Select the text you want to change, then use Text for fonts, size, and colors; Paragraph for alignment and spacing; and More for additional document tools. Block styles, lists, and the Insert menu remain available. Inline AI edit changes selected text when a usable model is connected.",
+        durationSeconds: 20,
         focus: "draftToolbar",
+      },
+      {
+        title: "Apply a consistent page layout",
+        caption: "Assistant settings offers Apply MLA layout. Review the result and save a version.",
+        narration: "Open Assistant settings and choose Apply MLA layout. This uses double spacing, twelve-point Times New Roman, and a centered title while keeping your text. You can undo the change. Review names, citations, and page breaks yourself, then save a version to keep the formatting.",
+        durationSeconds: 19,
+        focus: "draftSettings",
       },
       {
         title: "Save, export, and leave safely",
@@ -619,6 +715,55 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     ],
   },
   {
+    id: "save-and-recover-work",
+    audioSrc: "training/user/save-and-recover-work.mp3",
+    title: "Save, organize, and recover your drafts",
+    description: "Keep documents and decks in your account, review history, and understand work saved only in this browser.",
+    icon: "drafts",
+    outcomes: [
+      "Save state understood",
+      "History organized",
+      "Local work protected"
+    ],
+    setupSteps: [
+      "Save a version and wait for Saved. Both documents and decks can be saved to your account.",
+      "If the server save fails, use Retry or export a copy. Local only means this browser holds the latest changes.",
+      "Open Draft history to preview and restore saved work, or switch between active and archived items.",
+      "Archive finished work when you want to keep it. Delete is a separate action with confirmation.",
+      "Open Only on this device to review unsent work. Clear list and Hide this reminder change reminders; neither uploads nor deletes your content."
+    ],
+    scenes: [
+      {
+        title: "Wait for the account save",
+        caption: "Save version creates a snapshot. Saved confirms the version reached your account.",
+        narration: "Documents and decks can now follow your account. Save a version and wait for Saved in the toolbar. Saving is still in progress. Local only means the latest changes have not reached your account; use Retry or export a copy. If the browser could not store them either, keep the workspace open until you recover them.",
+        durationSeconds: 22,
+        focus: "draftSaveState"
+      },
+      {
+        title: "Preview and reopen saved work",
+        caption: "Draft history shows documents and decks, their save state, and a preview on hover or keyboard focus.",
+        narration: "Open Draft history in the assistant rail. Hover a card or focus it with the keyboard to preview its content before opening it. Select the card to restore the document or deck. If an account copy cannot load, the entry stays listed so you can retry when the connection recovers.",
+        durationSeconds: 19,
+        focus: "draftHistoryPreview"
+      },
+      {
+        title: "Archive finished drafts",
+        caption: "Use Active and Archived to find work. Archive keeps it; Delete requires confirmation.",
+        narration: "Use the Active and Archived filters to organize saved work. Archive moves a finished item out of the active list, and Unarchive brings it back. Delete is a separate action that asks for confirmation. If a draft changed elsewhere, reload its server copy after preserving your local changes.",
+        durationSeconds: 20,
+        focus: "draftHistory"
+      },
+      {
+        title: "Review work only on this device",
+        caption: "Retry chats or open Drafts. Clearing or hiding reminders does not upload or delete work.",
+        narration: "The Only on this device notice lists changes that have not reached your account. Retry all retries chat saves; Open Drafts lets you review document and deck saves. Clear list dismisses the current reminders, and new edits can appear again. Hide this reminder hides the notice. Neither action uploads nor deletes work.",
+        durationSeconds: 22,
+        focus: "unsyncedWork"
+      }
+    ]
+  },
+  {
     id: "deck-basics",
     audioSrc: "training/user/deck-basics.mp3",
     title: "Build a slide deck",
@@ -627,11 +772,11 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     outcomes: ["Deck created", "Brand applied", "Real .pptx exported"],
     scenes: [
       {
-        title: "One draft, two formats",
+        title: "Choose the deck format",
         caption: "The Draft format switch at the top starts on Document — click Deck to change formats.",
         narration:
-          "At the top of every draft sits the format switch, and right now it reads Document. The same draft can carry both formats — click Deck to switch.",
-        durationSeconds: 11,
+          "At the top of the drafting workspace, choose Deck in the Draft format switch. Documents and decks keep separate saved account drafts, so switching formats does not replace the original document.",
+        durationSeconds: 13,
         focus: "draftModeToggle",
       },
       {
@@ -676,9 +821,9 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Edit slide text with AI",
-        caption: "Highlight text, click the AI pen, describe the change, then Apply AI edit.",
+        caption: "Highlight text, click the AI pen, describe the change, then Replace highlight.",
         narration:
-          "Highlight any slide text and click the AI pen. Describe what should change, and Apply AI edit rewrites the highlighted text in place — undo restores it if you change your mind.",
+          "Highlight any slide text and click the AI pen. Describe what should change, and Replace highlight rewrites the highlighted text in place — undo restores it if you change your mind.",
         durationSeconds: 13,
         focus: "deckAiEdit",
       },
@@ -716,10 +861,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Versions and export",
-        caption: "Decks save versions on this device only; Export produces a real .pptx or a Markdown outline.",
+        caption: "Save versions to your account, wait for Saved, then export PowerPoint or a Markdown outline.",
         narration:
-          "Deck versions save on this device only until you export. Export produces a real, editable PowerPoint file that mirrors your slides, or a Markdown outline of titles, bullets, and notes.",
-        durationSeconds: 14,
+          "Save a version of your deck and wait for the Saved status to confirm it reached your account. If saving fails, retry or export a copy before leaving. Export produces a real PowerPoint file with slide content and notes, or a Markdown outline. Your uploaded brand-template library remains stored in this browser.",
+        durationSeconds: 22,
         focus: "deckExportMenu",
       },
     ],
@@ -750,10 +895,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Use it in chat",
-        caption: "Type @ to choose an available profile. The Agent send option separately permits enabled tools.",
+        caption: "Type @ to choose an available profile, then confirm the intended profile before sending.",
         narration:
-          "In chat, type the at sign to choose an available profile. If the list is empty, ask your administrator to check profile readiness and access. The Agent send option separately permits enabled tools; it does not select a profile.",
-        durationSeconds: 17,
+          "In chat, type the at sign and select the profile you intend to use. If the list is empty, ask your administrator to check profile readiness and access. Agent mode also offers a profile selector in Send options; check its selected profile before sending, because enabling the mode can choose the first available one.",
+        durationSeconds: 22,
         focus: "agentMenu",
       },
     ],
@@ -816,10 +961,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Tool status is honest",
-        caption: "Each connection shows its real status — draft and approval states are labeled.",
+        caption: "Read draft, approval-required, and enabled states; verify the connection with an approved task.",
         narration:
-          "Every row shows its real status — draft, approval required, enabled — so you always know whether a connection is actually live before relying on it.",
-        durationSeconds: 11,
+          "Connection rows distinguish draft, approval-required, and enabled states. Enabled means the connection is available under policy; it does not prove every request will work. Test it with an approved task and review any authorization or service error before relying on it.",
+        durationSeconds: 19,
         focus: "toolsRows",
       },
       {
@@ -843,7 +988,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       "Open Agents/Automations in the sidebar and switch to the Automations tab.",
       "Click New automation and name the workflow clearly.",
       "Choose Chat or Draft as the run target.",
-      "Pick Once, Weekly, or Cron for the schedule.",
+      "Pick Daily, Weekly, Once, or Cron for the schedule; confirm the time in UTC.",
       "Choose approved models for each step and add instructions for the chain.",
       "Save it, then use Run now to test before relying on the schedule.",
     ],
@@ -858,10 +1003,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Create the scheduled run",
-        caption: "New automation sets the Chat or Draft target and a Once, Weekly, or Cron schedule.",
+        caption: "New automation sets Chat or Draft as the target and offers Daily, Weekly, Once, or Cron schedules.",
         narration:
-          "New automation builds the schedule: name it, choose Chat or Draft as the target, then pick Once, Weekly, or a Cron expression — and build the model chain step by step.",
-        durationSeconds: 13,
+          "Name the automation and choose Chat or Draft as its target. Select Daily, Weekly, Once, or a Cron expression, then set the time in UTC and build the model chain step by step. Review the schedule before saving and testing it.",
+        durationSeconds: 17,
         focus: "automationsNew",
       },
       {
@@ -1006,6 +1151,57 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     ],
   },
   {
+    id: "search-and-commands",
+    audioSrc: "training/user/search-and-commands.mp3",
+    title: "Search, commands, and workspace links",
+    description: "Find saved work, reopen recent results, and jump to screens with keyboard commands.",
+    icon: "organize",
+    outcomes: [
+      "Work found",
+      "Commands understood",
+      "Links reused"
+    ],
+    setupSteps: [
+      "Choose Search or press Control K on Windows and Linux, or Command K on Mac.",
+      "Type words from a title or message to retrieve work you can access, including archived chats.",
+      "Clear the query to revisit Recent items. Use the arrow keys and Enter to select a result, or Escape to close.",
+      "Type > in the Search palette for commands. In the chat composer, > selects automations instead.",
+      "Use workspace links and browser Back or Forward to revisit screens. Links still require sign-in and the appropriate permissions."
+    ],
+    scenes: [
+      {
+        title: "Search saved work",
+        caption: "Search retrieves matching chats, agents, drafts, and indexed documents within your access.",
+        narration: "Choose Search or press Control K, or Command K on a Mac. Type part of a title or message. Results include archived chats and other workspace items you can access. If indexing is still catching up, the palette tells you results may be incomplete; try again after it finishes.",
+        durationSeconds: 20,
+        focus: "searchPalette"
+      },
+      {
+        title: "Return to recent results",
+        caption: "Clear the query to see Recent. Arrow keys and Enter open the selected item; Escape closes.",
+        narration: "Clear the query to see items you recently opened through Search. Recent entries are kept for your account in this browser. Use the arrow keys and Enter, or select a result directly. Opening a recent item still depends on your current access and whether that item remains available.",
+        durationSeconds: 19,
+        focus: "searchRecent",
+        calloutPlacement: "left-rail"
+      },
+      {
+        title: "Use commands in the Search palette",
+        caption: "Type > here for navigation and actions. In chat, the same symbol selects automations.",
+        narration: "Type greater-than in the Search palette to list commands, then add a word to narrow them. Commands can open Drafts, Help, or other screens your role can use, and offer actions such as changing appearance. This is different from greater-than in the chat composer, where it selects automations.",
+        durationSeconds: 19,
+        focus: "searchCommands",
+        calloutPlacement: "left-rail"
+      },
+      {
+        title: "Keep a useful workspace link",
+        caption: "Workspace navigation uses screen links, and browser Back and Forward revisit your route.",
+        narration: "Workspace navigation now has real screen links. Copy a navigation link or open it in another tab when useful, and use browser Back and Forward to revisit your route. A link does not share private content or grant permission. When leaving an edited draft, complete the unsaved-work prompt before continuing.",
+        durationSeconds: 21,
+        focus: "sidebarUtilities"
+      }
+    ]
+  },
+  {
     id: "account-security",
     audioSrc: "training/user/account-security.mp3",
     title: "Protect your account and recover access",
@@ -1057,6 +1253,13 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         focus: "securityReplace",
       },
       {
+        title: "Complete verification when signing in",
+        caption: "Enter a current authenticator code, or choose Use a recovery code instead, then Verify and continue.",
+        narration: "On later sign-ins, enter the current six-digit code from your authenticator and choose Verify and continue. If the authenticator is unavailable, select Use a recovery code instead and enter one unused code. Recovery codes work once. If neither is available, follow your organization's account recovery process.",
+        durationSeconds: 23,
+        focus: "securitySignIn"
+      },
+      {
         title: "Change a local account password",
         caption: "Password → Edit opens Current password, New password, Confirm new password, and Update password.",
         narration: "In your account's Password card, choose Edit. Enter the current password, a new password with at least twelve characters, and a matching confirmation, then select Update password. After a successful change you remain in the workspace with a refreshed session, and older sessions are revoked. An SSO-managed password is changed through your identity provider.",
@@ -1075,7 +1278,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     setupSteps: [
       "Open your account card and edit your profile. Save profile applies the changes; Cancel leaves the saved profile unchanged.",
       "Use the Light mode or Dark mode control at the bottom of the sidebar to change appearance.",
-      "Open Composer shortcuts beside the message field for the available command prefixes and keyboard hints.",
+      "Open Send options → Resources for the available resources, command prefixes, and keyboard hints.",
       "On a narrow screen, open the menu to reach navigation, account, Help, and available installation instructions.",
       "Open Help for the video library and printable user guide. Choose Report a problem for a platform issue.",
       "Enter a useful subject and reproducible description, optionally attach a safe screenshot, and send the report. Confirm Report sent before assuming an administrator received it.",
@@ -1096,11 +1299,19 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         focus: "appearanceControl",
       },
       {
-        title: "Use the composer shortcut guide",
-        caption: "Composer shortcuts explains / prompts and tools, @ agents, # knowledge, $ skills, and > automations.",
-        narration: "Choose Composer shortcuts beside the message field to see the command prefixes. Start a word with slash for prompts and tools, at for agents, hash for knowledge, dollar for skills, or greater-than for automations. In the standard composer, Enter sends and Shift Enter adds a line. Dismiss shortcuts returns you to your message.",
+        title: "Schedule light and dark mode",
+        caption: "Theme schedule uses this device's local time. Save two different times and enable Switch automatically.",
+        narration: "Open Theme schedule beside the appearance control. Turn on Switch automatically, choose different times for Light mode and Dark mode, then Save schedule. The schedule stays in this browser and uses the device's local time. You can still change appearance manually until the next scheduled change.",
+        durationSeconds: 20,
+        focus: "themeSchedule"
+      },
+      {
+        title: "Browse resources from Send options",
+        caption: "Send options → Resources lets you search prompts, connections, agents, knowledge, skills, and automations.",
+        narration: "Open Send options beside the send button, then choose Resources to browse and search by category. Choose an available resource, or type slash for prompts and connections, at for agents, hash for knowledge, dollar for skills, or greater-than for automations. In the standard composer, Enter sends and Shift Enter adds a line.",
         durationSeconds: 22,
         focus: "composerShortcuts",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Open navigation on a small screen",

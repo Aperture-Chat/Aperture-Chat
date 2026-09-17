@@ -16,6 +16,7 @@ from app.db import (
     MatterRow,
     create_application_engine,
 )
+from app.db.orm import SearchIndexEntryRow
 from app.models.schemas import Role, Tenant, User
 from app.repositories.deps import get_store
 from app.repositories.matters import (
@@ -81,6 +82,7 @@ def matter_search_api(tmp_path: Path):
             MatterDeletionJobRow.__table__,
             DraftDocumentRow.__table__,
             DraftRevisionRow.__table__,
+            SearchIndexEntryRow.__table__,
         ],
     )
     repository = MatterDraftRepository(engine)
@@ -328,3 +330,46 @@ def test_matter_search_persistence_failure_is_generic_and_returns_no_partial_res
     assert response.status_code == 503
     assert response.json() == {"detail": "Matter and draft search is temporarily unavailable."}
     assert "sensitive sqlite path" not in response.text
+
+
+def test_deck_drafts_search_by_slide_text_and_never_leak_json_structure(matter_search_api) -> None:
+    client, actor, repository = matter_search_api
+    deck = json.dumps(
+        {
+            "schema": "aperture-deck-v1",
+            "title": "Marigold launch deck",
+            "theme": {},
+            "slides": [
+                {"id": "s1", "layout": "title", "title": "Marigold launch", "subtitle": "Board review"},
+                {
+                    "id": "s2",
+                    "layout": "title-bullets",
+                    "title": "Timeline",
+                    "bullets": [{"runs": [{"text": "Pilot in Tulipwood region"}], "level": 0}],
+                    "notes": "Mention the Zinnia budget line.",
+                },
+            ],
+        }
+    )
+    repository.create_draft(
+        tenant_id="tenant-a",
+        owner_user_id="user-one",
+        draft_id="draft-deck",
+        title="Marigold launch deck",
+        content=deck,
+        kind="deck",
+    )
+    actor["value"] = _user("user-one")
+    by_bullet = client.get("/api/search", params={"q": "tulipwood"})
+    hits = _section(by_bullet.json(), "draft")
+    assert [item["id"] for item in hits] == ["draft-deck"]
+    assert hits[0]["navigation"] == {"view": "drafts", "draft_id": "draft-deck", "kind": "deck"}
+    assert "Tulipwood" in hits[0]["snippet"]
+    assert "runs" not in hits[0]["snippet"] and "layout" not in hits[0]["snippet"]
+    by_notes = client.get("/api/search", params={"q": "zinnia"})
+    assert [item["id"] for item in _section(by_notes.json(), "draft")] == ["draft-deck"]
+    # Structural JSON keys are not searchable text.
+    by_key = client.get("/api/search", params={"q": "title-bullets"})
+    assert _section(by_key.json(), "draft") == []
+    actor["value"] = _user("user-two")
+    assert _section(client.get("/api/search", params={"q": "tulipwood"}).json(), "draft") == []

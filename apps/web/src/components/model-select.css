@@ -16,3 +16,20 @@
 .model-default-action small { display: block; margin-top: 2px; font-size: 11px; }
 .model-default-action:hover, .model-default-action.is-default { color: var(--teal); background: var(--teal-soft); }
 .model-option:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.model-menu-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  margin-top: 4px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+.model-menu-footer:hover, .model-menu-footer:focus-visible { color: var(--teal); background: var(--teal-soft); }

@@ -52,8 +52,10 @@ from app.db.orm import (
     ChatFolderRow,
     ChatStateImportRow,
     ChatThreadRow,
+    ChatRetentionTombstoneRow,
     ChatThreadTagRow,
     IssueReportRow,
+    SearchIndexEntryRow,
     MatterRow,
     MfaPreauthChallengeRow,
     RetentionHoldRow,
@@ -69,6 +71,8 @@ from app.db.orm import (
     UserSessionWatermarkRow,
     UserTotpFactorRow,
 )
+from app.core.search_index import entry_for_thread
+from app.repositories.search_index import remove_entry, write_entry
 from app.models.schemas import (
     AlertNotification,
     AuditEvent,
@@ -89,6 +93,10 @@ from app.core.sessions import MAX_MFA_FACTOR_GENERATION
 
 T = TypeVar("T")
 Index = int | slice
+
+
+class RetentionDeletedError(ValueError):
+    """A stale save attempted to restore a disposed chat."""
 
 
 class SessionRevocationConflictError(RuntimeError):
@@ -1257,7 +1265,11 @@ class ApplicationStateRepository:
         copied = ChatThread.model_validate(thread.model_dump(mode="python"))
 
         def operation(session: Session) -> ChatThread:
+            if session.get(ChatRetentionTombstoneRow, copied.id) is not None:
+                raise RetentionDeletedError("This conversation was deleted by retention policy. Start a new chat.")
             existing = self._chat_thread_row(session, copied.id)
+            prior_activity = existing.last_activity_at if existing is not None else None
+            content_changed = existing is None or existing.messages != copied.model_dump(mode="json")["messages"]
             # Matter assignment has a separate explicit-membership gate. This
             # general workspace upsert may preserve the authoritative SQL link,
             # but it must neither assign one nor resurrect a stale cached link
@@ -1277,13 +1289,16 @@ class ApplicationStateRepository:
             row.matter_id = matter_id
             now = datetime.now(UTC)
             row.created_at = created_at or now
-            row.last_activity_at = now
-            row.disposition_state = disposition_state
-            row.disposition_pending_since = disposition_pending_since
+            row.last_activity_at = now if content_changed else (prior_activity or now)
+            row.disposition_state = None if content_changed else disposition_state
+            row.disposition_pending_since = None if content_changed else disposition_pending_since
             session.add(row)
             session.flush()
             self._link_thread_attachments(session, row.id, row.messages)
-            return _freeze_chat_thread(row.to_model())
+            saved = _freeze_chat_thread(row.to_model())
+            # Same transaction as the thread: the index can never half-apply.
+            write_entry(session, entry_for_thread(saved, updated_at=now))
+            return saved
 
         return self.run_transaction(operation)
 
@@ -1404,7 +1419,7 @@ class ApplicationStateRepository:
 
         return self.run_transaction(operation)
 
-    def delete_chat_thread(self, thread_id: str) -> ChatThread | None:
+    def delete_chat_thread(self, thread_id: str, *, protect_holds: bool = False) -> ChatThread | None:
         # Preview files are the only stored copy of uploaded images; collect
         # the doomed IDs inside the transaction and unlink after it commits.
         doomed_attachment_ids: list[str] = []
@@ -1413,17 +1428,10 @@ class ApplicationStateRepository:
             row = self._chat_thread_row(session, thread_id)
             if row is None:
                 return None
+            if protect_holds and self._thread_held(session, thread_id, row.tenant_id):
+                return None
             thread = _freeze_chat_thread(row.to_model())
-            doomed_attachment_ids.extend(
-                session.execute(
-                    select(ChatAttachmentRow.id).where(
-                        ChatAttachmentRow.thread_id == thread_id
-                    )
-                ).scalars()
-            )
-            session.execute(
-                delete(ChatAttachmentRow).where(ChatAttachmentRow.thread_id == thread_id)
-            )
+            doomed_attachment_ids.extend(self._remove_unshared_chat_attachments(session, row))
             session.execute(
                 delete(ChatThreadTagRow).where(ChatThreadTagRow.thread_id == thread_id)
             )
@@ -1433,12 +1441,101 @@ class ApplicationStateRepository:
                 )
             )
             session.delete(row)
+            remove_entry(session, "chat", thread_id)
             return thread
 
         thread = self.run_transaction(operation)
         for attachment_id in doomed_attachment_ids:
             delete_attachment_preview(attachment_id)
         return thread
+
+    @staticmethod
+    def _remove_unshared_chat_attachments(session: Session, row: ChatThreadRow) -> list[str]:
+        """Preserve shared uploads, including evidence referenced by held chats."""
+        linked = list(session.scalars(select(ChatAttachmentRow).where(
+            ChatAttachmentRow.thread_id == row.id,
+            ChatAttachmentRow.tenant_id == row.tenant_id,
+        )))
+        references: dict[str, str] = {}
+        if linked:
+            candidates = {item.id for item in linked}
+            for other in session.scalars(select(ChatThreadRow).where(
+                ChatThreadRow.tenant_id == row.tenant_id, ChatThreadRow.id != row.id,
+            )):
+                for message in other.messages:
+                    for attachment in message.get("attachments") or []:
+                        if attachment.get("id") in candidates:
+                            references.setdefault(attachment["id"], other.id)
+        doomed = []
+        for attachment in linked:
+            if attachment.id in references:
+                attachment.thread_id = references[attachment.id]
+            else:
+                doomed.append(attachment.id)
+        session.execute(delete(ChatAttachmentRow).where(ChatAttachmentRow.id.in_(doomed)))
+        return doomed
+
+    @staticmethod
+    def _thread_held(session: Session, thread_id: str, tenant_id: str) -> bool:
+        return session.scalar(select(RetentionHoldThreadRow.thread_id).join(
+            RetentionHoldRow, RetentionHoldRow.id == RetentionHoldThreadRow.hold_id
+        ).where(RetentionHoldThreadRow.thread_id == thread_id, RetentionHoldRow.tenant_id == tenant_id,
+                RetentionHoldRow.released_at.is_(None)).limit(1)) is not None
+
+    def reset_retention_review(self, thread_ids: Sequence[str], tenant_id: str) -> None:
+        self.run_transaction(lambda session: session.execute(update(ChatThreadRow).where(ChatThreadRow.id.in_(thread_ids), ChatThreadRow.tenant_id == tenant_id).values(disposition_state=None, disposition_pending_since=None)))
+
+    def retention_scan_page(self, tenant_id: str, *, after: str = "", limit: int = 100) -> list[ChatThread]:
+        return self.run_transaction(lambda session: [_freeze_chat_thread(row.to_model()) for row in session.scalars(select(ChatThreadRow).where(ChatThreadRow.tenant_id == tenant_id, ChatThreadRow.id > after).order_by(ChatThreadRow.id).limit(limit))])
+
+    def retention_overview(self, policy, *, now=None) -> dict:
+        from app.core.retention_governance import decision
+        def operation(session):
+            tags = {}
+            for tag in session.scalars(select(ChatThreadTagRow).where(ChatThreadTagRow.tenant_id == policy.tenant_id)):
+                tags.setdefault(tag.thread_id, []).append(tag.to_model())
+            held = set(session.scalars(select(RetentionHoldThreadRow.thread_id).join(RetentionHoldRow, RetentionHoldRow.id == RetentionHoldThreadRow.hold_id).where(RetentionHoldRow.tenant_id == policy.tenant_id, RetentionHoldRow.released_at.is_(None))))
+            matters = {m.id: m.retention_days for m in session.scalars(select(MatterRow).where(MatterRow.tenant_id == policy.tenant_id))}
+            return {row.id: {**decision(policy, row, tags.get(row.id, []), held=row.id in held, matter_days=matters.get(row.matter_id), now=now), "created_at": row.created_at, "last_activity_at": row.last_activity_at} for row in session.scalars(select(ChatThreadRow).where(ChatThreadRow.tenant_id == policy.tenant_id).order_by(ChatThreadRow.id))}
+        return self.run_transaction(operation)
+
+    def dispose_retained_thread(self, thread_id, policy, now) -> str:
+        from app.core.retention_governance import decision
+        doomed = []
+        def operation(session):
+            row = session.scalar(select(ChatThreadRow).where(ChatThreadRow.id == thread_id, ChatThreadRow.tenant_id == policy.tenant_id).with_for_update())
+            if row is None or not policy.enabled or not policy.automation_enabled:
+                return "kept"
+            tags = [t.to_model() for t in session.scalars(select(ChatThreadTagRow).where(ChatThreadTagRow.thread_id == thread_id, ChatThreadTagRow.tenant_id == policy.tenant_id))]
+            matter = session.get(MatterRow, row.matter_id) if row.matter_id else None
+            info = decision(policy, row, tags, held=self._thread_held(session, thread_id, policy.tenant_id), matter_days=matter.retention_days if matter else None, now=now)
+            if not info["eligible"]:
+                row.disposition_state = None
+                row.disposition_pending_since = None
+                return "kept"
+            if info["delete_at"] is None or row.disposition_pending_since is None:
+                row.disposition_state = "pending"
+                row.disposition_pending_since = now
+                if policy.action == "archive_then_purge":
+                    row.archived = True
+                return "reviewing"
+            if info["delete_at"] > now:
+                return "waiting"
+            doomed.extend(self._remove_unshared_chat_attachments(session, row))
+            session.execute(delete(ChatFeedbackRow).where(ChatFeedbackRow.thread_id == thread_id, ChatFeedbackRow.tenant_id == policy.tenant_id))
+            session.execute(delete(ChatThreadTagRow).where(ChatThreadTagRow.thread_id == thread_id))
+            session.execute(delete(RetentionHoldThreadRow).where(RetentionHoldThreadRow.thread_id == thread_id))
+            session.add(ChatRetentionTombstoneRow(thread_id=thread_id, tenant_id=policy.tenant_id, deleted_at=now, policy_revision=policy.updated_at))
+            event = AuditEvent(id=f"audit-{uuid4()}", tenant_id=policy.tenant_id, actor_id="system-retention", actor_name="Retention scheduler", actor_role="SYSTEM", action="retention.chat_deleted", target=thread_id, target_type="chat", created_at=now, metadata={"policy_revision": policy.updated_at, "attachment_count": len(doomed)})
+            session.add(AuditEventRow.from_model(event))
+            session.add(AuditOutboxRow.from_audit_event(event))
+            session.delete(row)
+            remove_entry(session, "chat", thread_id)
+            return "deleted"
+        outcome = self.run_transaction(operation)
+        for attachment_id in doomed:
+            delete_attachment_preview(attachment_id)
+        return outcome
 
     def count_chat_threads(self) -> int:
         return self.run_transaction(
@@ -1916,6 +2013,7 @@ class ApplicationStateRepository:
             session.flush()
             for held_id in held_ids:
                 session.add(RetentionHoldThreadRow(hold_id=row.id, thread_id=held_id))
+            session.execute(update(ChatThreadRow).where(ChatThreadRow.id.in_(held_ids)).values(disposition_state=None, disposition_pending_since=None))
             session.flush()
             return row.to_model(), held_ids
 
@@ -1927,10 +2025,11 @@ class ApplicationStateRepository:
         *,
         released_at: datetime,
         released_by: str,
+        tenant_id: str | None = None,
     ) -> RetentionHold | None:
         def operation(session: Session) -> RetentionHold | None:
             row = session.get(RetentionHoldRow, hold_id)
-            if row is None or row.released_at is not None:
+            if row is None or row.released_at is not None or (tenant_id is not None and row.tenant_id != tenant_id):
                 return None
             row.released_at = released_at
             row.released_by = released_by
@@ -3840,6 +3939,9 @@ class ApplicationStateRepository:
                 ).rowcount
                 or 0
             )
+            session.execute(
+                delete(SearchIndexEntryRow).where(SearchIndexEntryRow.owner_user_id == user_id)
+            )
             removed_folders = (
                 session.execute(
                     delete(ChatFolderRow).where(ChatFolderRow.owner_user_id == user_id)
@@ -4001,6 +4103,11 @@ class ApplicationStateRepository:
                     )
                 ).rowcount
                 or 0
+            )
+            session.execute(
+                delete(SearchIndexEntryRow).where(
+                    owned_or_tenant(SearchIndexEntryRow.tenant_id, SearchIndexEntryRow.owner_user_id)
+                )
             )
             removed_folders = (
                 session.execute(
