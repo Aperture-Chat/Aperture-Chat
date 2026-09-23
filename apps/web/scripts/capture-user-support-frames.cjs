@@ -138,7 +138,8 @@ async function main() {
     const shot = (name, regions, extra) => screenshotWithBounds(page, capture.outputDirectory, name, regions, metadata, extra);
 
     await page.getByRole("button", { name: /^(Light|Dark) mode$/ }).waitFor();
-    await shot("appearance-control", { appearanceControl: page.locator(".sidebar-bottom") });
+    // The appearance controls are the moon/sun and clock buttons in the Help row.
+    await shot("appearance-control", { appearanceControl: page.locator(".help-row") });
 
     await page.getByRole("button", { name: "Send options", exact: true }).click();
     await page.getByRole("button", { name: "Resources", exact: true }).click();
