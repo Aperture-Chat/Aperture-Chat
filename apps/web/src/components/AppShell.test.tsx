@@ -407,7 +407,7 @@ test("regular users do not see admin or platform entry points", () => {
   expect(within(accountDrawer).queryByRole("button", { name: /console/ })).not.toBeInTheDocument();
 });
 
-test("admins reach their console from the account drawer instead of the rail", () => {
+test("admins can also reach their console from the account drawer, outside the primary navigation", () => {
   const adminData = cloneData();
   const adminViewChange = vi.fn();
   renderShell(adminData, adminViewChange);
@@ -444,40 +444,136 @@ test("platform owners reach both management consoles from the account drawer", (
   expect(ownerViewChange).toHaveBeenCalledWith("platform");
 });
 
-test("New chat stays a primary action while Chats reveals independent organization sections", () => {
+test("primary navigation leads with New chat and Search, and chat history is always visible", () => {
   const onNewChat = vi.fn();
   const onViewChange = vi.fn();
-  renderShell(cloneData(), onViewChange, onNewChat);
+  renderShell(cloneData(), onViewChange, onNewChat, [
+    shellThread("thread-visible", "Quarterly planning"),
+  ]);
 
   const primaryNav = screen.getByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primaryNav).getByRole("button", { name: "New chat" }));
+  const destinations = Array.from(primaryNav.querySelectorAll("button, a")).map((element) =>
+    element.getAttribute("aria-label"),
+  );
+  expect(destinations).toEqual(["New chat", "Search", "Drafts", "Agents", "Library"]);
 
+  fireEvent.click(within(primaryNav).getByRole("button", { name: "New chat" }));
   expect(onNewChat).toHaveBeenCalledTimes(1);
   expect(onViewChange).not.toHaveBeenCalledWith("chat");
 
-  const libraryButton = within(primaryNav).getByRole("link", { name: "Knowledge/Tools" });
-  const chatsButton = screen.getByRole("button", { name: "Chats" });
-  expect(libraryButton.compareDocumentPosition(chatsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(within(primaryNav).getByRole("button", { name: "Search" }));
+  expect(screen.getByRole("dialog", { name: /Search/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close search dialog" }));
 
-  expect(chatsButton).toHaveAttribute("aria-expanded", "false");
-  expect(screen.queryByRole("button", { name: "Folders" })).not.toBeInTheDocument();
-
-  fireEvent.click(chatsButton);
-
-  expect(chatsButton).toHaveAttribute("aria-expanded", "true");
-  const foldersButton = screen.getByRole("button", { name: "Folders" });
-  const pinnedButton = screen.getByRole("button", { name: "Pinned" });
-  const recentButton = screen.getByRole("button", { name: "Recent" });
-  expect(foldersButton).toHaveAttribute("aria-expanded", "false");
-  expect(pinnedButton).toHaveAttribute("aria-expanded", "false");
-  expect(recentButton).toHaveAttribute("aria-expanded", "false");
+  // Chats start open with no nested disclosures between the user and a chat.
+  expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.queryByRole("button", { name: "Recent" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Quarterly planning" })).toBeInTheDocument();
+  // Empty folder and pinned groups stay hidden instead of rendering placeholders.
+  expect(screen.queryByRole("group", { name: "Folders" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("group", { name: "Pinned" })).not.toBeInTheDocument();
   expect(screen.queryByText("No folders yet.")).not.toBeInTheDocument();
+});
 
-  fireEvent.click(foldersButton);
-  expect(foldersButton).toHaveAttribute("aria-expanded", "true");
-  expect(screen.getByText("No folders yet.")).toBeInTheDocument();
-  expect(pinnedButton).toHaveAttribute("aria-expanded", "false");
-  expect(recentButton).toHaveAttribute("aria-expanded", "false");
+test("an empty chat history says where conversations will appear", () => {
+  renderShell(cloneData());
+
+  expect(screen.getByText("Your conversations will appear here.")).toBeInTheDocument();
+});
+
+test("chat row actions live in one menu that closes on Escape and returns focus", () => {
+  const onArchiveThread = vi.fn();
+  renderShell(cloneData(), vi.fn(), vi.fn(), [shellThread("thread-menu", "Vendor summary")], null, vi.fn(), undefined, undefined, onArchiveThread);
+
+  const sidebar = document.querySelector(".sidebar") as HTMLElement;
+  expect(within(sidebar).queryByRole("button", { name: "Pin chat" })).not.toBeInTheDocument();
+  const trigger = within(sidebar).getByRole("button", { name: "More actions for Vendor summary" });
+  expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+
+  fireEvent.click(trigger);
+  const menu = screen.getByRole("menu", { name: "Actions for Vendor summary" });
+  // The menu lives at the top layer, outside every sidebar section that could
+  // clip it, and is fixed to its trigger's position.
+  expect(menu.parentElement).toBe(document.body);
+  expect(sidebar.contains(menu)).toBe(false);
+  expect(menu.style.top).not.toBe("");
+  expect(menu.style.left).not.toBe("");
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    "Pin chat",
+    "Move to folder",
+    "Archive",
+  ]);
+  expect(within(menu).getByRole("menuitem", { name: "Pin chat" })).toHaveFocus();
+  fireEvent.keyDown(menu, { key: "ArrowUp" });
+  expect(within(menu).getByRole("menuitem", { name: "Archive" })).toHaveFocus();
+
+  fireEvent.keyDown(menu, { key: "Escape" });
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+
+  fireEvent.click(trigger);
+  fireEvent.pointerDown(document.querySelector(".main-surface") as HTMLElement);
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+  expect(onArchiveThread).toHaveBeenCalledWith("thread-menu");
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+});
+
+test("Move to folder lists folders in the same floating menu", () => {
+  window.localStorage.setItem(
+    "aperture-chat-folders-user-admin",
+    JSON.stringify([
+      { id: "folder-clients", name: "Clients", created_at: "2026-06-29T00:00:00.000Z" },
+      { id: "folder-renewals", name: "Renewals", created_at: "2026-06-29T00:00:00.000Z", parent_id: "folder-clients" },
+    ]),
+  );
+  const onMoveThreadToFolder = vi.fn();
+  renderShell(cloneData(), vi.fn(), vi.fn(), [shellThread("thread-file", "Renewal memo")], null, vi.fn(), undefined, undefined, vi.fn(), onMoveThreadToFolder);
+
+  fireEvent.click(screen.getByRole("button", { name: "More actions for Renewal memo" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+  const folderMenu = screen.getByRole("menu", { name: "Move Renewal memo to a folder" });
+  expect(folderMenu.parentElement).toBe(document.body);
+  expect(within(folderMenu).getByRole("menuitem", { name: "Clients" })).toHaveFocus();
+  expect(within(folderMenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    "Clients",
+    "Renewals",
+    "New folder",
+  ]);
+
+  fireEvent.click(within(folderMenu).getByRole("menuitem", { name: "Renewals" }));
+  expect(onMoveThreadToFolder).toHaveBeenCalledWith("thread-file", "folder-renewals");
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+});
+
+test("management consoles appear in the sidebar only for roles that can open them", () => {
+  const ownerViewChange = vi.fn();
+  const owner = cloneData();
+  owner.me = { ...owner.me, role: "PLATFORM_OWNER" };
+  const { unmount } = renderShell(owner, ownerViewChange);
+  const sidebar = document.querySelector(".sidebar") as HTMLElement;
+  expect(within(sidebar).getByRole("link", { name: "Admin console" })).toHaveAttribute("href", "/admin/users");
+  fireEvent.click(within(sidebar).getByRole("link", { name: "Platform console" }));
+  expect(ownerViewChange).toHaveBeenCalledWith("platform");
+  unmount();
+
+  const admin = cloneData();
+  admin.me = { ...admin.me, role: "TENANT_ADMIN" };
+  const adminRender = renderShell(admin);
+  const adminSidebar = document.querySelector(".sidebar") as HTMLElement;
+  expect(within(adminSidebar).getByRole("link", { name: "Admin console" })).toBeInTheDocument();
+  expect(within(adminSidebar).queryByRole("link", { name: "Platform console" })).not.toBeInTheDocument();
+  adminRender.unmount();
+
+  const user = cloneData();
+  user.me = { ...user.me, role: "USER" };
+  renderShell(user);
+  const userSidebar = document.querySelector(".sidebar") as HTMLElement;
+  expect(within(userSidebar).queryByRole("link", { name: "Admin console" })).not.toBeInTheDocument();
+  expect(within(userSidebar).queryByRole("link", { name: "Platform console" })).not.toBeInTheDocument();
 });
 
 test("draft mode hides the disabled sidebar expand control", () => {
@@ -548,19 +644,17 @@ test("sidebar chats can be archived and moved into a folder", () => {
     onMoveThreadToFolder,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
-  fireEvent.click(screen.getByRole("button", { name: "Folders" }));
-
   fireEvent.click(screen.getByRole("button", { name: "Create chat folder" }));
   fireEvent.change(screen.getByLabelText("Folder name"), { target: { value: "Matter folders" } });
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-  fireEvent.click(screen.getByRole("button", { name: "Recent" }));
-  fireEvent.click(screen.getByLabelText("Add Contract review to a folder"));
-  fireEvent.click(screen.getByRole("button", { name: "Matter folders" }));
+  fireEvent.click(screen.getByRole("button", { name: "More actions for Contract review" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Matter folders" }));
   expect(onMoveThreadToFolder).toHaveBeenCalledWith("thread-contract", expect.stringMatching(/^folder-/));
 
-  fireEvent.click(screen.getByLabelText("Archive Contract review"));
+  fireEvent.click(screen.getByRole("button", { name: "More actions for Contract review" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
   expect(onArchiveThread).toHaveBeenCalledWith("thread-contract");
 });
 
@@ -590,8 +684,6 @@ test("sidebar folders can be deleted and their chats move back to recent", () =>
     onMoveThreadToFolder,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
-  fireEvent.click(screen.getByRole("button", { name: "Folders" }));
 
   expect(screen.getByText("Client folder")).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText("Delete Client folder folder"));
@@ -601,7 +693,6 @@ test("sidebar folders can be deleted and their chats move back to recent", () =>
   );
   expect(onMoveThreadToFolder).toHaveBeenCalledWith("thread-client", null);
   expect(screen.queryByText("Client folder")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Recent" }));
   expect(screen.getByText("Client matter")).toBeInTheDocument();
 });
 
@@ -622,10 +713,6 @@ test("sidebar caps folders, pinned chats, and recent chats behind view-all drawe
   renderShell(cloneData(), vi.fn(), vi.fn(), [...pinnedThreads, ...recentThreads]);
 
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Folders" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Pinned" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
   expect(within(sidebar).getByText("Matter folder 1")).toBeInTheDocument();
   expect(within(sidebar).getByText("Matter folder 3")).toBeInTheDocument();
   expect(within(sidebar).queryByText("Matter folder 4")).not.toBeInTheDocument();
@@ -680,8 +767,6 @@ test("folders nest as subfolders and a subtree delete returns chats to recent", 
     onMoveThreadToFolder,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
-  fireEvent.click(screen.getByRole("button", { name: "Folders" }));
 
   // Subfolders stay hidden until their parent expands; the root badge counts
   // every chat in the subtree, not only direct children.
@@ -726,24 +811,24 @@ test("folders nest as subfolders and a subtree delete returns chats to recent", 
   ).toEqual([]);
 });
 
-test("pinned sidebar rows keep the persistent action fade state", () => {
+test("pinned chats get their own group and offer Unpin from the row menu", () => {
   const pinnedThread = shellThread(
     "pinned-long-title",
     "Create me a sonnet and make it significantly longer",
     { pinned: true },
   );
+  const recentThread = shellThread("recent-thread", "Budget notes");
 
-  renderShell(cloneData(), vi.fn(), vi.fn(), [pinnedThread]);
+  renderShell(cloneData(), vi.fn(), vi.fn(), [pinnedThread, recentThread]);
 
-  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
-  fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
-
-  const row = screen.getByText(pinnedThread.title).closest(".chat-row");
+  const pinnedGroup = screen.getByRole("group", { name: "Pinned" });
+  const row = within(pinnedGroup).getByText(pinnedThread.title).closest(".chat-row");
   expect(row).toHaveClass("is-pinned");
-  expect(within(row as HTMLElement).getByRole("button", { name: "Unpin chat" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  // With a pinned group above it, the recent list is labelled too.
+  expect(within(screen.getByRole("group", { name: "Recent" })).getByText("Budget notes")).toBeInTheDocument();
+
+  fireEvent.click(within(row as HTMLElement).getByRole("button", { name: `More actions for ${pinnedThread.title}` }));
+  expect(screen.getByRole("menuitem", { name: "Unpin chat" })).toBeInTheDocument();
 });
 
 test("chat previews show every prompt and output, reset to the top, and omit thinking traces", () => {
@@ -782,8 +867,6 @@ test("chat previews show every prompt and output, reset to the top, and omit thi
   });
 
   renderShell(cloneData(), vi.fn(), vi.fn(), [previewThread]);
-  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
-  fireEvent.click(screen.getByRole("button", { name: "Recent" }));
   const trigger = screen.getByRole("button", { name: "Rich preview" });
   fireEvent.focus(trigger);
 
@@ -826,8 +909,6 @@ test("chat previews open after a deliberate hover delay and stay closed for a pa
     });
 
     renderShell(cloneData(), vi.fn(), vi.fn(), [previewThread]);
-    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
-    fireEvent.click(screen.getByRole("button", { name: "Recent" }));
     const trigger = screen.getByRole("button", { name: "Hover preview" });
 
     fireEvent.mouseEnter(trigger);
@@ -864,8 +945,6 @@ test("the same chat preview is available in all-chat and archive listings", () =
 
   renderShell(cloneData(), vi.fn(), vi.fn(), [...activeThreads, archivedThread]);
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
   fireEvent.click(within(sidebar).getByRole("button", { name: "View all chats" }));
 
   const allChats = screen.getByRole("dialog", { name: "All chats" });
@@ -1079,7 +1158,7 @@ test("sidebar width supports keyboard resizing within its bounds", () => {
   expect(window.localStorage.getItem("aperture-sidebar-width")).toBe("224");
 });
 
-test("switching accounts never writes the previous user's folder or read state into the next account", () => {
+test("switching accounts never writes the previous user's folders into the next account", () => {
   const first = cloneData();
   const second = cloneData();
   second.me.id = "user-second";
@@ -1101,10 +1180,11 @@ test("switching accounts never writes the previous user's folder or read state i
   writes.mockClear();
   rerender(shell(second));
   expect(writes.mock.calls.filter(([key]) => key.endsWith(second.me.id)).every(([, value]) =>
-    !value.includes("folder-first") && !value.includes("firstThread"),
+    !value.includes("folder-first"),
   )).toBe(true);
   expect(JSON.parse(localStorage.getItem(`aperture-chat-folders-${second.me.id}`)!)).toEqual([secondFolder]);
-  expect(JSON.parse(localStorage.getItem(`aperture-chat-read-v1-${second.me.id}`)!)).toEqual({ secondThread: 200 });
+  // Read positions now live on the server; the old browser-only copies are cleared.
+  expect(localStorage.getItem(`aperture-chat-read-v1-${second.me.id}`)).toBeNull();
   writes.mockRestore();
 });
 
@@ -1203,8 +1283,6 @@ test("all-chats drawer filter narrows threads by title without inventing results
   renderShell(cloneData(), vi.fn(), vi.fn(), [...recentThreads, pricingThread]);
 
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
   fireEvent.click(within(sidebar).getByRole("button", { name: "View all chats" }));
 
   const drawerDialog = screen.getByRole("dialog", { name: "All chats" });
@@ -1245,8 +1323,6 @@ test("all-chats drawer rows carry the same pin, archive, and folder actions as t
   );
 
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
   fireEvent.click(within(sidebar).getByRole("button", { name: "View all chats" }));
 
   const drawerDialog = screen.getByRole("dialog", { name: "All chats" });
@@ -1313,4 +1389,213 @@ test("the platform update row is requested for owners only and shows when a rele
   renderShell(ownerData, vi.fn(), vi.fn(), [], null, vi.fn(), "PLATFORM_OWNER");
   const row = await screen.findByRole("button", { name: /Update to v9\.1\.0/ });
   expect(row.closest(".utility-rows")).not.toBeNull();
+});
+
+function mockPlatformUpdateAvailable() {
+  const updateCalls: string[] = [];
+  vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (!url.includes("/api/platform/updates")) {
+      return new Response(JSON.stringify({ detail: "Not found" }), { status: 404 });
+    }
+    updateCalls.push(url);
+    return new Response(
+      JSON.stringify({
+        current_version: "v9.0.0",
+        latest_version: "v9.1.0",
+        update_available: true,
+        releases: [
+          {
+            version: "v9.1.0",
+            name: "Aperture Chat v9.1.0",
+            url: "https://example.test/releases/v9.1.0",
+            published_at: "2026-09-03T10:00:00Z",
+            highlights: "- Synthetic highlight.",
+            notes: "# Aperture Chat v9.1.0",
+          },
+        ],
+        checked_at: "2026-09-03T11:00:00Z",
+        check_error: null,
+        check_enabled: true,
+        repository: "example/aperture",
+        releases_page_url: "https://example.test/releases",
+        updater: {
+          configured: false,
+          connected: false,
+          last_heartbeat_at: null,
+          project: null,
+          problem: null,
+          run: { phase: "idle", message: "" },
+          log_tail: "",
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  return updateCalls;
+}
+
+test("only platform owners see release update notices; admins, users, and role previews never do", async () => {
+  const updateCalls = mockPlatformUpdateAvailable();
+  const owner = cloneData();
+  owner.me = { ...owner.me, role: "PLATFORM_OWNER" };
+  const ownerRender = renderShell(owner);
+  expect(await screen.findByText("Release available: v9.1.0")).toBeInTheDocument();
+  expect(updateCalls.length).toBeGreaterThan(0);
+  ownerRender.unmount();
+
+  // An owner previewing a tenant role sees exactly what that role would: the
+  // shell receives the previewed role, so the notice and its polling stop.
+  for (const [role, actualRole, viewAsRole] of [
+    ["TENANT_ADMIN", "TENANT_ADMIN", null],
+    ["USER", "USER", null],
+    ["TENANT_ADMIN", "PLATFORM_OWNER", "TENANT_ADMIN"],
+    ["USER", "PLATFORM_OWNER", "USER"],
+  ] as const) {
+    updateCalls.length = 0;
+    const data = cloneData();
+    data.me = { ...data.me, role };
+    const view = renderShell(data, vi.fn(), vi.fn(), [], viewAsRole, vi.fn(), actualRole);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/Release available|Update to v/)).not.toBeInTheDocument();
+    expect(updateCalls).toEqual([]);
+    view.unmount();
+  }
+});
+
+test("Escape in a chat row menu closes only the menu inside the mobile navigation drawer", () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 462 });
+  renderShell(cloneData(), vi.fn(), vi.fn(), [shellThread("thread-mobile", "Site visit notes")]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+  const drawer = screen.getByRole("dialog", { name: "Navigation" });
+  fireEvent.click(within(drawer).getByRole("button", { name: "More actions for Site visit notes" }));
+  const menu = screen.getByRole("menu", { name: "Actions for Site visit notes" });
+
+  fireEvent.keyDown(menu, { key: "Escape" });
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Navigation" })).toBeInTheDocument();
+});
+
+test("the Chats heading hides and shows the whole history and remembers the choice per account", () => {
+  const threads = [shellThread("thread-one", "Launch checklist"), shellThread("thread-two", "Vendor terms")];
+  const first = renderShell(cloneData(), vi.fn(), vi.fn(), threads);
+
+  const toggle = screen.getByRole("button", { name: "Chats" });
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(toggle).toHaveAttribute("aria-controls", "sidebar-chat-sections");
+  fireEvent.click(toggle);
+
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("button", { name: "Launch checklist" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Create chat folder" })).not.toBeInTheDocument();
+  expect(toggle).toHaveAttribute("aria-description", "2 chats hidden");
+  expect(toggle).toHaveTextContent("2");
+  // Search keeps every chat reachable while the list is hidden.
+  expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
+  expect(window.localStorage.getItem("aperture-sidebar-chats-hidden-user-admin")).toBe("true");
+  first.unmount();
+
+  // The next visit on this device starts hidden, and a second click restores the list.
+  renderShell(cloneData(), vi.fn(), vi.fn(), threads);
+  const restored = screen.getByRole("button", { name: "Chats" });
+  expect(restored).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(restored);
+  expect(screen.getByRole("button", { name: "Launch checklist" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Create chat folder" })).toBeInTheDocument();
+  expect(window.localStorage.getItem("aperture-sidebar-chats-hidden-user-admin")).toBeNull();
+});
+
+test("hidden chats still signal unread replies from the Chats heading", () => {
+  window.localStorage.setItem("aperture-sidebar-chats-hidden-user-admin", "true");
+  const thread = shellThread("thread-unread", "Board prep", { updated_at: "2026-09-01T12:00:00.000Z" });
+  const view = renderShell(cloneData(), vi.fn(), vi.fn(), [thread]);
+  const toggle = screen.getByRole("button", { name: "Chats" });
+  expect(toggle).toHaveAttribute("aria-description", "1 chat hidden");
+
+  // A newer assistant reply than the one this browser has seen marks it unread.
+  view.rerender(
+    <AppShell
+      data={cloneData()}
+      actualRole="TENANT_ADMIN"
+      viewAsRole={null}
+      onViewAsRoleChange={vi.fn()}
+      currentView="chat"
+      onViewChange={vi.fn()}
+      darkMode={false}
+      onToggleDarkMode={vi.fn()}
+      threads={[{ ...thread, updated_at: "2026-09-02T12:00:00.000Z", messages: [...thread.messages, { id: "reply", role: "assistant", content: "Ready.", createdAt: "9:01 AM", status: "ok" }] }]}
+      activeChatId="chat-new"
+      onOpenChat={vi.fn()}
+      onNewChat={vi.fn()}
+      onTogglePin={vi.fn()}
+      onArchiveThread={vi.fn()}
+      onRestoreThread={vi.fn()}
+      onDeleteThread={vi.fn()}
+      onMoveThreadToFolder={vi.fn()}
+    >
+      <main>Workspace</main>
+    </AppShell>,
+  );
+  expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute(
+    "aria-description",
+    "1 chat hidden, with unread replies",
+  );
+});
+
+test("unread dots follow the server read position, and opening or watching a chat records the read", () => {
+  const onMarkThreadRead = vi.fn();
+  const reply = (id: string) => ({ id, role: "assistant" as const, content: "Done.", createdAt: "9:01 AM", status: "ok" as const });
+  const read = shellThread("thread-read", "Quarterly recap", {
+    messages: [...shellThread("x", "Quarterly recap").messages, reply("reply-read")],
+    last_read_message_id: "reply-read",
+  });
+  const unread = shellThread("thread-unread", "Automation digest", {
+    messages: [...shellThread("y", "Automation digest").messages, reply("reply-new")],
+    last_read_message_id: null,
+  });
+  const props = (activeChatId: string, currentView: ViewKey = "chat") => (
+    <AppShell
+      data={cloneData()}
+      actualRole="TENANT_ADMIN"
+      viewAsRole={null}
+      onViewAsRoleChange={vi.fn()}
+      currentView={currentView}
+      onViewChange={vi.fn()}
+      darkMode={false}
+      onToggleDarkMode={vi.fn()}
+      threads={[read, unread]}
+      activeChatId={activeChatId}
+      onOpenChat={vi.fn()}
+      onNewChat={vi.fn()}
+      onTogglePin={vi.fn()}
+      onArchiveThread={vi.fn()}
+      onRestoreThread={vi.fn()}
+      onDeleteThread={vi.fn()}
+      onMoveThreadToFolder={vi.fn()}
+      onMarkThreadRead={onMarkThreadRead}
+    >
+      <main>Workspace</main>
+    </AppShell>
+  );
+  const { rerender } = render(props("chat-new"));
+
+  const rowFor = (title: string) => screen.getByRole("button", { name: title }).closest(".chat-row") as HTMLElement;
+  expect(rowFor("Quarterly recap")).not.toHaveClass("is-unread");
+  expect(rowFor("Automation digest")).toHaveClass("is-unread");
+  expect(within(rowFor("Automation digest")).getByRole("status", { name: "Unread reply" })).toBeInTheDocument();
+  expect(onMarkThreadRead).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Automation digest" }));
+  expect(onMarkThreadRead).toHaveBeenCalledWith("thread-unread");
+
+  // A chat that is open elsewhere (for example behind Drafts) is not being read.
+  onMarkThreadRead.mockClear();
+  rerender(props("thread-unread", "drafts"));
+  expect(onMarkThreadRead).not.toHaveBeenCalled();
+  // Back on the chat screen, the open conversation is read as it is shown.
+  rerender(props("thread-unread", "chat"));
+  expect(onMarkThreadRead).toHaveBeenCalledWith("thread-unread");
 });

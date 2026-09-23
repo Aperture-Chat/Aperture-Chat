@@ -30,16 +30,17 @@ import {
   Pencil,
   Search,
   Send,
-  Shield,
   ShieldCheck,
   Smartphone,
   Sun,
   Trash2,
   BookOpen,
+  Building2,
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Fragment, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
 
@@ -84,28 +85,51 @@ import { PlatformUpdateRow } from "./PlatformUpdateRow";
 import { Logo } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
 import { AccountSecurity } from "./AccountSecurity";
-import {
-  isThreadUnread,
-  loadReadState,
-  markThreadRead,
-  saveReadState,
-  seedReadState,
-  type ChatReadState,
-} from "../lib/chatReadState";
+import { forgetLegacyReadState, isThreadUnread } from "../lib/chatReadState";
 
 export type { ViewKey };
 
 const nav = [
   { key: "chat", label: "New chat", icon: Plus },
   { key: "drafts", label: "Drafts", icon: FileText },
-  { key: "agents", label: "Agents/Automations", icon: Bot },
-  { key: "library", label: "Knowledge/Tools", icon: BookOpen },
+  { key: "agents", label: "Agents", icon: Bot },
+  { key: "library", label: "Library", icon: BookOpen },
 ] as const;
 
 const consoleNav = [
-  { key: "admin", label: "Admin", icon: ShieldCheck },
-  { key: "platform", label: "Platform", icon: Shield },
+  { key: "admin", label: "Admin console", icon: ShieldCheck },
+  { key: "platform", label: "Platform console", icon: Building2 },
 ] as const;
+
+type ChatMenuAnchor = { top: number; bottom: number; right: number };
+
+const CHAT_MENU_WIDTH = 190;
+/** First-render guess (three actions) before the real height is measured. */
+const CHAT_MENU_HEIGHT_ESTIMATE = 124;
+const CHAT_MENU_GAP = 4;
+const CHAT_MENU_VIEWPORT_MARGIN = 8;
+
+/** Places a chat row menu below its trigger, or above it when the viewport
+ * has no room below, keeping it fully on screen either way. */
+function chatMenuPosition(anchor: ChatMenuAnchor, height: number): CSSProperties {
+  const margin = CHAT_MENU_VIEWPORT_MARGIN;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const left = Math.max(margin, Math.min(anchor.right - CHAT_MENU_WIDTH, viewportWidth - CHAT_MENU_WIDTH - margin));
+  const below = anchor.bottom + CHAT_MENU_GAP;
+  const above = anchor.top - CHAT_MENU_GAP - height;
+  const fitsBelow = below + height + margin <= viewportHeight;
+  const top = fitsBelow || above < margin
+    ? Math.max(margin, Math.min(below, viewportHeight - height - margin))
+    : above;
+  return { left, top, maxHeight: viewportHeight - margin * 2 };
+}
+
+/** Shortcut hint for the search row; Apple keyboards label the key ⌘. */
+const SEARCH_SHORTCUT_LABEL =
+  typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+    ? "⌘K"
+    : "Ctrl K";
 
 const NAV_TOOLTIPS: Record<
   (typeof nav)[number]["key"] | (typeof consoleNav)[number]["key"],
@@ -261,6 +285,7 @@ function UserAppShell({
   onRestoreThread,
   onDeleteThread,
   onMoveThreadToFolder,
+  onMarkThreadRead,
   onSignOut,
   onRequestSignOut,
   onProfileUpdate,
@@ -302,6 +327,8 @@ function UserAppShell({
   onRestoreThread: (id: string) => void;
   onDeleteThread: (id: string) => void;
   onMoveThreadToFolder: (id: string, folderId: string | null) => void;
+  /** Records that the owner has seen a chat's newest reply (server-backed). */
+  onMarkThreadRead?: (id: string) => void;
   onSignOut?: () => void;
   /** Voluntary sign-out may first preserve unfinished workspace edits. */
   onRequestSignOut?: () => void;
@@ -337,12 +364,19 @@ function UserAppShell({
     setSecurityCloseBlocked(blocked);
   };
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [chatsExpanded, setChatsExpanded] = useState(false);
-  const [foldersExpanded, setFoldersExpanded] = useState(false);
-  const [pinnedExpanded, setPinnedExpanded] = useState(false);
-  const [recentExpanded, setRecentExpanded] = useState(false);
+  // One chat row's "More actions" menu at a time. It renders in a portal at
+  // the top layer, anchored to its trigger, so no sidebar section can clip it.
+  const [chatMenu, setChatMenu] = useState<{
+    threadId: string;
+    view: "actions" | "folders";
+    anchor: ChatMenuAnchor;
+  } | null>(null);
+  const chatMenuRef = useRef<HTMLDivElement | null>(null);
+  const [chatMenuHeight, setChatMenuHeight] = useState(CHAT_MENU_HEIGHT_ESTIMATE);
+  // People can tuck the whole chat history away; the choice is remembered per
+  // account on this device. Search still finds every chat while it is hidden.
+  const [chatsHidden, setChatsHidden] = useState(() => loadChatsHidden(data.me.id));
   const [folders, setFolders] = useState<ChatFolder[]>(() => loadChatFolders(data.me.id));
-  const [chatReadState, setChatReadState] = useState<ChatReadState>(() => loadReadState(data.me.id));
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   // Parent for the folder being created: null = a new root folder.
   const [folderCreateParentId, setFolderCreateParentId] = useState<string | null>(null);
@@ -351,7 +385,6 @@ function UserAppShell({
   const [expandedFolderIds, setExpandedFolderIds] = useState<ReadonlySet<string>>(new Set());
   // The most recently opened folder keeps its root visible in the preview.
   const [lastExpandedFolderId, setLastExpandedFolderId] = useState<string | null>(null);
-  const [folderMenuThreadId, setFolderMenuThreadId] = useState<string | null>(null);
   const [pendingFolderThreadId, setPendingFolderThreadId] = useState<string | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -405,7 +438,7 @@ function UserAppShell({
     const observer = new ResizeObserver(measure);
     observer.observe(list);
     return () => observer.disconnect();
-  }, [chatsExpanded, recentExpanded, recentChats.length]);
+  }, [collapsed, chatsHidden, recentChats.length]);
   // With real layout, one extra row renders partially clipped under the
   // fade, so the list visibly dissolves right where it meets the button
   // instead of stopping at a hard whole-row gap.
@@ -413,13 +446,18 @@ function UserAppShell({
     recentFitMeasured && recentChats.length > recentFitCount ? recentFitCount + 1 : recentFitCount;
   const visibleRecentChats = previewThreads(recentChats, recentRenderCount, activeChatId);
   const visibleRailWidth = collapsed ? 76 : railWidth;
+  const sidebarConsoles = consoleNav.filter(({ key }) =>
+    key === "platform"
+      ? data.me.role === "PLATFORM_OWNER"
+      : data.me.role === "TENANT_ADMIN" || data.me.role === "PLATFORM_OWNER",
+  );
 
   useEffect(() => {
     setFolders(loadChatFolders(data.me.id));
     setExpandedFolderIds(new Set());
     setLastExpandedFolderId(null);
     setFolderCreateParentId(null);
-    setFolderMenuThreadId(null);
+    setChatMenu(null);
     setPendingFolderThreadId(null);
   }, [data.me.id]);
 
@@ -428,27 +466,16 @@ function UserAppShell({
   }, [data.me.id, folders]);
 
   useEffect(() => {
-    setChatReadState(loadReadState(data.me.id));
+    forgetLegacyReadState(data.me.id);
   }, [data.me.id]);
 
+  // The conversation on screen is being read right now, including a reply
+  // that finishes while the user watches it arrive.
+  const openThread = currentView === "chat" ? threads.find((thread) => thread.id === activeChatId) : undefined;
+  const openThreadUnread = openThread ? isThreadUnread(openThread) : false;
   useEffect(() => {
-    // Threads this browser has never seen before are recorded as read on
-    // arrival, so enabling the indicator never marks an existing history
-    // unread. Anything that changes after this point is a genuine new reply.
-    setChatReadState((current) => {
-      const seeded = seedReadState(data.me.id, current, threads);
-      // The conversation on screen is being read right now. Without this, a
-      // reply streaming into the open chat pushes its updated_at past the
-      // stamp taken when it was opened and marks it unread while the user
-      // watches it arrive.
-      const open = threads.find((thread) => thread.id === activeChatId);
-      return open ? markThreadRead(seeded, open) : seeded;
-    });
-  }, [threads, activeChatId, data.me.id]);
-
-  useEffect(() => {
-    saveReadState(data.me.id, chatReadState);
-  }, [data.me.id, chatReadState]);
+    if (openThreadUnread && openThread) onMarkThreadRead?.(openThread.id);
+  }, [openThread, openThreadUnread, onMarkThreadRead]);
 
   // Close the mobile drawer when we grow back to a desktop layout.
   useEffect(() => {
@@ -513,6 +540,76 @@ function UserAppShell({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // A chat row menu closes on an outside press or Escape; Escape returns focus
+  // to the row's "More actions" button so keyboard users keep their place. It
+  // follows its trigger while anything scrolls and closes once the row leaves
+  // the visible chat list.
+  const chatMenuThreadId = chatMenu?.threadId ?? null;
+  useEffect(() => {
+    if (!chatMenuThreadId) return;
+    const menuTrigger = () =>
+      Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>("[data-chat-row-id]") ?? [])
+        .find((row) => row.dataset.chatRowId === chatMenuThreadId)
+        ?.querySelector<HTMLButtonElement>(".chat-row-more") ?? null;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && (chatMenuRef.current?.contains(target) || menuTrigger()?.contains(target))) return;
+      setChatMenu(null);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      // Captured first so an open mobile navigation drawer stays open.
+      event.preventDefault();
+      event.stopPropagation();
+      setChatMenu(null);
+      menuTrigger()?.focus();
+    }
+    function reposition() {
+      const trigger = menuTrigger();
+      const list = trigger?.closest(".sidebar-main");
+      if (!trigger || !list) {
+        setChatMenu(null);
+        return;
+      }
+      const rect = trigger.getBoundingClientRect();
+      const bounds = list.getBoundingClientRect();
+      if (rect.bottom < bounds.top || rect.top > bounds.bottom) {
+        setChatMenu(null);
+        return;
+      }
+      setChatMenu((current) =>
+        current &&
+        (current.anchor.top !== rect.top || current.anchor.bottom !== rect.bottom || current.anchor.right !== rect.right)
+          ? { ...current, anchor: { top: rect.top, bottom: rect.bottom, right: rect.right } }
+          : current,
+      );
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    focusChatMenuItem(chatMenuRef.current, 0);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [chatMenuThreadId]);
+
+  // Switching between the action list and the folder list starts at the top.
+  const chatMenuView = chatMenu?.view ?? null;
+  useEffect(() => {
+    if (chatMenuView === "folders") focusChatMenuItem(chatMenuRef.current, 0);
+  }, [chatMenuView]);
+
+  // Placement uses the rendered height so a long folder list still flips
+  // above its trigger or stays inside the viewport.
+  useLayoutEffect(() => {
+    const height = chatMenuRef.current?.offsetHeight;
+    if (height && height !== chatMenuHeight) setChatMenuHeight(height);
+  });
+
   const closeDrawer = () => setNavOpen(false);
 
   const openUtilityDrawer = (nextDrawer: UtilityDrawerKey) => {
@@ -562,8 +659,7 @@ function UserAppShell({
 
   const handleOpenChat = (id: string) => {
     if (securityCloseBlockedRef.current) return;
-    const opened = threads.find((thread) => thread.id === id);
-    if (opened) setChatReadState((current) => markThreadRead(current, opened));
+    onMarkThreadRead?.(id);
     onOpenChat(id);
     setDrawer(null);
     closeDrawer();
@@ -674,20 +770,14 @@ function UserAppShell({
     setPendingFolderThreadId(null);
   };
 
-  const openFolderMenu = (chatId: string) => {
-    if (folders.length === 0) {
-      setPendingFolderThreadId(chatId);
-      startCreatingFolder(null);
-      setFolderMenuThreadId(null);
-      return;
-    }
-    setFolderMenuThreadId((current) => (current === chatId ? null : chatId));
+  const startFolderForThread = (chatId: string) => {
+    setPendingFolderThreadId(chatId);
+    startCreatingFolder(null);
   };
 
   const handleMoveToFolder = (chatId: string, folderId: string | null) => {
     onMoveThreadToFolder(chatId, folderId);
     if (folderId) revealFolder(folderId);
-    setFolderMenuThreadId(null);
   };
 
   const handleDeleteFolder = (folder: ChatFolder) => {
@@ -716,22 +806,140 @@ function UserAppShell({
     setLastExpandedFolderId((current) => (current && subtreeIds.has(current) ? null : current));
     setFolderCreateParentId((current) => (current && subtreeIds.has(current) ? null : current));
     setPendingFolderThreadId(null);
-    setFolderMenuThreadId(null);
+    setChatMenu(null);
+  };
+
+  const hiddenChatsUnread = chatsHidden && activeChats.some((thread) => isThreadUnread(thread));
+  const hiddenChatsSummary = chatsHidden && activeChats.length > 0
+    ? `${activeChats.length} ${activeChats.length === 1 ? "chat" : "chats"} hidden${hiddenChatsUnread ? ", with unread replies" : ""}`
+    : undefined;
+
+  const updateChatsHidden = (hidden: boolean) => {
+    setChatsHidden(hidden);
+    saveChatsHidden(data.me.id, hidden);
+    if (hidden) setChatMenu(null);
+  };
+
+  const toggleChatMenu = (threadId: string, trigger: HTMLElement) => {
+    if (chatMenu?.threadId === threadId) {
+      setChatMenu(null);
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    setChatMenu({ threadId, view: "actions", anchor: { top: rect.top, bottom: rect.bottom, right: rect.right } });
+  };
+
+  const runChatMenuAction = (action: () => void) => {
+    setChatMenu(null);
+    action();
+  };
+
+  const renderChatMenu = (item: ChatThread) => {
+    if (!chatMenu) return null;
+    const folderView = chatMenu.view === "folders";
+    return createPortal(
+      <div
+        ref={chatMenuRef}
+        className="thread-folder-menu chat-row-menu"
+        style={chatMenuPosition(chatMenu.anchor, chatMenuHeight)}
+        role="menu"
+        aria-label={folderView ? `Move ${item.title} to a folder` : `Actions for ${item.title}`}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            focusChatMenuItem(event.currentTarget, event.key === "ArrowDown" ? 1 : -1);
+          }
+        }}
+      >
+        {folderView ? (
+          <>
+            <strong>Move to folder</strong>
+            {flattenFolderTree(folders).map(({ folder, depth }) => (
+              <button
+                key={folder.id}
+                type="button"
+                role="menuitem"
+                style={depth > 0 ? { paddingLeft: 7 + depth * 14 } : undefined}
+                onClick={() => runChatMenuAction(() => handleMoveToFolder(item.id, folder.id))}
+              >
+                <Folder size={13} />
+                <span>{folder.name}</span>
+              </button>
+            ))}
+            {item.folder_id && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runChatMenuAction(() => handleMoveToFolder(item.id, null))}
+              >
+                <X size={13} />
+                <span>Remove from folder</span>
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runChatMenuAction(() => startFolderForThread(item.id))}
+            >
+              <Plus size={13} />
+              <span>New folder</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runChatMenuAction(() => onTogglePin(item.id))}
+            >
+              {item.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+              <span>{item.pinned ? "Unpin chat" : "Pin chat"}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (folders.length === 0) {
+                  runChatMenuAction(() => startFolderForThread(item.id));
+                } else {
+                  setChatMenu((current) => (current ? { ...current, view: "folders" } : current));
+                }
+              }}
+            >
+              <FolderPlus size={14} />
+              <span>Move to folder</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runChatMenuAction(() => onArchiveThread(item.id))}
+            >
+              <Archive size={14} />
+              <span>Archive</span>
+            </button>
+          </>
+        )}
+      </div>,
+      document.body,
+    );
   };
 
   const renderChatRow = (item: ChatThread) => {
     const selected = currentView === "chat" && item.id === activeChatId;
+    const menuOpen = chatMenu?.threadId === item.id;
     return (
       <div
         className={clsx(
           "chat-row",
           selected && "is-selected",
           item.pinned && "is-pinned",
-          isThreadUnread(item, chatReadState) && "is-unread",
+          isThreadUnread(item) && "is-unread",
+          menuOpen && "has-open-menu",
         )}
+        data-chat-row-id={item.id}
         key={item.id}
       >
-        {isThreadUnread(item, chatReadState) && (
+        {isThreadUnread(item) && (
           <span className="chat-unread-dot" role="status" aria-label="Unread reply" />
         )}
         <ChatPreview thread={item}>
@@ -746,77 +954,18 @@ function UserAppShell({
         </ChatPreview>
         <div className="chat-row-actions">
           <button
-            className="pin-toggle chat-row-action"
+            className="pin-toggle chat-row-action chat-row-more"
             type="button"
-            aria-label={`Add ${item.title} to a folder`}
-            data-tooltip={`File "${item.title}" into a folder to keep related chats together`}
-            onClick={() => openFolderMenu(item.id)}
+            aria-label={`More actions for ${item.title}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            data-tooltip="Pin, file, or archive this chat"
+            onClick={(event) => toggleChatMenu(item.id, event.currentTarget)}
           >
-            <FolderPlus size={14} />
-          </button>
-          <button
-            className="pin-toggle chat-row-action"
-            type="button"
-            aria-label={item.pinned ? "Unpin chat" : "Pin chat"}
-            data-tooltip={
-              item.pinned
-                ? `Unpin "${item.title}" and let it return to your recent list`
-                : `Pin "${item.title}" to keep it at the top of your sidebar`
-            }
-            aria-pressed={item.pinned}
-            onClick={() => onTogglePin(item.id)}
-          >
-            {item.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
-          <button
-            className="pin-toggle chat-row-action"
-            type="button"
-            aria-label={`Archive ${item.title}`}
-            data-tooltip={`Move "${item.title}" out of your sidebar without deleting it`}
-            onClick={() => onArchiveThread(item.id)}
-          >
-            <Archive size={14} />
+            <Ellipsis size={16} />
           </button>
         </div>
-        {folderMenuThreadId === item.id && !collapsed && (
-          <div className="thread-folder-menu">
-            <strong>Move to folder</strong>
-            {flattenFolderTree(folders).map(({ folder, depth }) => (
-              <button
-                key={folder.id}
-                type="button"
-                style={depth > 0 ? { marginLeft: depth * 14 } : undefined}
-                data-tooltip={`Move this chat into your "${folder.name}" folder`}
-                onClick={() => handleMoveToFolder(item.id, folder.id)}
-              >
-                <Folder size={13} />
-                <span>{folder.name}</span>
-              </button>
-            ))}
-            {item.folder_id && (
-              <button
-                type="button"
-                data-tooltip="Take this chat out of its folder and back to Recent"
-                onClick={() => handleMoveToFolder(item.id, null)}
-              >
-                <X size={13} />
-                <span>Remove from folder</span>
-              </button>
-            )}
-            <button
-              type="button"
-              data-tooltip="Create a new folder and move this chat into it"
-              onClick={() => {
-                setPendingFolderThreadId(item.id);
-                startCreatingFolder(null);
-                setFolderMenuThreadId(null);
-              }}
-            >
-              <Plus size={13} />
-              <span>New folder</span>
-            </button>
-          </div>
-        )}
+        {menuOpen && !collapsed && renderChatMenu(item)}
       </div>
     );
   };
@@ -828,6 +977,7 @@ function UserAppShell({
         onChange={(event) => setNewFolderName(event.target.value)}
         placeholder={folderCreateParentId ? "Subfolder name" : "Folder name"}
         aria-label="Folder name"
+        autoFocus
       />
       <button type="submit" data-tooltip="Save this folder and add it to your sidebar">Create</button>
     </form>
@@ -999,18 +1149,31 @@ function UserAppShell({
         <nav className="primary-nav" aria-label="Primary">
           {nav.map(({ key, label, icon: Icon }) =>
             key === "chat" ? (
-              <button
-                key={key}
-                className={clsx("nav-item", currentView === key && "is-active")}
-                type="button"
-                aria-label={label}
-                aria-current={currentView === key ? "page" : undefined}
-                data-tooltip={NAV_TOOLTIPS[key]}
-                onClick={handleNewChat}
-              >
-                <Icon size={19} />
-                <span>{label}</span>
-              </button>
+              <Fragment key={key}>
+                <button
+                  className={clsx("nav-item", currentView === key && "is-active")}
+                  type="button"
+                  aria-label={label}
+                  aria-current={currentView === key ? "page" : undefined}
+                  data-tooltip={NAV_TOOLTIPS[key]}
+                  onClick={handleNewChat}
+                >
+                  <Icon size={19} />
+                  <span>{label}</span>
+                </button>
+                <button
+                  className="nav-item nav-search"
+                  type="button"
+                  aria-label="Search"
+                  aria-keyshortcuts="Control+K Meta+K"
+                  data-tooltip="Search previous chats, including archived, plus agents, drafts, and indexed documents"
+                  onClick={openPalette}
+                >
+                  <Search size={19} />
+                  <span>Search</span>
+                  <kbd className="nav-shortcut" aria-hidden="true">{SEARCH_SHORTCUT_LABEL}</kbd>
+                </button>
+              </Fragment>
             ) : (
               /* Real links so copy-link and middle-click open the same screen;
                * a plain click stays in-app through the navigation guard. */
@@ -1037,170 +1200,125 @@ function UserAppShell({
 
         {!collapsed && (
           <div className="sidebar-main chat-library">
-            <button
-              className="minor-row chat-library-toggle"
-              type="button"
-              aria-expanded={chatsExpanded}
-              aria-controls="sidebar-chat-sections"
-              data-tooltip="Show or hide your organized chat history"
-              onClick={() => setChatsExpanded((value) => !value)}
-            >
-              <MessageSquare size={16} />
-              <span>Chats</span>
-              <ChevronDown
-                className={clsx("nav-disclosure", chatsExpanded && "is-expanded")}
-                size={15}
-                aria-hidden="true"
-              />
-            </button>
+            {/* Chat history shows folders first, then pinned chats, then
+             * everything recent. Group labels appear only when more than one
+             * group exists, so a short history stays one list. The heading
+             * hides or shows the whole history. */}
+            <div className="section-label-row chat-library-heading">
+              <button
+                className="chat-library-toggle"
+                type="button"
+                aria-label="Chats"
+                aria-expanded={!chatsHidden}
+                aria-controls="sidebar-chat-sections"
+                aria-description={hiddenChatsSummary}
+                data-tooltip={chatsHidden ? "Show your chats" : "Hide your chats"}
+                onClick={() => updateChatsHidden(!chatsHidden)}
+              >
+                <span className="section-label">Chats</span>
+                <ChevronDown className="chat-library-chevron" size={14} aria-hidden="true" />
+                {chatsHidden && activeChats.length > 0 && (
+                  <span className="chat-library-count" aria-hidden="true">
+                    {activeChats.length}
+                  </span>
+                )}
+                {hiddenChatsUnread && <span className="chat-library-unread" aria-hidden="true" />}
+              </button>
+              {!chatsHidden && (
+                <button
+                  className="section-icon-button folder-create-button"
+                  type="button"
+                  aria-label="Create chat folder"
+                  aria-pressed={isCreatingFolder && folderCreateParentId === null}
+                  data-tooltip="Create a folder to group related chats in your sidebar"
+                  onClick={() => {
+                    setPendingFolderThreadId(null);
+                    if (isCreatingFolder && folderCreateParentId === null) {
+                      setIsCreatingFolder(false);
+                    } else {
+                      startCreatingFolder(null);
+                    }
+                  }}
+                >
+                  <FolderPlus size={15} />
+                </button>
+              )}
+            </div>
 
-            {chatsExpanded && (
+            {!chatsHidden && (
               <div id="sidebar-chat-sections" className="chat-navigation-panel">
-                <div className="chat-section folder-section">
-                  <div className="section-label-row">
-                    <button
-                      className="chat-section-toggle"
-                      type="button"
-                      aria-expanded={foldersExpanded}
-                      aria-controls="sidebar-folders"
-                      onClick={() => setFoldersExpanded((value) => !value)}
-                    >
-                      <Folder size={13} />
-                      <span>Folders</span>
-                      <ChevronDown
-                        className={clsx("nav-disclosure", foldersExpanded && "is-expanded")}
-                        size={14}
-                        aria-hidden="true"
-                      />
-                    </button>
-                    <button
-                      className="section-icon-button folder-create-button"
-                      type="button"
-                      aria-label="Create chat folder"
-                      aria-pressed={isCreatingFolder && folderCreateParentId === null}
-                      data-tooltip="Create a folder to group related chats in your sidebar"
-                      onClick={() => {
-                        setFoldersExpanded(true);
-                        setPendingFolderThreadId(null);
-                        if (isCreatingFolder && folderCreateParentId === null) {
-                          setIsCreatingFolder(false);
-                        } else {
-                          startCreatingFolder(null);
-                        }
-                      }}
-                    >
-                      <FolderPlus size={15} />
-                    </button>
+                {(folders.length > 0 || (isCreatingFolder && folderCreateParentId === null)) && (
+                  <div className="chat-section folder-section" role="group" aria-label="Folders">
+                    {isCreatingFolder && folderCreateParentId === null && folderCreateForm}
+                    {folders.length > 0 && (
+                      <div className={clsx("sidebar-list-preview", rootFolders.length > FOLDER_PREVIEW_LIMIT && "has-overflow")}>
+                        {visibleFolders.map((folder) => renderFolderNode(folder, 0))}
+                      </div>
+                    )}
+                    {rootFolders.length > FOLDER_PREVIEW_LIMIT && (
+                      <button
+                        className="link-button sidebar-view-all"
+                        type="button"
+                        data-tooltip="Open the full list of your folders and their chats"
+                        onClick={() => openUtilityDrawer("all-folders")}
+                      >
+                        View all folders
+                      </button>
+                    )}
                   </div>
-                  {foldersExpanded && (
-                    <div id="sidebar-folders" className="chat-section-content">
-                      {isCreatingFolder && folderCreateParentId === null && folderCreateForm}
-                      {folders.length > 0 ? (
-                        <>
-                          <div className={clsx("sidebar-list-preview", rootFolders.length > FOLDER_PREVIEW_LIMIT && "has-overflow")}>
-                            {visibleFolders.map((folder) => renderFolderNode(folder, 0))}
-                          </div>
-                          {rootFolders.length > FOLDER_PREVIEW_LIMIT && (
-                            <button
-                              className="link-button sidebar-view-all"
-                              type="button"
-                              data-tooltip="Open the full list of your folders and their chats"
-                              onClick={() => openUtilityDrawer("all-folders")}
-                            >
-                              View all folders
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <p className="sidebar-empty">No folders yet.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                )}
 
-                <div className="chat-section">
-                  <button
-                    className="chat-section-toggle"
-                    type="button"
-                    aria-expanded={pinnedExpanded}
-                    aria-controls="sidebar-pinned"
-                    onClick={() => setPinnedExpanded((value) => !value)}
-                  >
-                    <Pin size={13} />
-                    <span>Pinned</span>
-                    <ChevronDown
-                      className={clsx("nav-disclosure", pinnedExpanded && "is-expanded")}
-                      size={14}
-                      aria-hidden="true"
-                    />
-                  </button>
-                  {pinnedExpanded && (
-                    <div id="sidebar-pinned" className="chat-section-content">
-                      {pinnedChats.length > 0 ? (
-                        <>
-                          <div className={clsx("sidebar-list-preview", pinnedChats.length > PINNED_PREVIEW_LIMIT && "has-overflow")}>
-                            {visiblePinnedChats.map(renderChatRow)}
-                          </div>
-                          {pinnedChats.length > PINNED_PREVIEW_LIMIT && (
-                            <button
-                              className="link-button sidebar-view-all"
-                              type="button"
-                              data-tooltip="See every chat you have pinned in one place"
-                              onClick={() => openUtilityDrawer("all-pinned")}
-                            >
-                              View all pinned
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <p className="sidebar-empty">No pinned chats.</p>
-                      )}
+                {pinnedChats.length > 0 && (
+                  <div className="chat-section" role="group" aria-labelledby="sidebar-pinned-label">
+                    <span className="chat-section-label" id="sidebar-pinned-label">Pinned</span>
+                    <div className={clsx("sidebar-list-preview", pinnedChats.length > PINNED_PREVIEW_LIMIT && "has-overflow")}>
+                      {visiblePinnedChats.map(renderChatRow)}
                     </div>
-                  )}
-                </div>
+                    {pinnedChats.length > PINNED_PREVIEW_LIMIT && (
+                      <button
+                        className="link-button sidebar-view-all"
+                        type="button"
+                        data-tooltip="See every chat you have pinned in one place"
+                        onClick={() => openUtilityDrawer("all-pinned")}
+                      >
+                        View all pinned
+                      </button>
+                    )}
+                  </div>
+                )}
 
-                <div className={clsx("chat-section", recentExpanded && "recent-section")}>
-                  <button
-                    className="chat-section-toggle"
-                    type="button"
-                    aria-expanded={recentExpanded}
-                    aria-controls="sidebar-recent"
-                    onClick={() => setRecentExpanded((value) => !value)}
+                <div className="chat-section recent-section" role="group" aria-labelledby="sidebar-recent-label">
+                  <span
+                    className={clsx(
+                      "chat-section-label",
+                      !(pinnedChats.length > 0 || folders.length > 0) && "sr-only",
+                    )}
+                    id="sidebar-recent-label"
                   >
-                    <Clock3 size={13} />
-                    <span>Recent</span>
-                    <ChevronDown
-                      className={clsx("nav-disclosure", recentExpanded && "is-expanded")}
-                      size={14}
-                      aria-hidden="true"
-                    />
-                  </button>
-                  {recentExpanded && (
-                    <div id="sidebar-recent" className="chat-section-content">
-                      {recentChats.length > 0 ? (
-                        <>
-                          <div
-                            ref={recentListRef}
-                            className={clsx("sidebar-list-preview", recentChats.length > recentFitCount && "has-overflow")}
-                          >
-                            {visibleRecentChats.map(renderChatRow)}
-                          </div>
-                          {recentChats.length > recentFitCount && (
-                            <button
-                              className="link-button sidebar-view-all"
-                              type="button"
-                              data-tooltip="Browse your full chat history beyond the recent list"
-                              onClick={() => openUtilityDrawer("all-chats")}
-                            >
-                              View all chats
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <p className="sidebar-empty">No recent chats.</p>
+                    Recent
+                  </span>
+                  {recentChats.length > 0 ? (
+                    <>
+                      <div
+                        ref={recentListRef}
+                        className={clsx("sidebar-list-preview", recentChats.length > recentFitCount && "has-overflow")}
+                      >
+                        {visibleRecentChats.map(renderChatRow)}
+                      </div>
+                      {recentChats.length > recentFitCount && (
+                        <button
+                          className="link-button sidebar-view-all"
+                          type="button"
+                          data-tooltip="Browse your full chat history beyond the recent list"
+                          onClick={() => openUtilityDrawer("all-chats")}
+                        >
+                          View all chats
+                        </button>
                       )}
-                    </div>
-                  )}
+                    </>
+                  ) : activeChats.length === 0 ? (
+                    <p className="sidebar-empty">Your conversations will appear here.</p>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -1218,40 +1336,64 @@ function UserAppShell({
                 onOpenDrafts={() => handleSelectView("drafts")}
               />
             )}
-            <button
-              className="minor-row"
-              type="button"
-              aria-label="Search"
-              data-tooltip="Search previous chats, including archived, plus agents, drafts, and indexed documents (Ctrl/⌘ K)"
-              onClick={openPalette}
-            >
-              <Search size={16} />
-              <span>Search</span>
-            </button>
-            <button
-              className="minor-row"
-              type="button"
-              aria-label="Help"
-              data-tooltip="Get guidance on knowledge sources and agent workflows"
-              onClick={() => openUtilityDrawer("help")}
-            >
-              <CircleHelp size={16} />
-              <span>Help</span>
-            </button>
-            <div className="theme-mode-row">
-            <button
-              className="minor-row"
-              type="button"
-              aria-label={darkMode ? "Light mode" : "Dark mode"}
-              data-tooltip="Switch between light and dark appearance"
-              onClick={onToggleDarkMode}
-            >
-              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-              <span>{darkMode ? "Light mode" : "Dark mode"}</span>
-            </button>
-            <button type="button" className={clsx("theme-schedule-button", themeSchedule.enabled && "is-active")}
-              aria-label="Theme schedule" data-tooltip="Schedule light and dark mode" aria-haspopup="dialog"
-              onClick={() => setThemeScheduleOpen(true)}><Ellipsis size={18} /></button>
+            {/* Management consoles follow the effective (previewed) role, the
+             * same rule the account panel and route guard apply. */}
+            {sidebarConsoles.map(({ key, label, icon: Icon }) => {
+              const pendingRequests =
+                key === "admin" && typeof data.modelAccessRequestCount === "number"
+                  ? data.modelAccessRequestCount
+                  : 0;
+              return (
+                <a
+                  key={key}
+                  className={clsx("minor-row console-link", currentView === key && "is-selected")}
+                  href={routeToPath(defaultRouteForView(key))}
+                  aria-label={label}
+                  aria-current={currentView === key ? "page" : undefined}
+                  data-tooltip={NAV_TOOLTIPS[key]}
+                  onClick={(event) => {
+                    if (event.defaultPrevented || event.button !== 0) return;
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    handleSelectView(key);
+                  }}
+                >
+                  <Icon size={16} />
+                  <span>{label}</span>
+                  {pendingRequests > 0 && (
+                    <span
+                      className="pill pill-warning console-link-count"
+                      aria-label={`${pendingRequests} pending model access ${pendingRequests === 1 ? "request" : "requests"}`}
+                    >
+                      {pendingRequests}
+                    </span>
+                  )}
+                </a>
+              );
+            })}
+            <div className="theme-mode-row help-row">
+              <button
+                className="minor-row"
+                type="button"
+                aria-label="Help"
+                data-tooltip="Get guidance on knowledge sources and agent workflows"
+                onClick={() => openUtilityDrawer("help")}
+              >
+                <CircleHelp size={16} />
+                <span>Help</span>
+              </button>
+              <button
+                type="button"
+                className="theme-schedule-button"
+                aria-label={darkMode ? "Light mode" : "Dark mode"}
+                data-tooltip={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+                onClick={onToggleDarkMode}
+              >
+                {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+              <button type="button" className={clsx("theme-schedule-button", themeSchedule.enabled && "is-active")}
+                aria-label="Theme schedule" data-tooltip="Schedule light and dark mode" aria-haspopup="dialog"
+                onClick={() => setThemeScheduleOpen(true)}><Clock3 size={16} /></button>
             </div>
             {themeScheduleOpen && <ThemeScheduleDialog schedule={themeSchedule}
               onSave={(next) => onSaveThemeSchedule?.(next)} onClose={() => setThemeScheduleOpen(false)} />}
@@ -1354,8 +1496,7 @@ function UserAppShell({
           onStartFolderCreation={(threadId) => {
             if (securityCloseBlockedRef.current) return;
             setPendingFolderThreadId(threadId);
-            setChatsExpanded(true);
-            setFoldersExpanded(true);
+            updateChatsHidden(false);
             startCreatingFolder(null);
             setDrawer(null);
           }}
@@ -2888,6 +3029,17 @@ function profileImageDataUrlByteLength(value: string): number | null {
   return Math.floor((encoded.length * 3) / 4) - padding;
 }
 
+/** Moves focus within a chat row menu: step 0 focuses the first item, and
+ * arrow-key steps wrap around the ends. */
+function focusChatMenuItem(menu: HTMLElement | null, step: 1 | -1 | 0) {
+  if (!menu) return;
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+  if (items.length === 0) return;
+  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  const next = step === 0 || current < 0 ? 0 : (current + step + items.length) % items.length;
+  items[next]?.focus();
+}
+
 function availablePreviewRoles(role: Role): Role[] {
   if (role === "PLATFORM_OWNER") return ["PLATFORM_OWNER", "TENANT_ADMIN", "USER"];
   if (role === "TENANT_ADMIN") return ["TENANT_ADMIN", "USER"];
@@ -2975,6 +3127,26 @@ function saveRailWidth(width: number) {
     }
   } catch {
     // Persisting the rail width is a convenience; layout state should still work if storage is unavailable.
+  }
+}
+
+const CHATS_HIDDEN_STORAGE_PREFIX = "aperture-sidebar-chats-hidden";
+
+function loadChatsHidden(userId: string): boolean {
+  try {
+    return window.localStorage.getItem(`${CHATS_HIDDEN_STORAGE_PREFIX}-${userId}`) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveChatsHidden(userId: string, hidden: boolean) {
+  try {
+    const key = `${CHATS_HIDDEN_STORAGE_PREFIX}-${userId}`;
+    if (hidden) window.localStorage.setItem(key, "true");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Remembering the choice is a convenience; the toggle still works without storage.
   }
 }
 

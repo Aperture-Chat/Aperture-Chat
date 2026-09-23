@@ -17,8 +17,13 @@
  * CAPTURE_TEXT_MODEL_ID optionally selects an enabled text model through the
  * real picker for chat home and drafting; no provider/model is configured here.
  * CAPTURE_REUSE_SAVED_DRAFT=1 restores CAPTURE_DRAFT_TITLE from real history.
+ * CAPTURE_DRAFT_TIMEOUT_MS extends the wait for that request on slower local models.
  * CAPTURE_FOLDER_NAME optionally creates that folder through the user UI.
  * CAPTURE_OUTPUT_DIRECTORY stages a completed batch outside public assets.
+ * CAPTURE_KEEP_PUBLISHED_FRAMES=chat-images,chat-images-download leaves the
+ * published image-generation frames unchanged when the isolated instance has
+ * no image-capable model. The hidden-chat-list frame shows its unread dot only
+ * when a synthetic chat genuinely has a reply the account has not opened.
  * An optional CAPTURE_AUTHORING_API_URL + CAPTURE_AUTHORING_SESSION_FILE pair
  * captures the four authoring screens from a separate local instance through
  * real API requests. This can demonstrate permitted configuration without
@@ -48,6 +53,8 @@ const DRAFT_TITLE = (process.env.CAPTURE_DRAFT_TITLE || "Synthetic training memo
 const FOLDER_NAME = (process.env.CAPTURE_FOLDER_NAME || "").trim();
 const AUTHORING_API = (process.env.CAPTURE_AUTHORING_API_URL || "").trim();
 const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").trim();
+// Slower local models need longer for the one real Draft Assistant request.
+const DRAFT_TIMEOUT_MS = Number(process.env.CAPTURE_DRAFT_TIMEOUT_MS || 180000);
 
 (async () => {
   const { createCaptureRun } = require("./training-capture-run.cjs");
@@ -94,6 +101,12 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
       throw new Error(`Capture failed at ${label}`, { cause: e });
     }
   };
+  // Park the pointer on empty space and drop focus rings before a clean shot.
+  const rest = async () => {
+    await page.mouse.move(1160, 845);
+    await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+    await page.waitForTimeout(300);
+  };
   const clearComposer = async () => {
     const textarea = page.locator(".composer textarea");
     await textarea.press("Meta+a");
@@ -128,16 +141,11 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
     throw new Error("CAPTURE_TEXT_MODEL_ID is not an available option in the current model picker.");
   };
 
-  // Expand the Chats disclosure and its Recent + Pinned sections.
-  await step("expand sidebar sections", async () => {
-    const chats = page.getByRole("button", { name: /^Chats/ }).first();
+  // Chat history is always listed; make sure it is shown and add the optional folder.
+  await step("prepare sidebar chats", async () => {
+    const chats = page.getByRole("button", { name: "Chats", exact: true });
     if (await chats.getAttribute("aria-expanded") !== "true") await chats.click();
-    await page.waitForTimeout(500);
-    for (const sec of ["Folders", "Recent", "Pinned"]) {
-      const section = page.getByRole("button", { name: sec, exact: true }).first();
-      if (await section.getAttribute("aria-expanded") !== "true") await section.click();
-      await page.waitForTimeout(400);
-    }
+    await page.waitForTimeout(400);
     if (FOLDER_NAME && !await page.locator(".folder-row").filter({ hasText: FOLDER_NAME }).count()) {
       await page.getByRole("button", { name: "Create chat folder", exact: true }).click();
       await page.getByRole("textbox", { name: "Folder name", exact: true }).fill(FOLDER_NAME);
@@ -149,14 +157,41 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.locator(".composer textarea").waitFor();
   await step("select text model", selectTextModel);
+  // The chat-basics lesson explains the active-tools chip, so one available tool is on.
+  await step("show tools chip", async () => {
+    if (await page.locator(".composer-tools-status").isVisible()) return;
+    await page.getByRole("button", { name: "Send options", exact: true }).click();
+    const available = page.getByRole("menuitemcheckbox").and(page.locator(":not([disabled])"));
+    if (!await available.count()) throw new Error("No tool is available for the selected model.");
+    await available.first().click();
+    if (await page.getByRole("menuitem", { name: /^Send now/ }).isVisible()) await page.keyboard.press("Escape");
+    await page.locator(".composer-tools-status").waitFor({ state: "visible" });
+    await rest();
+  });
   await shot("chat-home");
 
-  // Sidebar with a hovered row's quick actions.
-  await step("sidebar row hover", async () => {
-    await savedChat(TRACE_CHAT_TITLE, /^What a/).hover();
-    await page.waitForTimeout(500);
-  });
+  // Sidebar at rest: navigation, folders, pinned and recent chats, and utilities.
+  await step("sidebar at rest", rest);
   await shot("sidebar-chats");
+  // One chat's More actions menu (Pin chat, Move to folder, Archive).
+  await step("sidebar chat menu", async () => {
+    const row = savedChat(TRACE_CHAT_TITLE, /^What a/);
+    const title = (await row.innerText()).trim();
+    await row.hover();
+    await page.getByRole("button", { name: `More actions for ${title}`, exact: true }).click();
+    await page.getByRole("menu", { name: `Actions for ${title}`, exact: true }).waitFor();
+    await shot("sidebar-chat-menu");
+    await page.keyboard.press("Escape");
+  });
+  // The whole chat list hidden behind the CHATS heading, with its count and unread dot.
+  await step("sidebar chats hidden", async () => {
+    const chats = page.getByRole("button", { name: "Chats", exact: true });
+    await chats.click();
+    await rest();
+    await shot("sidebar-chats-hidden");
+    await chats.click();
+    await rest();
+  });
   await step("chat hover preview", async () => {
     await savedChat(TRACE_CHAT_TITLE, /^What a/).hover();
     await page.locator(".chat-hover-preview").waitFor({ state: "visible" });
@@ -263,7 +298,11 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
     await trace.click();
   });
   // --- Image reply + download affordance ---
-  await step("image thread", async () => {
+  // Needs a real generated image; CAPTURE_KEEP_PUBLISHED_FRAMES can keep both published frames.
+  if (capture.keeps("chat-images") !== capture.keeps("chat-images-download")) {
+    throw new Error("Keep both image frames or neither; they show the same conversation.");
+  }
+  if (!capture.keeps("chat-images")) await step("image thread", async () => {
     await openSavedChat(IMAGE_CHAT_TITLE, /^Create a minimalis/);
     const img = page.locator(".message-rendered-response .md-figure img").last();
     await img.waitFor({ state: "visible" });
@@ -280,8 +319,10 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
   });
 
   // --- Drafts: one real assistant-generated document ---
-  await step("drafts document", async () => {
-    await nav.getByRole("button", { name: "Drafts", exact: true }).click();
+  // capture-training-refresh.cjs also produces this frame; keep it here with
+  // CAPTURE_KEEP_PUBLISHED_FRAMES=drafts when that script is the source.
+  if (!capture.keeps("drafts")) await step("drafts document", async () => {
+    await nav.getByRole("link", { name: "Drafts", exact: true }).click();
     await page.waitForTimeout(1200);
     if (process.env.CAPTURE_REUSE_SAVED_DRAFT === "1") {
       await page.getByRole("button", { name: "Draft history", exact: true }).click();
@@ -323,7 +364,7 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
           return el && el.textContent && el.textContent.trim().length > 300;
         },
         null,
-        { timeout: 180000 },
+        { timeout: DRAFT_TIMEOUT_MS },
       );
     await page.waitForTimeout(1500);
     await page.getByRole("textbox", { name: "Document title", exact: true }).fill(DRAFT_TITLE);
@@ -360,7 +401,7 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
     }, null, 2));
   }
   await step("agents view", async () => {
-    await nav.getByRole("button", { name: "Agents/Automations", exact: true }).click();
+    await nav.getByRole("link", { name: "Agents", exact: true }).click();
     await page.waitForTimeout(1000);
     await shot("agents");
   });
@@ -372,7 +413,7 @@ const AUTHORING_SESSION = (process.env.CAPTURE_AUTHORING_SESSION_FILE || "").tri
 
   // --- Library: Knowledge + Tools ---
   await step("library knowledge", async () => {
-    await nav.getByRole("button", { name: "Knowledge/Tools", exact: true }).click();
+    await nav.getByRole("link", { name: "Library", exact: true }).click();
     await page.waitForTimeout(1000);
     await page.getByText("Knowledge", { exact: true }).first().click();
     await page.waitForTimeout(800);

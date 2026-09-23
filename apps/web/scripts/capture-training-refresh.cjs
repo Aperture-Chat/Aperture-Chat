@@ -270,7 +270,7 @@ async function runMore(){
   await page.getByRole('textbox',{name:'Document body',exact:true}).waitFor();
   await page.getByRole('button',{name:'Back to chat',exact:true}).click();
   await page.getByRole('button',{name:'Search',exact:true}).click();
-  await page.getByText('Recent',{exact:true}).waitFor();
+  await page.locator('.command-palette-panel').getByText('Recent',{exact:true}).waitFor();
   await shot("search-recent",{searchRecent:page.locator('.command-palette-panel')});
   await browser.close();
 }

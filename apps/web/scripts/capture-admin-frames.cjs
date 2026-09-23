@@ -11,7 +11,10 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const PUBLIC_OUT = path.join(__dirname, "..", "public", "training", "admin");
+// CAPTURE_OUTPUT_DIRECTORY stages a completed batch outside public assets.
+const PUBLIC_OUT = process.env.CAPTURE_OUTPUT_DIRECTORY
+  ? path.resolve(process.env.CAPTURE_OUTPUT_DIRECTORY)
+  : path.join(__dirname, "..", "public", "training", "admin");
 const APP = process.env.CAPTURE_APP_URL || "http://localhost:5173";
 const USER = process.env.CAPTURE_USER_ID || "user-admin";
 const CAPTURE_AUTH = require("./training-capture-run.cjs").captureCredentials();
@@ -135,14 +138,18 @@ const POLICIES_ONLY = process.env.CAPTURE_POLICIES_ONLY === "1";
   await page.waitForTimeout(500);
   await shot("response-actions");
 
-  // SSO: open the add form so the field layout is visible.
-  await tab("SSO");
-  const addSso = page.getByRole("button", { name: /Add SSO configuration/ }).first();
-  if (await addSso.isVisible().catch(() => false)) {
-    await addSso.click();
-    await page.waitForTimeout(600);
+  // SSO: open the add form so the field layout is visible. The editable form
+  // needs a fixture that really permits delegated SSO administration, so
+  // CAPTURE_KEEP_PUBLISHED_FRAMES=sso-form keeps it when this instance does not.
+  if (!capture.keeps("sso-form")) {
+    await tab("SSO");
+    const addSso = page.getByRole("button", { name: /Add SSO configuration/ }).first();
+    if (await addSso.isVisible().catch(() => false)) {
+      await addSso.click();
+      await page.waitForTimeout(600);
+    }
+    await shot("sso-form");
   }
-  await shot("sso-form");
 
   await capturePolicies();
 
@@ -156,6 +163,14 @@ const POLICIES_ONLY = process.env.CAPTURE_POLICIES_ONLY === "1";
   await shot("alerts-rule-form");
 
   // Retention captures inspect synthetic chats and confirmation UI only.
+  // capture-retention-governance.cjs also produces these frames; keep them here
+  // with CAPTURE_KEEP_PUBLISHED_FRAMES when that script is the source.
+  const retentionFrames = ["retention-policy", "retention-tags", "retention-preview", "retention-batch"];
+  const keptRetention = retentionFrames.filter((name) => capture.keeps(name));
+  if (keptRetention.length && keptRetention.length !== retentionFrames.length) {
+    throw new Error("Keep all four retention frames or none; they are captured as one sequence.");
+  }
+  if (!keptRetention.length) {
   await tab("Audit");
   await setPanelExpanded("Data Retention", true);
   await page.locator('.panel:has(.panel-header h2:text-is("Data Retention"))').evaluate(element => element.scrollIntoView({ block: "center" }));
@@ -179,6 +194,7 @@ const POLICIES_ONLY = process.env.CAPTURE_POLICIES_ONLY === "1";
   await shot("retention-batch");
   await page.locator(".retention-batch-bar").getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("checkbox", { name: "Select all listed chats", exact: true }).uncheck();
+  }
 
   fs.writeFileSync(path.join(OUT, "measured-rects.json"), JSON.stringify(measured, null, 2));
 
