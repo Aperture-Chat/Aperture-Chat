@@ -131,11 +131,11 @@ SHA tag. The `test` to `main` promotion gate and release-only `latest` tags
 continue to use the existing release workflow.
 
 Version-qualified branch tags follow `v<version>-<branch>`, for example
-`v0.5.3-dev`, `v0.5.3-test`, and `v0.5.3-main`. Both the API and web package
+`v0.5.4-dev`, `v0.5.4-test`, and `v0.5.4-main`. Both the API and web package
 use these tags. They advance with subsequent commits carrying that version;
 use the recorded digest pair to pin an exact build. The workflow verifies the
 version-qualified pair before moving the plain branch aliases. Stable
-`v0.5.3` and `latest` remain exclusive to the tagged main release.
+`v0.5.4` and `latest` remain exclusive to the tagged main release.
 
 ## Persistent storage and backups
 
@@ -230,6 +230,24 @@ docker compose -f docker-compose.release.yml --profile local logs --tail=200 web
 Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
+
+## New Since v0.5.3
+
+- The sidebar is simpler: Search sits under New chat, Agents and Library have
+  their own entries, and chat history lives under a CHATS heading that each
+  person can hide. A single More actions menu on each chat pins, moves, or
+  archives it. Console links, Help, and the theme buttons sit at the bottom.
+- Unread markers follow a read position saved with each account, so chats read
+  in one browser no longer appear unread in another.
+- Release-update notices remain visible only to platform owners. The admin
+  role picker matches the rest of the console.
+- Refreshed user, administrator, and owner training screens, narration, and
+  downloadable PDF guides for the new sidebar.
+- Back up the complete application data volume before upgrading. This release
+  adds the chat read-position migration, which marks existing chats as read
+  through their latest message. Image rollback does not undo migrations.
+- API and web images publish as `v0.5.4-dev`, `v0.5.4-test`, and `v0.5.4-main`.
+  Stable `v0.5.4` and `latest` promote inspected test images without rebuilding.
 
 ## New Since v0.5.2
 

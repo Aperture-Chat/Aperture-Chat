@@ -454,3 +454,145 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
   .theme-schedule-modal .modal-icon { display: none; }
   .theme-schedule-times { gap: 10px; }
 }
+
+/* ---------- Simplified sidebar ----------
+ * Search sits with the primary destinations, chat history is always visible
+ * as one list, row actions collapse into a single "More actions" menu shown on
+ * hover or focus, and management consoles live beside Help at the bottom. */
+.nav-shortcut { margin-left: auto; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--faint); font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1.5; letter-spacing: 0.02em; }
+.sidebar-dark .nav-shortcut { border-color: rgb(255 255 255 / 18%); color: #9fb4ba; }
+.rail-collapsed .nav-shortcut, .is-drawer .nav-shortcut { display: none; }
+@media (pointer: coarse) { .nav-shortcut { display: none; } }
+
+.chat-library { padding-top: 12px; }
+.chat-library-heading { flex: 0 0 auto; margin: 0 0 4px; padding: 0 2px 0 11px; }
+.chat-library-heading .section-label { margin: 0; }
+.chat-navigation-panel { display: flex; flex-direction: column; margin: 0 0 8px; padding-left: 0; border-left: 0; animation: none; }
+.chat-navigation-panel .chat-section { border-top: 0; padding: 0 0 8px; }
+.chat-navigation-panel .chat-section.recent-section { flex: 1 1 auto; padding-bottom: 0; }
+.chat-section-label { display: block; padding: 4px 11px 3px; color: var(--faint); font-size: 11.5px; font-weight: 650; }
+.sidebar-dark .chat-section-label { color: #9fb4ba; }
+.chat-navigation-panel .sidebar-empty { padding: 2px 11px; }
+
+/* Row actions appear only while the row is hovered, focused, or its menu is
+ * open, so titles use the full row width at rest. Scoped to the sidebar: the
+ * "All chats" drawer keeps its explicit action icons. */
+.sidebar .chat-row.is-selected .pin-toggle,
+.sidebar .chat-row.is-pinned .pin-toggle { opacity: 0; }
+.sidebar .chat-row:hover .pin-toggle,
+.sidebar .chat-row:focus-within .pin-toggle,
+.sidebar .chat-row.has-open-menu .pin-toggle { opacity: 1; }
+.sidebar .chat-row.is-selected .chat-row-actions::before,
+.sidebar .chat-row.is-pinned .chat-row-actions::before { opacity: 0; }
+.sidebar .chat-row:hover .chat-row-actions::before,
+.sidebar .chat-row:focus-within .chat-row-actions::before,
+.sidebar .chat-row.has-open-menu .chat-row-actions::before { opacity: 1; }
+.sidebar .chat-row.is-selected .minor-row span,
+.sidebar .chat-row.is-pinned .minor-row span { -webkit-mask-image: none; mask-image: none; }
+.sidebar .chat-row:hover .minor-row span,
+.sidebar .chat-row:focus-within .minor-row span,
+.sidebar .chat-row.has-open-menu .minor-row span {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 44px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 44px), transparent 100%);
+}
+@media (hover: none) {
+  .sidebar .chat-row .pin-toggle, .sidebar .chat-row .chat-row-actions::before { opacity: 1; }
+}
+.chat-row-more { width: 28px; }
+/* Portaled to <body> and fixed to its trigger: above every sidebar section,
+ * drawer, and tooltip, so nothing can clip or cover it. */
+.chat-row-menu { position: fixed; top: auto; right: auto; z-index: 250; width: min(190px, calc(100vw - 32px)); overflow-y: auto; box-shadow: 0 10px 28px -12px rgb(8 41 56 / 28%), 0 2px 6px rgb(8 41 56 / 8%); }
+.theme-dark .chat-row-menu { box-shadow: 0 12px 30px -12px rgb(0 0 0 / 65%); }
+.sidebar .chat-row .minor-row span { text-overflow: ellipsis; }
+
+a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
+.console-link-count { margin-left: auto; min-width: 20px; justify-content: center; font-size: 11px; }
+.rail-collapsed .minor-row .console-link-count { display: inline-flex; position: absolute; top: 3px; right: 3px; min-width: 16px; padding: 0 4px; font-size: 10px; }
+
+.help-row:hover, .help-row:focus-within { background: transparent; color: inherit; }
+.sidebar-dark .help-row:hover, .sidebar-dark .help-row:focus-within { background: transparent; color: inherit; }
+.help-row .minor-row:hover { background: color-mix(in srgb, var(--teal-soft) 55%, transparent); color: var(--teal); }
+.sidebar-dark .help-row .minor-row:hover { background: rgb(255 255 255 / 7%); color: white; }
+.help-row .theme-schedule-button { color: var(--muted); transition: background var(--speed) var(--ease), color var(--speed) var(--ease); }
+.help-row .theme-schedule-button:hover { background: color-mix(in srgb, var(--teal-soft) 70%, transparent); color: var(--teal); }
+.help-row .theme-schedule-button.is-active { color: var(--teal); }
+.sidebar-dark .help-row .theme-schedule-button { color: #bfd0d4; }
+.sidebar-dark .help-row .theme-schedule-button:hover { background: rgb(255 255 255 / 8%); color: white; }
+
+/* Chats heading doubles as a quiet show/hide toggle for the whole history. */
+.chat-library-heading { padding-left: 4px; }
+.chat-library-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); font: inherit; cursor: pointer; transition: background var(--speed) var(--ease), color var(--speed) var(--ease); }
+.chat-library-toggle .section-label { margin: 0; color: inherit; }
+.chat-library-toggle:hover, .chat-library-toggle:focus-visible { background: color-mix(in srgb, var(--teal-soft) 55%, transparent); color: var(--teal); }
+.sidebar-dark .chat-library-toggle { color: #9fb4ba; }
+.sidebar-dark .chat-library-toggle:hover, .sidebar-dark .chat-library-toggle:focus-visible { background: rgb(255 255 255 / 7%); color: white; }
+.chat-library-chevron { flex: 0 0 auto; transition: transform var(--speed) var(--ease); }
+.chat-library-toggle[aria-expanded="false"] .chat-library-chevron { transform: rotate(-90deg); }
+.chat-library-count { min-width: 18px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--teal-soft) 70%, transparent); color: var(--muted); font-size: 10.5px; font-weight: 650; line-height: 17px; text-align: center; }
+.sidebar-dark .chat-library-count { background: rgb(255 255 255 / 9%); color: #cfdde0; }
+.chat-library-unread { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.chat-navigation-panel { animation: chat-navigation-reveal 150ms var(--ease) both; }
+
+/* Role pickers in user administration: the platform's rounded control and
+ * line chevron (the same shape as the app's ChevronDown icon) instead of the
+ * browser's native select, which ignores rounding on some systems and reads
+ * small inside dense tables. Dark mode swaps in a lighter chevron. */
+.user-management-table .role-select,
+.access-request-role select {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 34px 0 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background-color: var(--surface);
+  --role-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23536a6d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: var(--role-chevron);
+  background-position: right 11px center;
+  background-size: 15px 15px;
+  background-repeat: no-repeat;
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--speed) var(--ease), background-color var(--speed) var(--ease), color var(--speed) var(--ease);
+}
+.user-management-table .role-select:not(:disabled):hover,
+.access-request-role select:not(:disabled):hover {
+  border-color: var(--teal);
+  background-color: color-mix(in srgb, var(--teal-soft) 45%, var(--surface));
+  /* The shared control hover rule uses the background shorthand; restore the chevron. */
+  background-image: var(--role-chevron);
+  background-position: right 11px center;
+  background-size: 15px 15px;
+  background-repeat: no-repeat;
+  color: var(--teal-strong);
+  box-shadow: none;
+}
+.theme-dark .user-management-table .role-select,
+.theme-dark .access-request-role select {
+  --role-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a0adae' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.user-management-table .role-select:focus-visible,
+.access-request-role select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Rows the viewer cannot edit read as plain text rather than a dimmed control. */
+.user-management-table .role-select:disabled,
+.access-request-role select:disabled {
+  border-color: transparent;
+  background-color: transparent;
+  background-image: none;
+  padding-inline: 0;
+  color: var(--muted);
+  opacity: 1;
+  cursor: default;
+}
+.user-management-table .role-select { max-width: 156px; }
+@media (max-width: 640px) {
+  .user-management-table .role-select { max-width: none; min-height: 44px; }
+}

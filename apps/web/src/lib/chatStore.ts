@@ -4,6 +4,7 @@ import {
   deleteChatThread,
   generateChatThreadTitle,
   listChatThreads,
+  markChatThreadRead,
   renameChatThread,
   runAutomation,
   saveChatThread,
@@ -20,6 +21,7 @@ import type {
   ChatThread,
   ModelConfig,
 } from "./types";
+import { laterReadMarker, readableMessageId } from "./chatReadState";
 import { replaceDiagramFence } from "./markdown";
 import { preferredModel, usableModels } from "./modelAccess";
 import { formatTimeLabel, platformTimestamp, type PlatformTimestamp } from "./serverClock";
@@ -631,16 +633,28 @@ function mergeServerThreads(
   return [...ownedServerThreads, ...localOnly].map(normalizeThread);
 }
 
+/**
+ * Accepts a server snapshot of a thread while keeping what only this browser
+ * knows so far: an in-flight pending reply, and a read position that is
+ * further along than the one the server returned.
+ */
 export function preservePendingTraceState(current: ChatThread, saved: ChatThread): ChatThread {
+  const readPosition = laterReadMarker(
+    saved.messages.map((message) => message.id),
+    saved.last_read_message_id,
+    current.last_read_message_id,
+  );
+  const base =
+    readPosition === (saved.last_read_message_id ?? null) ? saved : { ...saved, last_read_message_id: readPosition };
   const pendingById = new Map(
     current.messages
       .filter((message) => messageWithActiveResponseVersion(message).status === "pending")
       .map((message) => [message.id, message]),
   );
-  if (pendingById.size === 0) return saved;
+  if (pendingById.size === 0) return base;
 
   return {
-    ...saved,
+    ...base,
     messages: saved.messages.map((message) => {
       const pending = pendingById.get(message.id);
       if (!pending) return message;
@@ -808,6 +822,12 @@ export type ChatStore = {
   setModel: (modelId: string) => void;
   setDefaultModel: (modelId: string) => void;
   togglePin: (chatId: string) => void;
+  /**
+   * Records that the owner has seen a chat's newest reply. Updates the local
+   * thread at once and stores the position on the server so other browsers
+   * agree; the thread's next save also carries it if that request fails.
+   */
+  markThreadRead: (chatId: string) => void;
   /** Renames one persisted chat and updates every view backed by the thread store. */
   renameThread: (chatId: string, title: string) => Promise<void>;
   /**
@@ -936,6 +956,15 @@ export function useChatStore(
         const next = withBlankChat(merged, data, fallbackModel);
         const activeThread = current.find((thread) => thread.id === activeIdRef.current);
         setThreads(next.threads);
+        // A read recorded here while offline (or while its save was in flight)
+        // is further along than the server's copy; send it on.
+        for (const server of serverThreads) {
+          const reconciled = merged.find((thread) => thread.id === server.id);
+          const position = reconciled?.last_read_message_id ?? null;
+          if (position && position !== (server.last_read_message_id ?? null)) {
+            void markChatThreadRead(persona, server.id, position).catch(() => undefined);
+          }
+        }
         if (activeThread && isBlankNewChat(activeThread)) setActiveId(next.activeId);
       })
       .catch(() => {
@@ -985,6 +1014,17 @@ export function useChatStore(
       if (!enabled || isBlankNewChat(thread)) return Promise.resolve(null);
       return saveChatThread(persona, thread)
         .then((saved) => {
+          // The reply may have been read after this save was sent; once the
+          // message is stored, the server can accept that read position.
+          const local = threadsRef.current.find((item) => item.id === saved.id);
+          const position = laterReadMarker(
+            saved.messages.map((message) => message.id),
+            saved.last_read_message_id,
+            local?.last_read_message_id,
+          );
+          if (position && position !== (saved.last_read_message_id ?? null)) {
+            void markChatThreadRead(persona, saved.id, position).catch(() => undefined);
+          }
           setThreads((current) =>
             current.map((item) =>
               item.id === saved.id
@@ -1235,6 +1275,28 @@ export function useChatStore(
     setThreads((current) => current.map((thread) => (thread.id === chatId ? updatedThread : thread)));
     persistThread(updatedThread);
   }, [persistThread]);
+
+  const markThreadRead = useCallback(
+    (chatId: string) => {
+      const existing = threadsRef.current.find((thread) => thread.id === chatId);
+      if (!existing) return;
+      const target = readableMessageId(existing);
+      if (!target || existing.last_read_message_id === target) return;
+      // Reading is not an edit: no save, so the chat keeps its place in the list.
+      threadsRef.current = threadsRef.current.map((thread) =>
+        thread.id === chatId ? { ...thread, last_read_message_id: target } : thread,
+      );
+      setThreads((current) =>
+        current.map((thread) => (thread.id === chatId ? { ...thread, last_read_message_id: target } : thread)),
+      );
+      if (!enabled || isBlankNewChat(existing)) return;
+      void markChatThreadRead(persona, chatId, target).catch(() => {
+        // Usually the reply's own save is still in flight (409). That save's
+        // completion re-sends this position, and the next save carries it.
+      });
+    },
+    [enabled, persona],
+  );
 
   const renameThread = useCallback(
     async (chatId: string, requestedTitle: string) => {
@@ -2254,6 +2316,7 @@ export function useChatStore(
     setModel,
     setDefaultModel,
     togglePin,
+    markThreadRead,
     renameThread,
     generateThreadTitle,
     archiveThread,

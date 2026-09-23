@@ -173,8 +173,10 @@ def test_constructor_adapters_round_trip_messages_and_derive_sessions_only() -> 
         stored = repository.chat_threads[thread.id]
 
         assert stored.model_dump(mode="json") == thread.model_dump(mode="json")
+        # Session summaries carry thread metadata only: no messages and no
+        # per-owner read position (unread needs the messages to evaluate).
         assert repository.chat_sessions[thread.id].model_dump(mode="json") == thread.model_dump(
-            mode="json", exclude={"messages"}
+            mode="json", exclude={"messages", "last_read_message_id"}
         )
         assert not hasattr(repository.chat_sessions[thread.id], "messages")
         with pytest.raises(TypeError):

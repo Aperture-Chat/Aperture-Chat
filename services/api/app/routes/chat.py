@@ -157,6 +157,8 @@ from app.models.schemas import (
     ChatSession,
     ChatThread,
     ChatThreadTitleUpdateRequest,
+    ChatThreadReadRequest,
+    ChatThreadReadState,
     ChatThreadUpsertRequest,
     CloudAttachmentImportRequest,
     CloudAttachmentItem,
@@ -685,6 +687,8 @@ def save_thread(
         used_agent=payload.used_agent,
         updated_at=_format_upload_time(clock.now()),
         messages=_normalize_thread_message_times(payload.messages),
+        # Forward-only merge with the stored position happens in the repository.
+        last_read_message_id=payload.last_read_message_id,
     )
     try:
         saved = store.save_chat_thread(thread)
@@ -755,6 +759,43 @@ def rename_thread(
         runtime_state_changed=False,
     )
     return saved
+
+
+@router.put("/api/chat/threads/{thread_id}/read")
+def mark_thread_read(
+    thread_id: str,
+    payload: ChatThreadReadRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> ChatThreadReadState:
+    """Record that the owner has seen the thread through ``message_id``.
+
+    Read position is personal UI state, so it is owner-only (like every other
+    chat history write) and is not written to the audit log. It never moves
+    backwards and never changes the thread's activity clock or list order.
+    """
+
+    existing = store.chat_threads.get(thread_id)
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat thread not found.",
+        )
+    _assert_thread_write_scope(existing, actor)
+    if not any(message.id == payload.message_id for message in existing.messages):
+        # The save carrying this message may still be in flight; the client
+        # retries after it lands, and the save itself also carries the marker.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That message is not in this chat yet.",
+        )
+    saved = store.mark_chat_thread_read(thread_id, payload.message_id)
+    if saved is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat thread not found.",
+        )
+    return ChatThreadReadState(thread_id=saved.id, last_read_message_id=saved.last_read_message_id)
 
 
 AI_TITLE_MAX_COMPLETION_TOKENS = 60

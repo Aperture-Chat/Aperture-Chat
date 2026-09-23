@@ -302,21 +302,26 @@ async function renderApp() {
   return view;
 }
 
-function openChatHistorySection(name: "Folders" | "Pinned" | "Recent") {
-  const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  const chatsButton = within(sidebar).getByRole("button", { name: "Chats" });
-  if (chatsButton.getAttribute("aria-expanded") !== "true") fireEvent.click(chatsButton);
-  const sectionButton = within(sidebar).getByRole("button", { name });
-  if (sectionButton.getAttribute("aria-expanded") !== "true") fireEvent.click(sectionButton);
-  return sidebar;
+function chatSidebar() {
+  return document.querySelector(".sidebar") as HTMLElement;
+}
+
+/** Opens a sidebar chat row's "More actions" menu and picks one action. */
+function chooseChatRowAction(sidebar: HTMLElement, action: string, title?: string) {
+  const trigger = title
+    ? within(sidebar).getByRole("button", { name: `More actions for ${title}` })
+    : within(sidebar).getAllByRole("button", { name: /^More actions for / })[0];
+  fireEvent.click(trigger);
+  // The menu is portaled to the top layer, outside the sidebar.
+  fireEvent.click(screen.getByRole("menuitem", { name: action }));
 }
 
 test("real chat flow: send, render assistant reply, list in Recent, and persist", async () => {
   await renderApp();
 
-  // No demo chats are seeded — Recent starts empty.
-  const sidebar = openChatHistorySection("Recent");
-  expect(await screen.findByText("No recent chats.")).toBeInTheDocument();
+  // No demo chats are seeded — the chat history starts empty.
+  const sidebar = chatSidebar();
+  expect(await screen.findByText("Your conversations will appear here.")).toBeInTheDocument();
 
   // Start a fresh chat and type into the live composer.
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
@@ -414,7 +419,7 @@ test("the first completed exchange automatically receives a subject-based AI tit
     expect(generatedTitleRequests, observedRequests.join("\n")).toHaveLength(1);
   });
   expect(await screen.findByRole("heading", { name: "Artemis II Mission Research Paper" })).toBeInTheDocument();
-  const sidebar = openChatHistorySection("Recent");
+  const sidebar = chatSidebar();
   expect(within(sidebar).getByText("Artemis II Mission Research Paper")).toBeInTheDocument();
   expect(requestOrder.at(-1)).toBe("generate");
   expect(generatedTitleRequests).toHaveLength(1);
@@ -535,7 +540,7 @@ test("reloads a pending chat and continues the partial reply", async () => {
     ).toBe(true);
   });
 
-  const sidebar = openChatHistorySection("Recent");
+  const sidebar = chatSidebar();
   fireEvent.click(within(sidebar).getByText("Artemis paper"));
   expect(await screen.findByText(/Partial draft already streamed/)).toBeInTheDocument();
   expect(await screen.findByText(/the rest of the draft/)).toBeInTheDocument();
@@ -1268,13 +1273,15 @@ test("a created chat can be pinned and unpinned from the sidebar", async () => {
   fireEvent.keyDown(textarea, { key: "Enter" });
   await screen.findByText(CANNED);
 
-  const sidebar = openChatHistorySection("Recent");
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Pin chat" }));
+  const sidebar = chatSidebar();
+  chooseChatRowAction(sidebar, "Pin chat");
 
-  // Pinning flips the affordance and moves the chat into the Pinned section.
-  openChatHistorySection("Pinned");
-  expect(within(sidebar).getByRole("button", { name: "Unpin chat" })).toBeInTheDocument();
-  expect(within(sidebar).getByText("Draft an NDA summary")).toBeInTheDocument();
+  // Pinning moves the chat into the Pinned group, whose row menu offers Unpin.
+  const pinned = within(sidebar).getByRole("group", { name: "Pinned" });
+  expect(within(pinned).getByText("Draft an NDA summary")).toBeInTheDocument();
+  fireEvent.click(within(pinned).getAllByRole("button", { name: /^More actions for / })[0]);
+  expect(screen.getByRole("menuitem", { name: "Unpin chat" })).toBeInTheDocument();
+  fireEvent.keyDown(document, { key: "Escape" });
 
   // Pin state survives a reload (persisted to localStorage).
   await waitFor(() => {
@@ -1282,9 +1289,11 @@ test("a created chat can be pinned and unpinned from the sidebar", async () => {
     expect(raw).toContain('"pinned":true');
   });
 
-  // Unpinning returns the Pin affordance.
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Unpin chat" }));
-  expect(within(sidebar).getByRole("button", { name: "Pin chat" })).toBeInTheDocument();
+  // Unpinning returns the chat to Recent and the menu offers Pin again.
+  chooseChatRowAction(sidebar, "Unpin chat");
+  expect(within(sidebar).queryByRole("group", { name: "Pinned" })).not.toBeInTheDocument();
+  fireEvent.click(within(sidebar).getAllByRole("button", { name: /^More actions for / })[0]);
+  expect(screen.getByRole("menuitem", { name: "Pin chat" })).toBeInTheDocument();
 });
 
 test("attaching a file shows a removable chip and rides along in the sent message", async () => {
@@ -1511,10 +1520,8 @@ test("document prompt hides copy action but can stage into a new session", async
 
 test("use in chat from Agents sends the selected agent profile runtime", async () => {
   await renderApp();
-
-  openChatHistorySection("Recent");
-  expect(await screen.findByText("No recent chats.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("link", { name: "Agents/Automations" }));
+  expect(await screen.findByText("Your conversations will appear here.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Agents" }));
 
   const profileCard = (await screen.findByText("Client Update Agent")).closest(".agent-profile-card");
   expect(profileCard).not.toBeNull();
@@ -1768,7 +1775,7 @@ test("a pending response in one chat does not block sending from a new chat", as
   fireEvent.click(sendButton);
 
   await waitFor(() => expect(chatRequests).toHaveLength(2));
-  const sidebar = openChatHistorySection("Recent");
+  const sidebar = chatSidebar();
   expect(within(sidebar).getByText("Draft the long paper")).toBeInTheDocument();
   expect(within(sidebar).getByText("Summarize the independent issue")).toBeInTheDocument();
 
@@ -2036,12 +2043,12 @@ test("backend chat threads hydrate into Recent and persist pin and model selecti
 
   await renderApp();
 
-  const sidebar = openChatHistorySection("Recent");
+  const sidebar = chatSidebar();
   expect(await within(sidebar).findByText("Server backed matter")).toBeInTheDocument();
   fireEvent.click(within(sidebar).getByText("Server backed matter"));
   expect(await screen.findByText("Server reply")).toBeInTheDocument();
 
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Pin chat" }));
+  chooseChatRowAction(sidebar, "Pin chat", "Server backed matter");
   await waitFor(() => {
     expect(savedThreads.some((thread) => thread.pinned === true)).toBe(true);
   });
@@ -2113,8 +2120,6 @@ test("renaming the workspace title updates Recent and persists through the title
   await renderApp();
 
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
   fireEvent.click(await within(sidebar).findByText("Uploaded Document Knowledge Base"));
 
   expect(await screen.findByRole("heading", { name: "Uploaded Document Knowledge Base" })).toBeInTheDocument();
@@ -2213,8 +2218,6 @@ test("AI rename appears only after a finalized reply and persists through the ge
   await renderApp();
 
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
 
   fireEvent.click(await within(sidebar).findByText("Unanswered question"));
   expect(await screen.findByRole("heading", { name: "Unanswered question" })).toBeInTheDocument();

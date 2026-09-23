@@ -36,6 +36,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
+from app.core.chat_read import later_read_marker
 from app.db.engine import (
     APPLICATION_STATE_IMPORT_REVISION,
     CHAT_STATE_IMPORT_REVISION,
@@ -1284,9 +1285,16 @@ class ApplicationStateRepository:
             disposition_pending_since = (
                 existing.disposition_pending_since if existing is not None else None
             )
+            # Read position is forward-only: a stale save cannot move it back.
+            last_read_message_id = later_read_marker(
+                [message.id for message in copied.messages],
+                existing.last_read_message_id if existing is not None else None,
+                copied.last_read_message_id,
+            )
             session.execute(delete(ChatThreadRow).where(ChatThreadRow.id == copied.id))
             row = ChatThreadRow.from_model(copied)
             row.matter_id = matter_id
+            row.last_read_message_id = last_read_message_id
             now = datetime.now(UTC)
             row.created_at = created_at or now
             row.last_activity_at = now if content_changed else (prior_activity or now)
@@ -1327,6 +1335,31 @@ class ApplicationStateRepository:
             .where(ChatAttachmentRow.id.in_(attachment_ids))
             .values(thread_id=thread_id)
         )
+
+    def mark_chat_thread_read(self, thread_id: str, message_id: str) -> ChatThread | None:
+        """Advance the owner's read position in place.
+
+        A direct update, like archiving: reading must not bump the retention
+        activity clock, move the thread to the newest position, or rewrite its
+        search entry. Returns None when the thread does not exist.
+        """
+
+        def operation(session: Session) -> ChatThread | None:
+            row = self._chat_thread_row(session, thread_id)
+            if row is None:
+                return None
+            message_ids = [
+                str(message.get("id"))
+                for message in row.messages
+                if isinstance(message, Mapping) and message.get("id")
+            ]
+            merged = later_read_marker(message_ids, row.last_read_message_id, message_id)
+            if merged != row.last_read_message_id:
+                row.last_read_message_id = merged
+                session.flush()
+            return _freeze_chat_thread(row.to_model())
+
+        return self.run_transaction(operation)
 
     def get_chat_thread(self, thread_id: str) -> ChatThread | None:
         def operation(session: Session) -> ChatThread | None:

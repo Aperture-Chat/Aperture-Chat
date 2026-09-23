@@ -1452,6 +1452,7 @@ export function App() {
       onRestoreThread={chat.restoreThread}
       onDeleteThread={chat.deleteThread}
       onMoveThreadToFolder={chat.moveThreadToFolder}
+      onMarkThreadRead={chat.markThreadRead}
       onSignOut={handleSignOut}
       onRequestSignOut={requestSignOut}
       onProfileUpdate={handleAccountProfileUpdate}

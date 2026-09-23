@@ -15,7 +15,10 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const PUBLIC_OUT = path.join(__dirname, "..", "public", "training", "owner");
+// CAPTURE_OUTPUT_DIRECTORY stages a completed batch outside public assets.
+const PUBLIC_OUT = process.env.CAPTURE_OUTPUT_DIRECTORY
+  ? path.resolve(process.env.CAPTURE_OUTPUT_DIRECTORY)
+  : path.join(__dirname, "..", "public", "training", "owner");
 const APP = process.env.CAPTURE_APP_URL || "http://localhost:5173";
 const USER = process.env.CAPTURE_USER_ID || "user-owner";
 const CAPTURE_AUTH = require("./training-capture-run.cjs").captureCredentials();
@@ -94,7 +97,9 @@ const TOKEN = CAPTURE_AUTH.token;
   await shot("providers");
 
   // The API Key Vault lives inside each provider card (metadata only).
-  const apiKeys = page.locator("button", { hasText: "API Keys" }).first();
+  // Open the first provider whose vault actually holds a key (its button shows a count).
+  const apiKeys = page.locator("button", { hasText: /API Keys\s*[1-9]/ }).first();
+  if (!await apiKeys.count()) throw new Error("No provider has a stored key to show in the API Key Vault.");
   await apiKeys.click();
   await page.waitForTimeout(800);
   await page
@@ -105,6 +110,9 @@ const TOKEN = CAPTURE_AUTH.token;
   await shot("vault");
 
   await tab("Org Settings");
+  // The expanded Search index panel fills the top; center the collapsed policy panels.
+  await page.locator(".tenant-policy-panel").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await page.mouse.move(1, 1);
   await shot("policies-current-collapsed");
   await expandSection("Role Boundary");
   await scrollToText("Role Boundary");
@@ -179,6 +187,14 @@ const TOKEN = CAPTURE_AUTH.token;
   await shot("alerts-deliveries");
 
   // Retention captures inspect synthetic chats and confirmation UI only.
+  // capture-retention-governance.cjs also produces these frames; keep them here
+  // with CAPTURE_KEEP_PUBLISHED_FRAMES when that script is the source.
+  const retentionFrames = ["retention-policy", "retention-tags", "retention-preview", "retention-batch"];
+  const keptRetention = retentionFrames.filter((name) => capture.keeps(name));
+  if (keptRetention.length && keptRetention.length !== retentionFrames.length) {
+    throw new Error("Keep all four retention frames or none; they are captured as one sequence.");
+  }
+  if (!keptRetention.length) {
   await tab("Audit");
   await expandSection("Data Retention");
   await page.locator('.panel:has(.panel-header h2:text-is("Data Retention"))').evaluate(element => element.scrollIntoView({ block: "center" }));
@@ -202,6 +218,7 @@ const TOKEN = CAPTURE_AUTH.token;
   await shot("retention-batch");
   await page.locator(".retention-batch-bar").getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("checkbox", { name: "Select all listed chats", exact: true }).uncheck();
+  }
 
   // Usage needs actual reported provider activity; capture other pages first.
   await tab("Analytics");

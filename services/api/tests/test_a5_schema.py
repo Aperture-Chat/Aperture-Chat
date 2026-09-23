@@ -147,6 +147,7 @@ def test_a5_fresh_upgrade_has_expected_authority_tables_and_indexes(tmp_path: Pa
             "disposition_state",
             "disposition_pending_since",
             "messages",
+            "last_read_message_id",
         }
         assert {index["name"] for index in inspector.get_indexes("user_api_keys")} >= {
             "ix_user_api_keys_key_hash",
