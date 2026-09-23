@@ -21,7 +21,7 @@ const PARTS = [
   { id: "basics", minRole: "user", label: "Getting started" },
   { id: "chat", minRole: "user", label: "Chat" },
   { id: "workspace", minRole: "user", label: "Drafts, decks, and agents" },
-  { id: "toolsauto", minRole: "user", label: "Knowledge/Tools and automations" },
+  { id: "toolsauto", minRole: "user", label: "Library and automations" },
   { id: "account", minRole: "user", label: "Appearance, your account, and help" },
   { id: "admin", minRole: "admin", label: "The Admin console" },
   { id: "owner", minRole: "owner", label: "The Platform owner console" },
@@ -136,13 +136,14 @@ const SECTIONS = [
         ["Sidebar button", "What it opens"],
         [
           ["New chat", "A fresh conversation with your workspace assistant. This is the default view."],
+          ["Search", "Search past work for chats (including archived), documents and decks, agents, and indexed documents, plus commands. Shortcut: Ctrl+K (Windows) or ⌘K (Mac)."],
           ["Drafts", "A document and slide-deck editor with an AI assistant beside it."],
-          ["Agents/Automations", "Reusable agent profiles, plus an Automations tab for scheduled runs."],
-          ["Knowledge/Tools", "Two tabs: Knowledge (searchable document collections) and Tools (connections, prompts, and skills)."],
+          ["Agents", "Reusable agent profiles, plus an Automations tab for scheduled runs."],
+          ["Library", "Two tabs: Knowledge (searchable document collections) and Tools (connections, prompts, and skills)."],
         ],
       ),
       p(
-        "Below the navigation buttons, a Chats row expands into your organized chat history — Folders, Pinned, and Recent sections, covered in the next section.",
+        "Below the navigation buttons, your chat history is always listed under a small CHATS heading — folders first, then pinned chats, then recent chats. The next section covers organizing them.",
       ),
       sub("Resizing and collapsing the sidebar"),
       list([
@@ -154,15 +155,15 @@ const SECTIONS = [
       p("Use Tab and Shift+Tab to move between controls and Enter or Space to activate the focused control. In a dialog, keyboard focus stays with that dialog. Use its Close or Cancel button, or Escape when available, to return to the control that opened it. Confirmations explain when an action is permanent before you commit it."),
       sub("The bottom of the sidebar"),
       list([
-        "Search — opens Search past work for chats, documents and decks, agents, and indexed documents. It also offers commands. The keyboard shortcut is Ctrl+K (Windows) or ⌘K (Mac).",
+        "Admin console and Platform console — links shown only to administrators and platform owners (see “Where the consoles live”). Platform owners may also see a Release available notice here.",
         "Help — opens the guided walkthrough videos and this downloadable guide.",
-        "Dark mode / Light mode — switches the appearance instantly (see “Light and dark mode” later in this guide).",
+        "Dark mode / Light mode and Theme schedule — two small buttons beside Help: the moon or sun switches the appearance instantly, and the clock sets a schedule (see “Light and dark mode” later in this guide).",
         "Install app — appears on phones and tablets, and adds the workspace to your home screen (see “Install the app on your phone”).",
         "Your account card — your initials or photo, name, and role. Click it to open the account drawer, including Personalization memory when your organization has enabled it.",
       ]),
       sub("Where the consoles live"),
       p(
-        "Administrators open the Admin console from the account drawer: click your account card, expand the Management section, and choose Admin console. Regular users simply do not have a Management section. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
+        "Administrators choose Admin console near the bottom of the sidebar; platform owners also see Platform console. The account drawer's Management section lists the same consoles. Regular users see neither. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
       ),
       sub("Returning to a view"),
       p("The browser address follows the workspace view and console tab. Browser Back and Forward return to those views; opening a saved chat or draft link still checks your account's access. A link does not share private content or grant permission to another person."),
@@ -172,29 +173,30 @@ const SECTIONS = [
     id: "organize",
     part: "basics",
     minRole: "user",
-    title: "Organizing chats: folders, pins, and recent",
+    title: "Organizing chats: folders, pins, and the chat menu",
     summary: "Keep the chats you care about easy to find.",
     blocks: [
       p(
-        "Click the Chats row in the sidebar to expand your organized history. Inside it are three sections — Folders, Pinned, and Recent — and each one expands or collapses with a click.",
+        "Your chat history is always visible under the CHATS heading: folders first, then a Pinned group when something is pinned, then your recent chats (labeled Recent only when a group sits above them). Click the CHATS heading to hide or show the whole list; this is remembered for your account on this device. While hidden, it shows a count and a dot for unread replies, and Search still finds every chat.",
       ),
       sub("Folders"),
       steps([
-        "Expand the Folders section and click the folder icon with a plus sign next to its heading.",
+        "Click the folder icon with a plus sign next to the CHATS heading.",
         "Type a name for the folder — a client, a matter, a project — and click Create.",
-        "To file a chat into the folder, hover the chat's row in the sidebar and click the folder-plus icon that appears, then pick the folder (or create a new one right there).",
+        "To file a chat into a folder, hover or focus its row, click the ⋯ (More actions) button, and choose Move to folder. Pick a folder, choose New folder to create one right there, or choose Remove from folder to take it out.",
         "Click a folder to expand or collapse the chats inside it.",
       ]),
       note("info", "Deleting a folder does not delete its chats — they move back to the Recent list."),
       sub("Pinned chats"),
       steps([
-        "Hover any chat row and click the pin icon that appears.",
-        "The chat moves to the Pinned section, where it stays until you unpin it (click the pin icon again).",
+        "Hover or focus any chat row, click ⋯ (More actions), and choose Pin chat.",
+        "The chat moves to the Pinned group, just below your folders, where it stays until you choose Unpin chat from the same menu.",
       ]),
       sub("Recent chats"),
       list([
-        "The Recent section lists your latest conversations. Click one to reopen it exactly where you left off.",
-        "Hover a row to reveal three quick actions: add to folder (folder-plus icon), pin (pin icon), and archive (box icon).",
+        "Recent chats — below folders and pinned chats — list your latest conversations. Click one to reopen it exactly where you left off.",
+        "Hover or focus a row to reveal its ⋯ (More actions) button. The menu offers Pin chat (or Unpin chat), Move to folder, and Archive.",
+        "A dot beside a chat marks a newest assistant reply you have not opened. Read status is saved to your account, so it matches in every browser and device.",
         "Archiving moves a chat out of the sidebar without deleting it — use it to tidy up. Archived chats are listed in your account drawer, where you can restore or permanently delete them.",
         "Click View all chats at the bottom of the list to browse your full history, including everything that no longer fits in the sidebar.",
       ]),
@@ -208,7 +210,7 @@ const SECTIONS = [
     summary: "Find saved work, preview a result, or run an available command.",
     blocks: [
       steps([
-        "Click Search near the bottom of the sidebar, or press Ctrl+K (Windows) or ⌘K (Mac) from anywhere.",
+        "Click Search near the top of the sidebar, just below New chat, or press Ctrl+K (Windows) or ⌘K (Mac) from anywhere.",
         "The Search past work box opens. Type a few words from what you remember: a chat title, message text, an agent or draft name, slide text, or text from an indexed document.",
         "Results are grouped by kind. Chat results lead, matching text is highlighted, and archived conversations are labeled explicitly. Saved documents and decks open in their matching editor.",
         "Hover over or keyboard-focus a supported chat or draft result to preview it. The chat row also offers folder, pin, and archive or restore actions when that conversation is available in the current workspace.",
@@ -569,7 +571,7 @@ const SECTIONS = [
       ),
       sub("Creating an agent"),
       steps([
-        "If your account has agent authoring permission, click Agents/Automations in the sidebar, then New Agent.",
+        "If your account has agent authoring permission, click Agents in the sidebar, then New Agent.",
         "Give it a name and a short description of what it is for.",
         "Work through the editor tabs: Profile (name, model, and description), Knowledge (assign knowledge bases), Tools (select MCP tools), Prompts & Skills (attach system prompts and skill files), Access (who can use it), and Hermes (the optional learning companion).",
         "Click the save button. Standard users create private profiles; administrators control group sharing and organization publishing. Check model readiness and access before trying the profile in chat.",
@@ -595,7 +597,7 @@ const SECTIONS = [
     summary: "Give chats grounded, citable access to your documents, web pages, and APIs.",
     blocks: [
       p(
-        "Knowledge lives in the Library: click Knowledge/Tools in the sidebar, then the Knowledge tab. The Knowledge Bases panel lists every collection with its status, security posture, and whether it is enabled.",
+        "Knowledge lives in the Library: click Library in the sidebar, then the Knowledge tab. The Knowledge Bases panel lists every collection with its status, security posture, and whether it is enabled.",
       ),
       steps([
         "Click Add Knowledge Base and name the collection.",
@@ -623,7 +625,7 @@ const SECTIONS = [
     summary: "MCP connections, saved prompts, and skill files inside the Library.",
     blocks: [
       p(
-        "Click Knowledge/Tools in the sidebar, then the Tools tab. The Tools Library and Connectors panel has three sections:",
+        "Click Library in the sidebar, then the Tools tab. The Tools Library and Connectors panel has three sections:",
       ),
       table(
         ["Tab", "What lives there", "Where it appears in chat"],
@@ -652,7 +654,7 @@ const SECTIONS = [
       ),
       sub("Creating an automation"),
       steps([
-        "Click Agents/Automations in the sidebar, then the Automations tab, then New automation.",
+        "Click Agents in the sidebar, then the Automations tab, then New automation.",
         "Name it — for example “Monday client digest”.",
         "Choose what it runs against: chat or draft.",
         "Pick a trigger: Daily (a time each day), Weekly (a day and time), Once (a specific date and time), or Cron expression (such as 0 9 * * 1 for 9:00 every Monday, in UTC).",
@@ -691,12 +693,12 @@ const SECTIONS = [
     summary: "Switch appearance now or schedule it for this browser.",
     blocks: [
       steps([
-        "Find the appearance row near the bottom of the sidebar — it reads Dark mode with a moon icon in light mode, and Light mode with a sun icon in dark mode.",
+        "Find the moon or sun button beside Help near the bottom of the sidebar — a moon (Dark mode) while in light mode, a sun (Light mode) while in dark mode.",
         "Click it. The entire platform switches immediately — no reload, nothing to save.",
         "Click it again to switch back.",
       ]),
       sub("Schedule light and dark mode"),
-      p("Choose the clock button beside the appearance row to open Theme schedule. Enable Switch automatically, set different Light mode at and Dark mode at times, then choose Save schedule. The schedule uses this device's local time every day and is saved in this browser. You can still switch manually until the next scheduled change; disable the switch to stop automatic changes."),
+      p("Choose the clock button beside it to open Theme schedule. Enable Switch automatically, set different Light mode at and Dark mode at times, then choose Save schedule. The schedule uses this device's local time every day and is saved in this browser. You can still switch manually until the next scheduled change; disable the switch to stop automatic changes."),
     ],
   },
   {
@@ -711,7 +713,7 @@ const SECTIONS = [
       ),
       list([
         "Profile — click the card with your name and the pencil icon to edit your display name, firm, website, bio, phone number, and photo (upload an image up to 5 MB, or paste a URL). Click Save profile when done, or Cancel to discard.",
-        "Management — organization administrators see this section; expanding it opens the Admin console. Regular users do not have it.",
+        "Management — administrators and platform owners see this section, listing the consoles they can open; the sidebar's Admin console and Platform console links go to the same places. Regular users do not have it.",
         "Personalization memory — opens your private memory manager when the feature is enabled. Use it to control, review, add, correct, pin, forget, or clear what the assistant remembers about you.",
         "Password — accounts that sign in with a password can change it here (click the pencil, enter the current password, then the new one twice — at least 12 characters). The app continues with a new authenticated session after saving and revokes previous sessions. Accounts that sign in through SSO manage their password with the SSO provider instead, and the panel says so.",
         "Security — choose Manage security to set up an authenticator for a local account, review the remaining recovery-code count, or replace codes after verifying your identity. Turning verification off is available only when organization policy permits it and signs you out. SSO accounts follow their identity-provider settings for voluntary enrollment.",
@@ -806,8 +808,7 @@ const SECTIONS = [
     summary: "Where the console lives and what its nine tenant-governance tabs control.",
     blocks: [
       steps([
-        "Click your account card at the bottom of the sidebar to open the account drawer.",
-        "Expand the Management section and click Admin console. (This section appears only for workspace administrators.)",
+        "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Management section lists it too.)",
         "The console opens with nine tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Policies, Audit, and Alerts. Policies is always present between Analytics and Audit; service-wide availability determines which organization controls are active inside it.",
       ]),
       p(
@@ -968,7 +969,7 @@ const SECTIONS = [
       p(
         "Chat output actions adds admin-approved buttons to assistant responses for export, formatting, or handoff. Choose New response action to create one; existing custom actions offer Edit and Delete. Each row shows Enabled or Draft and an enable switch. Creating these actions does not configure a shared source connector.",
       ),
-      p("MCP connections and model-callable tools remain in Knowledge/Tools → Tools → Connections. Prompts and Skills also remain in the Tools library. Their authoring and use follow the existing permissions and the shared connector availability set by the service team."),
+      p("MCP connections and model-callable tools remain in Library → Tools → Connections. Prompts and Skills also remain in the Tools library. Their authoring and use follow the existing permissions and the shared connector availability set by the service team."),
     ],
   },
   {
@@ -1180,8 +1181,7 @@ const SECTIONS = [
     summary: "The highest access level, its six tabs, and the role ceilings.",
     blocks: [
       steps([
-        "Click your account card at the bottom of the sidebar to open the account drawer.",
-        "Expand the Management section and click Platform owner console. (Only platform owners see it.)",
+        "Click Platform console (building icon) near the bottom of the sidebar. (Only platform owners see it; the account drawer's Management section lists it as Platform owner console.)",
         "The console has six tabs: Org Settings, Models, Providers, Analytics, Audit, and Alerts. Org Settings holds organization configuration; API keys live on each provider's card under Providers.",
       ]),
       p("Keep the three role ceilings in mind — they explain who can touch what across the entire platform:"),
@@ -1213,7 +1213,7 @@ const SECTIONS = [
       steps([
         "On a new installation with no active owner, complete Create the first platform owner with your display name, work email, and a password of at least 12 characters. Confirm the password and choose Create platform owner.",
         "The Getting started card offers the setup action for your role. Open owner guide opens this role's documentation. Choose an action or explicitly dismiss the card; merely loading the workspace does not mark it reviewed.",
-        "Open the account drawer, expand Management, and choose Platform owner console. Documentation opens the owner guide, narrated lessons, and the Interactive platform guide for step-by-step configuration advice.",
+        "Choose Platform console near the bottom of the sidebar. Documentation opens the owner guide, narrated lessons, and the Interactive platform guide for step-by-step configuration advice.",
         "Open Providers, register the intended gateway, and save its real credential in API Keys. A successful save confirms configuration storage; Needs validation still requires a successful runtime check.",
         "For a provider that supports catalog discovery, choose Sync Models on its card. This refreshes the catalog and tests a small live model request. Read the returned status and correct credential or runtime failures before relying on the connection.",
         "In Models, review the resulting catalog and enable only the models you intend to offer. Providers with manually managed catalogs need their model configuration checked separately.",

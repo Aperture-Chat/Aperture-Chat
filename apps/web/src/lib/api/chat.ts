@@ -150,6 +150,24 @@ export function saveChatThread(
   });
 }
 
+/**
+ * Records that the owner has seen a chat through `messageId`. The API keeps
+ * the furthest position and answers 409 while the message's own save is
+ * still in flight.
+ */
+export function markChatThreadRead(
+  userId: string,
+  threadId: string,
+  messageId: string,
+  options: ApiMutationOptions = {},
+): Promise<{ thread_id: string; last_read_message_id: string | null }> {
+  return apiRequest(userId, `/api/chat/threads/${pathId(threadId)}/read`, {
+    method: "PUT",
+    body: { message_id: messageId },
+    signal: options.signal,
+  });
+}
+
 /** Rename a chat without rewriting its messages or other session state. */
 export function renameChatThread(
   userId: string,

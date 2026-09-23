@@ -4,14 +4,14 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **49 lessons, 223 scenes, 49 MP3 tracks, and 3,873 seconds of narration timelines (64 minutes 33 seconds)**. Its 218 measured focus-map entries comprise 95 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **49 lessons, 224 scenes, 49 MP3 tracks, and 3,910 seconds of narration timelines (65 minutes 10 seconds)**. Its 220 measured focus-map entries comprise 97 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 22 | 102 | 95 | 22 | 1678 | 26 |
-| Administrator | 13 | 57 | 58 | 13 | 1095 | 40 |
+| User | 22 | 103 | 97 | 22 | 1714 | 26 |
+| Administrator | 13 | 57 | 58 | 13 | 1096 | 40 |
 | Platform owner | 14 | 64 | 65 | 14 | 1100 | 58 |
-| Total | 49 | 223 | 218 | 49 | 3873 | — |
+| Total | 49 | 224 | 220 | 49 | 3910 | — |
 
 All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/58 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
@@ -48,14 +48,14 @@ Seconds are the sum of each lesson's source scene durations.
 | User | Follow the work trace | `work-traces` | 4 | 50 |
 | User | Knowledge bases | `knowledge` | 3 | 40 |
 | User | Knowledge, Web, Agent, and reply settings | `send-options` | 6 | 73 |
-| User | Organize and find your work | `organize` | 5 | 53 |
+| User | Organize and find your work | `organize` | 6 | 89 |
 | User | Personalization memory | `personalization-memory` | 4 | 81 |
-| User | Personalize, use mobile, and get help | `account-mobile-help` | 9 | 170 |
+| User | Personalize, use mobile, and get help | `account-mobile-help` | 9 | 172 |
 | User | Preview chats at a glance | `chat-previews` | 1 | 29 |
 | User | Protect your account and recover access | `account-security` | 7 | 154 |
 | User | Request access and enter your workspace | `access-and-sign-in` | 5 | 100 |
 | User | Save, organize, and recover your drafts | `save-and-recover-work` | 4 | 83 |
-| User | Scheduled automations | `scheduled-automations` | 4 | 58 |
+| User | Scheduled automations | `scheduled-automations` | 4 | 56 |
 | User | Search, commands, and workspace links | `search-and-commands` | 4 | 79 |
 | User | Session details and context | `session-details` | 2 | 43 |
 | User | Start chatting | `chat-basics` | 4 | 55 |
@@ -72,7 +72,7 @@ Seconds are the sum of each lesson's source scene durations.
 | Administrator | Tenant audit | `admin-audit` | 3 | 62 |
 | Administrator | Tenant model access | `admin-model-access` | 3 | 49 |
 | Administrator | Tenant SSO and provisioning | `admin-sso` | 4 | 70 |
-| Administrator | Users and accounts | `admin-users` | 4 | 78 |
+| Administrator | Users and accounts | `admin-users` | 4 | 79 |
 | Platform owner | Alerts and email delivery | `owner-alerts` | 4 | 61 |
 | Platform owner | Analytics: runtime, activity, and usage | `runtime-analytics` | 6 | 88 |
 | Platform owner | API Key Vault and replacement | `api-key-vault` | 3 | 39 |
@@ -125,7 +125,7 @@ SSO footage depends on actual service policy. The editable `sso-form.png` must c
 
 Baseline scripts stage complete batches under ignored `tmp/training-captures/` before copying declared frames to public assets; failed batches retain the prior files. Auth and support captures remain in review storage until publication. Inspect every image before release for synthetic data, hidden secrets, hover tooltips, current styling, and the narrated controls. Retain image hashes and measured targets together.
 
-Retention captures require owner/admin synthetic session files, an inactive Forever policy, a configured synthetic source, and a matching saved conversation. The script allows scan and preview requests only; it does not save a finite policy or delete records. It stages ten frames per role under `tmp/retention-capture/` with centered, measured targets for review before publication. Both consoles group retention under Audit → Data Retention, with Schedule and rules and Tags and holds views. The two retention lessons start with a measured Audit-tab navigation shot and a written account-menu checklist. Location captions identify the view and control, and arrows target the actual source-entry fields, duration slider, label actions, hold form, and Preview/Save buttons. They teach review of suggested labels, explicit activation, minimum review periods, and the limits of chat-only cleanup.
+Retention captures require owner/admin synthetic session files, an inactive Forever policy, a configured synthetic source, and a matching saved conversation. The script allows scan and preview requests only; it does not save a finite policy or delete records. It stages ten frames per role under `tmp/retention-capture/` with centered, measured targets for review before publication. Both consoles group retention under Audit → Data Retention, with Schedule and rules and Tags and holds views. The two retention lessons start with a measured Audit-tab navigation shot and a written sidebar-link checklist. Location captions identify the view and control, and arrows target the actual source-entry fields, duration slider, label actions, hold form, and Preview/Save buttons. They teach review of suggested labels, explicit activation, minimum review periods, and the limits of chat-only cleanup.
 
 ### 3. Regenerate narration without concurrent source edits
 
@@ -211,3 +211,13 @@ The dedicated Setup tab and its four-scene lesson have been retired. Existing li
 The remaining owner library contains 14 lessons and 64 scenes. Four screenshots were recaptured from the isolated synthetic app; five focus regions were remeasured against those exact images. Providers and connections and Users and role boundaries received new narration. All 64 owner scenes were rendered with no clipped title cards or overlaps between title cards, captions, and highlighted controls. Earlier owner scenes received explicit overlay placement where needed.
 
 The current complete catalog contains 49 lessons and 49 MP3 tracks (48 signed-in entries plus the pre-sign-in walkthrough). All media and PDF-copy checks pass. Legacy navigation, the 14-lesson owner library, and desktop/phone layouts were checked in light and dark themes.
+
+## Sidebar redesign refresh — September 23, 2026
+
+The sidebar now lists Search, Drafts, Agents, and Library below New chat. Chat history sits under a collapsible CHATS heading with folder, Pinned, and Recent groups, and each chat row has a single ⋯ menu. Admin console and Platform console links, Help, and the appearance buttons sit at the bottom, and unread markers follow a read position saved to the account. The training library was refreshed to match.
+
+- **Screens:** 133 published screenshots were recaptured from the isolated synthetic app and two were added (`sidebar-chat-menu.png`, `sidebar-chats-hidden.png`). The chat fixtures behind them were created through the real UI with a local model, so every reply shown is genuine. Twelve frames were kept unchanged: `chat-images.png` and `chat-images-download.png`, which need a live image-generation provider, and the ten `deck-*` frames that carry generated slide imagery. Those two chat frames still show the earlier sidebar; the deck frames show only the collapsed rail.
+- **Lessons:** Organize and find your work gained a sixth scene, Hide your chat list, and teaches the ⋯ menu for pinning, moving, and archiving. All three libraries and guides use the current Agents, Library, Admin console, and Platform console labels.
+- **Narration:** six tracks were regenerated (`tools-automations`, `scheduled-automations`, `organize`, `account-mobile-help`, `admin-users`, `admin-tools`). Each was transcribed with speech recognition and compared with its script.
+- **Focus and layout:** 220 focus regions were imported against the exact published PNG bytes. All 224 scenes were rendered through the training composition, measured for overlap between title cards, captions, and highlighted controls, and reviewed visually. Four scenes received explicit callout placement: both Search palette scenes, the problem-report form, and the temporary-password dialog. The Connections scenes highlight the Chat output actions header. Review corrected two owner frames: Policy Controls is now scrolled into view, and the retention tags frame shows a filtered scan with a suggested label.
+- **Guides:** the three PDFs were regenerated (28, 42, and 58 pages), every page was rendered with Poppler and inspected, and each pair of copies is byte-identical.

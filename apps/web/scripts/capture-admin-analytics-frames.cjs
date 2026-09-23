@@ -15,7 +15,10 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const PUBLIC_OUT = path.join(__dirname, "..", "public", "training", "admin");
+// CAPTURE_OUTPUT_DIRECTORY stages a completed batch outside public assets.
+const PUBLIC_OUT = process.env.CAPTURE_OUTPUT_DIRECTORY
+  ? path.resolve(process.env.CAPTURE_OUTPUT_DIRECTORY)
+  : path.join(__dirname, "..", "public", "training", "admin");
 const APP = process.env.CAPTURE_APP_URL || "http://localhost:5173";
 const USER = process.env.CAPTURE_USER_ID || "user-admin";
 const CAPTURE_AUTH = require("./training-capture-run.cjs").captureCredentials();

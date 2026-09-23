@@ -16,7 +16,7 @@ relational database is available.
 - Signed-session bootstrap, first-owner setup, local/OIDC sign-in, access requests, and account security.
 - Chat, model selection, attachments, connected sources, work traces, history, and session details.
 - Drafts with document/deck switching, grouped formatting controls, templates, version comparison, history previews, archive/delete, and export.
-- Agents/Automations and Knowledge/Tools workspaces with role-aware access.
+- Agents (with Automations) and Library (Knowledge and Tools) workspaces with role-aware access.
 - Tenant administration for users, groups, SSO, model restrictions, policies, knowledge, tools, and analytics.
 - Platform-owner controls for providers, credentials, organizations, model availability, connectors, audit, branding, and release updates.
 - Role-specific training and downloadable guides; access/sign-in guidance is available before authentication.
