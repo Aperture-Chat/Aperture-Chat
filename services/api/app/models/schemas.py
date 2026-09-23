@@ -2343,6 +2343,11 @@ class ChatMessage(BaseModel):
 
 class ChatThread(ChatSession):
     messages: list[ChatMessage] = Field(default_factory=list)
+    # The owner's read position: the id of the newest message they have seen.
+    # A thread is unread while its last message is an assistant reply with a
+    # different id. Stored on the server so every browser agrees; it only
+    # ever moves forward (see ``app.core.chat_read.later_read_marker``).
+    last_read_message_id: str | None = None
 
 
 class ChatThreadUpsertRequest(BaseModel):
@@ -2357,6 +2362,17 @@ class ChatThreadUpsertRequest(BaseModel):
     used_agent: bool = False
     updated_at: str = "Just now"
     messages: list[ChatMessage] = Field(default_factory=list)
+    # Lets a save carry a read that raced ahead of it; merged forward-only.
+    last_read_message_id: str | None = Field(default=None, max_length=255)
+
+
+class ChatThreadReadRequest(BaseModel):
+    message_id: str = Field(min_length=1, max_length=255)
+
+
+class ChatThreadReadState(BaseModel):
+    thread_id: str
+    last_read_message_id: str | None
 
 
 class ChatThreadTitleUpdateRequest(BaseModel):

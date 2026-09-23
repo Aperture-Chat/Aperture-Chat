@@ -5004,6 +5004,10 @@ class SeedStore:
             scan_thread(self, saved, self.tenant_retention_policy(saved.tenant_id))
             return saved
 
+    def mark_chat_thread_read(self, thread_id: str, message_id: str) -> ChatThread | None:
+        with self._store_lock:
+            return self.application_state_repository.mark_chat_thread_read(thread_id, message_id)
+
     def delete_chat_thread(self, thread_id: str) -> ChatThread | None:
         with self._store_lock:
             return self.application_state_repository.delete_chat_thread(thread_id, protect_holds=True)

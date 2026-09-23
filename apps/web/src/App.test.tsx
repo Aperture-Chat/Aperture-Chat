@@ -24,7 +24,7 @@ test("console switches retain their track and keyboard focus between sections", 
   }));
   render(<App />);
   const primary = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primary).getByRole("link", { name: "Agents/Automations" }));
+  fireEvent.click(within(primary).getByRole("link", { name: "Agents" }));
   const track = await screen.findByRole("group", { name: "Agent workspace sections" });
   const agents = within(track).getByRole("button", { name: "Agents", exact: true });
   fireEvent.keyDown(agents, { key: "ArrowRight" });
@@ -38,7 +38,7 @@ test("console switches retain their track and keyboard focus between sections", 
   expect(agents).toHaveFocus();
   expect(track).toHaveAttribute("data-active-index", "0");
 
-  fireEvent.click(within(primary).getByRole("link", { name: "Knowledge/Tools" }));
+  fireEvent.click(within(primary).getByRole("link", { name: "Library" }));
   const library = await screen.findByRole("group", { name: "Library sections" });
   fireEvent.keyDown(within(library).getByRole("button", { name: "Knowledge", exact: true }), { key: "End" });
   expect(library).toHaveAttribute("data-active-index", "1");
@@ -94,15 +94,13 @@ test("renders Aperture Chat shell with intentional empty chat history", async ()
   expect(
     screen.queryByLabelText("Open session controls"),
   ).not.toBeInTheDocument();
-  // No demo chats are seeded — Pinned/Recent show on-brand empty states.
+  // No demo chats are seeded — the always-visible history shows one empty
+  // state instead of empty Pinned/Recent placeholders.
   const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Chats" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Pinned" }));
-  fireEvent.click(within(sidebar).getByRole("button", { name: "Recent" }));
   expect(
-    await screen.findByText("No recent chats."),
+    await within(sidebar).findByText("Your conversations will appear here."),
   ).toBeInTheDocument();
-  expect(screen.getByText("No pinned chats.")).toBeInTheDocument();
+  expect(within(sidebar).queryByRole("group", { name: "Pinned" })).not.toBeInTheDocument();
 });
 
 test("persists dark mode preference across app reloads", async () => {
@@ -350,8 +348,6 @@ test("transferring a chat response after opening a saved draft does not reopen t
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Chats", exact: true }));
-  fireEvent.click(screen.getByRole("button", { name: "Recent", exact: true }));
   fireEvent.click(await screen.findByRole("button", { name: "Research response", exact: true }));
   expect(await screen.findByRole("button", { name: "Transfer response to Drafts" })).toBeInTheDocument();
 
@@ -1537,7 +1533,7 @@ test("knowledge bases load documents and sync through the knowledge API", async 
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -1605,7 +1601,7 @@ test("knowledge external connection setup lives in the API data tab", async () =
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -1713,7 +1709,7 @@ test("creates a knowledge base with its first web data source", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   fireEvent.click(
     await screen.findByRole("button", { name: "Add Knowledge Base" }),
@@ -1942,7 +1938,7 @@ test("uploads knowledge documents and reports indexed chunks", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2056,7 +2052,7 @@ test("knowledge API source shows OAuth client metadata fields and saves them", a
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
 
   const litigationRow = (await screen.findByText("Litigation Playbook")).closest(
@@ -2281,7 +2277,7 @@ test("deletes a single indexed knowledge document", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2372,7 +2368,7 @@ test("deletes a knowledge base through the admin API", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2443,7 +2439,7 @@ test("clears all knowledge bases through the admin API", async () => {
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
   fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }),
+    within(primaryNav).getByRole("link", { name: "Library" }),
   );
   expect(
     await screen.findByRole("heading", { name: "Library" }),
@@ -2510,7 +2506,7 @@ test("deletes a tool configuration through the admin API", async () => {
   render(<App />);
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }));
+  fireEvent.click(within(primaryNav).getByRole("link", { name: "Library" }));
   fireEvent.click(
     within(await screen.findByRole("group", { name: "Library sections" })).getByRole("button", {
       name: "Tools",
@@ -2592,7 +2588,7 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
   render(<App />);
 
   const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(within(primaryNav).getByRole("link", { name: "Knowledge/Tools" }));
+  fireEvent.click(within(primaryNav).getByRole("link", { name: "Library" }));
   fireEvent.click(
     within(await screen.findByRole("group", { name: "Library sections" })).getByRole("button", {
       name: "Tools",
@@ -2865,7 +2861,7 @@ test("unknown paths fall back to chat and browser back returns to the previous s
   await waitFor(() => expect(window.location.pathname).toBe("/chat"));
 
   const primary = await screen.findByRole("navigation", { name: "Primary" });
-  const agentsLink = within(primary).getByRole("link", { name: "Agents/Automations" });
+  const agentsLink = within(primary).getByRole("link", { name: "Agents" });
   expect(agentsLink).toHaveAttribute("href", "/agents");
   fireEvent.click(agentsLink);
   expect(await screen.findByRole("group", { name: "Agent workspace sections" })).toBeInTheDocument();

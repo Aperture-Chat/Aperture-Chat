@@ -288,3 +288,93 @@ test("a failed thread save marks it unsynced, and a later success or hydration c
   expect(view.result.current.unsyncedThreadCount).toBe(0);
   expect(view.result.current.threads.find((item) => item.id === "thread-unsynced")?.syncPending).toBe(false);
 });
+
+function readThread(overrides: Partial<ChatThread> = {}): ChatThread {
+  return {
+    id: "thread-read-sync",
+    tenant_id: sampleData.currentTenant.id,
+    owner_user_id: "fresh-user",
+    title: "Automation digest",
+    model_id: "text-model",
+    group_id: "group-1",
+    pinned: false,
+    archived: false,
+    folder_id: null,
+    used_agent: false,
+    updated_at: "Sep 22, 9:00 AM",
+    messages: [
+      { id: "u1", role: "user", content: "Summarize", createdAt: "9:00 AM", status: "ok" },
+      { id: "a1", role: "assistant", content: "Summary", createdAt: "9:01 AM", status: "ok" },
+    ],
+    last_read_message_id: null,
+    ...overrides,
+  };
+}
+
+test("marking a chat read stores the position on the server without saving or reordering the chat", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread()]);
+  const save = vi.spyOn(api, "saveChatThread");
+  const markRead = vi
+    .spyOn(api, "markChatThreadRead")
+    .mockResolvedValue({ thread_id: "thread-read-sync", last_read_message_id: "a1" });
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  act(() => view.result.current.markThreadRead("thread-read-sync"));
+
+  const updated = view.result.current.threads.find((thread) => thread.id === "thread-read-sync");
+  expect(updated?.last_read_message_id).toBe("a1");
+  expect(updated?.updated_at).toBe("Sep 22, 9:00 AM");
+  expect(markRead).toHaveBeenCalledWith(data.me.id, "thread-read-sync", "a1");
+  expect(save).not.toHaveBeenCalled();
+
+  // Already read: nothing more to send.
+  act(() => view.result.current.markThreadRead("thread-read-sync"));
+  expect(markRead).toHaveBeenCalledTimes(1);
+});
+
+test("a read the server could not take yet rides along with the chat's next save", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread()]);
+  vi.spyOn(api, "markChatThreadRead").mockRejectedValue(new Error("409"));
+  const save = vi
+    .spyOn(api, "saveChatThread")
+    .mockImplementation(async (_user, thread) => ({ ...thread, last_read_message_id: thread.last_read_message_id ?? null }));
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  await act(async () => view.result.current.markThreadRead("thread-read-sync"));
+  await act(async () => view.result.current.togglePin("thread-read-sync"));
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save.mock.calls[0][1].last_read_message_id).toBe("a1");
+});
+
+test("a newer read position from this browser survives the server copy and is sent on", async () => {
+  const data = firstUseData();
+  window.localStorage.setItem(
+    `aperture-chats-v2-${data.me.id}`,
+    JSON.stringify([readThread({ last_read_message_id: "a1" })]),
+  );
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread({ last_read_message_id: null })]);
+  const markRead = vi
+    .spyOn(api, "markChatThreadRead")
+    .mockResolvedValue({ thread_id: "thread-read-sync", last_read_message_id: "a1" });
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  expect(view.result.current.threads.find((thread) => thread.id === "thread-read-sync")?.last_read_message_id).toBe("a1");
+  expect(markRead).toHaveBeenCalledWith(data.me.id, "thread-read-sync", "a1");
+});
+
+test("server snapshots never move a read position backwards", () => {
+  const local = readThread({
+    messages: [...readThread().messages, { id: "u2", role: "user", content: "More", createdAt: "9:02 AM", status: "ok" }, { id: "a2", role: "assistant", content: "More detail", createdAt: "9:03 AM", status: "ok" }],
+    last_read_message_id: "a2",
+  });
+  const stale = { ...local, last_read_message_id: "a1" };
+  expect(preservePendingTraceState(local, stale).last_read_message_id).toBe("a2");
+  const ahead = { ...local, last_read_message_id: "a2" };
+  expect(preservePendingTraceState({ ...local, last_read_message_id: "a1" }, ahead).last_read_message_id).toBe("a2");
+});

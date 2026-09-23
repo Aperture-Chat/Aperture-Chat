@@ -1385,6 +1385,9 @@ export type ChatMessage = {
 
 export type ChatThread = ChatSession & {
   messages: ChatMessage[];
+  /** Id of the newest message the owner has seen; stored on the server so every
+   * browser agrees on unread chats, and only ever moves forward. */
+  last_read_message_id?: string | null;
   /** Client-only: the last server save of this thread failed, so the newest
    * messages exist only in this browser until a retry succeeds. Never sent. */
   syncPending?: boolean;

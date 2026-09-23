@@ -1075,6 +1075,9 @@ class ChatThreadRow(Base):
         StrictChatMessagesJSON(none_as_null=True),
         nullable=False,
     )
+    # The owner's read position (newest message id they have seen). Server-
+    # merged forward-only by ``upsert_chat_thread`` and ``mark_chat_thread_read``.
+    last_read_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     @classmethod
     def from_model(cls, thread: ChatThread) -> ChatThreadRow:
@@ -1095,6 +1098,7 @@ class ChatThreadRow(Base):
             used_agent=thread.used_agent,
             updated_at=thread.updated_at,
             messages=messages,
+            last_read_message_id=thread.last_read_message_id,
         )
 
     def to_model(self) -> ChatThread:
@@ -1113,6 +1117,7 @@ class ChatThreadRow(Base):
                 "used_agent": self.used_agent,
                 "updated_at": self.updated_at,
                 "messages": _canonical_chat_messages(self.messages),
+                "last_read_message_id": self.last_read_message_id,
             }
         )
 
