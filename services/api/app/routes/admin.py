@@ -2066,7 +2066,12 @@ def update_knowledge_config(
         _assert_connector_config_scope(payload.connector_config_id, config.tenant_id, store)
     if payload.owner_user_id is not None:
         _assert_knowledge_owner_scope(payload.owner_user_id, config.tenant_id, store)
+    previous_acl = list(config.acl_group_ids)
     _apply_config_updates(config, updates)
+    if config.acl_group_ids != previous_acl:
+        # Indexed documents and chunks carry a copy of the sharing list that
+        # retrieval checks; keep it in step so newly shared groups can search.
+        store.update_knowledge_acl(config)
     masked_secret = _save_secret_if_present(store, "knowledge", config.id, payload.secret_value)
     if masked_secret is not None:
         config.secret_set = True
@@ -2104,30 +2109,53 @@ def tool_configs(
     return _visible_tenant_records(store.tool_configs, actor)
 
 
-_STDIO_COMMAND_SETTING_KEYS = ("command", "args")
+def _stdio_launch(settings: dict | None) -> tuple[str, tuple[str, ...]] | None:
+    """The host process a tool's settings would launch, or None if none.
+
+    Mirrors the MCP runtime: a missing transport means stdio, and only a
+    non-empty command actually starts a process. Empty/missing command, args of
+    "" vs [] vs absent, and case/whitespace differences all normalize to the
+    same value, so a no-op re-save never looks like a new command.
+    """
+    settings = settings or {}
+    transport = str(settings.get("transport") or "stdio").strip().lower()
+    command = str(settings.get("command") or "").strip()
+    if transport != "stdio" or not command:
+        return None
+    raw_args = settings.get("args") or []
+    if isinstance(raw_args, str):
+        args = tuple(part.strip() for part in raw_args.split(",") if part.strip())
+    elif isinstance(raw_args, list):
+        args = tuple(str(arg).strip() for arg in raw_args if str(arg).strip())
+    else:
+        args = ()
+    return (command, args)
 
 
 def _stdio_command_change_requested(
     incoming_settings: dict | None,
     existing_settings: dict | None = None,
 ) -> bool:
-    """True if the payload introduces or changes an MCP stdio command/args/transport.
+    """True if the payload changes which host process the tool would launch.
 
     Configuring a host command is equivalent to code execution on the API host,
-    so only the platform owner may do it. A tenant-admin re-save that leaves the
-    command untouched (or edits unrelated settings) returns False and is allowed.
+    so only the platform owner may do it. Settings merge on update, so the
+    effective launch after the merge is compared with the current one: a
+    re-save that leaves the command untouched (or edits unrelated settings)
+    returns False and is allowed, as does an HTTP/SSE tool that carries an
+    empty command. Any change to a configured command — including clearing or
+    re-pointing it — stays owner-only.
     """
     if not isinstance(incoming_settings, dict):
         return False
     existing = existing_settings or {}
-    for key in _STDIO_COMMAND_SETTING_KEYS:
-        if key in incoming_settings and incoming_settings.get(key) != existing.get(key):
-            return True
-    incoming_transport = str(incoming_settings.get("transport") or "").strip().lower()
-    existing_transport = str(existing.get("transport") or "").strip().lower()
-    if incoming_transport == "stdio" and incoming_transport != existing_transport:
-        return True
-    return False
+    current = _stdio_launch(existing)
+    proposed = _stdio_launch({**existing, **incoming_settings})
+    return proposed != current
+
+
+def _without_stdio_command_keys(settings: dict) -> dict:
+    return {key: value for key, value in settings.items() if key not in ("command", "args")}
 
 
 def _assert_valid_custom_script_settings(settings: dict | None) -> None:
@@ -2162,12 +2190,14 @@ def create_tool_config(
     store: SeedStore = Depends(get_store),
 ) -> ToolConfig:
     assert_tool_authoring(actor, store.groups)
-    if _stdio_command_change_requested(payload.settings) and not is_platform_owner(actor):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="MCP stdio commands are managed at the service level. "
-            "Organization administrators can create HTTP or SSE MCP tools.",
-        )
+    if not is_platform_owner(actor):
+        if _stdio_command_change_requested(payload.settings):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="MCP stdio commands are managed at the service level. "
+                "Organization administrators can create HTTP or SSE MCP tools.",
+            )
+        payload.settings = _without_stdio_command_keys(payload.settings)
     if payload.tool_type == "custom_script":
         _assert_valid_custom_script_settings(payload.settings)
     if not _is_agent_profile_admin(actor):
@@ -2222,13 +2252,24 @@ def update_tool_config(
                 detail="Sharing a tool with groups is managed by administrators.",
             )
     updates = payload.model_dump(exclude_unset=True)
-    if _stdio_command_change_requested(payload.settings, config.settings) and not is_platform_owner(
-        actor
-    ):
+    if payload.tool_type is not None and payload.tool_type != config.tool_type:
+        # A tool's type selects its runtime (MCP server, sandboxed script,
+        # provider plugin...). Silently converting one into another broke
+        # tools, so the type is fixed at creation.
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="MCP stdio commands are managed at the service level.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A tool's type can't be changed after it is created. Create a new tool instead.",
         )
+    if not is_platform_owner(actor):
+        if _stdio_command_change_requested(payload.settings, config.settings):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="MCP stdio commands are managed at the service level.",
+            )
+        if isinstance(updates.get("settings"), dict):
+            # The launch is unchanged, so an echoed command/args (or an empty
+            # one from an HTTP/SSE form) is dropped rather than rewritten.
+            updates["settings"] = _without_stdio_command_keys(updates["settings"])
     next_tool_type = payload.tool_type or config.tool_type
     if next_tool_type == "custom_script" and (
         payload.tool_type is not None or payload.settings is not None
@@ -2270,6 +2311,24 @@ def delete_tool_config(
         {"name": config.name, "tool_type": config.tool_type},
     )
     return {"status": "deleted", "id": config.id}
+
+
+@router.delete("/tool-configs/{config_id}/secret")
+def clear_tool_config_secret(
+    config_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> ToolConfig:
+    """Remove a tool's saved access token / OAuth client secret from the vault."""
+    config = _get_tenant_record(config_id, store.tool_configs, actor)
+    if not _is_agent_profile_admin(actor):
+        assert_tool_authoring(actor, store.groups)
+        _assert_owned_config_scope(actor, config.owner_user_id, "tool")
+    store.delete_configuration_secret("tool", config.id)
+    config.secret_set = False
+    config.masked_secret = None
+    store.record_audit(actor, "admin.tool_config_secret_cleared", config.id, {"name": config.name})
+    return config
 
 
 @router.post("/tool-configs/script-preview")
@@ -2340,6 +2399,7 @@ def create_prompt_template(
         variables=payload.variables,
         group_ids=payload.group_ids,
         enabled=payload.enabled,
+        updated_at=clock.now_iso(),
     )
     store.prompt_templates[template.id] = template
     store.record_audit(
@@ -2361,7 +2421,7 @@ def update_prompt_template(
     if payload.group_ids is not None:
         _assert_group_scope(actor, payload.group_ids, store, tenant_id=template.tenant_id)
     _apply_config_updates(template, updates)
-    template.updated_at = "Just now"
+    template.updated_at = clock.now_iso()
     store.record_audit(
         actor, "admin.prompt_template_updated", template.id, _template_audit_payload(template)
     )
@@ -2421,6 +2481,7 @@ def create_skill_file(
         version=payload.version,
         group_ids=payload.group_ids,
         enabled=payload.enabled,
+        updated_at=clock.now_iso(),
     )
     store.skill_files[skill.id] = skill
     store.record_audit(actor, "admin.skill_file_created", skill.id, _skill_audit_payload(skill))
@@ -2440,7 +2501,7 @@ def update_skill_file(
     if payload.group_ids is not None:
         _assert_group_scope(actor, payload.group_ids, store, tenant_id=skill.tenant_id)
     _apply_config_updates(skill, updates)
-    skill.updated_at = "Just now"
+    skill.updated_at = clock.now_iso()
     store.record_audit(actor, "admin.skill_file_updated", skill.id, _skill_audit_payload(skill))
     return skill
 
@@ -3914,6 +3975,7 @@ def _delete_group_record(
     for config in store.knowledge_configs.values():
         if group.id in config.acl_group_ids:
             config.acl_group_ids = [item for item in config.acl_group_ids if item != group.id]
+            store.update_knowledge_acl(config)
     for config in store.tool_configs.values():
         if group.id in config.allowed_group_ids:
             config.allowed_group_ids = [

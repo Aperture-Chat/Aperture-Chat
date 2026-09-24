@@ -1317,6 +1317,8 @@ export function App() {
             data={effectiveData}
             actorUserId={data.me.id}
             onDataChange={setData}
+            onOpenThread={(threadId) => navigate({ kind: "chat", threadId })}
+            onOpenDraft={(draftId) => navigate({ kind: "drafts", draftId })}
           />
           ) : (
         <AgentWorkspaceConsole

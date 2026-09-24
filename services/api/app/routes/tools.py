@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse, HTMLResponse
 
+from app.core import clock
 from app.core.config import get_settings
 from app.core.generated_artifacts import generated_artifact_file
 from app.core.mcp_runtime import call_mcp_tool, check_mcp_server, mcp_env_from_auth
@@ -71,7 +73,6 @@ def generated_response_action_artifact(
 @router.get("/{config_id}/oauth/authorize-url")
 def mcp_oauth_authorize_url(
     config_id: str,
-    request: Request,
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> dict[str, Any]:
@@ -89,76 +90,134 @@ def mcp_oauth_authorize_url(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This tool is missing its OAuth authorization URL or client ID.",
         )
+    redirect_uri = _configured_callback_url(tool)
     state = sign_oidc_state({"config_id": tool.id, "actor_id": actor.id}, get_settings().secret_key)
     params = {
         "response_type": "code",
         "client_id": client_id,
-        "redirect_uri": _configured_callback_url(tool),
+        "redirect_uri": redirect_uri,
         "state": state,
     }
     scope = _oauth_scope(tool)
     if scope:
         params["scope"] = scope
     separator = "&" if "?" in authorization_url else "?"
-    return {"authorize_url": f"{authorization_url}{separator}{urlencode(params)}", "state": state}
+    return {
+        "authorize_url": f"{authorization_url}{separator}{urlencode(params)}",
+        "state": state,
+        "redirect_uri": redirect_uri,
+    }
 
 
-@router.get("/{config_id}/oauth/callback")
+@router.get("/{config_id}/oauth/callback", response_class=HTMLResponse)
 def mcp_oauth_callback(
     config_id: str,
-    request: Request,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
     store: SeedStore = Depends(get_store),
-) -> dict[str, Any]:
+) -> HTMLResponse:
+    """Finish a provider sign-in started from the connection editor.
+
+    The provider redirects the admin's browser here, so every outcome is a
+    small human-readable page rather than raw JSON.
+    """
     tool = store.tool_configs.get(config_id)
     if tool is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown tool configuration.")
+        return _oauth_result_page(
+            "Connection not found",
+            "This connection no longer exists in Aperture. Close this window and try again from the Library.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
     if error:
-        return {
-            "status": "error",
-            "tool_config_id": tool.id,
-            "name": tool.name,
-            "error": error,
-            "state": state,
-        }
-    if code and _oauth_token_url(tool):
-        if not state:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The OAuth callback is missing its state parameter.",
-            )
-        state_payload = verify_oidc_state(state, get_settings().secret_key)
-        if state_payload is None or str(state_payload.get("config_id") or "") != tool.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The OAuth state is invalid or expired; restart the MCP connection.",
-            )
-        token_payload = _exchange_oauth_code(tool, code, _callback_url(request), store)
-        store.set_configuration_secret("tool-oauth-token", tool.id, json.dumps(token_payload))
-        settings = dict(tool.settings)
-        settings["oauth_token_status"] = "stored"
-        settings["oauth_last_callback_state"] = state
-        settings["oauth_token_type"] = token_payload.get("token_type")
-        settings["oauth_scope"] = token_payload.get("scope")
-        tool.settings = settings
-        return {
-            "status": "token_stored",
-            "tool_config_id": tool.id,
-            "name": tool.name,
-            "code": "exchanged",
-            "state": state,
-            "token_type": token_payload.get("token_type"),
-            "scope": token_payload.get("scope"),
-        }
-    return {
-        "status": "received" if code else "ready",
-        "tool_config_id": tool.id,
-        "name": tool.name,
-        "code": "received" if code else None,
-        "state": state,
-    }
+        return _oauth_result_page(
+            "Sign-in was not completed",
+            f"{tool.name}: the provider returned “{error}”. Nothing was saved. "
+            "Close this window and try again from the connection's Sign-in settings.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if not code:
+        return _oauth_result_page(
+            "Sign-in address",
+            f"This is the sign-in return address for {tool.name}. "
+            "Start sign-in from the connection's Sign-in settings in Aperture.",
+        )
+    if not _oauth_token_url(tool):
+        return _oauth_result_page(
+            "Sign-in was not completed",
+            f"The provider sent a sign-in code, but {tool.name} has no token URL, so no token was saved. "
+            "Add the token URL in the connection's Sign-in settings, save, and connect again.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    state_payload = verify_oidc_state(state, get_settings().secret_key) if state else None
+    if state_payload is None or str(state_payload.get("config_id") or "") != tool.id:
+        return _oauth_result_page(
+            "Sign-in link expired",
+            "This sign-in link is invalid or has expired, so nothing was saved. "
+            "Close this window and choose Connect again in Aperture.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        # The redirect_uri must match the one sent in the authorize request,
+        # which is the configured public URL, never this (possibly proxied)
+        # request's own URL.
+        token_payload = _exchange_oauth_code(tool, code, _configured_callback_url(tool), store)
+    except HTTPException as exc:
+        return _oauth_result_page(
+            "Sign-in was not completed",
+            f"{tool.name}: {exc.detail} Nothing was saved.",
+            status_code=exc.status_code,
+        )
+    store.set_configuration_secret("tool-oauth-token", tool.id, json.dumps(token_payload))
+    settings = dict(tool.settings)
+    settings.pop("oauth_last_callback_state", None)
+    settings["oauth_token_status"] = "stored"
+    settings["oauth_token_type"] = token_payload.get("token_type")
+    settings["oauth_scope"] = token_payload.get("scope")
+    settings["oauth_connected_at"] = clock.now_iso()
+    tool.settings = settings
+    actor = store.users.get(str(state_payload.get("actor_id") or ""))
+    if actor is not None:
+        store.record_audit(
+            actor,
+            "tool.oauth_connected",
+            tool.id,
+            {
+                "name": tool.name,
+                "token_type": token_payload.get("token_type"),
+                "scope": token_payload.get("scope"),
+            },
+        )
+    else:
+        store.save_runtime_state()
+    return _oauth_result_page(
+        "Connected",
+        f"{tool.name} is connected. You can close this window and return to Aperture.",
+    )
+
+
+@router.delete("/{config_id}/oauth/token")
+def clear_mcp_oauth_token(
+    config_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> ToolConfig:
+    """Disconnect a tool from its OAuth provider by deleting the stored token."""
+    require_admin_or_owner(actor)
+    tool = _get_configurable_tool(config_id, actor, store)
+    store.delete_configuration_secret("tool-oauth-token", tool.id)
+    settings = dict(tool.settings)
+    for key in (
+        "oauth_token_status",
+        "oauth_token_type",
+        "oauth_scope",
+        "oauth_connected_at",
+        "oauth_last_callback_state",
+    ):
+        settings.pop(key, None)
+    tool.settings = settings
+    store.record_audit(actor, "tool.oauth_disconnected", tool.id, {"name": tool.name})
+    return tool
 
 
 @router.post("/{config_id}/approve")
@@ -306,11 +365,17 @@ def _oauth_token_url(tool: ToolConfig) -> str:
 
 
 def _configured_callback_url(tool: ToolConfig) -> str:
+    """The absolute redirect URI used for both the authorize and token steps.
+
+    A saved value is honored only when absolute (older clients saved a
+    relative path when the web app shares the API origin); otherwise the URL
+    is built from the configured public API base URL.
+    """
     configured = str(tool.settings.get("oauth_callback_url") or "").strip()
-    if configured:
+    if configured.lower().startswith(("https://", "http://")):
         return configured
     base = get_settings().api_base_url.rstrip("/")
-    return f"{base}/api/tools/{tool.id}/oauth/callback"
+    return f"{base}/api/tools/{quote(tool.id, safe='')}/oauth/callback"
 
 
 def _oauth_scope(tool: ToolConfig) -> str:
@@ -330,8 +395,33 @@ def _mcp_oauth_env(store: SeedStore, tool: ToolConfig) -> dict[str, str]:
     )
 
 
-def _callback_url(request: Request) -> str:
-    return str(request.url).split("?", 1)[0]
+def _oauth_result_page(title: str, message: str, *, status_code: int = 200) -> HTMLResponse:
+    """A minimal standalone page for the provider's redirect back to Aperture."""
+    safe_title = html.escape(title)
+    safe_message = html.escape(message)
+    body = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{safe_title} · Aperture</title>
+<style>
+  body {{ margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f6f7f8; color: #1f2933; }}
+  main {{ max-width: 420px; margin: 24px; padding: 28px 30px; border: 1px solid #dde1e5;
+    border-radius: 14px; background: #fff; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }}
+  h1 {{ margin: 0 0 8px; font-size: 19px; font-weight: 600; }}
+  p {{ margin: 0; font-size: 14px; line-height: 1.55; color: #52606d; }}
+</style>
+</head>
+<body><main><h1>{safe_title}</h1><p>{safe_message}</p></main></body>
+</html>"""
+    return HTMLResponse(
+        content=body,
+        status_code=status_code,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 def _exchange_oauth_code(tool: ToolConfig, code: str, callback_url: str, store: SeedStore) -> dict[str, Any]:

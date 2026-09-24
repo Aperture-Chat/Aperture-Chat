@@ -1,5 +1,6 @@
 import json
 import re
+from html import escape
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode
@@ -7,6 +8,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
+from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.core.box import BoxError, BoxItem, get_box_client
@@ -19,12 +21,21 @@ from app.core.cloud_sources import (
 )
 from app.core.config import get_settings
 from app.core.connector_auth import acquire_connector_token
+from app.core.api_source_fetch import (
+    ApiSourceError,
+    ApiSourceRequest,
+    FetchedApiSource,
+    build_api_url,
+    fetch_api_source,
+    parse_header_lines,
+)
 from app.core.knowledge_ingestion import (
     ExtractedSegment,
     chunk_segments,
     extract_segments,
     extract_segments_from_file,
 )
+from app.core.knowledge_ingestion import _limit_segments as limit_extracted_segments
 from app.core.media_transcription import (
     MediaTranscriptionError,
     is_media_upload,
@@ -55,6 +66,7 @@ from app.models.schemas import (
     KnowledgeConfig,
     KnowledgeApiSourceCreateRequest,
     KnowledgeDocument,
+    KnowledgeIndexStatus,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     KnowledgeSyncRequest,
@@ -111,7 +123,7 @@ def api_source_oauth_authorize_url(
     return {"authorize_url": f"{authorization_url}{separator}{urlencode(params)}", "state": state}
 
 
-@router.get("/{config_id}/oauth/callback")
+@router.get("/{config_id}/oauth/callback", response_class=HTMLResponse)
 def api_source_oauth_callback(
     config_id: str,
     request: Request,
@@ -119,69 +131,148 @@ def api_source_oauth_callback(
     state: str | None = None,
     error: str | None = None,
     store: SeedStore = Depends(get_store),
-) -> dict[str, Any]:
+) -> HTMLResponse:
+    """Finish an API source's provider sign-in in the popup the UI opened.
+
+    The provider redirects a person's browser here, so every outcome is a short
+    readable page. On success the waiting API source is fetched and indexed
+    immediately; any failure is reported on the page and again on Sync.
+    """
     config = store.knowledge_configs.get(config_id)
     if config is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Unknown knowledge configuration."
         )
+    brand = store.brand_name(config.tenant_id)
     if error:
-        return {
-            "status": "error",
-            "knowledge_config_id": config.id,
-            "name": config.name,
-            "error": error,
-            "state": state,
-        }
-    if code and _api_source_oauth_token_url(config):
-        if not state:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The OAuth callback is missing its state parameter.",
-            )
-        state_payload = verify_oidc_state(state, get_settings().secret_key)
-        if state_payload is None or str(state_payload.get("config_id") or "") != config.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The OAuth state is invalid or expired; restart the API source connection.",
-            )
+        return _oauth_popup_page(
+            f"The provider did not grant access ({error}). Nothing was changed.",
+            success=False,
+            brand=brand,
+        )
+    if not code:
+        return _oauth_popup_page(
+            "This address receives the provider's sign-in response. Start the connection "
+            "from the knowledge base in Aperture.",
+            success=False,
+            brand=brand,
+            status_code=200,
+        )
+    if not _api_source_oauth_token_url(config):
+        return _oauth_popup_page(
+            "This knowledge base has no provider sign-in configured.",
+            success=False,
+            brand=brand,
+        )
+    state_payload = verify_oidc_state(state or "", get_settings().secret_key) if state else None
+    if state_payload is None or str(state_payload.get("config_id") or "") != config.id:
+        return _oauth_popup_page(
+            "The sign-in link expired or did not come from Aperture. Start the connection again.",
+            success=False,
+            brand=brand,
+        )
+    try:
         token_payload = _exchange_api_source_oauth_code(config, code, _callback_url(request), store)
-        store.set_configuration_secret(
-            "knowledge-oauth-token", config.id, json.dumps(token_payload)
-        )
-        settings = dict(config.settings)
-        settings["oauth_token_status"] = "stored"
-        settings["oauth_last_callback_state"] = state
-        settings["oauth_token_type"] = token_payload.get("token_type")
-        settings["oauth_scope"] = token_payload.get("scope")
-        config.settings = settings
-        store.record_audit(
-            _oauth_callback_actor(config, store),
-            "knowledge.oauth_token_stored",
-            config.id,
-            {
-                "token_type": token_payload.get("token_type"),
-                "scope": token_payload.get("scope"),
-                "state": state,
-                "access_token": "[redacted]",
-            },
-        )
-        return {
-            "status": "token_stored",
-            "knowledge_config_id": config.id,
-            "name": config.name,
-            "code": "exchanged",
-            "state": state,
+    except HTTPException as exc:
+        return _oauth_popup_page(str(exc.detail), success=False, brand=brand)
+    store.set_configuration_secret("knowledge-oauth-token", config.id, json.dumps(token_payload))
+    settings = dict(config.settings)
+    settings["oauth_token_status"] = "stored"
+    settings["oauth_token_type"] = token_payload.get("token_type")
+    settings["oauth_scope"] = token_payload.get("scope")
+    config.settings = settings
+    actor = store.users.get(str(state_payload.get("actor_id") or "")) or _oauth_callback_actor(
+        config, store
+    )
+    store.record_audit(
+        actor,
+        "knowledge.oauth_token_stored",
+        config.id,
+        {
             "token_type": token_payload.get("token_type"),
             "scope": token_payload.get("scope"),
-        }
-    return {
-        "status": "received" if code else "ready",
-        "knowledge_config_id": config.id,
-        "name": config.name,
-        "code": "received" if code else None,
-        "state": state,
-    }
+            "access_token": "[redacted]",
+        },
+    )
+    message = _index_authorized_api_sources(config, actor, store)
+    return _oauth_popup_page(message, success=True, brand=brand)
+
+
+def _index_authorized_api_sources(config: KnowledgeConfig, actor: User, store: SeedStore) -> str:
+    """Fetch API sources that were waiting for this provider sign-in."""
+    sources = _linked_sources(config)
+    waiting = [source for source in sources if source.get("awaiting_authorization")]
+    if not waiting:
+        return "Access granted. Use Sync in Aperture to refresh the API data."
+    indexed: list[str] = []
+    failed: list[str] = []
+    for source in waiting:
+        source["awaiting_authorization"] = False
+        name = str(source.get("name") or "API source")
+        try:
+            fetched = _fetch_linked_api_source(config, source, store)
+        except HTTPException as exc:
+            failed.append(f"{name}: {exc.detail}")
+            continue
+        document, chunks = _document_from_text(
+            config,
+            name=name,
+            source_type="api",
+            source_uri=fetched.display_url,
+            text=fetched.text,
+            synced_at=_sync_time(),
+            document_id=str(source.get("document_id") or "") or None,
+        )
+        source["document_id"] = document.id
+        _save_linked_sources(config, sources)
+        _append_indexed_sources(
+            store,
+            config,
+            [document],
+            chunks,
+            synced_at=document.updated_at,
+            provider_status="live",
+            provider_message=_api_fetch_message(name, fetched, len(chunks)),
+        )
+        indexed.append(name)
+    _save_linked_sources(config, sources)
+    store.record_audit(
+        actor,
+        "knowledge.api_source_authorized",
+        config.id,
+        {"indexed": len(indexed), "failed": len(failed)},
+    )
+    if failed:
+        return (
+            "Access granted, but fetching the API failed: "
+            + "; ".join(failed)
+            + " Fix the source settings and use Sync in Aperture to try again."
+        )
+    return f"Access granted and {', '.join(indexed)} indexed."
+
+
+def _oauth_popup_page(
+    message: str,
+    *,
+    success: bool,
+    brand: str = "Aperture Chat",
+    status_code: int | None = None,
+) -> HTMLResponse:
+    heading = "Connected" if success else "Connection not finished"
+    return HTMLResponse(
+        content=(
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            f"<title>{escape(brand)} — {escape(heading)}</title>"
+            "<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:15vh auto;"
+            "padding:0 16px;color:#1c2430}h1{font-size:18px}p{font-size:14px;line-height:1.5;"
+            "color:#3d4757}</style></head><body>"
+            f"<h1>{escape(heading)}</h1><p>{escape(message)}</p>"
+            "<p>You can close this window and return to Aperture.</p>"
+            + ("<script>setTimeout(function(){window.close();},2500);</script>" if success else "")
+            + "</body></html>"
+        ),
+        status_code=status_code if status_code is not None else (200 if success else 400),
+    )
 
 
 @router.post("/search")
@@ -225,6 +316,7 @@ def search(
             "hit_count": len(hits),
             "query": query,
         },
+        runtime_state_changed=False,
     )
     return KnowledgeSearchResponse(query=query, knowledge_config_ids=readable_config_ids, hits=hits)
 
@@ -235,16 +327,47 @@ def documents(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[KnowledgeDocument]:
-    assert_group_permission(actor, store.groups, "knowledge_access", "Knowledge access")
-    config = _get_readable_config(config_id, actor, store)
+    config = _get_viewable_config(config_id, actor, store)
     documents = store.knowledge_documents_for(config.id)
     store.record_audit(
         actor,
         "knowledge.documents_listed",
         config.id,
         {"document_count": len(documents), "source_type": config.source_type},
+        runtime_state_changed=False,
     )
     return documents
+
+
+@router.get("/limits")
+def limits(actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict[str, Any]:
+    """Upload and indexing limits the Library shows next to its upload controls."""
+    del actor
+    settings = get_settings()
+    return {
+        "upload_max_mb": settings.knowledge_upload_max_mb,
+        "max_extracted_chars": settings.knowledge_max_extracted_chars,
+        "ocr_enabled": settings.knowledge_ocr_enabled,
+        "ocr_max_pages": settings.knowledge_ocr_max_pages,
+        "semantic_search": store.vector_store.dense_status("")["semantic_search"],
+        # Provider sign-ins must be registered with the exact callback the
+        # server sends, so the UI shows this rather than guessing an origin.
+        "oauth_callback_base": f"{get_settings().api_base_url.rstrip('/')}/api/knowledge",
+    }
+
+
+@router.get("/{config_id}/index-status")
+def index_status(
+    config_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> KnowledgeIndexStatus:
+    """Report how much of a knowledge base still awaits semantic (dense) vectors."""
+    config = _get_viewable_config(config_id, actor, store)
+    return KnowledgeIndexStatus(
+        knowledge_config_id=config.id,
+        **store.knowledge_index_status(config.id),
+    )
 
 
 @router.post("/{config_id}/sync")
@@ -255,6 +378,8 @@ def sync(
     store: SeedStore = Depends(get_store),
 ) -> KnowledgeSyncResponse:
     config = _get_operable_config(config_id, actor, store)
+    if config.source_type not in _CONNECTOR_SOURCE_TYPES:
+        return _refresh_linked_sources(config, actor, store, force=bool(payload and payload.force))
     sync_documents, sync_chunks, provider_status, provider_message = _provider_sync_documents(
         config, store
     )
@@ -300,6 +425,7 @@ async def upload_documents(
     synced_at = _sync_time()
     new_documents: list[KnowledgeDocument] = []
     new_chunks: list[KnowledgeChunk] = []
+    notes: list[str] = []
     uploaded_bytes = 0
     settings = get_settings()
     usage_context: UsageBudgetRequestContext | None = None
@@ -335,18 +461,19 @@ async def upload_documents(
                     usage_context,
                 )
                 segments = [ExtractedSegment(text=result.text, locator="transcript")]
+                truncated = False
             else:
-                segments = await run_in_threadpool(
-                    extract_segments_from_file,
+                segments, truncated = await run_in_threadpool(
+                    _extract_upload_segments,
                     filename,
                     file.file,
                     file.content_type,
-                    max_chars=settings.knowledge_max_extracted_chars,
-                    ocr_enabled=settings.knowledge_ocr_enabled,
-                    ocr_max_pages=settings.knowledge_ocr_max_pages,
-                    ocr_page_timeout_seconds=settings.knowledge_ocr_page_timeout_seconds,
+                    settings.knowledge_max_extracted_chars,
                 )
-            document, chunks = _document_from_segments(
+            # Chunking a multi-million-character file is CPU work; keep it off
+            # the event loop so other requests are served meanwhile.
+            document, chunks = await run_in_threadpool(
+                _document_from_segments,
                 config,
                 name=filename,
                 source_type="upload",
@@ -354,6 +481,15 @@ async def upload_documents(
                 segments=segments,
                 synced_at=synced_at,
             )
+            if document.status == "metadata-only":
+                notes.append(
+                    f"No readable text was found in {filename}, so only its name is searchable."
+                )
+            elif truncated:
+                notes.append(
+                    f"Only the first {settings.knowledge_max_extracted_chars:,} characters of "
+                    f"{filename} were indexed."
+                )
             new_documents.append(document)
             new_chunks.extend(chunks)
         if usage_context is not None:
@@ -375,6 +511,16 @@ async def upload_documents(
         if usage_context is not None:
             _fail_knowledge_media_usage(usage_context)
         raise
+    readable = [document for document in new_documents if document.status != "metadata-only"]
+    passages = sum(document.chunk_count for document in readable)
+    provider_message = " ".join(
+        [
+            f"Indexed {len(readable)} of {len(new_documents)} uploaded "
+            f"file{'' if len(new_documents) == 1 else 's'} "
+            f"({passages:,} passage{'' if passages == 1 else 's'}).",
+            *notes,
+        ]
+    )
     config, documents, synced_at = await run_in_threadpool(
         _append_indexed_sources,
         store,
@@ -383,9 +529,10 @@ async def upload_documents(
         new_chunks,
         synced_at=synced_at,
         provider_status="live",
-        provider_message=f"Uploaded and indexed {len(new_documents)} document source{'' if len(new_documents) == 1 else 's'}.",
+        provider_message=provider_message,
     )
-    store.record_audit(
+    await run_in_threadpool(
+        store.record_audit,
         actor,
         "knowledge.documents_uploaded",
         config.id,
@@ -402,7 +549,7 @@ async def upload_documents(
         status="synced",
         synced_at=synced_at,
         provider_status="live",
-        provider_message=f"Uploaded and indexed {len(new_documents)} document source{'' if len(new_documents) == 1 else 's'}.",
+        provider_message=provider_message,
     )
 
 
@@ -415,6 +562,17 @@ def delete_document(
 ) -> KnowledgeSyncResponse:
     config = _get_operable_config(config_id, actor, store)
     synced_at = _sync_time()
+    # Forget any refresh recipe (and stored API credential) for this document
+    # so Sync never re-creates content that was deliberately removed.
+    sources = _linked_sources(config)
+    removed_sources = [source for source in sources if source.get("document_id") == document_id]
+    if removed_sources:
+        _save_linked_sources(
+            config, [source for source in sources if source.get("document_id") != document_id]
+        )
+        for source in removed_sources:
+            if source.get("secret_ref"):
+                store.delete_configuration_secret("knowledge-api-source", str(source["secret_ref"]))
     result = store.delete_knowledge_document(config, document_id, synced_at=synced_at)
     if result is None:
         raise HTTPException(
@@ -463,7 +621,7 @@ def add_web_source(
     if manual_text:
         text = manual_text
         provider_message = (
-            f"Indexed operator-provided text for {url}; the page itself was not fetched."
+            f"Indexed the text you provided for {url}; the page itself was not fetched."
         )
     else:
         # Fetch failures raise an HTTP error so no fake "indexed" document is created.
@@ -475,6 +633,20 @@ def add_web_source(
         source_uri=url,
         text=text,
         synced_at=synced_at,
+    )
+    _save_linked_sources(
+        config,
+        [
+            *_linked_sources(config),
+            {
+                "document_id": document.id,
+                "kind": "web",
+                "name": name,
+                "url": url,
+                # Pasted text has no live page behind it, so Sync leaves it alone.
+                "refresh": not manual_text,
+            },
+        ],
     )
     config, documents, synced_at = _append_indexed_sources(
         store,
@@ -508,114 +680,140 @@ def add_api_source(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> KnowledgeSyncResponse:
+    """Register an API source and index its current response.
+
+    Nothing is indexed unless the request succeeds, so a wrong URL or
+    credential fails here instead of producing a document that only describes
+    the connection. OAuth sources are saved and wait for the provider sign-in;
+    the OAuth callback fetches them once a token is stored.
+    """
     config = _get_operable_config(config_id, actor, store)
-    synced_at = _sync_time()
     base_url = payload.base_url.strip()
     if not base_url:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="API source base URL is required."
+            status_code=status.HTTP_400_BAD_REQUEST, detail="API URL is required."
         )
-    name = payload.name.strip() or base_url
-    if payload.secret_value:
-        # OAuth client secrets are stored under a deterministic key so the
-        # OAuth callback can complete the token exchange later.
-        secret_record_id = (
-            f"{config.id}:oauth-client"
-            if payload.auth_type == "oauth-client"
-            else f"{config.id}:{uuid4()}"
+    auth_type = (payload.auth_type or "none").strip().lower()
+    if auth_type not in _API_AUTH_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Authentication must be none, api-key, bearer-token, or oauth-client.",
         )
-        store.set_configuration_secret(
-            "knowledge-api-source", secret_record_id, payload.secret_value
+    method = (payload.method or "GET").strip().upper()
+    if method not in {"GET", "POST"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="API sources support GET and POST."
         )
-    if payload.auth_type == "oauth-client":
+    try:
+        headers = parse_header_lines(payload.headers)
+    except ApiSourceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    secret_value = (payload.secret_value or "").strip() or None
+    if auth_type in {"api-key", "bearer-token"} and not secret_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter the API key or token this source should send.",
+        )
+    name = payload.name.strip() or build_api_url(base_url, payload.path or "")
+    document_id = f"doc-api-{uuid4()}"
+    source: dict[str, Any] = {
+        "document_id": document_id,
+        "kind": "api",
+        "name": name,
+        "base_url": base_url,
+        "path": (payload.path or "").strip(),
+        "method": method,
+        "headers": headers,
+        "body": (payload.body or "").strip() or None,
+        "auth_type": auth_type,
+        "credential_name": (payload.credential_name or "").strip()
+        or ("X-API-Key" if auth_type == "api-key" else ""),
+        "credential_location": (payload.credential_location or "header").strip().lower(),
+        "refresh": True,
+    }
+    if source["credential_location"] not in {"header", "query"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The API key must be sent as a header or a query parameter.",
+        )
+
+    if auth_type == "oauth-client":
+        if any(item.get("auth_type") == "oauth-client" for item in _linked_sources(config)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This knowledge base already has a provider-connected API. Delete it "
+                "before connecting a different one.",
+            )
+        client_id = (payload.client_id or "").strip()
+        authorization_url = (payload.authorization_url or "").strip()
+        token_url = (payload.token_url or "").strip()
+        if not client_id or not authorization_url or not token_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth needs a client ID, authorization URL, and token URL.",
+            )
         settings = dict(config.settings)
         settings["api_source_oauth"] = {
             "name": name,
-            "client_id": (payload.client_id or "").strip(),
-            "authorization_url": (payload.authorization_url or "").strip(),
-            "token_url": (payload.token_url or "").strip(),
-            "callback_url": (payload.callback_url or "").strip(),
+            "client_id": client_id,
+            "authorization_url": authorization_url,
+            "token_url": token_url,
+            "callback_url": _knowledge_oauth_callback_url(config.id),
             "scopes": [scope.strip() for scope in payload.scopes if scope.strip()],
             "audience": (payload.audience or "").strip(),
         }
         config.settings = settings
-    description_parts = (
-        [payload.description.strip()] if payload.description and payload.description.strip() else []
-    )
-    connection_lines = [
-        f"Source label: {payload.source_label.strip()}"
-        if payload.source_label and payload.source_label.strip()
-        else "",
-        f"Resource or path: {payload.resource_id.strip()}"
-        if payload.resource_id and payload.resource_id.strip()
-        else "",
-        f"Request method: {payload.request_method.strip().upper()}"
-        if payload.request_method and payload.request_method.strip()
-        else "",
-        f"Header notes: {payload.header_notes.strip()}"
-        if payload.header_notes and payload.header_notes.strip()
-        else "",
-    ]
-    description_parts.extend(line for line in connection_lines if line)
-    if payload.auth_type == "api-key":
-        credential_name = (
-            payload.credential_name.strip() if payload.credential_name else "X-API-Key"
-        )
-        credential_location = (
-            payload.credential_location.strip() if payload.credential_location else "header"
-        )
-        api_key_lines = [
-            f"API key metadata for {name}.",
-            f"Credential name: {credential_name}.",
-            f"Credential location: {credential_location}.",
-            "API key value is stored in the backend vault and is not indexed.",
-        ]
-        description_parts.extend(api_key_lines)
-    elif payload.auth_type == "bearer-token":
-        bearer_lines = [
-            f"Bearer token metadata for {name}.",
-            "Authorization header: Bearer token.",
-            "Bearer token value is stored in the backend vault and is not indexed.",
-        ]
-        description_parts.extend(bearer_lines)
-    elif payload.auth_type == "oauth-client":
-        oauth_lines = [
-            f"OAuth client metadata for {name}.",
-            f"Client ID: {payload.client_id.strip()}"
-            if payload.client_id and payload.client_id.strip()
-            else "",
-            (
-                f"Authorization URL: {payload.authorization_url.strip()}"
-                if payload.authorization_url and payload.authorization_url.strip()
-                else ""
-            ),
-            f"Token URL: {payload.token_url.strip()}"
-            if payload.token_url and payload.token_url.strip()
-            else "",
-            f"Callback URL: {payload.callback_url.strip()}"
-            if payload.callback_url and payload.callback_url.strip()
-            else "",
-            f"Scopes: {', '.join(scope.strip() for scope in payload.scopes if scope.strip())}"
-            if payload.scopes
-            else "",
-            f"Audience/Tenant: {payload.audience.strip()}"
-            if payload.audience and payload.audience.strip()
-            else "",
-            "Client secret is stored in the backend vault and is not indexed.",
-        ]
-        description_parts.extend(line for line in oauth_lines if line)
-    description = (
-        "\n".join(description_parts)
-        or f"API source {name} uses {payload.auth_type} authentication at {base_url}."
-    )
+        if secret_value:
+            store.set_configuration_secret(
+                "knowledge-api-source", f"{config.id}:oauth-client", secret_value
+            )
+        source["awaiting_authorization"] = _stored_oauth_token(config, store) is None
+        if source["awaiting_authorization"]:
+            _save_linked_sources(config, [*_linked_sources(config), source])
+            provider_message = (
+                f"Saved {name}. Sign in with the provider to finish connecting; the data is "
+                "indexed as soon as access is granted."
+            )
+            store.record_audit(
+                actor,
+                "knowledge.api_source_added",
+                config.id,
+                _api_source_audit(source, awaiting_authorization=True),
+            )
+            config, documents, synced_at = store.record_knowledge_sync(
+                config,
+                status=str(config.settings.get("status") or "draft"),
+                synced_at=str(config.settings.get("last_sync") or "Not synced"),
+                provider_status="pending",
+                provider_message=provider_message,
+            )
+            return KnowledgeSyncResponse(
+                config=config,
+                documents=documents,
+                status=str(config.settings.get("status") or "draft"),
+                synced_at=synced_at,
+                provider_status="pending",
+                provider_message=provider_message,
+            )
+
+    secret_ref = f"{config.id}:{document_id}" if secret_value and auth_type != "oauth-client" else None
+    fetched = _fetch_linked_api_source(config, source, store, secret_override=secret_value)
+    synced_at = _sync_time()
     document, chunks = _document_from_text(
         config,
         name=name,
         source_type="api",
-        source_uri=base_url,
-        text=description,
+        source_uri=fetched.display_url,
+        text=fetched.text,
         synced_at=synced_at,
+        document_id=document_id,
     )
+    if secret_ref:
+        store.set_configuration_secret("knowledge-api-source", secret_ref, secret_value or "")
+        source["secret_ref"] = secret_ref
+    source["awaiting_authorization"] = False
+    _save_linked_sources(config, [*_linked_sources(config), source])
+    provider_message = _api_fetch_message(name, fetched, len(chunks))
     config, documents, synced_at = _append_indexed_sources(
         store,
         config,
@@ -623,29 +821,13 @@ def add_api_source(
         chunks,
         synced_at=synced_at,
         provider_status="live",
-        provider_message=f"Registered API source {name} and stored the credential in the backend vault.",
+        provider_message=provider_message,
     )
     store.record_audit(
         actor,
         "knowledge.api_source_added",
         config.id,
-        {
-            "base_url": base_url,
-            "auth_type": payload.auth_type,
-            "source_label": payload.source_label,
-            "resource_id": payload.resource_id,
-            "request_method": payload.request_method,
-            "header_notes": payload.header_notes,
-            "credential_name": payload.credential_name,
-            "credential_location": payload.credential_location,
-            "client_id": payload.client_id,
-            "authorization_url": payload.authorization_url,
-            "token_url": payload.token_url,
-            "callback_url": payload.callback_url,
-            "scopes": payload.scopes,
-            "audience": payload.audience,
-            "secret_value": "[redacted]",
-        },
+        {**_api_source_audit(source, awaiting_authorization=False), "chunk_count": len(chunks)},
     )
     return KnowledgeSyncResponse(
         config=config,
@@ -653,7 +835,7 @@ def add_api_source(
         status=knowledge_sync_status("live"),
         synced_at=synced_at,
         provider_status="live",
-        provider_message=f"Registered API source {name} and stored the credential in the backend vault.",
+        provider_message=provider_message,
     )
 
 
@@ -737,6 +919,310 @@ def _fail_knowledge_media_usage(context: UsageBudgetRequestContext) -> None:
         return
 
 
+_CONNECTOR_SOURCE_TYPES = frozenset({"box", "microsoft-graph", "google-drive", "imanage"})
+_API_AUTH_TYPES = frozenset({"none", "api-key", "bearer-token", "oauth-client"})
+_LINKED_SOURCES_KEY = "linked_sources"
+
+
+def _linked_sources(config: KnowledgeConfig) -> list[dict[str, Any]]:
+    """Refresh recipes for web pages and API sources, keyed by document id."""
+    raw = config.settings.get(_LINKED_SOURCES_KEY)
+    if not isinstance(raw, list):
+        return []
+    return [dict(item) for item in raw if isinstance(item, dict)]
+
+
+def _save_linked_sources(config: KnowledgeConfig, sources: list[dict[str, Any]]) -> None:
+    settings = dict(config.settings)
+    settings[_LINKED_SOURCES_KEY] = sources
+    config.settings = settings
+
+
+def _extract_upload_segments(
+    filename: str,
+    file: Any,
+    content_type: str | None,
+    max_chars: int,
+) -> tuple[list[ExtractedSegment], bool]:
+    """Extract an upload and report whether it was cut at the character limit.
+
+    Extraction asks for one character more than the limit, so a document that
+    is exactly at the limit is never reported as truncated.
+    """
+    settings = get_settings()
+    segments = extract_segments_from_file(
+        filename,
+        file,
+        content_type,
+        max_chars=max_chars + 1,
+        ocr_enabled=settings.knowledge_ocr_enabled,
+        ocr_max_pages=settings.knowledge_ocr_max_pages,
+        ocr_page_timeout_seconds=settings.knowledge_ocr_page_timeout_seconds,
+    )
+    joined_length = sum(len(segment.text) for segment in segments) + 2 * max(0, len(segments) - 1)
+    if joined_length <= max_chars:
+        return segments, False
+    return limit_extracted_segments(segments, max_chars=max_chars), True
+
+
+def _refresh_linked_sources(
+    config: KnowledgeConfig,
+    actor: User,
+    store: SeedStore,
+    *,
+    force: bool,
+) -> KnowledgeSyncResponse:
+    """Re-fetch web pages and API sources; uploaded files are never touched.
+
+    Uploads are indexed when they are added, so a knowledge base made only of
+    uploads has nothing to sync and keeps its status. Each linked source is
+    refreshed in place; a failed refresh keeps that source's previous content.
+    """
+    sources = _linked_sources(config)
+    refreshable = [
+        source
+        for source in sources
+        if source.get("refresh")
+        and (source.get("kind") == "web" or source.get("kind") == "api")
+        and not source.get("awaiting_authorization")
+    ]
+    waiting = [source for source in sources if source.get("awaiting_authorization")]
+    if not refreshable:
+        message = (
+            "Waiting for the provider sign-in before this API can be fetched."
+            if waiting
+            else "Nothing to sync. Uploaded files and pasted text are indexed when you add "
+            "them; add a web page or API to keep content refreshed automatically."
+        )
+        store.record_audit(
+            actor,
+            "knowledge.config_synced",
+            config.id,
+            {"refreshed": 0, "failed": 0, "force": force, "source_type": config.source_type},
+            runtime_state_changed=False,
+        )
+        return KnowledgeSyncResponse(
+            config=config,
+            documents=store.knowledge_documents_for(config.id),
+            status=str(config.settings.get("status") or "draft"),
+            synced_at=str(config.settings.get("last_sync") or "Not synced"),
+            provider_status="unchanged",
+            provider_message=message,
+        )
+
+    synced_at = _sync_time()
+    documents_by_id = {document.id: document for document in store.knowledge_documents_for(config.id)}
+    refreshed = 0
+    failures: list[str] = []
+    for source in refreshable:
+        name = str(source.get("name") or source.get("url") or source.get("base_url") or "source")
+        try:
+            if source.get("kind") == "web":
+                text, _message = _fetch_web_source(str(source.get("url") or ""))
+                source_uri = str(source.get("url") or "")
+            else:
+                fetched = _fetch_linked_api_source(config, source, store)
+                text, source_uri = fetched.text, fetched.display_url
+        except HTTPException as exc:
+            failures.append(f"{name}: {exc.detail}")
+            continue
+        existing = documents_by_id.get(str(source.get("document_id") or ""))
+        document, chunks = _document_from_text(
+            config,
+            name=existing.name if existing else name,
+            source_type=str(source.get("kind")),
+            source_uri=source_uri,
+            text=text,
+            synced_at=synced_at,
+            document_id=str(source.get("document_id") or "") or None,
+        )
+        if not source.get("document_id"):
+            source["document_id"] = document.id
+        store.replace_knowledge_document(config, document, chunks)
+        refreshed += 1
+    _save_linked_sources(config, sources)
+    if failures:
+        status_value = "error"
+        provider_status = "error"
+        message = (
+            f"Refreshed {refreshed} of {len(refreshable)} linked sources. "
+            "Could not refresh " + "; ".join(failures) + ". Their previous content is kept."
+        )
+    else:
+        status_value = "synced"
+        provider_status = "live"
+        message = f"Refreshed {refreshed} linked source{'' if refreshed == 1 else 's'}."
+    config, documents, synced_at = store.record_knowledge_sync(
+        config,
+        status=status_value,
+        synced_at=synced_at,
+        provider_status=provider_status,
+        provider_message=message,
+    )
+    store.record_audit(
+        actor,
+        "knowledge.config_synced",
+        config.id,
+        {
+            "refreshed": refreshed,
+            "failed": len(failures),
+            "force": force,
+            "provider_status": provider_status,
+            "source_type": config.source_type,
+        },
+    )
+    return KnowledgeSyncResponse(
+        config=config,
+        documents=documents,
+        status=status_value,
+        synced_at=synced_at,
+        provider_status=provider_status,
+        provider_message=message,
+    )
+
+
+def _fetch_linked_api_source(
+    config: KnowledgeConfig,
+    source: dict[str, Any],
+    store: SeedStore,
+    *,
+    secret_override: str | None = None,
+) -> FetchedApiSource:
+    """Run one API source request with its stored credential, or raise HTTP errors."""
+    auth_type = str(source.get("auth_type") or "none")
+    credential_header: tuple[str, str] | None = None
+    credential_query: tuple[str, str] | None = None
+    token_payload: dict[str, Any] | None = None
+    if auth_type in {"api-key", "bearer-token"}:
+        secret = secret_override
+        if secret is None and source.get("secret_ref"):
+            secret = store.configuration_secret("knowledge-api-source", str(source["secret_ref"]))
+        if not secret:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The stored credential for this API source is missing; add the source again.",
+            )
+        if auth_type == "bearer-token":
+            credential_header = ("Authorization", f"Bearer {secret}")
+        else:
+            credential_name = str(source.get("credential_name") or "X-API-Key")
+            if source.get("credential_location") == "query":
+                credential_query = (credential_name, secret)
+            else:
+                credential_header = (credential_name, secret)
+    elif auth_type == "oauth-client":
+        token_payload = _stored_oauth_token(config, store)
+        if token_payload is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Sign in with the provider before this API source can be fetched.",
+            )
+        credential_header = ("Authorization", f"Bearer {token_payload['access_token']}")
+
+    def run(header: tuple[str, str] | None) -> FetchedApiSource:
+        return fetch_api_source(
+            ApiSourceRequest(
+                base_url=str(source.get("base_url") or ""),
+                path=str(source.get("path") or ""),
+                method=str(source.get("method") or "GET"),
+                headers={str(key): str(value) for key, value in dict(source.get("headers") or {}).items()},
+                body=source.get("body") or None,
+                credential_header=header,
+                credential_query=credential_query,
+            )
+        )
+
+    try:
+        return run(credential_header)
+    except ApiSourceError as exc:
+        # Expired OAuth access tokens are refreshed once when the provider
+        # issued a refresh token; any other failure is reported as-is.
+        if token_payload is not None and " 401" in exc.detail and token_payload.get("refresh_token"):
+            refreshed = _refresh_api_source_oauth_token(config, store, token_payload)
+            if refreshed is not None:
+                try:
+                    return run(("Authorization", f"Bearer {refreshed['access_token']}"))
+                except ApiSourceError as retry_exc:
+                    raise HTTPException(status_code=retry_exc.status_code, detail=retry_exc.detail) from retry_exc
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _api_fetch_message(name: str, fetched: FetchedApiSource, chunk_count: int) -> str:
+    size_kb = max(1, fetched.byte_count // 1024)
+    message = (
+        f"Fetched {name} ({size_kb:,} KB) and indexed {chunk_count:,} "
+        f"passage{'' if chunk_count == 1 else 's'}."
+    )
+    if fetched.truncated:
+        message += " The response was longer than the indexing limit, so only the start was kept."
+    return message
+
+
+def _api_source_audit(source: dict[str, Any], *, awaiting_authorization: bool) -> dict[str, Any]:
+    return {
+        "base_url": source.get("base_url"),
+        "path": source.get("path"),
+        "method": source.get("method"),
+        "auth_type": source.get("auth_type"),
+        "credential_location": source.get("credential_location"),
+        "header_names": sorted(dict(source.get("headers") or {})),
+        "awaiting_authorization": awaiting_authorization,
+        "secret_value": "[redacted]",
+    }
+
+
+def _stored_oauth_token(config: KnowledgeConfig, store: SeedStore) -> dict[str, Any] | None:
+    raw = store.configuration_secret("knowledge-oauth-token", config.id)
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or not str(payload.get("access_token") or "").strip():
+        return None
+    return payload
+
+
+def _refresh_api_source_oauth_token(
+    config: KnowledgeConfig,
+    store: SeedStore,
+    token_payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    oauth_settings = _api_source_oauth_settings(config)
+    token_url = _api_source_oauth_token_url(config)
+    client_id = str(oauth_settings.get("client_id") or "").strip()
+    if not token_url or not client_id:
+        return None
+    try:
+        validate_public_url(token_url)
+    except EgressBlocked:
+        return None
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": str(token_payload.get("refresh_token")),
+        "client_id": client_id,
+    }
+    client_secret = store.configuration_secret("knowledge-api-source", f"{config.id}:oauth-client")
+    if client_secret:
+        data["client_secret"] = client_secret
+    try:
+        with httpx.Client(timeout=15.0) as oauth_client:
+            response = oauth_client.post(token_url, data=data, headers={"Accept": "application/json"})
+        refreshed = response.json() if response.status_code < 400 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(refreshed, dict) or not str(refreshed.get("access_token") or "").strip():
+        return None
+    refreshed.setdefault("refresh_token", token_payload.get("refresh_token"))
+    store.set_configuration_secret("knowledge-oauth-token", config.id, json.dumps(refreshed))
+    return refreshed
+
+
+def _knowledge_oauth_callback_url(config_id: str) -> str:
+    return f"{get_settings().api_base_url.rstrip('/')}/api/knowledge/{config_id}/oauth/callback"
+
+
 def _get_readable_config(config_id: str, actor: User, store: SeedStore) -> KnowledgeConfig:
     config = store.knowledge_configs.get(config_id)
     if config is None:
@@ -745,6 +1231,22 @@ def _get_readable_config(config_id: str, actor: User, store: SeedStore) -> Knowl
         )
     assert_knowledge_access(actor, config)
     return config
+
+
+def _get_viewable_config(config_id: str, actor: User, store: SeedStore) -> KnowledgeConfig:
+    """People who manage a knowledge base can inspect it even while it is off.
+
+    Turning a base off stops assistants from searching it; its administrators
+    and owner still need to see what it contains. Everyone else goes through
+    the normal read check, which also requires the base to be on.
+    """
+    try:
+        return _get_operable_config(config_id, actor, store)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise
+    assert_group_permission(actor, store.groups, "knowledge_access", "Knowledge access")
+    return _get_readable_config(config_id, actor, store)
 
 
 def _get_operable_config(config_id: str, actor: User, store: SeedStore) -> KnowledgeConfig:
@@ -1159,7 +1661,9 @@ def _cloud_document_and_chunks(
         document.status = "metadata-only"
         return document, chunks, False
 
-    segments = extract_segments(item.name, content, mime_type=_extraction_mime_type(item))
+    segments = extract_segments(
+        item.name, content, mime_type=_extraction_mime_type(item), **_extraction_settings()
+    )
     chunks = _knowledge_chunks_from_segments(document, segments)
     if not chunks:
         chunks = [_inventory_chunk(config, document, 0)]
@@ -1217,6 +1721,16 @@ def _box_document(config: KnowledgeConfig, item: BoxItem) -> KnowledgeDocument:
     )
 
 
+def _extraction_settings() -> dict[str, Any]:
+    settings = get_settings()
+    return {
+        "max_chars": settings.knowledge_max_extracted_chars,
+        "ocr_enabled": settings.knowledge_ocr_enabled,
+        "ocr_max_pages": settings.knowledge_ocr_max_pages,
+        "ocr_page_timeout_seconds": settings.knowledge_ocr_page_timeout_seconds,
+    }
+
+
 def _estimated_chunks(size: int | None) -> int:
     if size is None or size <= 0:
         return 0
@@ -1237,7 +1751,7 @@ def _box_document_and_chunks(
         document.status = "metadata-only"
         return document, chunks, False
 
-    segments = extract_segments(item.name, content)
+    segments = extract_segments(item.name, content, **_extraction_settings())
     chunks = _knowledge_chunks_from_segments(document, segments)
     if not chunks:
         chunks = [_inventory_chunk(config, document, 0)]
@@ -1280,6 +1794,7 @@ def _document_from_text(
     source_uri: str,
     text: str | None,
     synced_at: str,
+    document_id: str | None = None,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk]]:
     segments = [ExtractedSegment(text=text)] if text else []
     return _document_from_segments(
@@ -1289,6 +1804,7 @@ def _document_from_text(
         source_uri=source_uri,
         segments=segments,
         synced_at=synced_at,
+        document_id=document_id,
     )
 
 
@@ -1300,9 +1816,10 @@ def _document_from_segments(
     source_uri: str,
     segments: list[ExtractedSegment],
     synced_at: str,
+    document_id: str | None = None,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk]]:
     document = KnowledgeDocument(
-        id=f"doc-{source_type}-{uuid4()}",
+        id=document_id or f"doc-{source_type}-{uuid4()}",
         knowledge_config_id=config.id,
         tenant_id=config.tenant_id,
         name=name,

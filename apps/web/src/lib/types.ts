@@ -774,11 +774,36 @@ export type SsoConfig = {
   admin_notes: string;
 };
 
+/** A web page or API whose content Sync re-fetches (from config settings). */
+export type KnowledgeLinkedSource = {
+  document_id: string | null;
+  kind: "web" | "api";
+  name: string;
+  url?: string;
+  base_url?: string;
+  path?: string;
+  method?: string;
+  auth_type?: string;
+  refresh: boolean;
+  awaiting_authorization?: boolean;
+};
+
+export type KnowledgeIndexStatus = {
+  knowledge_config_id: string;
+  semantic_search: "on" | "off" | string;
+  total_chunks: number;
+  pending_chunks: number;
+  pending_by_document: Record<string, number>;
+};
+
 export type KnowledgeBase = {
   id: string;
   name: string;
   description: string;
   source: string;
+  /** How content arrives: upload, web, api, or a connector id such as box. */
+  source_type?: string;
+  linked_sources?: KnowledgeLinkedSource[];
   connector_id: string;
   connector_config_id?: string | null;
   status: "draft" | "syncing" | "synced" | "stale" | "error";
@@ -843,6 +868,10 @@ export type ToolConfig = {
   runtime_invocations?: McpRuntimeInvocation[];
   script?: string;
   timeout_seconds?: number;
+  /** A token/client secret is saved in the vault (never the value itself). */
+  secret_set?: boolean;
+  /** A provider sign-in finished and its OAuth token is stored. */
+  oauth_token_stored?: boolean;
 };
 
 export type McpToolSummary = {
@@ -1467,16 +1496,31 @@ export type AutomationStep = {
   instruction: string;
 };
 
+export type AutomationRunRecord = {
+  at: string;
+  status: "succeeded" | "failed" | "skipped" | string;
+  /** manual = console Run now, scheduled = the scheduler, chat = the ">" shortcut. */
+  trigger: "manual" | "scheduled" | "chat" | string;
+  detail?: string;
+  duration_ms?: number | null;
+  steps?: number;
+  thread_id?: string | null;
+  draft_id?: string | null;
+};
+
 export type Automation = {
   id: string;
   tenant_id: string;
   name: string;
+  /** Where results are delivered: a new chat thread or a new draft. */
   surface: "chat" | "draft";
   trigger_type: "once" | "daily" | "weekly" | "cron";
   run_at?: string | null;
   weekly_day?: string | null;
   time_of_day?: string | null;
   cron_expression?: string | null;
+  /** IANA time zone for schedule times; absent means UTC. */
+  timezone?: string | null;
   prompt: string;
   steps: AutomationStep[];
   enabled: boolean;
@@ -1485,6 +1529,10 @@ export type Automation = {
   updated_at?: string;
   last_run_at?: string | null;
   last_run_status?: string | null;
+  run_history?: AutomationRunRecord[];
+  consecutive_failures?: number;
+  /** Server-computed next fire time (ISO) while enabled; null otherwise. */
+  next_run_at?: string | null;
 };
 
 export type AutomationRunResult = {
@@ -1497,8 +1545,20 @@ export type AutomationRunResult = {
     output: string;
     /** True when the provider stopped this step at its token limit. */
     truncated?: boolean;
+    /** True when the step ran a workspace agent profile. */
+    agent?: boolean;
+    /** Knowledge sources an agent step retrieved from. */
+    knowledge_sources?: string[];
   }>;
   final_output: string;
+  thread_id?: string | null;
+  draft_id?: string | null;
+};
+
+export type AutomationSchedulePreview = {
+  valid: boolean;
+  error: string | null;
+  next_runs: string[];
 };
 
 export type BootstrapWireData = Partial<

@@ -136,7 +136,7 @@ test("agent workspace hides profile editing until Edit is clicked", async () => 
   renderAgentWorkspace();
 
   expect(
-    screen.getByRole("heading", { name: "Agent Profiles" }),
+    screen.getByRole("article", { name: "Client Update Agent" }),
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("heading", { name: "Edit Agent Profile" }),
@@ -207,7 +207,8 @@ test("agent profile delete removes the selected agent from local workspace state
   renderAgentWorkspace();
 
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  fireEvent.click(screen.getByRole("button", { name: /Delete Agent/ }));
+  fireEvent.click(screen.getByRole("button", { name: "More actions for Client Update Agent" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Delete Agent/ }));
 
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
@@ -224,10 +225,11 @@ test("agent profile row delete works without opening the editor", async () => {
   renderAgentWorkspace();
 
   const agentRow = screen.getByText("Client Update Agent").closest(
-    ".agent-profile-card",
+    ".agent-card",
   ) as HTMLElement;
+  openCardMenu(agentRow, "Client Update Agent");
   fireEvent.click(
-    within(agentRow).getByRole("button", { name: "Delete" }),
+    within(agentRow).getByRole("menuitem", { name: "Delete" }),
   );
 
   await waitFor(() =>
@@ -260,9 +262,10 @@ test("tenant admin sees locked agent profiles as organization policy protected",
   renderAgentWorkspace();
 
   const agentRow = screen.getByText("Client Update Agent").closest(
-    ".agent-profile-card",
+    ".agent-card",
   ) as HTMLElement;
-  const lockedButton = within(agentRow).getByRole("button", {
+  openCardMenu(agentRow, "Client Update Agent");
+  const lockedButton = within(agentRow).getByRole("menuitem", {
     name: "Locked",
   });
 
@@ -326,10 +329,11 @@ test("agent profile delete does not show legacy platform-owner API wording", asy
   renderAgentWorkspace();
 
   const agentRow = screen.getByText("Client Update Agent").closest(
-    ".agent-profile-card",
+    ".agent-card",
   ) as HTMLElement;
+  openCardMenu(agentRow, "Client Update Agent");
   fireEvent.click(
-    within(agentRow).getByRole("button", { name: "Delete" }),
+    within(agentRow).getByRole("menuitem", { name: "Delete" }),
   );
 
   expect(
@@ -356,7 +360,8 @@ test("clear agents deletes all configured agent profiles", async () => {
   };
   renderAgentWorkspace();
 
-  fireEvent.click(screen.getByRole("button", { name: "Clear Agents" }));
+  fireEvent.click(screen.getByRole("button", { name: "More agent actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Clear Agents" }));
 
   await waitFor(() =>
     expect(
@@ -672,21 +677,101 @@ test("granted users edit only their own agents and cannot widen visibility", () 
   renderAgentWorkspace();
 
   // Only the profile Jane authored exposes Edit/Delete.
-  const mineCard = screen.getByText(mine.name).closest(".agent-profile-card") as HTMLElement;
-  expect(within(mineCard).getByRole("button", { name: /Edit/ })).toBeInTheDocument();
-  expect(within(mineCard).getByRole("button", { name: /Delete/ })).toBeInTheDocument();
+  const mineCard = screen.getByText(mine.name).closest(".agent-card") as HTMLElement;
+  expect(within(mineCard).getByRole("button", { name: /^Edit$/ })).toBeInTheDocument();
+  openCardMenu(mineCard, mine.name);
+  expect(within(mineCard).getByRole("menuitem", { name: /Delete/ })).toBeInTheDocument();
+  const theirsCard = screen.getByText(theirs.name).closest(".agent-card") as HTMLElement;
+  expect(within(theirsCard).queryByRole("button", { name: /^Edit$/ })).not.toBeInTheDocument();
 
-  fireEvent.click(within(mineCard).getByRole("button", { name: /Edit/ }));
+  fireEvent.click(within(mineCard).getByRole("button", { name: /^Edit$/ }));
 
   // Visibility is stated, not offered as a control the server would override.
+  selectTab("Access");
   expect(screen.queryByLabelText("Visibility")).not.toBeInTheDocument();
   expect(
     screen.getByText(/Private — only you can use this agent/),
   ).toBeInTheDocument();
-
-  selectTab("Access");
   expect(screen.queryByText("Allowed groups")).not.toBeInTheDocument();
   expect(
     screen.getByText(/Agents you build stay private to your account/),
   ).toBeInTheDocument();
+});
+
+function openCardMenu(card: HTMLElement, name: string) {
+  fireEvent.click(within(card).getByRole("button", { name: `More actions for ${name}` }));
+}
+
+test("an agent whose attachments would make chat fail is flagged before anyone chats with it", () => {
+  currentData = {
+    ...currentData,
+    skillFiles: currentData.skillFiles.map((skill) =>
+      skill.id === "skill-client-update-package" ? { ...skill, enabled: false } : skill,
+    ),
+    knowledgeBases: currentData.knowledgeBases.map((knowledge) =>
+      knowledge.id === "kb-litigation-playbook" ? { ...knowledge, enabled: false } : knowledge,
+    ),
+  };
+  renderAgentWorkspace();
+
+  const card = screen.getByRole("article", { name: "Client Update Agent" });
+  expect(within(card).getByText("Needs attention")).toBeInTheDocument();
+  expect(within(card).getByText(/Skill file “Client Update Package Skill” is turned off/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Needs attention/ }));
+  expect(screen.getByRole("article", { name: "Client Update Agent" })).toBeInTheDocument();
+
+  fireEvent.click(within(card).getByRole("button", { name: "Edit" }));
+  const banner = screen.getByText(/Chats with this agent will fail until this is fixed/).closest(".agent-readiness") as HTMLElement;
+  expect(within(banner).getByText(/answers without it/)).toBeInTheDocument();
+  // Detaching the turned-off skill leaves only the non-fatal knowledge warning.
+  selectTab("Prompts & Skills");
+  fireEvent.click(screen.getByRole("checkbox", { name: /Client Update Package Skill/ }));
+  selectTab("Profile");
+  expect(screen.getByText(/This agent is running with less than you configured/)).toBeInTheDocument();
+});
+
+test("a new agent starts with nothing attached and can start from a template", () => {
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: /New Agent/ }));
+
+  expect(screen.getByLabelText("Agent name")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Create agent" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /Meeting Summarizer/ }));
+  expect(screen.getByLabelText("Agent name")).toHaveValue("Meeting Summarizer");
+
+  selectTab("Knowledge");
+  expect(screen.getAllByRole("checkbox").every((box) => !(box as HTMLInputElement).checked)).toBe(true);
+  selectTab("Prompts & Skills");
+  expect(screen.getAllByRole("checkbox").every((box) => !(box as HTMLInputElement).checked)).toBe(true);
+});
+
+test("the group picker appears only when access is limited to selected groups", () => {
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  selectTab("Access");
+  expect(screen.queryByText("Allowed groups")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "group" } });
+  expect(screen.getByText("Allowed groups")).toBeInTheDocument();
+});
+
+test("duplicate opens an unsaved copy and search filters the grid", () => {
+  renderAgentWorkspace();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search agents" }), { target: { value: "no such agent" } });
+  expect(screen.getByText("No agents match your search.")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search agents" }), { target: { value: "client" } });
+  const card = screen.getByRole("article", { name: "Client Update Agent" });
+
+  openCardMenu(card, "Client Update Agent");
+  fireEvent.click(within(card).getByRole("menuitem", { name: "Duplicate" }));
+  expect(screen.getByLabelText("Agent name")).toHaveValue("Client Update Agent (copy)");
+  expect(screen.getByRole("button", { name: "Create agent" })).toBeInTheDocument();
+  expect(screen.getByText(/Editing a copy of Client Update Agent/)).toBeInTheDocument();
+});
+
+test("an empty workspace offers agent templates", () => {
+  currentData = { ...currentData, models: currentData.models.filter((model) => !model.is_custom) };
+  renderAgentWorkspace();
+  expect(screen.getByRole("heading", { name: "Build your first agent" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Policy Q&A/ }));
+  expect(screen.getByLabelText("Agent name")).toHaveValue("Policy Q&A");
 });

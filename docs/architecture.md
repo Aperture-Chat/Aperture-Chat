@@ -98,7 +98,11 @@ Cloud-source clients include Box, Google Drive, Microsoft Graph sources
 (OneDrive/SharePoint), and iManage. Authentication and source access depend on
 the configured connector and upstream permissions. Uploaded knowledge supports
 text extraction, optional local OCR, and a local dense-vector index; media
-transcription can call the configured model provider.
+transcription can call the configured model provider. Knowledge web pages and
+API sources are fetched through the same outbound guards (API redirects are
+refused so credentials never follow them) and re-fetched on Sync. New content
+is keyword-searchable as soon as it is stored; a background worker then adds
+semantic vectors (`APERTURE_KNOWLEDGE_DENSE_BACKGROUND`).
 
 Model requests, cloud-source access, and enabled web search can send data to
 external services. Outbound guards block metadata/link-local destinations and

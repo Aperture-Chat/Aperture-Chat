@@ -24757,21 +24757,52 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 }
 
 .composer-context-tools { display: contents; }
-@media (max-width: 600px) {
+/* Phones keep every composer control on one row: the buttons hold their size
+   and the active-tool chip takes the space left, dropping its label to an icon
+   before anything would wrap. */
+@media (max-width: 640px) {
   .composer .composer-toolbar {
-    display: flex; flex-wrap: wrap;
+    display: flex; flex-wrap: nowrap;
     align-items: center; gap: 4px; padding-top: 8px;
   }
   .composer .composer-tools { display: contents; }
-  .composer .composer-context-tools { display: flex; flex: 1 1 124px; min-width: 0; }
+  .composer .composer-context-tools { display: flex; flex: 1 1 0; min-width: 0; container: composer-context / inline-size; }
   .composer .composer-context-tools:empty { display: none; }
   .composer .composer-tools > .attach { flex: 0 0 36px; }
   .composer .composer-tools .attach-trigger { width: 36px; height: 44px; }
-  .composer .send-actions { width: auto; min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 0; }
-  .composer .composer-tools-status { min-width: 0; min-height: 32px; max-width: 100%; gap: 4px; padding: 0 4px; border-radius: 8px; background: var(--teal-soft); }
-  .composer .composer-tools-status > svg, .composer .composer-tools-clear { flex-shrink: 0; }
-  .composer .composer-tools-status.is-single span { min-width: 0; max-width: none; }
+  .composer .send-actions { flex: 0 0 auto; width: auto; min-width: 0; margin-left: auto; flex-wrap: nowrap; justify-content: flex-end; gap: 0; }
+  .composer .dictation-control { margin-right: 0; }
+  .composer .context-window-indicator { margin-right: 3px; }
+  .composer .composer-tools-status { min-width: 0; min-height: 32px; max-width: 100%; gap: 3px; padding: 0 2px 0 4px; border-radius: 8px; background: var(--teal-soft); }
+  .composer .composer-tools-clear { width: 20px; min-width: 20px; }
+  .composer .composer-tools-status > svg, .composer .composer-tools-status > b, .composer .composer-tools-clear { flex-shrink: 0; }
+  .composer .composer-tools-status > span { min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; }
   .composer .composer-mcp-chip { max-width: 100%; overflow-wrap: anywhere; }
+}
+/* 118px fits the widest single label, "Web search". */
+@container composer-context (width < 118px) {
+  .composer .composer-tools-status > span { display: none; }
+}
+/* Only the tightest rows (320px phones with extra draft actions) drop the
+   chip's clear button; Send options still turns the tool off. */
+@container composer-context (width < 43px) {
+  .composer .composer-tools-status { overflow: hidden; }
+  .composer .composer-tools-status .composer-tools-clear { display: none; }
+}
+@media (max-width: 374px) {
+  /* The narrowest phones also trim the composer inset and icon buttons. */
+  .composer:not(.is-expanded) { padding-inline: 9px; }
+  .composer .composer-toolbar { gap: 2px; }
+  .composer .composer-tools-status { gap: 2px; padding-left: 3px; }
+  .composer .composer-tools > .attach { flex-basis: 32px; }
+  .composer .composer-tools .attach-trigger { width: 32px; }
+  .composer .dictation-button,
+  .composer .composer-draft-actions.has-text .prompt-improve-button,
+  .composer .context-window-indicator { width: 30px; min-width: 30px; }
+  .composer .composer-expand-button, .composer .prompt-restore-button { width: 28px; min-width: 28px; padding: 0; }
+  .composer .context-window-indicator { margin-right: 0; }
+  .composer .send-button { width: 34px; min-width: 34px; }
+  .composer .send-options-button { width: 28px; min-width: 28px; }
 }
 
 /* Keep composer discovery and native file controls in the workspace palette. */

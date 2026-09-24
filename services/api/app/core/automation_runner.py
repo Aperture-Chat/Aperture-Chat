@@ -3,24 +3,44 @@
 Extracted from the run route so scheduled runs execute exactly the same code
 path as "Run now": real gateway calls, real model-access checks, and honest
 run bookkeeping. Nothing here simulates output or fabricates success.
+
+A step may name a plain model or a workspace agent profile. An agent step
+brings the same instructions chat would: its system and meta prompts, prompt
+templates, skill files, Hermes memories, and passages retrieved from its
+knowledge bases. Tools and MCP servers need an interactive approval flow and
+run only in chat, never inside an unattended chain.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 
-from app.core import clock
+from app.core import clock, hermes
+from app.core.automation_schedule import (
+    Schedule,
+    next_occurrence,
+    parse_instant,
+    resolve_zone,
+)
+from app.core.markdown_document import markdown_to_document_html
 from app.core.model_gateway import (
     DEFAULT_COMPLETION_TOKEN_BUDGET,
     ModelGatewayClient,
     ModelGatewayRoute,
     resolve_model_route,
 )
-from app.core.policy import assert_model_access
+from app.core.policy import (
+    assert_agent_profile_access,
+    assert_model_access,
+    hermes_companion_allowed,
+    is_workspace_agent_profile,
+)
 from app.core.web_search import OPENROUTER_WEB_SEARCH_TOOL
 from app.core.usage_budget import UsageBudgetError, UsageMeteringInvalid, new_accounting_id
 from app.core.usage_budget_runtime import (
@@ -31,7 +51,14 @@ from app.core.usage_budget_runtime import (
     UsageTenantScopeError,
     map_usage_budget_error,
 )
-from app.models.schemas import Automation, ModelConfig, User
+from app.models.schemas import (
+    Automation,
+    AutomationRunRecord,
+    ChatMessage,
+    ChatThread,
+    ModelConfig,
+    User,
+)
 from app.repositories.identity_config_sql import IdentityConfigSnapshotConflict
 from app.repositories.seed import SeedStore
 
@@ -40,10 +67,21 @@ logger = logging.getLogger("aperture.automations")
 # How many times run bookkeeping re-applies its fields after losing a
 # relational-digest CAS race to a concurrent writer.
 SNAPSHOT_CONFLICT_RETRIES = 3
+# Run history kept per automation, newest first.
+RUN_HISTORY_LIMIT = 10
+# Knowledge passages an agent step retrieves, and how much of each it quotes.
+AGENT_STEP_KNOWLEDGE_LIMIT = 4
+AGENT_STEP_PASSAGE_CHARS = 1200
+AGENT_STEP_QUERY_CHARS = 2000
+# Bytes of instruction text quoted from each template or skill file.
+AGENT_STEP_EXCERPT_CHARS = 4000
+DRAFT_TITLE_CHARS = 200
 
 
 def persist_automation_fields(
-    store: SeedStore, automation_id: str, fields: dict[str, object]
+    store: SeedStore,
+    automation_id: str,
+    fields: dict[str, object] | Callable[[Automation], dict[str, object]],
 ) -> Automation | None:
     """Apply bookkeeping fields to an automation and persist, surviving races.
 
@@ -53,14 +91,17 @@ def persist_automation_fields(
     finished multi-step run into "failed unexpectedly" at the very last write.
     Bookkeeping fields are safe to re-apply to the fresh record, so retry a
     bounded number of times. Returns ``None`` when the automation was deleted
-    by the winning writer: bookkeeping must never resurrect it.
+    by the winning writer: bookkeeping must never resurrect it. ``fields`` may
+    be a function of the current record (run history appends to whatever the
+    winning writer left), recomputed on every retry.
     """
     last_conflict: IdentityConfigSnapshotConflict | None = None
     for _ in range(SNAPSHOT_CONFLICT_RETRIES):
         current = store.automations.get(automation_id)
         if current is None:
             return None
-        updated = current.model_copy(update=fields)
+        update = fields(current) if callable(fields) else fields
+        updated = current.model_copy(update=update)
         store.automations[automation_id] = updated
         try:
             store.save_runtime_state()
@@ -147,6 +188,120 @@ def _web_sources_from_annotations(message: Mapping[str, Any]) -> list[tuple[str,
     return sources
 
 
+def _excerpt(text: str, limit: int) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else f"{text[: limit - 3].rstrip()}..."
+
+
+def _step_context(
+    store: SeedStore,
+    actor: User,
+    model: ModelConfig,
+    step_input: str,
+    *,
+    step_label: str,
+) -> tuple[list[str], list[str]]:
+    """System sections a step's model or agent contributes, plus source names.
+
+    Mirrors chat's runtime prompt: a model's own system and meta prompts and
+    its prompt templates and skill files always apply; an agent profile also
+    brings Hermes memories and retrieves from its knowledge bases. Anything
+    chat would refuse (a disabled template, a knowledge base the actor cannot
+    read) fails the step with that reason instead of silently running without
+    it; a turned-off knowledge base is skipped, as chat does.
+    """
+    # Late import: the chat route owns the canonical resolvers and access
+    # checks; importing lazily keeps core free of a load-time route import.
+    from app.routes.chat import (
+        _resolve_knowledge_config,
+        _resolve_prompt_templates,
+        _resolve_skill_files,
+    )
+
+    is_agent = is_workspace_agent_profile(model)
+    sections: list[str] = []
+    sources: list[str] = []
+    try:
+        if is_agent:
+            assert_agent_profile_access(actor, model)
+        if model.system_prompt and model.system_prompt.strip():
+            sections.append(model.system_prompt.strip())
+        if model.meta_prompt and model.meta_prompt.strip():
+            sections.append(model.meta_prompt.strip())
+        templates = _resolve_prompt_templates(store, actor, list(model.prompt_template_ids))
+        for template in templates:
+            if template.content.strip():
+                sections.append(
+                    f"Prompt template — {template.name}:\n"
+                    f"{_excerpt(template.content, AGENT_STEP_EXCERPT_CHARS)}"
+                )
+        skills = _resolve_skill_files(store, actor, list(model.skill_file_ids))
+        for skill in skills:
+            if skill.content.strip():
+                label = f"{skill.name} v{skill.version}" if skill.version else skill.name
+                sections.append(
+                    f"Skill file — {label}:\n{_excerpt(skill.content, AGENT_STEP_EXCERPT_CHARS)}"
+                )
+        if not is_agent:
+            return sections, sources
+        if model.agentic_companion == hermes.HERMES_COMPANION and hermes_companion_allowed(
+            actor, store.groups
+        ):
+            memories = [
+                memory.content.strip()
+                for memory in hermes.recent_memories(store, model.id)
+                if memory.content.strip()
+            ]
+            if memories:
+                sections.append(
+                    "Memories saved from earlier conversations with this agent "
+                    "(apply them where relevant):\n" + "\n".join(f"- {m}" for m in memories)
+                )
+        # Like chat, an agent's turned-off knowledge base is skipped rather
+        # than failing the run; unknown or unshared bases still refuse.
+        knowledge_ids = [
+            kid
+            for kid in dict.fromkeys(model.knowledge_config_ids)
+            if (config := store.knowledge_configs.get(kid)) is None or config.enabled
+        ]
+        if knowledge_ids:
+            configs = [_resolve_knowledge_config(store, actor, kid) for kid in knowledge_ids]
+            query = (step_input or "").strip()[:AGENT_STEP_QUERY_CHARS]
+            hits = (
+                store.retrieve_knowledge(
+                    actor,
+                    [config.id for config in configs],
+                    query,
+                    limit=AGENT_STEP_KNOWLEDGE_LIMIT,
+                )
+                if query
+                else []
+            )
+            seen: set[str] = set()
+            passages: list[str] = []
+            for hit in hits:
+                if hit.id in seen:
+                    continue
+                seen.add(hit.id)
+                passages.append(
+                    f"[K{len(passages) + 1}] {hit.source_name}: "
+                    f"{_excerpt(' '.join(hit.text.split()), AGENT_STEP_PASSAGE_CHARS)}"
+                )
+                if hit.source_name not in sources:
+                    sources.append(hit.source_name)
+            if passages:
+                sections.append(
+                    "Reference passages retrieved from this agent's knowledge. Ground your "
+                    "answer in them where relevant and cite them as [K1], [K2], ...:\n"
+                    + "\n".join(passages)
+                )
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=exc.status_code, detail=f"{step_label}: {exc.detail}"
+        ) from exc
+    return sections, sources
+
+
 def execute_chain(
     store: SeedStore,
     automation: Automation,
@@ -190,11 +345,25 @@ def execute_chain(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Step {index} ({model.name}) is not runnable: {route.status_message}",
             )
-        messages: list[dict[str, str]] = []
+        step_input = carry or "Begin the automation."
+        context_sections, knowledge_sources = _step_context(
+            store, actor, model, step_input, step_label=f"Step {index} ({model.name})"
+        )
         instruction = step.instruction.strip()
+        system_sections = [*context_sections]
         if instruction:
-            messages.append({"role": "system", "content": instruction})
-        messages.append({"role": "user", "content": carry or "Begin the automation."})
+            # The step's own instruction is the most specific direction, so it
+            # comes last, after the agent's standing instructions.
+            system_sections.append(instruction)
+        if automation.surface == "draft" and index == len(automation.steps):
+            system_sections.append(
+                "Your answer becomes a new draft document. Write it as a complete, "
+                "well-structured document in Markdown with a title heading."
+            )
+        messages: list[dict[str, str]] = []
+        if system_sections:
+            messages.append({"role": "system", "content": "\n\n".join(system_sections)})
+        messages.append({"role": "user", "content": step_input})
         web_tools = _step_web_search_tools(store, route)
         try:
             usage_context = orchestrator.begin_request(
@@ -256,6 +425,8 @@ def execute_chain(
                     "instruction": step.instruction,
                     "output": content,
                     "truncated": truncated,
+                    "agent": is_workspace_agent_profile(model),
+                    "knowledge_sources": knowledge_sources,
                 }
             )
             carry = content
@@ -342,20 +513,70 @@ def _usage_budget_http_exception(
     )
 
 
+# Scheduled failures in a row before the scheduler pauses an automation.
+AUTO_PAUSE_FAILURE_LIMIT = 3
+
+
+def _with_history(
+    current: Automation,
+    record: AutomationRunRecord,
+    *,
+    failed_scheduled: bool,
+) -> dict[str, object]:
+    """Bookkeeping update for one finished run, applied to the fresh record."""
+    status_text = (
+        "succeeded"
+        if record.status == "succeeded"
+        else f"{record.status}: {record.detail}" if record.detail else record.status
+    )
+    failures = (
+        current.consecutive_failures + 1
+        if failed_scheduled
+        else 0 if record.status == "succeeded" else current.consecutive_failures
+    )
+    update: dict[str, object] = {
+        "last_run_at": record.at,
+        "last_run_status": status_text,
+        "run_history": [record, *current.run_history][:RUN_HISTORY_LIMIT],
+        "consecutive_failures": failures,
+    }
+    if failed_scheduled and current.enabled and failures >= AUTO_PAUSE_FAILURE_LIMIT:
+        # A chain that keeps failing on schedule spends provider budget on
+        # every fire and floods the audit log; pause it and say why.
+        update["enabled"] = False
+        update["last_run_status"] = (
+            f"{status_text} — paused after {failures} failed scheduled runs in a row"
+        )
+    return update
+
+
 def record_run_success(
     store: SeedStore,
     automation: Automation,
     actor: User,
     *,
     scheduled: bool = False,
-) -> None:
+    trigger: str | None = None,
+    duration_ms: int | None = None,
+    thread_id: str | None = None,
+    draft_id: str | None = None,
+) -> Automation | None:
     run_at = clock.now_iso()
+    record = AutomationRunRecord(
+        at=run_at,
+        status="succeeded",
+        trigger=trigger or ("scheduled" if scheduled else "manual"),
+        duration_ms=duration_ms,
+        steps=len(automation.steps),
+        thread_id=thread_id,
+        draft_id=draft_id,
+    )
     automation.last_run_at = run_at
     automation.last_run_status = "succeeded"
-    persist_automation_fields(
+    persisted = persist_automation_fields(
         store,
         automation.id,
-        {"last_run_at": run_at, "last_run_status": "succeeded"},
+        lambda current: _with_history(current, record, failed_scheduled=False),
     )
     # The audit trail lives in application state, not the identity snapshot:
     # the run happened, so it is recorded even if the automation was deleted
@@ -369,8 +590,12 @@ def record_run_success(
             "executed_at": run_at,
             "steps": len(automation.steps),
             "scheduled": scheduled,
+            "trigger": record.trigger,
+            "thread_id": thread_id,
+            "draft_id": draft_id,
         },
     )
+    return persisted
 
 
 def record_run_failure(
@@ -380,14 +605,24 @@ def record_run_failure(
     error: str,
     *,
     scheduled: bool = False,
-) -> None:
+    trigger: str | None = None,
+    duration_ms: int | None = None,
+) -> Automation | None:
     run_at = clock.now_iso()
+    record = AutomationRunRecord(
+        at=run_at,
+        status="failed",
+        trigger=trigger or ("scheduled" if scheduled else "manual"),
+        detail=error,
+        duration_ms=duration_ms,
+        steps=len(automation.steps),
+    )
     automation.last_run_at = run_at
     automation.last_run_status = f"failed: {error}"
-    persist_automation_fields(
+    persisted = persist_automation_fields(
         store,
         automation.id,
-        {"last_run_at": run_at, "last_run_status": f"failed: {error}"},
+        lambda current: _with_history(current, record, failed_scheduled=scheduled),
     )
     store.record_audit(
         actor,
@@ -398,5 +633,154 @@ def record_run_failure(
             "executed_at": run_at,
             "error": error,
             "scheduled": scheduled,
+            "trigger": record.trigger,
         },
+    )
+    if persisted is not None and scheduled and not persisted.enabled and automation.enabled:
+        store.record_audit(
+            actor,
+            "automation.auto_paused",
+            automation.id,
+            {"consecutive_failures": persisted.consecutive_failures, "last_error": error},
+        )
+    return persisted
+
+
+def record_run_skipped(
+    store: SeedStore,
+    automation: Automation,
+    reason: str,
+) -> Automation | None:
+    """A scheduled fire that could not execute (for example, inactive creator)."""
+    record = AutomationRunRecord(
+        at=clock.now_iso(),
+        status="skipped",
+        trigger="scheduled",
+        detail=reason,
+        steps=len(automation.steps),
+    )
+    return persist_automation_fields(
+        store,
+        automation.id,
+        lambda current: {
+            "last_run_at": record.at,
+            "last_run_status": f"skipped: {reason}",
+            "run_history": [record, *current.run_history][:RUN_HISTORY_LIMIT],
+        },
+    )
+
+
+# --- Delivery ------------------------------------------------------------------
+
+
+def _local_stamp(automation: Automation, now: datetime, *, with_time: bool = False) -> str:
+    """The run time in the automation's own zone, so titles match its schedule."""
+    zone = resolve_zone(automation.timezone) or resolve_zone(None)
+    local = now.astimezone(zone)
+    if not with_time:
+        return local.strftime("%b %d, %Y")
+    return f"{local.strftime('%b %d, %Y %H:%M')} {local.tzname() or 'UTC'}"
+
+
+def delivery_thread(
+    automation: Automation,
+    owner: User,
+    transcript: list[dict[str, object]],
+    final_output: str,
+    now: datetime,
+    *,
+    prompt: str | None = None,
+    scheduled: bool = True,
+) -> ChatThread:
+    """A chat thread carrying a run's real output to its owner."""
+    stamp = _local_stamp(automation, now, with_time=True)
+    iso = now.isoformat()
+    metadata = {
+        "automation_id": automation.id,
+        "automation_name": automation.name,
+        "scheduled": scheduled,
+    }
+    return ChatThread(
+        id=f"thread-automation-{uuid4()}",
+        tenant_id=automation.tenant_id,
+        owner_user_id=owner.id,
+        title=f"{automation.name} — {stamp}",
+        model_id=automation.steps[-1].model_id if automation.steps else "",
+        group_id="",
+        updated_at=iso,
+        messages=[
+            ChatMessage(
+                id=f"msg-{uuid4()}",
+                role="user",
+                content=(prompt if prompt is not None else automation.prompt)
+                or "Begin the automation.",
+                createdAt=stamp,
+                createdAtIso=iso,
+                metadata=metadata,
+            ),
+            ChatMessage(
+                id=f"msg-{uuid4()}",
+                role="assistant",
+                content=final_output,
+                createdAt=stamp,
+                createdAtIso=iso,
+                metadata={**metadata, "steps": len(transcript)},
+            ),
+        ],
+    )
+
+
+def deliver_run_output(
+    store: SeedStore,
+    automation: Automation,
+    owner: User,
+    transcript: list[dict[str, object]],
+    final_output: str,
+    *,
+    prompt: str | None = None,
+    scheduled: bool = True,
+) -> tuple[str | None, str | None]:
+    """Deliver a finished run as a new chat thread or draft; returns their ids.
+
+    Delivery is part of the run: a draft or thread that cannot be saved fails
+    the run rather than reporting success with nowhere to find the output.
+    """
+    now = clock.now()
+    if automation.surface == "draft":
+        # Late import: the draft repository pulls in the SQL session stack.
+        from app.repositories.matters import MatterDraftRepository
+
+        title = f"{automation.name} — {_local_stamp(automation, now)}"[:DRAFT_TITLE_CHARS]
+        repository = MatterDraftRepository(store.application_state_repository.engine)
+        snapshot = repository.create_draft(
+            tenant_id=automation.tenant_id,
+            owner_user_id=owner.id,
+            title=title,
+            content=markdown_to_document_html(final_output),
+            kind="document",
+        )
+        return None, snapshot.document.id
+    thread = store.save_chat_thread(
+        delivery_thread(
+            automation, owner, transcript, final_output, now, prompt=prompt, scheduled=scheduled
+        )
+    )
+    return thread.id, None
+
+
+def with_next_run(automation: Automation, now: datetime | None = None) -> Automation:
+    """A copy carrying `next_run_at` for display; None when nothing is scheduled."""
+    upcoming: datetime | None = None
+    schedule = Schedule.of(automation)
+    if automation.enabled and automation.steps:
+        if automation.trigger_type == "once":
+            # A one-time run fires at run_at, or on the next pass if run_at has
+            # passed unfired; once fired it has nothing further scheduled.
+            zone = resolve_zone(schedule.timezone)
+            if not automation.last_scheduled_fire_at and zone is not None:
+                upcoming = parse_instant(schedule.run_at, zone)
+        else:
+            upcoming = next_occurrence(schedule, now or clock.now())
+    return automation.model_copy(
+        update={"next_run_at": upcoming.isoformat() if upcoming is not None else None}
     )

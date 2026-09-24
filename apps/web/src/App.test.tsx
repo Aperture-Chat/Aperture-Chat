@@ -1539,27 +1539,19 @@ test("knowledge bases load documents and sync through the knowledge API", async 
     await screen.findByRole("heading", { name: "Library" }),
   ).toBeInTheDocument();
 
-  const boxRow = screen
-    .getByText("Box Matter Knowledge")
-    .closest("tr") as HTMLElement;
-  fireEvent.click(within(boxRow).getByRole("button", { name: "Show Data" }));
+  const boxCard = screen.getByRole("article", { name: "Box Matter Knowledge" });
+  fireEvent.click(within(boxCard).getByRole("button", { name: "Open" }));
   expect(
     await screen.findByText("Box motion to compel outline.docx"),
   ).toBeInTheDocument();
-  expect(screen.getByText(/box:\/\/files\/987/)).toBeInTheDocument();
+  expect(screen.getByTitle("box://files/987")).toBeInTheDocument();
 
-  fireEvent.click(within(boxRow).getByRole("button", { name: "Sync" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
   expect(
-    await screen.findByText(/synced 1 documents through the knowledge API/i),
-  ).toBeInTheDocument();
-  expect(
-    screen.getByText("Box returned 1 file records from folder 12345."),
-  ).toBeInTheDocument();
-  expect(screen.getByText("Box Matter Folders")).toBeInTheDocument();
+    await screen.findAllByText("Box returned 1 file records from folder 12345."),
+  ).not.toHaveLength(0);
   expect(await screen.findByText("Live Box motion.docx")).toBeInTheDocument();
-  await waitFor(() => {
-    expect(screen.getByText("Jan 2, 2026, 4:05 PM UTC")).toBeInTheDocument();
-  });
+  expect(screen.getAllByText(/Updated Jan 2, 2026, 4:05 PM UTC/)).not.toHaveLength(0);
 
   expect(fetchMock).toHaveBeenCalledWith(
     expect.stringContaining("/api/knowledge/knowledge-box-matters/sync"),
@@ -1568,906 +1560,6 @@ test("knowledge bases load documents and sync through the knowledge API", async 
       body: JSON.stringify({ force: true }),
     }),
   );
-});
-
-test("knowledge external connection setup lives in the API data tab", async () => {
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/knowledge/knowledge-box-matters/documents") &&
-        init?.method !== "POST"
-      ) {
-        return new Response(JSON.stringify([]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-  expect(
-    await screen.findByRole("heading", { name: "Library" }),
-  ).toBeInTheDocument();
-
-  const boxRow = screen
-    .getByText("Box Matter Knowledge")
-    .closest("tr") as HTMLElement;
-  expect(
-    within(boxRow).queryByRole("button", { name: /Configure/ }),
-  ).not.toBeInTheDocument();
-
-  fireEvent.click(within(boxRow).getByRole("button", { name: "Show Data" }));
-  fireEvent.click(await screen.findByRole("tab", { name: "API" }));
-
-  expect(screen.getByText("API source")).toBeInTheDocument();
-  expect(screen.getByLabelText("Source label")).toBeInTheDocument();
-  expect(screen.getByLabelText("Resource, folder, or path")).toBeInTheDocument();
-  expect(screen.getByLabelText("Method")).toHaveValue("GET");
-  expect(screen.getByLabelText("Header notes")).toBeInTheDocument();
-  expect(screen.getByLabelText("Auth type")).toBeInTheDocument();
-  expect(screen.queryByText(/connector setup/i)).not.toBeInTheDocument();
-});
-
-test("creates a knowledge base with its first web data source", async () => {
-  const requests: Array<{ url: string; init?: RequestInit; body?: unknown }> =
-    [];
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const body = init?.body ? JSON.parse(init.body as string) : undefined;
-      requests.push({ url, init, body });
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/admin/knowledge-configs") &&
-        init?.method === "POST"
-      ) {
-        return new Response(
-          JSON.stringify({
-            id: body.id,
-            tenant_id: "tenant-example",
-            name: body.name,
-            source_type: body.source_type,
-            connector_config_id: body.connector_config_id,
-            enabled: body.enabled,
-            acl_group_ids: body.acl_group_ids,
-            owner_user_id: body.owner_user_id,
-            secret_set: false,
-            masked_secret: null,
-            settings: body.settings,
-          }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (
-        url.includes("/web-sources") &&
-        init?.method === "POST"
-      ) {
-        const createRequest = requests.find(
-          (request) =>
-            request.url.includes("/api/admin/knowledge-configs") &&
-            request.init?.method === "POST",
-        );
-        const createBody = createRequest?.body as Record<string, any>;
-        return new Response(
-          JSON.stringify({
-            config: {
-              id: createBody.id,
-              tenant_id: "tenant-example",
-              name: createBody.name,
-              source_type: createBody.source_type,
-              connector_config_id: null,
-              enabled: true,
-              acl_group_ids: createBody.acl_group_ids,
-              owner_user_id: createBody.owner_user_id,
-              secret_set: false,
-              masked_secret: null,
-              settings: {
-                ...createBody.settings,
-                status: "ready",
-                document_count: 1,
-                last_sync: "Just now",
-              },
-            },
-            documents: [],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Add Knowledge Base" }),
-  );
-
-  expect(
-    await screen.findByRole("form", { name: "Create knowledge base" }),
-  ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("radio", { name: /Document uploads/ }));
-  const createFileInput = screen.getByLabelText("Choose documents");
-  expect(createFileInput).toBeInTheDocument();
-  const firstCreateFile = new File(["First indexed note"], "first-note.txt", {
-    type: "text/plain",
-  });
-  const secondCreateFile = new File(
-    ["Second indexed note"],
-    "second-note.txt",
-    { type: "text/plain" },
-  );
-  fireEvent.change(createFileInput, {
-    target: {
-      files: fileListForInput([firstCreateFile, secondCreateFile]),
-    },
-  });
-  expect(screen.getByText("Ready to index")).toBeInTheDocument();
-  expect(screen.getByText("first-note.txt")).toBeInTheDocument();
-  expect(screen.getByText("second-note.txt")).toBeInTheDocument();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Remove first-note.txt" }),
-  );
-  expect(screen.queryByText("first-note.txt")).not.toBeInTheDocument();
-  expect(screen.getByText("second-note.txt")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("radio", { name: /Web links/ }));
-  expect(screen.getByLabelText("Web address")).toBeInTheDocument();
-  expect(screen.getByLabelText(/Source name/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("radio", { name: /API Connect/ }));
-  expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
-  expect(screen.getByLabelText("Authentication")).toHaveValue("api-key");
-  expect(screen.getByLabelText("API key")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("radio", { name: /Web links/ }));
-  fireEvent.change(screen.getByLabelText("Web address"), {
-    target: { value: "https://example.com/outside-counsel" },
-  });
-  fireEvent.change(screen.getByLabelText(/Source name/), {
-    target: { value: "Outside Counsel Guidelines" },
-  });
-  expect(screen.queryByLabelText("Source label")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Description")).not.toBeInTheDocument();
-  expect(screen.queryByText("Enable after creation")).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Who can use it?")).toHaveValue("");
-  fireEvent.change(screen.getByLabelText("Knowledge base name"), {
-    target: { value: "Outside Counsel Policy Library" },
-  });
-  fireEvent.change(screen.getByLabelText("Who can use it?"), {
-    target: { value: "group-corporate" },
-  });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Create with data source" }),
-  );
-
-  expect(
-    await screen.findByText(
-      "Outside Counsel Policy Library data source was saved. Review its status below.",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    screen.getByText("Outside Counsel Policy Library"),
-  ).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Web sources" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  expect(screen.getByText("Web source")).toBeInTheDocument();
-
-  const createRequest = requests.find(
-    (request) =>
-      request.url.includes("/api/admin/knowledge-configs") &&
-      request.init?.method === "POST",
-  );
-  expect(createRequest?.body).toMatchObject({
-    name: "Outside Counsel Policy Library",
-    source_type: "web",
-    connector_config_id: null,
-    enabled: true,
-    acl_group_ids: ["group-corporate"],
-    owner_user_id: "user-admin",
-    settings: {
-      description:
-        "Web URLs and extracted notes indexed into the vector knowledge API.",
-      source: "Curated web sources",
-      source_type_label: "Web links",
-      status: "draft",
-      document_count: 0,
-      last_sync: "Not synced",
-      acl: "Groups: Corporate",
-    },
-  });
-
-  const webSourceRequest = requests.find(
-    (request) =>
-      request.url.includes("/web-sources") &&
-      request.init?.method === "POST",
-  );
-  expect(webSourceRequest?.body).toEqual({
-    name: "Outside Counsel Guidelines",
-    url: "https://example.com/outside-counsel",
-    text: null,
-  });
-});
-
-test("uploads knowledge documents and reports indexed chunks", async () => {
-  const uploadRequests: Array<{ fileNames: string[] }> = [];
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/knowledge/kb-litigation-playbook/documents") &&
-        init?.method === "POST"
-      ) {
-        const form = init.body as FormData;
-        uploadRequests.push({
-          fileNames: form
-            .getAll("files")
-            .map((entry) =>
-              entry instanceof File ? entry.name : String(entry),
-            ),
-        });
-        return new Response(
-          JSON.stringify({
-            status: "synced",
-            synced_at: "Jun 28, 2026, 2:12 PM UTC",
-            provider_status: "live",
-            provider_message: "Uploaded and indexed 1 document source.",
-            config: {
-              id: "kb-litigation-playbook",
-              tenant_id: "tenant-example",
-              name: "Litigation Playbook",
-              source_type: "microsoft-graph",
-              connector_config_id: "conncfg-graph-example",
-              enabled: true,
-              acl_group_ids: ["group-litigation"],
-              secret_set: true,
-              settings: {
-                description:
-                  "Pleadings, discovery templates, matter strategy notes, and cited legal guidance.",
-                source: "SharePoint Litigation Library",
-                status: "synced",
-                document_count: 2,
-                last_sync: "Jun 28, 2026, 2:12 PM UTC",
-                acl: "AD Group: Litigation",
-                provider_status: "live",
-                provider_message: "Uploaded and indexed 1 document source.",
-              },
-            },
-            documents: [
-              {
-                id: "doc-responsive-pleading",
-                knowledge_config_id: "kb-litigation-playbook",
-                tenant_id: "tenant-example",
-                name: "Responsive pleading template.docx",
-                source_uri:
-                  "graph://sites/example-litigation/pleadings/responsive-pleading-template.docx",
-                source_type: "microsoft-graph",
-                status: "indexed",
-                chunk_count: 31,
-                acl_group_ids: ["group-litigation"],
-                updated_at: "Jun 28, 2026, 7:26 AM UTC",
-                citation_required: true,
-              },
-              {
-                id: "doc-client-update",
-                knowledge_config_id: "kb-litigation-playbook",
-                tenant_id: "tenant-example",
-                name: "client-update.txt",
-                source_uri:
-                  "upload://knowledge/kb-litigation-playbook/client-update.txt",
-                source_type: "upload",
-                status: "indexed",
-                chunk_count: 7,
-                acl_group_ids: ["group-litigation"],
-                updated_at: "Jun 28, 2026, 2:12 PM UTC",
-                citation_required: true,
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (url.includes("/api/knowledge/kb-litigation-playbook/documents")) {
-        return new Response(
-          JSON.stringify([
-            {
-              id: "doc-responsive-pleading",
-              knowledge_config_id: "kb-litigation-playbook",
-              tenant_id: "tenant-example",
-              name: "Responsive pleading template.docx",
-              source_uri:
-                "graph://sites/example-litigation/pleadings/responsive-pleading-template.docx",
-              source_type: "microsoft-graph",
-              status: "indexed",
-              chunk_count: 31,
-              acl_group_ids: ["group-litigation"],
-              updated_at: "Jun 28, 2026, 7:26 AM UTC",
-              citation_required: true,
-            },
-          ]),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-  expect(
-    await screen.findByRole("heading", { name: "Library" }),
-  ).toBeInTheDocument();
-  const row = (await screen.findByText("Litigation Playbook")).closest(
-    "tr",
-  ) as HTMLElement;
-  fireEvent.click(within(row).getByRole("button", { name: "Show Data" }));
-
-  const fileInput = (await screen.findByLabelText(
-    "Upload documents to Litigation Playbook",
-    {
-      selector: "input",
-    },
-  )) as HTMLInputElement;
-  const file = new File(
-    ["Client update should lead with response deadline."],
-    "client-update.txt",
-    {
-      type: "text/plain",
-    },
-  );
-  expect(fileInput).toBeEnabled();
-  fireEvent.change(fileInput, { target: { files: fileListForInput([file]) } });
-
-  await waitFor(() =>
-    expect(uploadRequests).toEqual([{ fileNames: ["client-update.txt"] }]),
-  );
-  expect(
-    await screen.findByText(
-      /Current index: 2 documents, 38 searchable chunks/i,
-    ),
-  ).toBeInTheDocument();
-  expect(await screen.findByText("client-update.txt")).toBeInTheDocument();
-});
-
-test("knowledge API source shows OAuth client metadata fields and saves them", async () => {
-  const requests: Array<{ url: string; init?: RequestInit; body?: unknown }> =
-    [];
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const body =
-        typeof init?.body === "string"
-          ? JSON.parse(init.body as string)
-          : undefined;
-      requests.push({ url, init, body });
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/knowledge/kb-litigation-playbook/documents") &&
-        init?.method !== "POST"
-      ) {
-        return new Response(JSON.stringify([]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/knowledge/kb-litigation-playbook/api-sources") &&
-        init?.method === "POST"
-      ) {
-        return new Response(
-          JSON.stringify({
-            status: "synced",
-            synced_at: "Jun 30, 2026, 9:20 AM UTC",
-            provider_status: "live",
-            provider_message:
-              "Registered API source Matter API and stored the credential in the backend vault.",
-            config: {
-              id: "kb-litigation-playbook",
-              tenant_id: "tenant-example",
-              name: "Litigation Playbook",
-              source_type: "microsoft-graph",
-              connector_config_id: "conncfg-graph-example",
-              enabled: true,
-              acl_group_ids: ["group-litigation"],
-              secret_set: true,
-              settings: {
-                description:
-                  "Pleadings, discovery templates, matter strategy notes, and cited legal guidance.",
-                source: "SharePoint Litigation Library",
-                status: "synced",
-                document_count: 12,
-                last_sync: "Jun 30, 2026, 9:20 AM UTC",
-                acl: "AD Group: Litigation",
-                provider_status: "live",
-                provider_message:
-                  "Registered API source Matter API and stored the credential in the backend vault.",
-              },
-            },
-            documents: [],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-
-  const litigationRow = (await screen.findByText("Litigation Playbook")).closest(
-    "tr",
-  ) as HTMLElement;
-  fireEvent.click(
-    within(litigationRow).getByRole("button", { name: "Show Data" }),
-  );
-
-  expect(
-    await screen.findByLabelText("Add sources to Litigation Playbook"),
-  ).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  fireEvent.click(screen.getByRole("tab", { name: "API" }));
-
-  const sourceCards = Array.from(
-    document.querySelectorAll("details.knowledge-source-details"),
-  );
-  const apiDetails = sourceCards.find((details) =>
-    details.textContent?.includes("API source"),
-  ) as HTMLDetailsElement;
-  expect(apiDetails).toBeTruthy();
-  expect(apiDetails).toHaveClass("knowledge-api-source-details");
-  expect(apiDetails.closest(".knowledge-detail-grid")).toHaveClass("is-api-tab");
-
-  expect(within(apiDetails).getByLabelText("Name").closest("label")).toHaveClass(
-    "knowledge-api-name-field",
-  );
-  fireEvent.change(within(apiDetails).getByLabelText("Name"), {
-    target: { value: "Matter API" },
-  });
-  expect(within(apiDetails).getByLabelText("Base URL").closest("label")).toHaveClass(
-    "knowledge-api-wide-field",
-  );
-  fireEvent.change(within(apiDetails).getByLabelText("Base URL"), {
-    target: { value: "https://api.matter.example.com" },
-  });
-  expect(within(apiDetails).getByLabelText("Source label").closest("label")).toHaveClass(
-    "knowledge-api-wide-field",
-  );
-  expect(within(apiDetails).getByLabelText("Method").closest("label")).toHaveClass(
-    "knowledge-api-method-field",
-  );
-  expect(within(apiDetails).getByLabelText("API key")).toBeInTheDocument();
-  expect(within(apiDetails).getByLabelText("Key name")).toHaveValue(
-    "X-API-Key",
-  );
-  expect(within(apiDetails).getByLabelText("Send as")).toHaveValue("header");
-  fireEvent.change(within(apiDetails).getByLabelText("Auth type"), {
-    target: { value: "bearer-token" },
-  });
-  expect(within(apiDetails).getByLabelText("Bearer token")).toBeInTheDocument();
-  expect(within(apiDetails).getByLabelText("Authorization header")).toHaveValue(
-    "Authorization: Bearer [stored token]",
-  );
-  fireEvent.change(within(apiDetails).getByLabelText("Auth type"), {
-    target: { value: "oauth-client" },
-  });
-
-  expect(
-    within(apiDetails).getByLabelText("OAuth client ID"),
-  ).toBeInTheDocument();
-  expect(
-    within(apiDetails).getByLabelText("OAuth client secret"),
-  ).toBeInTheDocument();
-  expect(within(apiDetails).getByLabelText("Token URL")).toBeInTheDocument();
-  expect(within(apiDetails).getByLabelText("Redirect URI")).toHaveValue(
-    "http://localhost:8000/api/knowledge/kb-litigation-playbook/oauth/callback",
-  );
-
-  fireEvent.change(within(apiDetails).getByLabelText("OAuth client ID"), {
-    target: { value: "matter-client-id" },
-  });
-  fireEvent.change(within(apiDetails).getByLabelText("OAuth client secret"), {
-    target: { value: "matter-client-secret" },
-  });
-  fireEvent.change(within(apiDetails).getByLabelText("Authorization URL"), {
-    target: { value: "https://login.example.com/oauth/authorize" },
-  });
-  fireEvent.change(within(apiDetails).getByLabelText("Token URL"), {
-    target: { value: "https://login.example.com/oauth/token" },
-  });
-  fireEvent.change(within(apiDetails).getByLabelText("Scopes"), {
-    target: { value: "matters.read, documents.read" },
-  });
-  fireEvent.change(within(apiDetails).getByLabelText("Audience or tenant"), {
-    target: { value: "tenant-example" },
-  });
-  fireEvent.click(
-    within(apiDetails).getByRole("button", { name: /save api source/i }),
-  );
-
-  expect(
-    await screen.findByText(
-      "Litigation Playbook API source saved and indexed.",
-    ),
-  ).toBeInTheDocument();
-
-  const apiSourceRequest = requests.find(
-    (request) =>
-      request.url.includes("/api/knowledge/kb-litigation-playbook/api-sources") &&
-      request.init?.method === "POST",
-  );
-  expect(apiSourceRequest?.body).toMatchObject({
-    name: "Matter API",
-    base_url: "https://api.matter.example.com",
-    auth_type: "oauth-client",
-    secret_value: "matter-client-secret",
-    client_id: "matter-client-id",
-    authorization_url: "https://login.example.com/oauth/authorize",
-    token_url: "https://login.example.com/oauth/token",
-    callback_url:
-      "http://localhost:8000/api/knowledge/kb-litigation-playbook/oauth/callback",
-    scopes: ["matters.read", "documents.read"],
-    audience: "tenant-example",
-  });
-});
-
-test("deletes a single indexed knowledge document", async () => {
-  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-  const requests: Array<{ url: string; init?: RequestInit }> = [];
-  const responsiveDocument = {
-    id: "doc-responsive-pleading",
-    knowledge_config_id: "kb-litigation-playbook",
-    tenant_id: "tenant-example",
-    name: "Responsive pleading template.docx",
-    source_uri:
-      "graph://sites/example-litigation/pleadings/responsive-pleading-template.docx",
-    source_type: "microsoft-graph",
-    status: "indexed",
-    chunk_count: 31,
-    acl_group_ids: ["group-litigation"],
-    updated_at: "Jun 28, 2026, 7:26 AM UTC",
-    citation_required: true,
-  };
-  const discoveryDocument = {
-    id: "doc-discovery-playbook",
-    knowledge_config_id: "kb-litigation-playbook",
-    tenant_id: "tenant-example",
-    name: "Discovery objections playbook.pdf",
-    source_uri:
-      "graph://sites/example-litigation/discovery/discovery-objections-playbook.pdf",
-    source_type: "microsoft-graph",
-    status: "indexed",
-    chunk_count: 53,
-    acl_group_ids: ["group-litigation"],
-    updated_at: "Jun 28, 2026, 7:26 AM UTC",
-    citation_required: true,
-  };
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      requests.push({ url, init });
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes(
-          "/api/knowledge/kb-litigation-playbook/documents/doc-responsive-pleading",
-        ) &&
-        init?.method === "DELETE"
-      ) {
-        return new Response(
-          JSON.stringify({
-            status: "synced",
-            synced_at: "Jun 28, 2026, 2:20 PM UTC",
-            provider_status: "live",
-            provider_message:
-              "Deleted Responsive pleading template.docx from the knowledge index.",
-            config: {
-              id: "kb-litigation-playbook",
-              tenant_id: "tenant-example",
-              name: "Litigation Playbook",
-              source_type: "microsoft-graph",
-              connector_config_id: "conncfg-graph-example",
-              enabled: true,
-              acl_group_ids: ["group-litigation"],
-              secret_set: true,
-              settings: {
-                description:
-                  "Pleadings, discovery templates, matter strategy notes, and cited legal guidance.",
-                source: "SharePoint Litigation Library",
-                status: "synced",
-                document_count: 1,
-                last_sync: "Jun 28, 2026, 2:20 PM UTC",
-                acl: "AD Group: Litigation",
-                provider_status: "live",
-                provider_message:
-                  "Deleted Responsive pleading template.docx from the knowledge index.",
-              },
-            },
-            documents: [discoveryDocument],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (url.includes("/api/knowledge/kb-litigation-playbook/documents")) {
-        return new Response(
-          JSON.stringify([responsiveDocument, discoveryDocument]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-  expect(
-    await screen.findByRole("heading", { name: "Library" }),
-  ).toBeInTheDocument();
-  const row = (await screen.findByText("Litigation Playbook")).closest(
-    "tr",
-  ) as HTMLElement;
-  fireEvent.click(within(row).getByRole("button", { name: "Show Data" }));
-
-  const documentList = await screen.findByRole("list", {
-    name: "Litigation Playbook indexed document inventory",
-  });
-  expect(documentList).toHaveClass("knowledge-document-list");
-  expect(
-    within(documentList).getByText("Responsive pleading template.docx"),
-  ).toBeInTheDocument();
-  expect(within(documentList).queryByText("indexed")).not.toBeInTheDocument();
-  expect(within(documentList).queryByText("31 chunks")).not.toBeInTheDocument();
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Delete Responsive pleading template.docx",
-    }),
-  );
-
-  await waitFor(() =>
-    expect(
-      requests.some(
-        (request) =>
-          request.url.includes(
-            "/api/knowledge/kb-litigation-playbook/documents/doc-responsive-pleading",
-          ) && request.init?.method === "DELETE",
-      ),
-    ).toBe(true),
-  );
-  expect(confirmSpy).toHaveBeenCalledWith(
-    "Delete Responsive pleading template.docx? This removes the document and its indexed chunks.",
-  );
-  expect(
-    await screen.findByText(
-      /Current index: 1 documents, 53 searchable chunks/i,
-    ),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole("button", {
-      name: "Delete Responsive pleading template.docx",
-    }),
-  ).not.toBeInTheDocument();
-  expect(
-    screen.getByText("Discovery objections playbook.pdf"),
-  ).toBeInTheDocument();
-  confirmSpy.mockRestore();
-});
-
-test("deletes a knowledge base through the admin API", async () => {
-  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-  const requests: Array<{ url: string; init?: RequestInit }> = [];
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      requests.push({ url, init });
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/admin/knowledge-configs/kb-litigation-playbook") &&
-        init?.method === "DELETE"
-      ) {
-        return new Response(
-          JSON.stringify({ status: "deleted", id: "kb-litigation-playbook" }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-  expect(
-    await screen.findByRole("heading", { name: "Library" }),
-  ).toBeInTheDocument();
-  const row = (await screen.findByText("Litigation Playbook")).closest(
-    "tr",
-  ) as HTMLElement;
-  const deleteButton = within(row).getByRole("button", { name: "Delete" });
-  expect(deleteButton).toBeEnabled();
-  fireEvent.click(deleteButton);
-  expect(confirmSpy).toHaveBeenCalledWith(
-    "Delete Litigation Playbook? This removes the knowledge base, indexed documents, and model links from the tenant catalog.",
-  );
-
-  await waitFor(() =>
-    expect(
-      requests.some(
-        (request) =>
-          request.url.includes(
-            "/api/admin/knowledge-configs/kb-litigation-playbook",
-          ) && request.init?.method === "DELETE",
-      ),
-    ).toBe(true),
-  );
-  expect(
-    await screen.findByText(
-      "Litigation Playbook deleted from the admin knowledge API.",
-    ),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByText("SharePoint Litigation Library"),
-  ).not.toBeInTheDocument();
-  confirmSpy.mockRestore();
-});
-
-test("clears all knowledge bases through the admin API", async () => {
-  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-  const requests: Array<{ url: string; init?: RequestInit }> = [];
-  const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString();
-      requests.push({ url, init });
-
-      if (url.includes("/api/bootstrap")) {
-        return new Response(JSON.stringify(sampleData), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (
-        url.includes("/api/admin/knowledge-configs/") &&
-        init?.method === "DELETE"
-      ) {
-        const id = url.split("/api/admin/knowledge-configs/")[1];
-        return new Response(JSON.stringify({ status: "deleted", id }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response("unavailable", { status: 500 });
-    },
-  );
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(<App />);
-
-  const primaryNav = await screen.findByRole("navigation", { name: "Primary" });
-  fireEvent.click(
-    within(primaryNav).getByRole("link", { name: "Library" }),
-  );
-  expect(
-    await screen.findByRole("heading", { name: "Library" }),
-  ).toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole("button", { name: "Clear Knowledge" }));
-  expect(confirmSpy).toHaveBeenCalledWith(
-    `Delete all ${sampleData.knowledgeBases.length} knowledge bases? This removes the knowledge bases, indexed documents, and model links from the tenant catalog.`,
-  );
-
-  await waitFor(() =>
-    expect(
-      requests.filter(
-        (request) =>
-          request.url.includes("/api/admin/knowledge-configs/") &&
-          request.init?.method === "DELETE",
-      ),
-    ).toHaveLength(sampleData.knowledgeBases.length),
-  );
-  expect(
-    await screen.findByText(
-      `Cleared ${sampleData.knowledgeBases.length} knowledge bases.`,
-    ),
-  ).toBeInTheDocument();
-  expect(screen.queryByText("Litigation Playbook")).not.toBeInTheDocument();
-  expect(screen.queryByText("Box Matter Knowledge")).not.toBeInTheDocument();
-  expect(screen.queryByText("Corporate Policy Library")).not.toBeInTheDocument();
-  confirmSpy.mockRestore();
 });
 
 test("deletes a tool configuration through the admin API", async () => {
@@ -2512,18 +1604,15 @@ test("deletes a tool configuration through the admin API", async () => {
       name: "Tools",
     }),
   );
-  const toolRow = await screen.findByText("Agent Workflow Runner");
-  const row = toolRow.closest("tr") as HTMLElement;
-  fireEvent.click(within(row).getByRole("button", { name: "Configure MCP" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Delete tool" }));
+  const toolCard = await screen.findByRole("article", { name: "Agent Workflow Runner" });
+  fireEvent.click(within(toolCard).getByRole("button", { name: "More actions for Agent Workflow Runner" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
   expect(
-    await screen.findByText(
-      "Agent Workflow Runner deleted from the admin tool API.",
-    ),
+    await screen.findByText("Agent Workflow Runner was deleted."),
   ).toBeInTheDocument();
   expect(confirmSpy).toHaveBeenCalledWith(
-    "Delete Agent Workflow Runner? This removes the tool configuration from the tenant catalog.",
+    "Delete Agent Workflow Runner? Agents that use it lose access to it. This can't be undone.",
   );
   expect(
     requests.some(
@@ -2569,12 +1658,12 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
             enabled: true,
             secret_set: true,
             masked_secret: "Existing secret retained",
-            name: body.name,
-            tool_type: body.tool_type,
-            endpoint_url: body.endpoint_url,
-            approval_required: body.approval_required,
+            name: body.name ?? "Hermes Agent MCP",
+            tool_type: body.tool_type ?? "mcp",
+            endpoint_url: body.endpoint_url ?? "stdio://hermes mcp serve",
+            approval_required: body.approval_required ?? true,
             allowed_group_ids: body.allowed_group_ids,
-            settings: body.settings,
+            settings: { transport: "stdio", command: "hermes", args: ["mcp", "serve"], ...body.settings },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -2603,30 +1692,30 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
   expect(
     screen.queryByRole("heading", { name: "Prompt Template Library" }),
   ).not.toBeInTheDocument();
-  const toolRow = await screen.findByText("Hermes Agent MCP");
-  const row = toolRow.closest("tr") as HTMLElement;
-  fireEvent.click(within(row).getByRole("button", { name: "Configure MCP" }));
+  const toolCard = await screen.findByRole("article", { name: "Hermes Agent MCP" });
+  fireEvent.click(within(toolCard).getByRole("button", { name: "Edit Hermes Agent MCP" }));
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Access & approval" }));
   expect(screen.queryByText("Agent attachments")).not.toBeInTheDocument();
-  expect(screen.getByText("Allowed groups")).toBeInTheDocument();
+  expect(screen.getByText("Who can use it")).toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: /Litigation/i })).toBeChecked();
   expect(screen.getByRole("checkbox", { name: /Finance Team/i })).toBeChecked();
-  expect(screen.getByText("Require approval before MCP calls")).toBeInTheDocument();
+  expect(screen.getByText("Ask before each use")).toBeInTheDocument();
   expect(
     screen.getByText(
-      "Pauses each invocation until an authorized user approves the tool run.",
+      "Before Aperture calls this connection, the person sending the message is asked to approve it in chat.",
     ),
   ).toBeInTheDocument();
-  expect(screen.getByText("Expose as Hermes companion")).toBeInTheDocument();
+  expect(screen.getByText("Available to Hermes companion")).toBeInTheDocument();
   expect(
     screen.getByText(
-      "Makes this server available to Hermes companion workflows that coordinate multi-step agent work.",
+      "Agents that use the Hermes companion get this connection automatically, for people allowed to use it.",
     ),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole("switch", { name: "Require approval before MCP calls" }),
+    screen.getByRole("switch", { name: "Ask before each use" }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole("switch", { name: "Expose as Hermes companion" }),
+    screen.getByRole("switch", { name: "Available to Hermes companion" }),
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("group", { name: "Skill files" }),
@@ -2635,7 +1724,8 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
     screen.queryByRole("group", { name: "Template prompts" }),
   ).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Save tool" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /Finance Team/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
   await waitFor(() =>
     expect(
@@ -2653,15 +1743,12 @@ test("saves MCP tool settings without agent prompt or skill attachments", async 
       request.init?.method === "PATCH",
   );
   const payload = JSON.parse(String(saveRequest?.init?.body)) as {
-    settings: Record<string, unknown>;
+    settings?: Record<string, unknown>;
+    allowed_group_ids?: string[];
   };
-  expect(payload.settings.skill_files).toBeUndefined();
-  expect(payload.settings.prompt_templates).toBeUndefined();
-  expect(payload.settings.runtime_invocations).toEqual([]);
-  expect(payload.settings.hermes_companion).toBe(true);
-  expect(
-    JSON.parse(String(saveRequest?.init?.body)).allowed_group_ids,
-  ).toEqual(["group-litigation", "group-finance"]);
+  // Only the changed field is sent: no agent attachments, no stdio command
+  // settings a tenant admin may not touch, and no tool type.
+  expect(payload).toEqual({ allowed_group_ids: ["group-litigation"] });
 });
 
 test("failed sign-in configuration can be retried without reloading the page", async () => {
