@@ -118,8 +118,7 @@ jobs:
             docs/DOCKER_RELEASE.md \
             docs/RETENTION.md \
             README.md \
-            LICENSE.md \
-            NOTICE.md
+            LICENSE.md
           echo "RELEASE_BUNDLE=${bundle}" >> "$GITHUB_ENV"
 
       - name: Write release notes
