@@ -94,6 +94,7 @@ import {
 import {
   approveMcpTool,
   ChatRequestError,
+  toolUsableBy,
   getCloudAttachmentAuthorizeUrl,
   importCloudAttachments,
   listCloudAttachmentItems,
@@ -785,14 +786,19 @@ function runtimeOptionsFromState(
   const selectedKnowledgeBase =
     enabledKnowledgeBases.find((knowledge) => knowledge.id === selectedKnowledgeBaseId) ?? enabledKnowledgeBases[0];
   const selectedKnowledgeIds = selectedKnowledgeBase ? [selectedKnowledgeBase.id] : [];
-  const requestedToolIds = selectedToolIds.filter((id) => data.tools.some((tool) => tool.id === id && tool.enabled
-    && (!isMcpRuntimeTool(tool) || connectorEnabled(data.connectors, "mcp"))));
+  // Only tools this user may actually run: turned on, shared with one of
+  // their groups (or theirs), and not behind a switched-off MCP connector.
+  // Sending anything else made the server refuse the whole Agent-mode turn.
+  const usableTools = data.tools.filter((tool) => toolUsableBy(data.me, tool)
+    && (!isMcpRuntimeTool(tool) || connectorEnabled(data.connectors, "mcp")));
+  const usableToolIds = new Set(usableTools.map((tool) => tool.id));
+  const requestedToolIds = selectedToolIds.filter((id) => usableToolIds.has(id));
   const agentEnabled = composerTools.Agent || requestedToolIds.length > 0;
   const baseToolIds =
     composerTools.Agent && selectedAgent
-      ? agentToolIds
+      ? agentToolIds.filter((id) => usableToolIds.has(id))
       : composerTools.Agent
-        ? data.tools.filter((tool) => tool.enabled).map((tool) => tool.id)
+        ? usableTools.map((tool) => tool.id)
         : [];
   return {
     agentProfileId: agentEnabled && selectedAgent ? selectedAgent.id : null,
@@ -843,7 +849,7 @@ function pendingMcpApprovalFromState(
   const approvalTools = [...new Set([...(runtime.toolConfigIds ?? []), ...profileToolIds])]
     .map((id) => data.tools.find((tool) => tool.id === id))
     .filter((tool): tool is ToolConfig => Boolean(tool))
-    .filter((tool) => tool.enabled && tool.approval_required && isMcpRuntimeTool(tool));
+    .filter((tool) => toolUsableBy(data.me, tool) && tool.approval_required && isMcpRuntimeTool(tool));
   if (approvalTools.length === 0) return null;
   const selectedAgent = composerTools.Agent && selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
   return {

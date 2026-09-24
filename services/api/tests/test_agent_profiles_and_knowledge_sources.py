@@ -180,7 +180,7 @@ def test_vector_store_uses_dense_semantics_without_keyword_overlap() -> None:
     assert hits[0].score > 1.0
 
 
-def test_knowledge_sources_upload_web_and_api_are_indexed() -> None:
+def test_knowledge_sources_upload_and_web_are_indexed() -> None:
     upload = client.post(
         "/api/knowledge/knowledge-box-matters/documents",
         headers=headers("user-admin"),
@@ -212,75 +212,16 @@ def test_knowledge_sources_upload_web_and_api_are_indexed() -> None:
     assert web.status_code == 200
     assert any(document["source_type"] == "web" for document in web.json()["documents"])
 
-    api = client.post(
-        "/api/knowledge/knowledge-box-matters/api-sources",
-        headers=headers("user-admin"),
-        json={
-            "name": "Matter API",
-            "base_url": "https://api.example.test/matters",
-            "auth_type": "oauth-client",
-            "client_id": "matter-client-id",
-            "authorization_url": "https://login.example.test/oauth/authorize",
-            "token_url": "https://login.example.test/oauth/token",
-            "callback_url": "https://aperture.example.test/oauth/knowledge/callback",
-            "scopes": ["matters.read", "documents.read"],
-            "audience": "tenant-example",
-            "secret_value": "oauth-client-secret",
-            "description": "Matter API exposes client decisions and deadlines.",
-        },
-    )
-    assert api.status_code == 200
-    body = api.json()
-    assert (
-        body["provider_message"]
-        == "Registered API source Matter API and stored the credential in the backend vault."
-    )
-    assert any(document["source_type"] == "api" for document in body["documents"])
-
-    api_key = client.post(
-        "/api/knowledge/knowledge-box-matters/api-sources",
-        headers=headers("user-admin"),
-        json={
-            "name": "Docket API key",
-            "base_url": "https://api.example.test/docket",
-            "auth_type": "api-key",
-            "credential_name": "X-Matter-Key",
-            "credential_location": "query",
-            "secret_value": "api-key-secret",
-            "description": "Docket API exposes filing calendar metadata.",
-        },
-    )
-    assert api_key.status_code == 200
-
-    bearer = client.post(
-        "/api/knowledge/knowledge-box-matters/api-sources",
-        headers=headers("user-admin"),
-        json={
-            "name": "Review API bearer",
-            "base_url": "https://api.example.test/review",
-            "auth_type": "bearer-token",
-            "secret_value": "bearer-token-secret",
-            "description": "Review API exposes matter review status.",
-        },
-    )
-    assert bearer.status_code == 200
-
+    # API sources are exercised against a mock HTTP endpoint in
+    # test_knowledge_linked_sources.py; indexing connection metadata alone is
+    # no longer treated as an API source.
     hits = get_store().retrieve_knowledge(
         get_store().users["user-admin"],
         ["knowledge-box-matters"],
-        "deadline docket client decisions matter-client-id matters.read X-Matter-Key Authorization Bearer",
+        "deadline docket hearing",
         limit=20,
     )
-    assert {hit.source_type for hit in hits}.intersection({"upload", "web", "api"})
-    api_hit_text = "\n".join(hit.text for hit in hits if hit.source_type == "api")
-    assert "matter-client-id" in api_hit_text
-    assert "matters.read" in api_hit_text
-    assert "X-Matter-Key" in api_hit_text
-    assert "query" in api_hit_text
-    assert "Authorization header: Bearer token" in api_hit_text
-    assert "oauth-client-secret" not in api_hit_text
-    assert "api-key-secret" not in api_hit_text
-    assert "bearer-token-secret" not in api_hit_text
+    assert {hit.source_type for hit in hits}.issuperset({"upload", "web"})
 
     search = client.post(
         "/api/knowledge/search",

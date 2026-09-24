@@ -53,27 +53,47 @@ def seed_local_user(user_id: str, email: str, role: Role) -> None:
 def test_knowledge_oauth_callback_ready_error_and_unknown_paths() -> None:
     ready = client.get("/api/knowledge/knowledge-box-matters/oauth/callback")
     assert ready.status_code == 200
-    assert ready.json()["status"] == "ready"
-    assert ready.json()["knowledge_config_id"] == "knowledge-box-matters"
+    assert ready.headers["content-type"].startswith("text/html")
+    assert "Start the connection from the knowledge base" in ready.text
 
     provider_error = client.get(
         "/api/knowledge/knowledge-box-matters/oauth/callback",
         params={"error": "access_denied", "state": "state-1"},
     )
-    assert provider_error.status_code == 200
-    assert provider_error.json() == {
-        "status": "error",
-        "knowledge_config_id": "knowledge-box-matters",
-        "name": "Box Matter Knowledge",
-        "error": "access_denied",
-        "state": "state-1",
-    }
+    assert provider_error.status_code == 400
+    assert "did not grant access (access_denied)" in provider_error.text
+    assert "<script" not in provider_error.text
 
     unknown = client.get("/api/knowledge/knowledge-missing/oauth/callback")
     assert unknown.status_code == 404
 
 
-def test_knowledge_oauth_callback_exchanges_code_and_stores_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_knowledge_oauth_callback_rejects_unsigned_state() -> None:
+    register = client.post(
+        "/api/knowledge/knowledge-box-matters/api-sources",
+        headers=headers("user-admin"),
+        json={
+            "name": "Matter API",
+            "base_url": "https://api.matter.example.test",
+            "auth_type": "oauth-client",
+            "client_id": "matter-client-id",
+            "authorization_url": "https://login.example.test/oauth/authorize",
+            "token_url": "https://login.example.test/oauth/token",
+        },
+    )
+    assert register.status_code == 200
+    forged = client.get(
+        "/api/knowledge/knowledge-box-matters/oauth/callback",
+        params={"code": "stolen", "state": "knowledge-box-matters"},
+    )
+    assert forged.status_code == 400
+    assert "did not come from Aperture" in forged.text
+    assert get_store().configuration_secret("knowledge-oauth-token", "knowledge-box-matters") is None
+
+
+def test_knowledge_oauth_callback_exchanges_code_and_indexes_waiting_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeOAuthClient:
@@ -94,57 +114,86 @@ def test_knowledge_oauth_callback_exchanges_code_and_stores_token(monkeypatch: p
                 json={"access_token": "knowledge-access-token", "token_type": "Bearer", "scope": "matters.read"},
             )
 
+    fetched_with: dict[str, object] = {}
+
+    def fake_fetch(request, **_kwargs):
+        fetched_with["request"] = request
+        from app.core.api_source_fetch import FetchedApiSource
+
+        return FetchedApiSource(
+            display_url="https://api.matter.example.test/v1/matters",
+            content_type="application/json",
+            text="matters[0].name: Harbor v. Beacon\nmatters[0].deadline: July 8",
+            byte_count=64,
+            truncated=False,
+        )
+
     register = client.post(
         "/api/knowledge/knowledge-box-matters/api-sources",
         headers=headers("user-admin"),
         json={
             "name": "Matter API",
             "base_url": "https://api.matter.example.test",
+            "path": "/v1/matters",
             "auth_type": "oauth-client",
             "secret_value": "matter-client-secret",
             "client_id": "matter-client-id",
             "authorization_url": "https://login.example.test/oauth/authorize",
             "token_url": "https://login.example.test/oauth/token",
-            "callback_url": "http://testserver/api/knowledge/knowledge-box-matters/oauth/callback",
             "scopes": ["matters.read"],
         },
     )
     assert register.status_code == 200
+    assert register.json()["provider_status"] == "pending"
+    assert not any(document["source_type"] == "api" for document in register.json()["documents"])
+
+    authorize = client.get(
+        "/api/knowledge/knowledge-box-matters/oauth/authorize-url",
+        headers=headers("user-admin"),
+    )
+    assert authorize.status_code == 200
+    state = authorize.json()["state"]
+    from app.core.config import get_settings
+
+    callback_url = f"{get_settings().api_base_url.rstrip('/')}/api/knowledge/knowledge-box-matters/oauth/callback"
+    assert "redirect_uri=" + callback_url.replace(":", "%3A").replace("/", "%2F") in authorize.json()["authorize_url"]
 
     monkeypatch.setattr(knowledge_route.httpx, "Client", FakeOAuthClient)
-    from app.core.config import get_settings
-    from app.core.sessions import sign_oidc_state
-
-    state = sign_oidc_state({"config_id": "knowledge-box-matters", "actor_id": "user-admin"}, get_settings().secret_key)
+    monkeypatch.setattr(knowledge_route, "fetch_api_source", fake_fetch)
     response = client.get(
         "/api/knowledge/knowledge-box-matters/oauth/callback",
         params={"code": "auth-code-123", "state": state},
     )
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "token_stored"
-    assert body["token_type"] == "Bearer"
+    assert "Access granted and Matter API indexed." in response.text
     assert captured["url"] == "https://login.example.test/oauth/token"
     assert captured["data"] == {
         "grant_type": "authorization_code",
         "code": "auth-code-123",
-        "redirect_uri": "http://testserver/api/knowledge/knowledge-box-matters/oauth/callback",
+        "redirect_uri": callback_url,
         "client_id": "matter-client-id",
         "client_secret": "matter-client-secret",
     }
+    request = fetched_with["request"]
+    assert request.credential_header == ("Authorization", "Bearer knowledge-access-token")
 
     store = get_store()
     token_payload = json.loads(store.configuration_secret("knowledge-oauth-token", "knowledge-box-matters") or "{}")
     assert token_payload["access_token"] == "knowledge-access-token"
-    assert store.knowledge_configs["knowledge-box-matters"].settings["oauth_token_status"] == "stored"
+    config = store.knowledge_configs["knowledge-box-matters"]
+    assert config.settings["oauth_token_status"] == "stored"
+    api_documents = [
+        document for document in store.knowledge_documents_for(config.id) if document.source_type == "api"
+    ]
+    assert [document.name for document in api_documents] == ["Matter API"]
+    hits = store.retrieve_knowledge(store.users["user-admin"], [config.id], "Harbor Beacon deadline", limit=3)
+    assert any("Harbor v. Beacon" in hit.text for hit in hits)
 
-    event = store.audit_events[-1]
-    assert event.action == "knowledge.oauth_token_stored"
-    assert event.action_type == "KNOWLEDGE_OAUTH_TOKEN_STORED"
-    assert event.target == "knowledge-box-matters"
-    assert event.metadata["access_token"] == "[redacted]"
-    assert "knowledge-access-token" not in str(event.metadata)
+    token_events = [event for event in store.audit_events if event.action == "knowledge.oauth_token_stored"]
+    assert token_events[-1].actor_id == "user-admin"
+    assert token_events[-1].metadata["access_token"] == "[redacted]"
+    assert "knowledge-access-token" not in str(token_events[-1].metadata)
 
 
 def test_oauth_env_from_token_payload_builds_mcp_env() -> None:
@@ -492,7 +541,7 @@ def test_web_source_manual_text_mode_is_labeled_as_unfetched() -> None:
     )
     assert response.status_code == 200
     assert response.json()["provider_message"] == (
-        "Indexed operator-provided text for https://example.test/pasted; the page itself was not fetched."
+        "Indexed the text you provided for https://example.test/pasted; the page itself was not fetched."
     )
 
 

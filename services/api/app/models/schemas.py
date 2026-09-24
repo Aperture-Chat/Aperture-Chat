@@ -7,7 +7,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core import clock
 from app.core.provider_credential_expiry import parse_provider_credential_expiry
@@ -1267,23 +1267,33 @@ class KnowledgeWebSourceCreateRequest(BaseModel):
 
 
 class KnowledgeApiSourceCreateRequest(BaseModel):
+    """One HTTP request whose response is fetched, indexed, and re-fetched on sync."""
+
     name: str
     base_url: str
-    auth_type: str = "api-key"
+    # Appended to base_url, e.g. "/v1/matters?status=open".
+    path: str | None = Field(default=None, validation_alias=AliasChoices("path", "resource_id"))
+    method: str = Field(default="GET", validation_alias=AliasChoices("method", "request_method"))
+    # "Name: value" lines sent with every request. Credentials belong in secret_value.
+    headers: str | None = None
+    body: str | None = None
+    auth_type: str = "none"
     secret_value: str | None = None
-    description: str | None = None
-    source_label: str | None = None
-    resource_id: str | None = None
-    request_method: str | None = None
-    header_notes: str | None = None
     credential_name: str | None = None
     credential_location: str | None = None
     client_id: str | None = None
     authorization_url: str | None = None
     token_url: str | None = None
-    callback_url: str | None = None
     scopes: list[str] = Field(default_factory=list)
     audience: str | None = None
+
+
+class KnowledgeIndexStatus(BaseModel):
+    knowledge_config_id: str
+    semantic_search: str
+    total_chunks: int
+    pending_chunks: int
+    pending_by_document: dict[str, int] = Field(default_factory=dict)
 
 
 class KnowledgeSyncResponse(BaseModel):
@@ -2517,20 +2527,36 @@ class AutomationStep(BaseModel):
     instruction: str = ""
 
 
+class AutomationRunRecord(BaseModel):
+    """One entry in an automation's bounded run history."""
+
+    at: str
+    status: str  # "succeeded" | "failed" | "skipped"
+    trigger: str = "manual"  # "manual" | "scheduled" | "chat"
+    detail: str = ""
+    duration_ms: int | None = None
+    steps: int = 0
+    # Where the run's output was delivered, when it was delivered anywhere.
+    thread_id: str | None = None
+    draft_id: str | None = None
+
+
 class Automation(BaseModel):
     id: str
     tenant_id: str
     name: str
-    # Which surface the run targets: a chat completion or a drafting run.
+    # Where results are delivered: a new chat thread, or a new draft document.
     surface: str = "chat"  # "chat" | "draft"
-    # Schedule shape, interpreted in UTC. Enabled schedules are fired by the
-    # in-process scheduler (app/core/scheduler.py); "Run now" executes the
-    # chain on demand through the same runner.
+    # Schedule shape. Enabled schedules are fired by the in-process scheduler
+    # (app/core/scheduler.py); "Run now" executes the chain on demand through
+    # the same runner. Times are wall-clock times in `timezone`; without one
+    # they are UTC (the historical behavior).
     trigger_type: str = "weekly"  # "once" | "daily" | "weekly" | "cron"
     run_at: str | None = None  # ISO datetime for a one-time run
     weekly_day: str | None = None  # e.g. "monday"
     time_of_day: str | None = None  # "HH:MM", used by daily and weekly triggers
     cron_expression: str | None = None
+    timezone: str | None = None  # IANA zone such as "America/Chicago"
     # The initial input handed to the first step of the chain.
     prompt: str = ""
     steps: list[AutomationStep] = Field(default_factory=list)
@@ -2544,6 +2570,13 @@ class Automation(BaseModel):
     # Stamped by the scheduler when it fires a trigger, before execution, so
     # scheduler passes and restarts never double-fire the same occurrence.
     last_scheduled_fire_at: str | None = None
+    # The most recent runs, newest first (bounded; see automation_runner).
+    run_history: list[AutomationRunRecord] = Field(default_factory=list)
+    # Scheduled failures in a row; the scheduler pauses the automation once
+    # this reaches its limit so a broken chain stops spending on every fire.
+    consecutive_failures: int = 0
+    # Computed on read from the schedule; never stored as authoritative.
+    next_run_at: str | None = None
 
 
 class AutomationCreateRequest(BaseModel):
@@ -2556,6 +2589,7 @@ class AutomationCreateRequest(BaseModel):
     weekly_day: str | None = None
     time_of_day: str | None = None
     cron_expression: str | None = None
+    timezone: str | None = None
     prompt: str = ""
     steps: list[AutomationStep] = Field(default_factory=list)
     enabled: bool = False
@@ -2569,6 +2603,7 @@ class AutomationUpdateRequest(BaseModel):
     weekly_day: str | None = None
     time_of_day: str | None = None
     cron_expression: str | None = None
+    timezone: str | None = None
     prompt: str | None = None
     steps: list[AutomationStep] | None = None
     enabled: bool | None = None
@@ -2579,6 +2614,19 @@ class AutomationRunRequest(BaseModel):
     # chain's first-step input for this run only. The chat ">" shortcut sends
     # the user's typed message here; scheduled fires never set it.
     input: str | None = None
+    # Deliver the output to a new chat thread or draft (per the automation's
+    # surface) and link it from run history. The console's "Run now" sets
+    # this; the chat shortcut renders the result in the open chat instead.
+    deliver: bool = False
+
+
+class AutomationSchedulePreviewRequest(BaseModel):
+    trigger_type: str
+    run_at: str | None = None
+    weekly_day: str | None = None
+    time_of_day: str | None = None
+    cron_expression: str | None = None
+    timezone: str | None = None
 
 
 # --- Platform updates (platform owner only) ----------------------------------

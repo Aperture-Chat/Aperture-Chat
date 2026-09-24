@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import html
 import mimetypes
+import os
 import re
 import zipfile
+from bisect import bisect_right
+from collections.abc import Iterable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from email import policy
 from email.parser import BytesParser
 from io import BytesIO
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
@@ -19,6 +23,11 @@ DEFAULT_CHUNK_OVERLAP = 160
 DEFAULT_OCR_MAX_PAGES = 250
 DEFAULT_OCR_PAGE_TIMEOUT_SECONDS = 45.0
 MIN_PDF_PAGE_TEXT_CHARS = 40
+_OCR_WORKERS_ENV = "APERTURE_KNOWLEDGE_OCR_WORKERS"
+_DEFAULT_MAX_OCR_WORKERS = 4
+_MAX_OCR_WORKERS = 16
+
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
 
 _TEXT_EXTENSIONS = {
     ".csv",
@@ -211,30 +220,28 @@ def chunk_text(
     max_chars: int = DEFAULT_CHUNK_CHARS,
     overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> list[str]:
+    """Greedily pack normalized text into chunks of at most ``max(200, max_chars)``.
+
+    Whole paragraphs are preferred. When the next paragraph does not fit and the
+    chunk still has meaningful room, the room is filled with whole sentences
+    (then words, then a hard slice for a single oversized token) and the rest of
+    the paragraph continues in the next chunk. Every chunk after the first
+    starts with the previous chunk's overlap tail, and that tail counts toward
+    the size limit.
+    """
+
     normalized = _normalize_text(text)
     if not normalized:
         return []
     safe_max = max(200, max_chars)
     safe_overlap = max(0, min(overlap, safe_max // 3))
-    paragraphs = [
-        paragraph.strip() for paragraph in re.split(r"\n{2,}", normalized) if paragraph.strip()
-    ]
-    chunks: list[str] = []
-    current = ""
-
-    for paragraph in paragraphs:
-        parts = _split_long_text(paragraph, safe_max)
-        for part in parts:
-            if not current:
-                current = part
-            elif len(current) + 2 + len(part) <= safe_max:
-                current = f"{current}\n\n{part}"
-            else:
-                chunks.append(current)
-                current = _overlap_prefix(current, safe_overlap, part)
-    if current:
-        chunks.append(current)
-    return chunks
+    builder = _ChunkBuilder(safe_max, safe_overlap)
+    for paragraph in re.split(r"\n{2,}", normalized):
+        paragraph = paragraph.strip()
+        if paragraph:
+            _pack_paragraph(builder, paragraph)
+    builder.flush()
+    return builder.chunks
 
 
 def chunk_segments(
@@ -357,10 +364,13 @@ def _extract_xlsx_segments(source: BinarySource) -> list[ExtractedSegment]:
 
     workbook = None
     try:
+        # data_only reads the values Excel cached for formula cells, so search
+        # sees "1,250,000" rather than "=SUM(B2:B9)". Workbooks written by
+        # scripts without cached values leave those cells blank instead.
         workbook = load_workbook(
             BytesIO(_read_all_source_bytes(source)),
             read_only=True,
-            data_only=False,
+            data_only=True,
             keep_links=False,
         )
         segments: list[ExtractedSegment] = []
@@ -618,32 +628,31 @@ def _ocr_pdf_pages(
     except Exception:
         return {}
 
-    results: dict[int, str] = {}
     try:
-        for page_index in page_indexes:
-            if page_index >= len(pdf):
-                continue
-            page = pdf[page_index]
-            bitmap = None
-            image = None
-            try:
-                bitmap = page.render(scale=2, rotation=0)
-                image = bitmap.to_pil()
-                results[page_index] = _ocr_image(
-                    image,
-                    timeout_seconds=timeout_seconds,
-                )
-            except Exception:
-                continue
-            finally:
-                if image is not None:
-                    image.close()
-                if bitmap is not None:
-                    bitmap.close()
-                page.close()
+        page_count = len(pdf)
+        indexes = [page_index for page_index in page_indexes if page_index < page_count]
+        return _ocr_pages(
+            _render_pdf_pages(pdf, indexes),
+            workers=min(_ocr_worker_count(), len(indexes)),
+            timeout_seconds=timeout_seconds,
+        )
     finally:
         pdf.close()
-    return results
+
+
+def _render_pdf_pages(pdf: Any, page_indexes: list[int]) -> Iterator[_OcrPage]:
+    # pypdfium2 is not thread-safe, so rendering happens here on the consuming
+    # thread and _ocr_pages also closes pages and bitmaps on that thread.
+    for page_index in page_indexes:
+        page = bitmap = image = None
+        try:
+            page = pdf[page_index]
+            bitmap = page.render(scale=2, rotation=0)
+            image = bitmap.to_pil()
+        except Exception:
+            _close_all(image, bitmap, page)
+            continue
+        yield _OcrPage(page_index, image, (image, bitmap, page))
 
 
 def _extract_image_segments(
@@ -653,7 +662,7 @@ def _extract_image_segments(
     ocr_page_timeout_seconds: float,
 ) -> list[ExtractedSegment]:
     try:
-        from PIL import Image, ImageSequence  # type: ignore[import-not-found]
+        from PIL import Image  # type: ignore[import-not-found]
     except ImportError:
         return []
 
@@ -661,31 +670,133 @@ def _extract_image_segments(
     image_source = BytesIO(source) if isinstance(source, bytes) else source
     try:
         with Image.open(image_source) as image:
-            segments: list[ExtractedSegment] = []
-            for index, frame in enumerate(ImageSequence.Iterator(image)):
-                if index >= ocr_max_pages:
-                    break
-                frame_copy = frame.copy()
-                try:
-                    text = _ocr_image(
-                        frame_copy,
-                        timeout_seconds=ocr_page_timeout_seconds,
-                    )
-                    if text:
-                        page_number = index + 1
-                        segments.append(
-                            ExtractedSegment(
-                                text=text,
-                                page_start=page_number,
-                                page_end=page_number,
-                                locator=f"Page {page_number}",
-                            )
-                        )
-                finally:
-                    frame_copy.close()
+            multi_frame = ocr_max_pages > 1 and bool(getattr(image, "is_animated", False))
+            texts = _ocr_pages(
+                _copy_image_frames(image, ocr_max_pages),
+                workers=_ocr_worker_count() if multi_frame else 1,
+                timeout_seconds=ocr_page_timeout_seconds,
+            )
     except Exception:
         return []
+
+    segments: list[ExtractedSegment] = []
+    for index in sorted(texts):
+        if texts[index]:
+            page_number = index + 1
+            segments.append(
+                ExtractedSegment(
+                    text=texts[index],
+                    page_start=page_number,
+                    page_end=page_number,
+                    locator=f"Page {page_number}",
+                )
+            )
     return segments
+
+
+def _copy_image_frames(image: Any, max_frames: int) -> Iterator[_OcrPage]:
+    from PIL import ImageSequence  # type: ignore[import-not-found]
+
+    # Frame iteration seeks the shared image object, so copies are made in order
+    # on the consuming thread.
+    for index, frame in enumerate(ImageSequence.Iterator(image)):
+        if index >= max_frames:
+            break
+        frame_copy = frame.copy()
+        yield _OcrPage(index, frame_copy, (frame_copy,))
+
+
+@dataclass(frozen=True, slots=True)
+class _OcrPage:
+    """A rendered page image plus the resources to close once its OCR ends."""
+
+    index: int
+    image: Any
+    resources: tuple[Any, ...]
+
+    def close(self) -> None:
+        _close_all(*self.resources)
+
+
+def _close_all(*resources: Any) -> None:
+    for resource in resources:
+        if resource is not None:
+            resource.close()
+
+
+def _ocr_worker_count() -> int:
+    """Pages to OCR concurrently; ``APERTURE_KNOWLEDGE_OCR_WORKERS`` overrides."""
+
+    configured = os.environ.get(_OCR_WORKERS_ENV, "").strip()
+    if configured:
+        try:
+            workers = int(configured)
+        except ValueError:
+            workers = 0
+        if workers > 0:
+            return min(workers, _MAX_OCR_WORKERS)
+    return max(1, min(_DEFAULT_MAX_OCR_WORKERS, (os.cpu_count() or 2) - 1))
+
+
+def _ocr_pages(
+    pages: Iterable[_OcrPage],
+    *,
+    workers: int,
+    timeout_seconds: float,
+) -> dict[int, str]:
+    """OCR pages into ``{page index: text}``, skipping any page that fails.
+
+    ``pages`` is consumed, and every page closed, on the calling thread; only
+    ``_ocr_image`` runs on worker threads. At most ``2 * workers`` pages are held
+    at once so long scanned documents do not accumulate rendered images.
+    """
+
+    results: dict[int, str] = {}
+    if workers <= 1:
+        for page in pages:
+            try:
+                results[page.index] = _ocr_image(page.image, timeout_seconds=timeout_seconds)
+            except Exception:
+                continue
+            finally:
+                page.close()
+        return results
+
+    # Tesseract also parallelizes each page with OpenMP threads; with pages
+    # already running in parallel that oversubscribes the CPU. pytesseract's
+    # subprocesses inherit this environment, so cap them at one thread each.
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+    in_flight: dict[Future[str], _OcrPage] = {}
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="knowledge-ocr") as executor:
+        try:
+            for page in pages:
+                try:
+                    future = executor.submit(
+                        _ocr_image, page.image, timeout_seconds=timeout_seconds
+                    )
+                except BaseException:
+                    page.close()
+                    raise
+                in_flight[future] = page
+                if len(in_flight) >= workers * 2:
+                    done, _pending = wait(in_flight, return_when=FIRST_COMPLETED)
+                    for finished in done:
+                        _collect_ocr_result(results, in_flight.pop(finished), finished)
+        finally:
+            # Wait for every submitted page before closing it, even on error:
+            # a worker may still be reading the image's memory.
+            for future, page in list(in_flight.items()):
+                _collect_ocr_result(results, page, future)
+    return dict(sorted(results.items()))
+
+
+def _collect_ocr_result(results: dict[int, str], page: _OcrPage, future: Future[str]) -> None:
+    try:
+        results[page.index] = future.result()
+    except Exception:
+        pass
+    finally:
+        page.close()
 
 
 def _ocr_image(image: object, *, timeout_seconds: float) -> str:
@@ -786,58 +897,133 @@ def _normalize_text(text: str) -> str:
     return "\n\n".join(paragraphs).strip()
 
 
-def _split_long_text(text: str, max_chars: int) -> list[str]:
-    if len(text) <= max_chars:
-        return [text]
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    parts: list[str] = []
-    current = ""
-    for sentence in sentences:
-        if not sentence:
+class _ChunkBuilder:
+    """Build chunks one at a time, counting the overlap prefix toward the limit."""
+
+    __slots__ = (
+        "chunks",
+        "fresh_room",
+        "has_content",
+        "max_chars",
+        "min_fill_room",
+        "overlap",
+        "_pieces",
+        "_size",
+    )
+
+    def __init__(self, max_chars: int, overlap: int) -> None:
+        self.chunks: list[str] = []
+        self.max_chars = max_chars
+        self.overlap = overlap
+        # With less room than this left, start a new chunk rather than split a paragraph.
+        self.min_fill_room = max_chars // 4
+        # Room every new chunk is guaranteed after its overlap prefix and separator.
+        self.fresh_room = max_chars - overlap - 2 if overlap else max_chars
+        # False while the chunk holds nothing but the previous chunk's overlap tail.
+        self.has_content = False
+        self._pieces: list[str] = []
+        self._size = 0
+
+    def room(self) -> int:
+        """Characters available for the next piece after its separator."""
+
+        if not self._pieces:
+            return self.max_chars
+        return self.max_chars - self._size - 2
+
+    def add(self, piece: str) -> None:
+        if self._pieces:
+            self._size += 2
+        self._pieces.append(piece)
+        self._size += len(piece)
+        self.has_content = True
+
+    def flush(self) -> None:
+        if not self.has_content:
+            return
+        chunk = "\n\n".join(self._pieces)
+        self.chunks.append(chunk)
+        prefix = chunk[-self.overlap :].strip() if self.overlap > 0 else ""
+        self._pieces = [prefix] if prefix else []
+        self._size = len(prefix)
+        self.has_content = False
+
+
+def _pack_paragraph(builder: _ChunkBuilder, paragraph: str) -> None:
+    length = len(paragraph)
+    if length <= builder.room():
+        builder.add(paragraph)
+        return
+
+    breaks: tuple[list[int], list[int]] | None = None
+    start = 0
+    while start < length:
+        room = builder.room()
+        if length - start <= room:
+            builder.add(paragraph[start:])
+            return
+        if builder.has_content and room < builder.min_fill_room:
+            builder.flush()
             continue
-        for segment in _split_oversized_sentence(sentence, max_chars):
-            if not current:
-                current = segment
-            elif len(current) + 1 + len(segment) <= max_chars:
-                current = f"{current} {segment}"
-            else:
-                parts.append(current)
-                current = segment
-    if current:
-        parts.append(current)
-    return parts
+        if breaks is None:
+            breaks = _sentence_breaks(paragraph)
+        end, next_start = _fill_cut(
+            paragraph,
+            start,
+            room,
+            breaks,
+            defer_room=builder.fresh_room if builder.has_content else None,
+        )
+        if end > start:
+            builder.add(paragraph[start:end])
+            start = next_start
+        # Either the chunk is now full or the next piece was deferred to a new
+        # chunk. A deferral only happens while the chunk has content, so the
+        # following pass always makes progress.
+        builder.flush()
 
 
-def _split_oversized_sentence(sentence: str, max_chars: int) -> list[str]:
-    if len(sentence) <= max_chars:
-        return [sentence]
+def _sentence_breaks(paragraph: str) -> tuple[list[int], list[int]]:
+    """Return sentence end offsets and the matching next-sentence start offsets."""
 
-    segments: list[str] = []
-    current = ""
-    for word in sentence.split():
-        if len(word) > max_chars:
-            if current:
-                segments.append(current)
-                current = ""
-            segments.extend(
-                word[offset : offset + max_chars] for offset in range(0, len(word), max_chars)
-            )
-        elif not current:
-            current = word
-        elif len(current) + 1 + len(word) <= max_chars:
-            current = f"{current} {word}"
-        else:
-            segments.append(current)
-            current = word
-    if current:
-        segments.append(current)
-    return segments
+    ends: list[int] = []
+    starts: list[int] = []
+    for match in _SENTENCE_BREAK.finditer(paragraph):
+        ends.append(match.start())
+        starts.append(match.end())
+    ends.append(len(paragraph))
+    starts.append(len(paragraph))
+    return ends, starts
 
 
-def _overlap_prefix(previous: str, overlap: int, next_text: str) -> str:
-    if overlap <= 0:
-        return next_text
-    prefix = previous[-overlap:].strip()
-    if not prefix:
-        return next_text
-    return f"{prefix}\n\n{next_text}"
+def _fill_cut(
+    paragraph: str,
+    start: int,
+    room: int,
+    breaks: tuple[list[int], list[int]],
+    *,
+    defer_room: int | None,
+) -> tuple[int, int]:
+    """Choose where to cut ``paragraph[start:]`` so the head fits in ``room``.
+
+    Returns ``(end, next_start)``. Whole sentences are preferred, then whole
+    words; only a single token longer than the room is sliced mid-token. With
+    ``defer_room`` set (the chunk already has content), a sentence or token that
+    would fit intact in a fresh chunk is deferred by returning ``end == start``.
+    """
+
+    ends, starts = breaks
+    limit = start + room
+    index = bisect_right(ends, limit) - 1
+    if index >= 0 and ends[index] > start:
+        return ends[index], starts[index]
+    sentence_end = ends[bisect_right(ends, start)]
+    if defer_room is not None and sentence_end - start <= defer_room:
+        return start, start
+    space = paragraph.rfind(" ", start, limit + 1)
+    if space > start:
+        return space, space + 1
+    if defer_room is not None and paragraph.find(" ", start, start + defer_room + 1) != -1:
+        return start, start
+    end = start + max(1, room)
+    return end, end
