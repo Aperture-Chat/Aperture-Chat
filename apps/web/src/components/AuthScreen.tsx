@@ -924,7 +924,9 @@ export function AuthScreen({
             )}
             <div>
               <span>{brandName}</span>
-              <strong>{mfa ? "Two-step verification" : accessMode ? "Access request" : bootstrapRequired ? "Workspace setup" : "Account sign-in"}</strong>
+              {(mfa || accessMode || bootstrapRequired) && (
+                <strong>{mfa ? "Two-step verification" : accessMode ? "Access request" : "Workspace setup"}</strong>
+              )}
             </div>
           </div>
 
@@ -938,7 +940,7 @@ export function AuthScreen({
                 <p>
                   {accessComplete
                     ? "If this email is new to the workspace, your request is now waiting for administrator review."
-                    : `Start with your name and work email. A ${brandName} administrator will review your request.`}
+                    : "Start with your name and work email. An administrator will review your request."}
                 </p>
               </div>
               {accessComplete ? (
@@ -1228,31 +1230,29 @@ export function AuthScreen({
                 </p>}
               </div>
             )}
-            {!bootstrapRequired && resolvedOptions && (
-              <div className="auth-request-entry">
-                <span><Clock3 size={15} /> Need an account?</span>
-                <button
-                  className="link-button auth-request-button"
-                  type="button"
-                  onClick={() => {
-                    setAccessDraft((current) => ({ ...current, email: current.email || email }));
-                    setAccessMode(true);
-                    setAccessError(null);
-                  }}
-                >
-                  Request access <ArrowRight size={14} />
-                </button>
-              </div>
-            )}
           </form>
             </>
           )}
           {!bootstrapRequired && !mfa && (
-            <div className="auth-video-help">
-              <strong>Need help getting started?</strong>
-              <p>See how to request access, get administrator approval, and sign in.</p>
-              <button className="link-button" type="button" onClick={() => setAccessVideoOpen(true)}>
-                <PlayCircle size={18} /> Watch the access &amp; sign-in video
+            <div className="auth-newcomer">
+              {!accessMode && resolvedOptions && (
+                <>
+                  <span className="auth-newcomer-label">New to {brandName}?</span>
+                  <button
+                    className="secondary-button auth-request-button"
+                    type="button"
+                    onClick={() => {
+                      setAccessDraft((current) => ({ ...current, email: current.email || email }));
+                      setAccessMode(true);
+                      setAccessError(null);
+                    }}
+                  >
+                    <UserPlus size={17} /> Request access
+                  </button>
+                </>
+              )}
+              <button className="link-button auth-video-link" type="button" onClick={() => setAccessVideoOpen(true)}>
+                <PlayCircle size={17} /> Watch the access walkthrough
               </button>
             </div>
           )}
@@ -1266,7 +1266,7 @@ export function AuthScreen({
         <aside className="auth-context" aria-label="Authentication requirements">
           <div className="auth-context-intro">
             <span className="auth-eyebrow">Made for focused work</span>
-            <h2>A clearer space<br />for your best work.</h2>
+            <h2>A clearer space<br />for your <span className="auth-context-accent">best work.</span></h2>
             <p>Conversations, knowledge, and the tools your team needs. All in one workspace.</p>
           </div>
           {mfa ? (

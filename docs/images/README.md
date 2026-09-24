@@ -4,6 +4,8 @@ The root README's screenshots and product tour were refreshed on
 September 24, 2026 from the v0.5.5 interface (redesigned sidebar, Agents,
 Automations, and Library). They illustrate the current interface, not a claim
 that every pixel matches an older published image.
+`sign-in.png` was recaptured the same day for v0.5.6 after the sign-in screen
+redesign.
 
 ## Capture content
 
