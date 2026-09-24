@@ -5,9 +5,7 @@ inspectable changes that can be tested and reviewed without hiding unrelated
 behavior.
 
 By submitting a contribution, you confirm that you have the right to submit it
-and agree that it may be distributed under [LICENSE.md](LICENSE.md). Public
-forks must also preserve [NOTICE.md](NOTICE.md) and the required fork
-provenance described in the license.
+and agree that it may be distributed under the [MIT License](LICENSE.md).
 
 ## Branch and promotion model
 

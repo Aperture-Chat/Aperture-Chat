@@ -34,6 +34,6 @@
 - [ ] I updated documentation and configuration when their contract changed.
 - [ ] Visual evidence uses synthetic data and contains no private information.
 - [ ] I did not commit secrets, production data, private infrastructure, or customer information.
-- [ ] I have the right to submit this contribution under `LICENSE.md`.
+- [ ] I have the right to submit this contribution under the MIT License in `LICENSE.md`.
 - [ ] No automated or human review is still active at merge time.
 - [ ] A `test` -> `main` promotion will use a merge commit so the inspected test commit remains verifiable.

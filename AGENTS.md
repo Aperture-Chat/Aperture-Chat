@@ -1,8 +1,8 @@
 # Aperture Chat Agent Workflow
 
-This repository is a public, source-available project. Treat every tracked file,
-generated artifact, screenshot, log excerpt, and example as information that can
-be read by anyone.
+This repository is a public, MIT-licensed open-source project. Treat every
+tracked file, generated artifact, screenshot, log excerpt, and example as
+information that can be read by anyone.
 
 ## Public-repository boundary
 
@@ -75,5 +75,5 @@ and promotion requirements are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Never reset volumes, erase runtime data, rewrite shared history, force-push,
   or change repository visibility without explicit owner approval.
 - Keep platform-owner, tenant-admin, and user authorization boundaries intact.
-- Respect [LICENSE.md](LICENSE.md) and preserve [NOTICE.md](NOTICE.md) in public
-  forks and distributions.
+- Keep the [MIT License](LICENSE.md) and its copyright notice with every copy
+  and distribution.
