@@ -33,9 +33,11 @@ const retention = {
 
 const FOCUS_TARGETS = {
   user: {
+    accessSignInPage: first(".auth-heading"),
+    accessRequestEntry: first(".auth-newcomer"),
     accessRequestForm: first(".auth-access-form"),
     accessRequestReceived: first(".auth-access-success"),
-    accessSignInMethod: first(".auth-panel"),
+    accessSignInMethod: first(".auth-form"),
     accessOwnPassword: first(".auth-panel"),
     accessWelcome: first(".first-run-welcome"),
     securityOverview: first(".account-security"),

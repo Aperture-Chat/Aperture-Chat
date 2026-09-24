@@ -231,6 +231,25 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.5
+
+- The sign-in screen is simpler. Under the Sign in button there is one
+  "Trouble signing in?" link and a "New to <workspace>?" section with a
+  full-width Request access button, replacing the old "Need an account?" row,
+  which looked clickable but was not, and a separate help block. The screen
+  also gets a softer backdrop and brand accents, and the access request form
+  wording is fixed.
+- The access and sign-in walkthrough now starts on the sign-in page, with new
+  scenes for opening the workspace address and finding Request access. Its
+  narration and screenshots are refreshed, along with the README sign-in image.
+- Aperture Chat is now released under the MIT License (replacing the Aperture
+  Chat Community Source License 1.1), and `NOTICE.md` is no longer part of the
+  release bundle. `SECURITY.md` lists a direct security contact email.
+- This release adds no database migrations. Back up the complete application
+  data volume before upgrading as usual.
+- API and web images publish as `v0.5.6-dev`, `v0.5.6-test`, and `v0.5.6-main`.
+  Stable `v0.5.6` and `latest` promote inspected test images without rebuilding.
+
 ## New Since v0.5.4
 
 - Agents and Automations are redesigned. Agent cards show the model, who can
