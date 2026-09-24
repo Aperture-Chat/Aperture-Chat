@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 
+from app.core import clock
 from app.core.memory import memory_state_for
 from app.core.policy import (
     is_platform_owner,
@@ -121,7 +122,9 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
         snapshot["skillFiles"] = [
             record for record in store.skill_files.values() if record.tenant_id == actor.tenant_id
         ]
-        snapshot["automations"] = visible_automations_for(actor, store)
+    # Every role goes through the same visibility filter so each automation
+    # carries its computed next run (owners see all of them).
+    snapshot["automations"] = visible_automations_for(actor, store)
     return snapshot
 
 
@@ -131,9 +134,19 @@ def _workspace_connector_enabled(store: SeedStore, connector_id: str) -> bool:
 
 
 def visible_automations_for(actor: User, store: SeedStore) -> list[object]:
+    # Late import keeps bootstrap from loading the chain runner at import time.
+    from app.core.automation_runner import with_next_run
+
     if is_platform_owner(actor):
-        return list(store.automations.values())
-    same_tenant = [record for record in store.automations.values() if record.tenant_id == actor.tenant_id]
-    if is_tenant_admin(actor):
-        return same_tenant
-    return [record for record in same_tenant if record.created_by == actor.id]
+        visible = list(store.automations.values())
+    else:
+        same_tenant = [
+            record for record in store.automations.values() if record.tenant_id == actor.tenant_id
+        ]
+        visible = (
+            same_tenant
+            if is_tenant_admin(actor)
+            else [record for record in same_tenant if record.created_by == actor.id]
+        )
+    now = clock.now()
+    return [with_next_run(record, now) for record in visible]

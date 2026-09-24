@@ -1,5 +1,5 @@
 import { apiRequest, pathId, type ApiMutationOptions } from "./http";
-import type { Automation, AutomationRunResult } from "../types";
+import type { Automation, AutomationRunResult, AutomationSchedulePreview } from "../types";
 
 export type AutomationSavePayload = {
   id?: string | null;
@@ -10,6 +10,7 @@ export type AutomationSavePayload = {
   weekly_day?: string | null;
   time_of_day?: string | null;
   cron_expression?: string | null;
+  timezone?: string | null;
   prompt: string;
   steps: Array<{ model_id: string; instruction: string }>;
   enabled: boolean;
@@ -53,16 +54,41 @@ export function deleteAutomation(
 
 /** Executes an automation's model chain immediately and returns the transcript.
  * `payload.input` replaces the stored prompt as the chain's first-step input
- * for this run only (used by the chat ">" shortcut). */
+ * for this run only (used by the chat ">" shortcut). `payload.deliver` saves
+ * the result as a new chat or draft, like a scheduled run (console Run now). */
 export function runAutomation(
   userId: string,
   automationId: string,
-  payload: { input?: string } = {},
+  payload: { input?: string; deliver?: boolean } = {},
   options: ApiMutationOptions = {},
 ): Promise<AutomationRunResult> {
+  const body = {
+    ...(payload.input ? { input: payload.input } : {}),
+    ...(payload.deliver ? { deliver: true } : {}),
+  };
   return apiRequest<AutomationRunResult>(userId, `/api/automations/${pathId(automationId)}/run`, {
     method: "POST",
-    body: payload.input ? { input: payload.input } : undefined,
+    body: Object.keys(body).length ? body : undefined,
+    signal: options.signal,
+  });
+}
+
+/** Validates a schedule and lists its next runs with the scheduler's own math. */
+export function previewAutomationSchedule(
+  userId: string,
+  schedule: {
+    trigger_type: string;
+    run_at?: string | null;
+    weekly_day?: string | null;
+    time_of_day?: string | null;
+    cron_expression?: string | null;
+    timezone?: string | null;
+  },
+  options: ApiMutationOptions = {},
+): Promise<AutomationSchedulePreview> {
+  return apiRequest<AutomationSchedulePreview>(userId, "/api/automations/schedule-preview", {
+    method: "POST",
+    body: schedule,
     signal: options.signal,
   });
 }

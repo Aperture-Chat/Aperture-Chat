@@ -1,136 +1,156 @@
 <div align="center">
 
-<a href="https://aperturechat.com/#demoPanel" aria-label="Watch the full Aperture Chat product walkthrough">
-<picture>
-  <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-walkthrough-light.png">
-  <img src="docs/images/product-walkthrough-light.gif" alt="Light-mode product recording from ApertureChat.com: Ask, Research, Draft, Slides, Team, and Platform" width="100%">
-</picture>
-</a>
+<img src="apps/web/public/favicon.svg" width="72" height="72" alt="Aperture Chat logo">
 
-<sub><em>The light-mode product walkthrough from ApertureChat.com, using the same six recordings in order. Waiting time is shortened in the original recordings.</em></sub>
+# Aperture Chat
 
-**[Watch the full walkthrough with playback controls and fullscreen](https://aperturechat.com/#demoPanel)**
+**The self-hosted AI workspace for your organization.**<br>
+Chat, documents, slide decks, agents, automations, and knowledge, on infrastructure you control.
 
-<br><br>
-
-**A self-hosted AI workspace for your organization** — chat, documents, slide decks,
-agents, knowledge, and administration on infrastructure you control.
-
+[![Latest release](https://img.shields.io/github/v/release/Aperture-Chat/Aperture-Chat?style=flat-square&color=0f766e&label=release)](https://github.com/Aperture-Chat/Aperture-Chat/releases)
 ![License: source available](https://img.shields.io/badge/license-source--available-475569?style=flat-square)
 ![Deploy: Docker Compose](https://img.shields.io/badge/deploy-Docker%20Compose-0ea5e9?style=flat-square)
 ![Frontend: React 19](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-6366f1?style=flat-square)
 ![Backend: FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python-0284c7?style=flat-square)
 
-[Platform](#the-platform) · [Install](#installation) · [First steps](#first-steps) · [Updates](#updates-and-branch-images) · [Development](#development) · [Documentation](#documentation) · [License](#license)
+[Features](#features) · [Get started](#get-started) · [Updates](#updates-and-images) · [Architecture](#architecture) · [Development](#development) · [Documentation](#documentation) · [License](#license)
+
+<br>
+
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-tour-light.png">
+  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, Agents, Automations, the knowledge Library, the document editor, and the Admin Console" width="100%">
+</picture>
+
+<sub>The current interface in a synthetic organization, answered by an open model running locally through Ollama.
+Watch the narrated walkthrough at <a href="https://aperturechat.com/#demoPanel">ApertureChat.com</a>.</sub>
 
 </div>
 
 ## Why Aperture Chat
 
-Aperture Chat brings approved AI models and shared context into one role-aware
-workspace. Platform owners configure providers and organization controls;
-tenant administrators manage their teams; users work with the models, sources,
-and tools assigned to them.
+<table>
+<tr>
+<td width="33%" valign="top">
 
-Application data and encrypted provider credentials are stored in your deployment.
-Requests to configured model providers, cloud connectors, and web search services
-leave that deployment as those features are used. Choose providers and access
+**Your infrastructure**<br>
+Run the whole workspace with Docker Compose. Application data and encrypted
+provider credentials stay in your deployment.
+
+</td>
+<td width="33%" valign="top">
+
+**Any approved model**<br>
+Connect OpenAI, Anthropic, Azure OpenAI, Google Gemini, OpenRouter, Ollama,
+and other OpenAI-compatible providers, then decide who may use each model.
+
+</td>
+<td width="33%" valign="top">
+
+**Built-in governance**<br>
+Role-aware consoles, SSO and SCIM, group policies, audit trails, retention,
+and analytics for the people responsible for AI use.
+
+</td>
+</tr>
+</table>
+
+Platform owners configure providers and organization-wide controls; tenant
+administrators manage their people, groups, and sources; users work with the
+models, knowledge, and tools assigned to them.
+
+Requests to configured model providers, cloud connectors, and web search leave
+your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-The current published release is [v0.5.4](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.4).
-It includes compact document formatting, MLA layout improvements, draft-history
-previews and archiving, sliding section switches, mobile layout fixes, and
-fullscreen training playback. See the [release notes](docs/DOCKER_RELEASE.md#new-since-v047)
-and [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
+> **Current release: [v0.5.5](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.5)**:
+> redesigned Agents, Automations, and Library; automations that honor an agent's
+> instructions and knowledge and deliver to chats or drafts; per-schedule time
+> zones; knowledge from files, web pages, and APIs with background indexing.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v054) and
+> [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
-## The Platform
+## Features
 
 ### Chat
 
 | Light | Dark |
 | --- | --- |
-| ![Fresh chat workspace in light mode](docs/images/chat-light.png) | ![Fresh chat workspace in dark mode](docs/images/chat-dark.png) |
+| ![Chat with the Policy Assistant agent: a cited answer drawn from the uploaded travel policy](docs/images/chat-light.png) | ![Dark mode: a standup template an automation delivered to a new chat](docs/images/chat-dark.png) |
 
-The screenshots show a clean installation before a provider is connected.
-Configure and enable a model to send messages; no demo provider or fabricated
-answer is inserted into a fresh deployment.
-
-- **Approved models:** select an available model for the conversation. Runtime access follows provider, platform, tenant, group/user, and deny policies.
-- **Sources and search:** use attachments, workspace knowledge, connected documents, and enabled web search. Inspect the sources returned with an answer.
-- **Work traces and session details:** review reported execution steps, context, and provider-reported usage. Availability depends on the provider and operation.
-- **Response actions:** copy, share, regenerate, give feedback, and transfer an answer to Drafts.
-- **History:** search conversations and organize them with folders, pins, and archives.
-- **Mobile layout:** compact composer controls and a separate row for active tools keep the writing area usable on narrow screens.
+- **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
+- **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer.
+- **Work traces.** Review the steps, sources, and provider-reported usage behind each reply. Availability depends on the provider.
+- **Response actions.** Copy, share, regenerate, rate, and transfer an answer to Drafts.
+- **Organized history.** Search conversations and keep them tidy with folders, pins, and archives. Read state follows your account across browsers.
 
 <details>
-<summary>Mobile chat</summary>
+<summary><b>Mobile layout</b></summary>
 <br>
-<img src="docs/images/chat-mobile.png" alt="Current mobile chat layout with compact composer controls in a synthetic workspace" width="300">
+<img src="docs/images/chat-mobile.png" alt="Chat on a phone-sized screen with the compact composer" width="320">
 </details>
 
 ### Documents and slide decks
 
-Use the sliding **Document / Deck** switch inside Drafts to choose the format.
-Manual editing, import, saving, and export remain available when AI drafting is
-unconfigured; generation and conversational edits require an enabled model.
-
 | Document editor | Slide editor |
 | --- | --- |
-| ![Current document editor with compact formatting controls and a manually authored project brief](docs/images/drafts-light.png) | ![Current slide editor with slide thumbnails and a manually authored example deck](docs/images/deck-dark.png) |
+| ![Document editor with a project brief, compact formatting toolbar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with thumbnails of the project brief converted into a deck](docs/images/deck-dark.png) |
 
-- **Document formatting:** common styles stay visible; Text, Paragraph, More, and Insert menus group the remaining controls. Use the ruler, lists, links, tables, and page layout tools as needed.
-- **Drafting context:** choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. Check which context sources are enabled before generating.
-- **Revisions and history:** save versions, compare revisions, restore a draft, preview history entries, archive/unarchive drafts, or delete entries you no longer need. Check the server-save indicator before leaving; entries marked **Local only** (including deck snapshots) remain browser-local, so export a copy before moving devices.
-- **Academic documents:** MLA-aware rendering includes double spacing, first-line indents, and reference formatting. Review the student heading, citations, and exported layout against the assignment requirements.
-- **Slide authoring:** convert a document into slides or start a blank deck; edit text, add and rearrange slides, choose layouts and backgrounds, and write speaker notes. Import a PowerPoint brand template or use configured AI slide/image tools.
-- **Export:** download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`) as appropriate to the format; use the document print/PDF flow for a paginated copy.
+- **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
+- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail.
+- **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
+- **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
+- **Export.** Download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`), or print a paginated PDF.
 
 <details>
-<summary>Document dark mode and slide light mode</summary>
+<summary><b>Document in dark mode, deck in light mode</b></summary>
+<br>
 
-| Document — dark | Deck — light |
+| Document, dark | Deck, light |
 | --- | --- |
 | ![Document editor in dark mode](docs/images/drafts-dark.png) | ![Slide editor in light mode](docs/images/deck-light.png) |
 
 </details>
 
-### Agents, automations, knowledge, and tools
+### Agents and automations
 
-| Agents / Automations | Knowledge / Tools |
+| Agents | Automations |
 | --- | --- |
-| ![Agents workspace and its sliding section switch before any profiles are configured](docs/images/agents-dark.png) | ![Knowledge library and its section switch before any sources are added](docs/images/library-dark.png) |
+| ![Agents page with three agents, their models, audiences, knowledge, and readiness](docs/images/agents-light.png) | ![Automations page with weekly, weekday, and one-time automations and their next runs](docs/images/automations-light.png) |
 
-- **Agents:** reusable profiles with instructions, models, knowledge, and tool access.
-- **Automations:** run multi-step workflows immediately or on enabled one-time, weekly, or cron schedules. Inspect status and transcripts; schedules run inside the API process.
-- **Knowledge:** upload documents to a searchable collection and retrieve relevant passages with citations. OCR and dense embeddings run locally when enabled; media transcription uses a configured model provider.
-- **Cloud sources:** connect Google Drive, Box, SharePoint, OneDrive, or iManage with the provider's required credentials and permissions. Configuration and a successful connection check do not automatically grant every user access to every document.
-- **Tools:** manage reusable prompts, skills, and MCP connections. Tool availability remains subject to workspace policy and connector configuration.
+- **Agents** bundle instructions, a model, knowledge, tools, prompts, and skills into a reusable assistant. Choose who can use each one, check its readiness, and start from a template or duplicate an existing agent.
+- **Automations** run a prompt through one or more models or agents, once, weekly, or on a cron schedule in the time zone you choose. A live preview lists the next runs, and invalid schedules are rejected before they are saved.
+- **Delivered where you work.** Each run arrives as a new chat or a new draft, and the last 10 runs, including **Run now**, are kept in the run history. Scheduled automations pause after three failures in a row.
 
-### Identity and administration
+### Library: knowledge and tools
+
+| Knowledge | Tools |
+| --- | --- |
+| ![Company Policies knowledge base with its uploaded documents](docs/images/knowledge-dark.png) | ![Tools library showing reusable prompt templates](docs/images/tools-dark.png) |
+
+- **Knowledge bases** combine uploaded files, web pages, and API sources. Uploads are keyword-searchable as soon as their text is extracted, and semantic vectors are added in the background. OCR and embeddings run locally; media transcription uses a configured provider.
+- **Sync** re-fetches web pages and API sources and never touches uploaded files. API requests pass the outbound guards and refuse redirects.
+- **Cloud sources.** Connect Google Drive, Box, SharePoint, OneDrive, or iManage with the provider's credentials and permissions. A successful connection does not grant every user access to every document.
+- **Tools** hold MCP connections, prompt templates, and skills. Connections are tested before they are saved, and tool use remains subject to workspace policy.
+
+### Administration and identity
+
+| Admin Console | Platform Owner Console |
+| --- | --- |
+| ![Admin Console user list with roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local Ollama provider and three agents](docs/images/platform-dark.png) |
 
 | Role | Responsibilities |
 | --- | --- |
-| **Platform Owner** | Providers and credentials, organization-wide model availability, shared connector controls, organizations, branding, platform audit, and release updates. |
-| **Tenant Admin** | Tenant users, groups, access requests, SSO, model restrictions, knowledge, tools, policies, and tenant analytics. |
+| **Platform Owner** | Providers and credentials, organization-wide model availability, shared connectors, organizations, branding, platform audit, and release updates. |
+| **Tenant Admin** | Users, groups, access requests, SSO, model restrictions, knowledge, tools, policies, retention, and tenant analytics. |
 | **User** | Granted chat, drafting, agent, knowledge, and tool workflows. |
 
-OIDC sign-in supports Entra ID, Google Workspace, Okta, and custom configuration.
-SCIM 2.0 provisioning requires its configured bearer token. Local accounts
-support temporary-password rotation, authenticator setup, and recovery flows.
-Signed sessions are required in deployed environments. Tenant administrators'
-prompt activity is scoped to the users they administer; owner prompts are not
-made visible simply because someone can open the admin console.
+- **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
+- **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing them requires platform-owner authorization.
+- **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Tenant administrators see prompt activity only for the users they administer.
+- **Training.** Role-specific Help includes narrated walkthroughs and downloadable guides, with fullscreen playback on desktop and mobile.
 
-Provider and connector secrets are encrypted at rest and masked in ordinary UI
-and API payloads. Credential management and explicit reveal operations require
-platform-owner authorization. Administrative actions and supported chat activity
-feed audit and analytics views, with CSV exports.
-
-Role-specific Help includes narrated walkthroughs and downloadable guides.
-Training playback offers fullscreen controls and a landscape presentation on
-mobile, with a fallback where native fullscreen is unavailable.
-
-## Installation
+## Get started
 
 ### Run a published release locally
 
@@ -141,110 +161,110 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-# APERTURE_IMAGE_TAG=v0.5.4
-# APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
+#   APERTURE_IMAGE_TAG=v0.5.5
+#   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
 docker compose -f docker-compose.release.yml --profile local ps
 ```
 
-Use the tag belonging to your downloaded bundle. Open `http://localhost:5173`.
-A fresh data volume has no seeded owner, demo users, or provider catalog: create
-the first platform owner, then configure the installation.
+Use the tag that matches your bundle, then open `http://localhost:5173`. A fresh
+data volume has no seeded owner, demo users, or provider catalog: create the
+first platform owner, then configure the installation.
 
-Both source and release Compose stacks enforce production authentication and
-secret requirements, including with the `local` profile. The local profile
-binds API/web ports to loopback by default. It does not enable development auth.
+Both the source and release Compose stacks enforce production authentication
+and secret requirements, including with the `local` profile. The local profile
+binds the API and web ports to loopback and does not enable development auth.
 
 ### Install on a VPS with HTTPS
 
-With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run the
-installer from a reviewed release bundle containing `scripts/install-release.py`:
+With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
+the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.4 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.5 --start
 ```
 
-Replace the domain and version. The installer creates private configuration,
-a strong secret, and a stable Compose project identity; it refuses to overwrite
-an existing installation directory. Complete first-owner setup immediately.
-Omit `--start` to inspect the generated configuration before starting Docker.
+Replace the domain and version. The installer writes private configuration, a
+strong secret, and a stable Compose project identity, and it refuses to
+overwrite an existing installation. Omit `--start` to review the configuration
+before Docker starts, and complete first-owner setup immediately afterwards.
 See [Docker deployment](docs/DOCKER_RELEASE.md) for manual HTTPS setup, forks,
-private registries, and upgrades of existing installations.
+private registries, and upgrades.
 
-## First steps
+### First steps
 
 1. Create the first owner account and store its credentials securely.
-2. Open the Platform Owner Console, add a provider, and validate its connection.
-3. Sync its model catalog and enable the models the organization should use.
-4. Configure tenant users/groups and model grants; approve access requests as appropriate.
-5. Add knowledge, connectors, and tools deliberately, then verify access as an ordinary user.
-6. Send a real test message and check the response, sources, and relevant audit records.
+2. In the Platform Owner Console, add a provider and validate the connection.
+3. Sync its model catalog and enable the models your organization should use.
+4. Set up users and groups, grant models, and review access requests.
+5. Add knowledge, connectors, agents, and tools deliberately, then check access as an ordinary user.
+6. Send a real test message and check the response, sources, and audit records.
 
-New users can request access from the sign-in screen. The access-and-sign-in
-walkthrough is available there before login. Approved users receiving a
-temporary password must choose their own password when prompted.
+New users can request access from the sign-in screen, which also offers a
+pre-login walkthrough. Users who receive a temporary password choose their own
+when prompted.
 
-![Current sign-in screen with access request and pre-login guidance](docs/images/sign-in.png)
+<p align="center">
+  <img src="docs/images/sign-in.png" alt="Sign-in screen with email sign-in, access requests, and the pre-login walkthrough" width="760">
+</p>
 
-## Updates and branch images
+## Updates and images
 
-Stable releases publish API and web images under
-`ghcr.io/aperture-chat/aperture-chat-api` and
-`ghcr.io/aperture-chat/aperture-chat-web`, for `linux/amd64` and `linux/arm64`.
+Every release publishes multi-architecture (`linux/amd64`, `linux/arm64`) images
+to `ghcr.io/aperture-chat/aperture-chat-api` and
+`ghcr.io/aperture-chat/aperture-chat-web`.
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.4` | Reviewed stable release. Prefer a specific version for deployment. |
-| `latest` | Moving stable-release alias. |
-| `dev`, `test`, `main` | Moving image pairs for the corresponding release branch. |
-| `v0.5.4-dev`, `v0.5.4-test`, `v0.5.4-main` | Moving branch aliases for commits carrying that version. |
-| `<branch>-<full-commit-sha>` | Commit-addressed builds; record manifest digests for exact reproducibility across rebuilds. |
+| `v0.5.5` | Reviewed stable release. Prefer a specific version for deployments. |
+| `latest` | Moving alias for the newest stable release. |
+| `dev`, `test`, `main` | Moving image pairs for each release branch. |
+| `v0.5.5-dev`, `v0.5.5-test`, `v0.5.5-main` | Moving branch aliases for commits carrying that version. |
+| `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
-Promotion follows **dev → test → main**. Both test images must be inspectable
-before main promotion. Stable publication promotes those inspected manifests
-without rebuilding. Verify both API and web digests, not only the presence of a tag.
+Changes are promoted **dev → test → main**. Both test images must be inspectable
+before main is promoted, and a stable release reuses those inspected manifests
+without rebuilding. Verify both the API and web digests, not just the tags.
 
-The release stack includes an owner-controlled updater sidecar. It pulls the
-new image pair, recreates API/web, verifies health and version, and attempts
-rollback on failure. The sidecar has Docker-socket access and therefore host-level
-control. Existing/source-build deployments need the appropriate manual setup;
-a version notice alone does not install the updater.
+The release stack includes an owner-controlled updater sidecar that pulls the
+new image pair, recreates the API and web services, verifies health and version,
+and attempts a rollback on failure. It has Docker-socket access and therefore
+host-level control. Existing and source-built deployments need the manual setup
+described in the deployment guide; a version notice alone does not install it.
 
-Back up persistent data and private configuration before upgrading. Preserve
-Compose project identity, volume names, and the signing secret. Never use
-`docker compose down -v` for a normal upgrade. See the
+Back up persistent data and private configuration before upgrading, and keep
+the Compose project name, volume names, and signing secret unchanged. Never use
+`docker compose down -v` for an upgrade. See the
 [upgrade procedure](docs/DOCKER_RELEASE.md#upgrade) for migrations, recovery,
 and manual updates.
 
-## Architecture and persistence
+## Architecture
 
 | Path | Purpose |
 | --- | --- |
-| `apps/web` | React 19, TypeScript, Vite, and Vitest; product UI and training media. |
-| `services/api` | FastAPI, model routing, identity, policy, persistence, retrieval, and workflow execution. |
+| `apps/web` | React 19, TypeScript, Vite, and Vitest: the product UI and training media. |
+| `services/api` | FastAPI: model routing, identity, policy, persistence, retrieval, and automation. |
 | `services/api/app/db` | SQLAlchemy models, Alembic integration, and explicit import/transfer utilities. |
 | `infra/caddy` | Reverse proxy and HTTPS configuration. |
 | `infra/updater` | Release updater sidecar. |
 | `docs` | Deployment, architecture, product images, and role guides. |
 
-Application persistence spans SQL-backed state (SQLite by default), remaining
-JSON state, and dedicated local stores such as the knowledge vector index.
-An optional PostgreSQL Compose profile requires an explicit, verified migration
-and `APERTURE_DATABASE_URL`; enabling the profile alone does not switch storage.
-Back up the full configured data set and secret, not just `runtime_state.json`.
+Application data spans SQL-backed state (SQLite by default), remaining JSON
+state, and dedicated local stores such as the knowledge vector index. An
+optional PostgreSQL Compose profile requires an explicit, verified migration and
+`APERTURE_DATABASE_URL`; enabling the profile alone does not switch storage.
+Back up the full data set and the secret, not just `runtime_state.json`.
 
-The scheduler and some stores remain process-local. PostgreSQL does not by
-itself make multiple API replicas safe. See [architecture](docs/architecture.md)
-for the current boundaries. Outbound protections block metadata/link-local
-access and restrict private-network destinations; operators explicitly allow
-required internal hosts rather than disabling those protections.
+The scheduler and some stores are process-local, so PostgreSQL alone does not
+make multiple API replicas safe. Outbound protections block metadata and
+link-local destinations and restrict private networks; allow required internal
+hosts explicitly rather than disabling the protections. See
+[architecture](docs/architecture.md) for details.
 
 ## Development
 
-Requirements: Node.js 24+ (use `.nvmrc`), npm, and Python 3.12+.
-
-From the repository root:
+Requirements: Node.js 24+ (see `.nvmrc`), npm, and Python 3.12+.
 
 ```bash
 cp .env.example .env
@@ -253,7 +273,7 @@ python3 -m venv services/api/.venv
 services/api/.venv/bin/python -m pip install -e './services/api[dev]'
 ```
 
-Run these in separate terminals:
+Run the web app and the API in separate terminals:
 
 ```bash
 npm run dev:web
@@ -264,50 +284,53 @@ cd services/api
 .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The API loads the root `.env`; the Vite server proxies API requests to port 8000.
-A clean local instance can create its first owner without a provider key. Add
-and enable a provider/model before testing generation. Local-only development
-can generate a persisted signing secret when the configured secret is blank;
-deployed Compose stacks require an explicit strong secret.
+The API loads the root `.env`, and the Vite server proxies API requests to port
+8000. A clean local instance can create its first owner without a provider key;
+add and enable a model before testing generation. Local development can
+generate a persisted signing secret when none is configured, while deployed
+Compose stacks require an explicit strong secret.
 
-For source-built containers, configure `.env` (including the secret), then run:
+To run source-built containers, configure `.env` (including the secret) and run:
 
 ```bash
 docker compose --profile local up -d --build
 ```
 
-Checks before submitting changes:
+Checks to run before submitting changes:
 
 ```bash
 git diff --check
 npm --workspace apps/web run typecheck
 npm --workspace apps/web run test -- --run
 npm run build:web
-cd services/api && .venv/bin/python -m pytest -q
+cd services/api && .venv/bin/ruff check . && .venv/bin/python -m pytest -q
 ```
 
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md). External contributors work from a fork
-and open PRs to `dev`; organization contributors start from `dev`. Keep changes
-focused, preserve unrelated work, and provide validation and screenshots for
-visible changes. Promotion uses merge commits through `dev`, `test`, and `main`.
+and open pull requests to `dev`; organization contributors branch from `dev`.
+Keep changes focused, preserve unrelated work, and include validation and
+screenshots for visible changes. Promotion uses merge commits through `dev`,
+`test`, and `main`.
 
 Never commit populated environment files, credentials, runtime databases,
 production logs, or private deployment details. Screenshots and examples must
 use synthetic data. Report vulnerabilities through [SECURITY.md](SECURITY.md).
-Participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Documentation
 
-- [Documentation index](docs/INDEX.md) — reader paths and repository map.
-- [Docker deployment and release notes](docs/DOCKER_RELEASE.md) — installation, image tags, updates, health checks, and recovery.
-- [Architecture](docs/architecture.md) — services, access boundaries, persistence, and integrations.
-- [User guide (PDF)](docs/aperture-user-guide.pdf) — chat, sources, drafts, and account help.
-- [Administrator guide (PDF)](docs/aperture-admin-guide.pdf) — access, groups, policies, retention, and issue review.
-- [Platform owner guide (PDF)](docs/aperture-owner-guide.pdf) — providers, organization controls, and operations.
-- [Training publication](docs/TRAINING.md) — lesson sources and media regeneration.
-- [README image maintenance](docs/images/README.md) — capture provenance and tour regeneration.
+| Guide | What it covers |
+| --- | --- |
+| [Documentation index](docs/INDEX.md) | Reader paths and repository map. |
+| [Docker deployment and release notes](docs/DOCKER_RELEASE.md) | Installation, image tags, updates, health checks, and recovery. |
+| [Architecture](docs/architecture.md) | Services, access boundaries, persistence, and integrations. |
+| [User guide (PDF)](docs/aperture-user-guide.pdf) | Chat, sources, drafts, and account help. |
+| [Administrator guide (PDF)](docs/aperture-admin-guide.pdf) | Access, groups, policies, retention, and issue review. |
+| [Platform owner guide (PDF)](docs/aperture-owner-guide.pdf) | Providers, organization controls, and operations. |
+| [Training publication](docs/TRAINING.md) | Lesson sources and media regeneration. |
+| [README image maintenance](docs/images/README.md) | How these screenshots and the tour are captured. |
 
 ## License
 

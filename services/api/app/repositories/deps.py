@@ -33,6 +33,7 @@ def get_store() -> SeedStore:
         embedding_model=settings.knowledge_embedding_model,
         embedding_cache_dir=settings.knowledge_embedding_cache_dir,
         embedding_threads=settings.knowledge_embedding_threads,
+        dense_background=settings.knowledge_dense_background,
     )
 
 

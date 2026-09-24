@@ -266,8 +266,6 @@ button:focus-visible, a:focus-visible { outline-width: 2px; outline-offset: 3px;
   .conversation.is-empty { gap: 24px; padding: 40px 20px 24px; }
   .composer { border-radius: 12px; padding: 14px; }
   .composer textarea { font-size: 16px; }
-  .composer-toolbar { flex-wrap: wrap; gap: 10px; }
-  .composer-tools { flex: 1 1 100%; flex-wrap: wrap; }
   .chat-starters { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .chat-starters button { min-height: 64px; padding: 14px 4px; }
   .chat-starters button + button { border-left: 0; border-top: 1px solid var(--border); }

@@ -145,19 +145,21 @@ for line in sys.stdin:
 
 
 def test_mcp_oauth_callback_url_resolves_for_tool_config() -> None:
+    # The seeded Hermes tool has no token URL: the callback resolves and says
+    # honestly that nothing was saved, as a page a person can read.
     response = client.get(
         "/api/tools/tool-hermes-agent-mcp/oauth/callback",
         params={"code": "oauth-code", "state": "state-123"},
     )
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "received",
-        "tool_config_id": "tool-hermes-agent-mcp",
-        "name": "Hermes Agent MCP",
-        "code": "received",
-        "state": "state-123",
-    }
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Hermes Agent MCP has no token URL, so no token was saved" in response.text
+    assert get_store().configuration_secret("tool-oauth-token", "tool-hermes-agent-mcp") is None
+
+    landing = client.get("/api/tools/tool-hermes-agent-mcp/oauth/callback")
+    assert landing.status_code == 200
+    assert "sign-in return address for Hermes Agent MCP" in landing.text
 
 
 def test_mcp_oauth_callback_exchanges_code_and_vaults_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,20 +218,18 @@ def test_mcp_oauth_callback_exchanges_code_and_vaults_token(monkeypatch: pytest.
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "token_stored",
-        "tool_config_id": "tool-oauth-mcp",
-        "name": "OAuth MCP",
-        "code": "exchanged",
-        "state": state,
-        "token_type": "Bearer",
-        "scope": "files.read tools.call",
-    }
+    assert response.headers["content-type"].startswith("text/html")
+    assert "OAuth MCP is connected. You can close this window and return to Aperture." in response.text
+    # Neither the token nor the signed state is echoed into the page.
+    assert "oauth-access-token" not in response.text
+    assert state not in response.text
     assert captured["url"] == "https://auth.example.test/oauth/token"
+    # redirect_uri is the configured public URL (the same one the authorize
+    # step sent), never this request's own, possibly proxied, URL.
     assert captured["data"] == {
         "grant_type": "authorization_code",
         "code": "oauth-code",
-        "redirect_uri": "http://testserver/api/tools/tool-oauth-mcp/oauth/callback",
+        "redirect_uri": f"{get_settings().api_base_url.rstrip('/')}/api/tools/tool-oauth-mcp/oauth/callback",
         "client_id": "client-123",
         "client_secret": "client-secret",
     }
@@ -238,7 +238,12 @@ def test_mcp_oauth_callback_exchanges_code_and_vaults_token(monkeypatch: pytest.
     token_payload = json.loads(store.configuration_secret("tool-oauth-token", "tool-oauth-mcp") or "{}")
     assert token_payload["access_token"] == "oauth-access-token"
     assert token_payload["refresh_token"] == "oauth-refresh-token"
-    assert store.tool_configs["tool-oauth-mcp"].settings["oauth_token_status"] == "stored"
+    saved_settings = store.tool_configs["tool-oauth-mcp"].settings
+    assert saved_settings["oauth_token_status"] == "stored"
+    assert "oauth_last_callback_state" not in saved_settings
+    connected = [event for event in store.audit_events if event.action == "tool.oauth_connected"]
+    assert connected and connected[-1].target == "tool-oauth-mcp"
+    assert connected[-1].actor_id == "user-admin"
 
 
 def test_mcp_call_invokes_stdio_tool(tmp_path) -> None:

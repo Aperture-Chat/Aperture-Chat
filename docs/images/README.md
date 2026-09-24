@@ -1,69 +1,75 @@
 # README interface captures
 
-The root README opens with the light-mode product walkthrough described below.
-Its separate interface screenshots were refreshed on
-September 7, 2026 from the current working tree based on v0.5.0; the sign-in
-capture also reflects the in-progress sign-in/Help changes in that checkout.
-They illustrate the development interface, not a claim that every pixel is in
-an already published image.
+The root README's screenshots and product tour were refreshed on
+September 24, 2026 from the v0.5.5 interface (redesigned sidebar, Agents,
+Automations, and Library). They illustrate the current interface, not a claim
+that every pixel matches an older published image.
 
 ## Capture content
 
-- `chat-light.png`, `chat-dark.png`: clean workspace before connecting a model.
-- `drafts-light.png`, `drafts-dark.png`: manually authored project brief with the compact document toolbar.
-- `deck-light.png`, `deck-dark.png`: the brief converted through the real Document/Deck UI, with a manually edited subtitle.
-- `agents-dark.png`, `library-dark.png`: current section switches and empty configuration states.
-- `chat-mobile.png`: narrow-screen chat composer.
-- `sign-in.png`: access requests and the pre-login walkthrough entry point.
+- `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
+  slideshow of six light-mode captures (a cited agent answer in chat, Agents,
+  Automations, Knowledge, the document editor, and the Admin Console), with the
+  first frame as the reduced-motion fallback.
+- `chat-light.png`, `chat-dark.png`: a Policy Assistant answer citing the
+  uploaded travel policy, and a chat delivered by an automation's Run now.
+- `chat-mobile.png`: the chat composer at a phone-sized breakpoint.
+- `drafts-light.png`, `drafts-dark.png`: a manually authored project brief in
+  the document editor.
+- `deck-light.png`, `deck-dark.png`: the same brief converted through the real
+  Document/Deck switch.
+- `agents-light.png`, `automations-light.png`: three agents and three
+  automations (weekly, weekday cron, and a paused one-time run).
+- `knowledge-dark.png`, `tools-dark.png`: a knowledge base with its uploaded
+  documents, and the prompt templates in Tools.
+- `admin-light.png`, `platform-dark.png`: the Admin Console user list and the
+  Platform Owner Console model availability table.
+- `sign-in.png`: email sign-in, access requests, and the pre-login walkthrough.
 
-The account and document content are synthetic. The capture API used new local
-data stores, no production environment configuration, and no model provider.
-No provider responses, connection successes, or usage counters were fabricated.
-Existing legacy browser history was excluded from screenshots and not imported.
+## Data and honesty
+
+The organization ("Meridian Advisory Group"), people, policies, project brief,
+agents, automations, prompts, and skills are synthetic. The capture API used
+new local data stores, no seeded demo data, no production configuration, and no
+private credentials.
+
+Model output is real. Chat replies and automation runs came from Gemma 3 4B,
+an open model served locally by Ollama and registered through the normal
+provider, validation, and model-sync flow. Knowledge documents were uploaded
+and indexed by the application; citations point at those uploads. No provider
+responses, connection results, or usage counters were edited or fabricated.
+Screens that depend on external services (web search, cloud connectors, MCP
+servers) are shown in their unconfigured state or not at all.
 
 ## Refresh procedure
 
 1. Run the current UI against an isolated local API with separate data paths,
-   synthetic accounts, and no private production configuration. Use a clean
-   browser profile/origin where possible; never clear someone else's history.
-2. Capture the real interface in light/dark themes and at a mobile breakpoint.
-   Restore only known synthetic documents. Keep any unconfigured-state notices
-   visible; do not restyle the product or invent results for the image.
-3. Stage captures in an ignored output directory. Review every image for private
-   data, credentials, unrelated browser history, transient tooltips, cut-off
+   seeds disabled, and no private production configuration. Create the first
+   owner through the bootstrap flow and use only synthetic accounts and files.
+2. Connect a local model (for example Ollama) through the Platform Owner
+   Console flow so answers are genuine. Review every answer for accuracy
+   against the synthetic source documents before capturing it.
+3. Capture the real interface in light and dark themes and at a mobile
+   breakpoint (1440×900 at 2× device scale; 390×844 for mobile). Keep
+   unconfigured-state notices visible; do not restyle the product or invent
+   results for the image.
+4. Stage captures in an ignored output directory and review every image for
+   private data, credentials, unrelated history, transient tooltips, cut-off
    content, and correspondence with the current interface.
-4. Replace this directory's named PNGs as one reviewed batch. Update the capture
-   date, descriptions, and root README captions when scope changes.
-5. Preview the root README, check relative links, and run `git diff --check`.
+5. Rebuild the tour from the reviewed light captures, replace this directory's
+   named files as one batch, and update this page and the README captions when
+   scope changes. Preview the README, check relative links, and run
+   `git diff --check`.
+
+The tour is a plain FFmpeg slideshow of the reviewed PNGs: each frame is scaled
+to 1280 pixels wide, shown for about three seconds, and encoded with a
+per-frame palette so interface text stays sharp.
 
 README screenshots are separate from the in-app training frames and PDF/video
-build pipeline; see [training publication](../TRAINING.md) before changing those assets.
-
-## Website product walkthrough
-
-The README hero uses the six complete **light-mode v6 recordings** from
-[ApertureChat-Website](https://github.com/Aperture-Chat/ApertureChat-Website),
-matching the player at [ApertureChat.com](https://aperturechat.com/#demoPanel).
-The order is Ask, Research, Draft, Slides, Team, Platform. These are the existing
-public product recordings with their real research responses and editorial
-pointer cues, not the synthetic no-provider screenshots described above.
-The original edit shortens waiting time and intermediate editorial work.
-
-`product-walkthrough-light.gif` transcodes those recordings at 960 pixels wide
-and 10 frames per second, retaining the full sequence and timing. Clicking it
-opens the website player with chapter selection, playback controls, and fullscreen.
-`product-walkthrough-light.png` is the opening-frame fallback for reduced motion
-where the README renderer supports the picture media query. GitHub controls
-which playback and accessibility features its README renderer permits.
-
-To regenerate with Node.js and FFmpeg installed:
-
-```bash
-node apps/web/scripts/generate-readme-tour.cjs --reviewed-captures --source-dir ../ApertureChat-Website
-```
-
-Pass a local checkout of the website repository containing the six
-`assets/hero/{chat,followup,draft,slides,team,platform}-v6-light.mp4` files.
-Review any changed clips for public suitability before rebuilding. The generator
-records source and output SHA-256 hashes in `product-walkthrough-manifest.json`;
-it does not download media, capture private application state, or alter the website.
+build pipeline; see [training publication](../TRAINING.md) before changing
+those assets. The narrated product walkthrough lives on
+[ApertureChat.com](https://aperturechat.com/#demoPanel); its source recordings
+are maintained in the
+[ApertureChat-Website](https://github.com/Aperture-Chat/ApertureChat-Website)
+repository, and `apps/web/scripts/generate-readme-tour.cjs` can still transcode
+them when a README copy of that walkthrough is wanted.

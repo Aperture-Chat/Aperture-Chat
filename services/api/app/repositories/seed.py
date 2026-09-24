@@ -355,6 +355,7 @@ class SeedStore:
         embedding_model: str = "BAAI/bge-small-en-v1.5",
         embedding_cache_dir: str | None = None,
         embedding_threads: int = 2,
+        dense_background: bool = False,
     ) -> None:
         self.vault = vault
         self._runtime_state_path = (
@@ -492,6 +493,7 @@ class SeedStore:
             embedding_model=embedding_model,
             embedding_cache_dir=embedding_cache_dir,
             embedding_threads=embedding_threads,
+            background_dense=dense_background,
         )
         self.openrouter_api_key = (openrouter_api_key or "").strip()
         self.openrouter_base_url = (openrouter_base_url or OPENROUTER_DEFAULT_BASE_URL).strip()
@@ -1907,7 +1909,7 @@ class SeedStore:
                 )
             state = scope_provider_credentials_for_import(
                 self.vault,
-                validate_v4_identity_config_state(self._identity_config_v4_payload()),
+                validate_v4_identity_config_state(self._identity_config_live_payload()),
             )
             try:
                 replaced, cleanup_job = (
@@ -3866,6 +3868,7 @@ class SeedStore:
             self._runtime_state_flush_condition.notify_all()
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=5.0)
+        self.vector_store.stop_dense_worker()
         if callback is not None:
             atexit.unregister(callback)
         if self._owns_application_state_repository:
@@ -3927,7 +3930,18 @@ class SeedStore:
         self._runtime_state_dirty = False
         self._runtime_state_flush_deadline = None
 
-    def _identity_config_v4_payload(self) -> dict[str, Any]:
+    def _identity_config_live_payload(self) -> dict[str, Any]:
+        """Return the v4 payload used to replace live SQL authority after cutover.
+
+        After cutover the vector store is the sole knowledge authority: snapshot
+        replacement excludes knowledge collections from its relational digest
+        and counts. Serializing and re-validating every document and chunk on
+        each mutation made every unrelated save scale with the total corpus, so
+        the live payload carries empty knowledge collections instead.
+        """
+        return self._identity_config_v4_payload(include_knowledge=False)
+
+    def _identity_config_v4_payload(self, *, include_knowledge: bool = True) -> dict[str, Any]:
         if self._application_state_metadata is None:
             raise RuntimeError("Application-state import metadata is unavailable.")
         if self._chat_state_metadata is None:
@@ -3946,8 +3960,16 @@ class SeedStore:
             "connector_configs": self._dump_model_collection(self.connector_configs),
             "sso_configs": self._dump_model_collection(self.sso_configs),
             "knowledge_configs": self._dump_model_collection(self.knowledge_configs),
-            "knowledge_documents": self._dump_grouped_model_collection(self.knowledge_documents),
-            "knowledge_chunks": self._dump_grouped_model_collection(self.knowledge_chunks),
+            "knowledge_documents": (
+                self._dump_grouped_model_collection(self.knowledge_documents)
+                if include_knowledge
+                else {}
+            ),
+            "knowledge_chunks": (
+                self._dump_grouped_model_collection(self.knowledge_chunks)
+                if include_knowledge
+                else {}
+            ),
             "tool_configs": self._dump_model_collection(self.tool_configs),
             "prompt_templates": self._dump_model_collection(self.prompt_templates),
             "skill_files": self._dump_model_collection(self.skill_files),
@@ -4326,6 +4348,8 @@ class SeedStore:
             config_id: self.vector_store.chunks_for(config_id)
             for config_id in sql_config_ids
         }
+        # Chunks stored while embeddings were unavailable get vectors later.
+        self.vector_store.request_dense_backfill()
         for rule in self.alert_rules.values():
             runtime = self.application_state_repository.get_alert_rule_runtime(rule.id)
             rule.last_triggered_at = (
@@ -4348,7 +4372,7 @@ class SeedStore:
             )
         state = scope_provider_credentials_for_import(
             self.vault,
-            validate_v4_identity_config_state(self._identity_config_v4_payload()),
+            validate_v4_identity_config_state(self._identity_config_live_payload()),
         )
         try:
             replaced = self.identity_config_repository.replace_active_snapshot(
@@ -4788,7 +4812,7 @@ class SeedStore:
                 )
             state = scope_provider_credentials_for_import(
                 self.vault,
-                validate_v4_identity_config_state(self._identity_config_v4_payload()),
+                validate_v4_identity_config_state(self._identity_config_live_payload()),
             )
             try:
                 replaced, cleanup_job = (
@@ -4875,6 +4899,60 @@ class SeedStore:
         ranked = [chunk for chunk in candidates if chunk.score > 0.1] or candidates
         ranked.sort(key=lambda chunk: (-chunk.score, chunk.source_name.lower(), chunk.ordinal))
         return [deepcopy(chunk) for chunk in ranked[:limit]]
+
+    def update_knowledge_acl(self, config: KnowledgeConfig) -> None:
+        """Copy a knowledge base's current sharing onto its indexed content."""
+        acl_group_ids = list(config.acl_group_ids)
+        with self._store_lock:
+            for document in self.knowledge_documents.get(config.id, []):
+                document.acl_group_ids = list(acl_group_ids)
+            for chunk in self.knowledge_chunks.get(config.id, []):
+                chunk.acl_group_ids = list(acl_group_ids)
+        self.vector_store.update_config_acl(config.id, acl_group_ids)
+
+    def knowledge_index_status(self, config_id: str) -> dict[str, Any]:
+        return self.vector_store.dense_status(config_id)
+
+    def replace_knowledge_document(
+        self,
+        config: KnowledgeConfig,
+        document: KnowledgeDocument,
+        chunks: list[KnowledgeChunk],
+    ) -> None:
+        """Refresh one linked source (web page or API) in place by document id."""
+        with self._store_lock:
+            documents = self.knowledge_documents.setdefault(config.id, [])
+            for index, existing in enumerate(documents):
+                if existing.id == document.id:
+                    documents[index] = document
+                    break
+            else:
+                documents.append(document)
+            self.knowledge_chunks[config.id] = [
+                chunk
+                for chunk in self.knowledge_chunks.get(config.id, [])
+                if chunk.document_id != document.id
+            ] + list(chunks)
+        self.vector_store.replace_document(document, chunks)
+
+    def record_knowledge_sync(
+        self,
+        config: KnowledgeConfig,
+        *,
+        status: str,
+        synced_at: str,
+        provider_status: str,
+        provider_message: str,
+    ) -> tuple[KnowledgeConfig, list[KnowledgeDocument], str]:
+        settings = dict(config.settings)
+        settings["status"] = status
+        settings["document_count"] = len(self.knowledge_documents.get(config.id, []))
+        settings["last_sync"] = synced_at
+        settings["provider_status"] = provider_status
+        settings["provider_message"] = provider_message
+        config.settings = settings
+        self.save_runtime_state()
+        return config, self.knowledge_documents_for(config.id), synced_at
 
     def append_knowledge_sources(
         self,
@@ -5513,6 +5591,8 @@ def _chunk_visible_to_actor(actor: User, chunk: KnowledgeChunk) -> bool:
         return True
     if actor.tenant_id != chunk.tenant_id:
         return False
+    if actor.role == Role.TENANT_ADMIN:
+        return True
     if chunk.acl_group_ids and not set(actor.group_ids).intersection(chunk.acl_group_ids):
         return False
     return True

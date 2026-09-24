@@ -1,3 +1,4 @@
+import os
 import secrets
 from functools import lru_cache
 from ipaddress import IPv4Network, IPv6Network, ip_network
@@ -13,6 +14,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # process working directory. Existing real environment variables win (no override).
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 load_dotenv(_REPO_ROOT / ".env")
+
+def _default_embedding_threads() -> int:
+    """Use about half the cores for local embeddings (2-4), leaving room for requests."""
+    return max(2, min(4, (os.cpu_count() or 2) // 2))
+
 
 # The historical hardcoded signing secret. It is public, so a deployment that
 # still uses it lets anyone forge session tokens / OIDC state and derive the
@@ -152,7 +158,10 @@ class Settings(BaseSettings):
     knowledge_dense_embeddings_enabled: bool = True
     knowledge_embedding_model: str = "BAAI/bge-small-en-v1.5"
     knowledge_embedding_cache_dir: str = "/opt/aperture-models"
-    knowledge_embedding_threads: int = Field(default=2, ge=1, le=16)
+    knowledge_embedding_threads: int = Field(default_factory=lambda: _default_embedding_threads(), ge=1, le=16)
+    # Embed new chunks on a background worker so uploads return as soon as text
+    # is extracted and keyword-searchable; semantic vectors fill in behind them.
+    knowledge_dense_background: bool = True
     elastic_url: str | None = None
     elastic_api_key: str | None = None
     scim_bearer_token: str | None = None
