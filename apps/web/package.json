@@ -1,7 +1,7 @@
 {
   "name": "@aperture/web",
   "private": true,
-  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "license": "MIT",
   "version": "0.5.5",
   "type": "module",
   "scripts": {
