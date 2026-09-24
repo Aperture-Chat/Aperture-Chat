@@ -8,7 +8,7 @@
 Chat, documents, slide decks, agents, automations, and knowledge, on infrastructure you control.
 
 [![Latest release](https://img.shields.io/github/v/release/Aperture-Chat/Aperture-Chat?style=flat-square&color=0f766e&label=release)](https://github.com/Aperture-Chat/Aperture-Chat/releases)
-![License: source available](https://img.shields.io/badge/license-source--available-475569?style=flat-square)
+[![License: MIT](https://img.shields.io/badge/license-MIT-475569?style=flat-square)](LICENSE.md)
 ![Deploy: Docker Compose](https://img.shields.io/badge/deploy-Docker%20Compose-0ea5e9?style=flat-square)
 ![Frontend: React 19](https://img.shields.io/badge/frontend-React%2019%20%2B%20TypeScript-6366f1?style=flat-square)
 ![Backend: FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python-0284c7?style=flat-square)
@@ -334,15 +334,8 @@ Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Aperture Chat is source-available under the [Aperture Chat Community Source
-License](LICENSE.md). Anyone may use, copy, modify, and share the platform at
-no license fee, subject to its terms. Selling, paid licensing, paid access to,
-and other commercialization of the application layer are not allowed. Selling
-or reselling bona fide AI-model usage tokens or credits through the platform,
-including with a markup, is expressly allowed.
-
-Public forks must retain [LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md),
-and clearly state in both their root license notice and top-level README that
-they are a fork of Aperture Chat. No Aperture Chat branding or attribution is
-required inside a forked application; forks may use their own product name and
-visual identity.
+Aperture Chat is open source under the [MIT License](LICENSE.md). Anyone may
+use, copy, modify, merge, publish, distribute, sublicense, and sell the
+software, including commercially, provided the copyright and license notice
+are included in all copies or substantial portions of it. The software is
+provided as-is, without warranty.
