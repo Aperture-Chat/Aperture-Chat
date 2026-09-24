@@ -137,7 +137,6 @@ from app.core.policy import (
     assert_group_permission,
     assert_knowledge_access,
     assert_model_access,
-    assert_tool_access,
     hermes_companion_allowed,
     model_access_allowed,
     tool_access_allowed,
@@ -4201,20 +4200,43 @@ def _resolve_runtime_context(
     )
     knowledge_configs = [
         _resolve_knowledge_config(store, actor, config_id)
-        for config_id in _dedupe([*request.knowledge_config_ids, *profile_knowledge_ids])
+        for config_id in _dedupe(
+            [*request.knowledge_config_ids, *_enabled_knowledge_ids(store, profile_knowledge_ids)]
+        )
     ]
-    tool_configs = [
-        _resolve_tool_config(store, actor, config_id)
-        for config_id in _dedupe([*request.tool_config_ids, *profile_tool_ids, *companion_tool_ids])
-    ]
+    tool_configs, skipped_tool_ids = _resolve_usable_tool_configs(
+        store, actor, _dedupe([*request.tool_config_ids, *profile_tool_ids])
+    )
     for tool in tool_configs:
         if tool.approval_required and not request.agent_enabled:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Tool '{tool.id}' requires an agent approval workflow.",
             )
-    approval_required_mcp_tools = _approval_required_mcp_tools(tool_configs)
     approved_tool_ids = _verified_approved_tool_ids(actor, request.approval_tokens)
+    # Companion tools are attached by the server, not requested by the client,
+    # so the client never asks the user to approve them. An approval-required
+    # companion tool without a signed approval is left out of this turn (never
+    # run) instead of failing the whole Hermes chat.
+    requested_tool_ids = {tool.id for tool in tool_configs}
+    if companion_tool_ids:
+        # Same tenant group policy as requested tools (unchanged behavior).
+        assert_group_permission(actor, store.groups, "tools_access", "Tool access")
+    for companion_tool_id in companion_tool_ids:
+        if companion_tool_id in requested_tool_ids:
+            continue
+        companion_tool = store.tool_configs.get(companion_tool_id)
+        if companion_tool is None:
+            continue
+        if (
+            companion_tool.tool_type == "mcp"
+            and companion_tool.approval_required
+            and companion_tool.id not in approved_tool_ids
+        ):
+            skipped_tool_ids.append(companion_tool.id)
+            continue
+        tool_configs.append(companion_tool)
+    approval_required_mcp_tools = _approval_required_mcp_tools(tool_configs)
     missing_mcp_approvals = [
         tool for tool in approval_required_mcp_tools if tool.id not in approved_tool_ids
     ]
@@ -4341,6 +4363,10 @@ def _resolve_runtime_context(
         ],
         "retrieval_query": retrieval_query,
         "tool_config_ids": [config.id for config in tool_configs],
+        # Requested or agent-attached tools left out of this turn because the
+        # actor may not use them, they are turned off, or (companion tools)
+        # they were not approved. Recorded for the audit trail; never run.
+        "skipped_tool_config_ids": skipped_tool_ids,
         "approval_required_tool_config_ids": [config.id for config in approval_required_mcp_tools],
         "approved_tool_config_ids": [
             config.id for config in approval_required_mcp_tools if config.id in approved_tool_ids
@@ -5994,16 +6020,45 @@ def _resolve_knowledge_config(store: SeedStore, actor: User, config_id: str) -> 
     return config
 
 
-def _resolve_tool_config(store: SeedStore, actor: User, config_id: str) -> ToolConfig:
-    config = store.tool_configs.get(config_id)
-    if config is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Unknown tool configuration '{config_id}'.",
-        )
+def _enabled_knowledge_ids(store: SeedStore, config_ids: list[str]) -> list[str]:
+    """Drop knowledge bases an administrator turned off from an agent's defaults.
+
+    Turning a knowledge base off pauses it; it must not make every chat with an
+    agent that lists it fail. Unknown or unshared bases are kept so
+    ``_resolve_knowledge_config`` still rejects them, and a disabled base is
+    never searched.
+    """
+    return [
+        config_id
+        for config_id in config_ids
+        if (config := store.knowledge_configs.get(config_id)) is None or config.enabled
+    ]
+
+
+def _resolve_usable_tool_configs(
+    store: SeedStore, actor: User, config_ids: list[str]
+) -> tuple[list[ToolConfig], list[str]]:
+    """Resolve the tools this turn may use, skipping ones the actor can't use.
+
+    A tool that is turned off, outside the actor's groups, or deleted used to
+    fail the whole message with a 403/404 — so one stale or restricted tool on
+    an agent broke every Agent-mode turn. Those tools are now skipped (and
+    reported back as skipped ids) instead. Authorization is unchanged: a
+    skipped tool is never run, and the tenant's "tools_access" group policy
+    still refuses the turn outright.
+    """
+    if not config_ids:
+        return [], []
     assert_group_permission(actor, store.groups, "tools_access", "Tool access")
-    assert_tool_access(actor, config)
-    return config
+    usable: list[ToolConfig] = []
+    skipped: list[str] = []
+    for config_id in config_ids:
+        config = store.tool_configs.get(config_id)
+        if config is None or not tool_access_allowed(actor, config):
+            skipped.append(config_id)
+            continue
+        usable.append(config)
+    return usable, skipped
 
 
 def _messages_with_runtime_context(
@@ -6261,7 +6316,9 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             name = str(template.get("name") or template.get("id") or "Prompt template")
             content = str(template.get("content") or "").strip()
             if content:
-                context_lines.append(f"- {name}: {_prompt_excerpt(content)}")
+                context_lines.append(
+                    f"- {name}: {_prompt_excerpt(content, limit=PROMPT_LIBRARY_EXCERPT_CHARS)}"
+                )
     hermes_memories = runtime_context.get("hermes_memories")
     if isinstance(hermes_memories, list) and hermes_memories:
         context_lines.append(
@@ -6285,7 +6342,9 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             content = str(skill.get("content") or "").strip()
             if content:
                 label = f"{name} v{version}" if version else name
-                context_lines.append(f"- {label}: {_prompt_excerpt(content)}")
+                context_lines.append(
+                    f"- {label}: {_prompt_excerpt(content, limit=PROMPT_LIBRARY_EXCERPT_CHARS)}"
+                )
     mcp_servers = runtime_context.get("mcp_servers")
     if isinstance(mcp_servers, list) and mcp_servers:
         context_lines.append("MCP servers:")
@@ -6423,11 +6482,17 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
     return "\n\n".join(parts)
 
 
-def _prompt_excerpt(text: str) -> str:
+# Attached prompt templates and skill files are authored instructions, so they
+# get a larger budget than retrieved snippets. The Library editor shows this
+# limit to authors; keep the two in sync (ToolLibraryManager.tsx).
+PROMPT_LIBRARY_EXCERPT_CHARS = 4000
+
+
+def _prompt_excerpt(text: str, *, limit: int = 1000) -> str:
     normalized = " ".join(text.split())
-    if len(normalized) <= 1000:
+    if len(normalized) <= limit:
         return normalized
-    return f"{normalized[:997].rstrip()}..."
+    return f"{normalized[: limit - 3].rstrip()}..."
 
 
 def _knowledge_hit_location(hit: dict[str, object]) -> str:

@@ -7,24 +7,26 @@ execution path as the "Run now" route, delivers each scheduled run's output
 into a chat thread owned by the automation's creator, and flushes buffered
 audit events to Elastic when configured.
 
-All schedule times are interpreted in UTC (the authoritative platform clock).
+Schedule times are wall-clock times in each automation's time zone (UTC when
+none is set); the math lives in app/core/automation_schedule.py.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
-from croniter import croniter
 from fastapi import HTTPException
 
-from app.core import clock, mailer
+from app.core import automation_schedule, clock, mailer
 from app.core.automation_runner import (
+    deliver_run_output,
     execute_chain,
     persist_automation_fields,
     record_run_failure,
+    record_run_skipped,
     record_run_success,
 )
 from app.core.config import Settings, get_settings
@@ -32,7 +34,7 @@ from app.core.elastic_export import flush_elastic_events
 from app.core.search_index import search_index_pass
 from app.core.model_gateway import ModelGatewayError, get_model_gateway_client
 from app.core.platform_updates import reconcile_updater_outcome, refresh_platform_update_check
-from app.models.schemas import Automation, ChatMessage, ChatThread, PlatformSettings, User
+from app.models.schemas import Automation, PlatformSettings, User
 from app.repositories.application_state import ApplicationStateRepository
 from app.repositories.deps import get_usage_budget_orchestrator
 from app.repositories.seed import SeedStore
@@ -49,64 +51,11 @@ NOT_CONFIGURED_DETAIL = (
     "owner can configure SMTP in the Owner portal → Alerts tab."
 )
 
-WEEKDAY_INDEX = {
-    "monday": 0,
-    "tuesday": 1,
-    "wednesday": 2,
-    "thursday": 3,
-    "friday": 4,
-    "saturday": 5,
-    "sunday": 6,
-}
+WEEKDAY_INDEX = automation_schedule.WEEKDAY_INDEX
 
 
 def _parse_iso(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed
-
-
-def _parse_time_of_day(value: str) -> tuple[int, int] | None:
-    parts = value.strip().split(":")
-    if len(parts) != 2:
-        return None
-    try:
-        hour, minute = int(parts[0]), int(parts[1])
-    except ValueError:
-        return None
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return None
-    return hour, minute
-
-
-def _weekly_occurrence(automation: Automation, now: datetime) -> datetime | None:
-    """The most recent scheduled weekly occurrence at or before `now` (UTC)."""
-    day = WEEKDAY_INDEX.get((automation.weekly_day or "").strip().lower())
-    time_of_day = _parse_time_of_day(automation.time_of_day or "")
-    if day is None or time_of_day is None:
-        return None
-    candidate = now.replace(hour=time_of_day[0], minute=time_of_day[1], second=0, microsecond=0)
-    candidate -= timedelta(days=(now.weekday() - day) % 7)
-    if candidate > now:
-        candidate -= timedelta(days=7)
-    return candidate
-
-
-def _daily_occurrence(automation: Automation, now: datetime) -> datetime | None:
-    """The most recent scheduled daily occurrence at or before `now` (UTC)."""
-    time_of_day = _parse_time_of_day(automation.time_of_day or "")
-    if time_of_day is None:
-        return None
-    candidate = now.replace(hour=time_of_day[0], minute=time_of_day[1], second=0, microsecond=0)
-    if candidate > now:
-        candidate -= timedelta(days=1)
-    return candidate
+    return automation_schedule.parse_instant(value, UTC)
 
 
 def is_due(automation: Automation, now: datetime) -> bool:
@@ -119,68 +68,12 @@ def is_due(automation: Automation, now: datetime) -> bool:
     if not automation.enabled or not automation.steps:
         return False
     last_fire = _parse_iso(automation.last_scheduled_fire_at)
-    if automation.trigger_type == "once":
-        run_at = _parse_iso(automation.run_at)
-        return run_at is not None and run_at <= now and last_fire is None
     baseline = last_fire or _parse_iso(automation.updated_at) or _parse_iso(automation.created_at)
-    if baseline is None:
-        return False
-    if automation.trigger_type == "daily":
-        occurrence = _daily_occurrence(automation, now)
-        return occurrence is not None and occurrence > baseline
-    if automation.trigger_type == "weekly":
-        occurrence = _weekly_occurrence(automation, now)
-        return occurrence is not None and occurrence > baseline
-    if automation.trigger_type == "cron":
-        expression = (automation.cron_expression or "").strip()
-        if not expression or not croniter.is_valid(expression):
-            return False
-        next_fire = croniter(expression, baseline).get_next(datetime)
-        return next_fire <= now
-    return False
-
-
-def _delivery_thread(
-    automation: Automation,
-    creator: User,
-    transcript: list[dict[str, object]],
-    final_output: str,
-    now: datetime,
-) -> ChatThread:
-    """A chat thread carrying the scheduled run's real output to its creator."""
-    stamp = now.strftime("%b %d, %Y %H:%M UTC")
-    iso = now.isoformat()
-    metadata = {
-        "automation_id": automation.id,
-        "automation_name": automation.name,
-        "scheduled": True,
-    }
-    return ChatThread(
-        id=f"thread-automation-{uuid4()}",
-        tenant_id=automation.tenant_id,
-        owner_user_id=creator.id,
-        title=f"{automation.name} — {stamp}",
-        model_id=automation.steps[-1].model_id if automation.steps else "",
-        group_id="",
-        updated_at=iso,
-        messages=[
-            ChatMessage(
-                id=f"msg-{uuid4()}",
-                role="user",
-                content=automation.prompt or "Begin the automation.",
-                createdAt=stamp,
-                createdAtIso=iso,
-                metadata=metadata,
-            ),
-            ChatMessage(
-                id=f"msg-{uuid4()}",
-                role="assistant",
-                content=final_output,
-                createdAt=stamp,
-                createdAtIso=iso,
-                metadata={**metadata, "steps": len(transcript)},
-            ),
-        ],
+    return automation_schedule.is_due(
+        automation_schedule.Schedule.of(automation),
+        now,
+        last_fire=last_fire,
+        baseline=baseline,
     )
 
 
@@ -200,14 +93,7 @@ def run_scheduled_automation(store: SeedStore, automation: Automation) -> None:
 
     creator = store.users.get(automation.created_by or "")
     if creator is None or not creator.active:
-        persist_automation_fields(
-            store,
-            automation.id,
-            {
-                "last_run_at": clock.now_iso(),
-                "last_run_status": "skipped: creator is inactive or missing",
-            },
-        )
+        record_run_skipped(store, automation, "creator is inactive or missing")
         if creator is not None:
             store.record_audit(
                 creator,
@@ -222,6 +108,7 @@ def run_scheduled_automation(store: SeedStore, automation: Automation) -> None:
         )
         return
 
+    started = time.monotonic()
     try:
         client = get_model_gateway_client()
         transcript, final_output = execute_chain(
@@ -231,18 +118,30 @@ def run_scheduled_automation(store: SeedStore, automation: Automation) -> None:
             client,
             get_usage_budget_orchestrator(),
         )
-        store.save_chat_thread(
-            _delivery_thread(automation, creator, transcript, final_output, clock.now())
+        thread_id, draft_id = deliver_run_output(
+            store, automation, creator, transcript, final_output, scheduled=True
         )
-        record_run_success(store, automation, creator, scheduled=True)
+        record_run_success(
+            store,
+            automation,
+            creator,
+            scheduled=True,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            thread_id=thread_id,
+            draft_id=draft_id,
+        )
     except (HTTPException, ModelGatewayError) as exc:
         detail = str(getattr(exc, "detail", None) or exc)
-        _record_scheduled_run_failure_without_masking(store, automation, creator, detail)
+        _record_scheduled_run_failure_without_masking(
+            store, automation, creator, detail, started=started
+        )
         logger.warning("Scheduled automation %s failed: %s", automation.id, detail)
         return
     except Exception as exc:  # noqa: BLE001 - persist an honest terminal state
         detail = f"unexpected {type(exc).__name__}"
-        _record_scheduled_run_failure_without_masking(store, automation, creator, detail)
+        _record_scheduled_run_failure_without_masking(
+            store, automation, creator, detail, started=started
+        )
         logger.exception("Scheduled automation %s failed unexpectedly", automation.id)
         return
     logger.info(
@@ -255,11 +154,16 @@ def _record_scheduled_run_failure_without_masking(
     automation: Automation,
     creator: User,
     error: str,
+    *,
+    started: float | None = None,
 ) -> None:
     """Best-effort failure bookkeeping that preserves the execution error."""
 
+    duration_ms = int((time.monotonic() - started) * 1000) if started is not None else None
     try:
-        record_run_failure(store, automation, creator, error, scheduled=True)
+        record_run_failure(
+            store, automation, creator, error, scheduled=True, duration_ms=duration_ms
+        )
     except Exception:  # noqa: BLE001 - scheduler must survive persistence failure
         logger.exception(
             "Could not persist failure status for scheduled automation %s",

@@ -9,12 +9,14 @@ import {
 import type {
   BootstrapData,
   BootstrapWireData,
+  ConfigSettings,
   Connector,
   ConnectorConfigRecord,
   Group,
   User,
   KnowledgeBase,
   KnowledgeConfigRecord,
+  KnowledgeLinkedSource,
   ModelConfig,
   PlatformSettings,
   SsoConfig,
@@ -211,6 +213,8 @@ export function mapKnowledgeConfigRecordToKnowledgeBase(
       stringSetting(record.settings, "source_label") ??
       connector?.name ??
       titleFromSlug(record.source_type),
+    source_type: record.source_type,
+    linked_sources: linkedSourcesSetting(record.settings),
     connector_id: connectorId,
     connector_config_id: record.connector_config_id,
     status: knowledgeStatus(record.settings) ?? (record.enabled ? "synced" : "draft"),
@@ -226,6 +230,32 @@ export function mapKnowledgeConfigRecordToKnowledgeBase(
     owner_user_id: record.owner_user_id,
     enabled: record.enabled,
   };
+}
+
+function linkedSourcesSetting(settings: ConfigSettings): KnowledgeLinkedSource[] {
+  const raw = settings.linked_sources;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item): KnowledgeLinkedSource[] => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const kind = record.kind === "web" || record.kind === "api" ? record.kind : null;
+    if (!kind) return [];
+    const text = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : undefined);
+    return [
+      {
+        document_id: text("document_id") ?? null,
+        kind,
+        name: text("name") ?? text("url") ?? text("base_url") ?? "Source",
+        url: text("url"),
+        base_url: text("base_url"),
+        path: text("path"),
+        method: text("method"),
+        auth_type: text("auth_type"),
+        refresh: record.refresh === true,
+        awaiting_authorization: record.awaiting_authorization === true,
+      },
+    ];
+  });
 }
 
 export function mapToolConfigRecordToDisplay(record: ToolConfigRecord): ToolConfig {
@@ -259,6 +289,8 @@ export function mapToolConfigRecordToDisplay(record: ToolConfigRecord): ToolConf
     script: stringSetting(record.settings, "script"),
     timeout_seconds:
       typeof record.settings.timeout_seconds === "number" ? record.settings.timeout_seconds : undefined,
+    secret_set: Boolean(record.secret_set),
+    oauth_token_stored: record.settings.oauth_token_status === "stored",
   };
 }
 

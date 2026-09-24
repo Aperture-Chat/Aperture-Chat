@@ -1523,7 +1523,7 @@ test("use in chat from Agents sends the selected agent profile runtime", async (
   expect(await screen.findByText("Your conversations will appear here.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "Agents" }));
 
-  const profileCard = (await screen.findByText("Client Update Agent")).closest(".agent-profile-card");
+  const profileCard = (await screen.findByText("Client Update Agent")).closest(".agent-card");
   expect(profileCard).not.toBeNull();
   fireEvent.click(within(profileCard as HTMLElement).getByRole("button", { name: "Chat" }));
 

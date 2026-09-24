@@ -231,6 +231,41 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.4
+
+- Agents and Automations are redesigned. Agent cards show the model, who can
+  use the agent, attached knowledge and tools, and a readiness check. Start
+  from a template, duplicate, search, and filter. New agents no longer start
+  with knowledge, templates, or skills pre-attached.
+- An automation step that uses an agent now applies that agent's instructions,
+  skills, and knowledge (agent tools remain chat-only). Results are delivered
+  to a new chat or a new draft, and every run, including Run now, is recorded
+  in a run history of the last 10 runs.
+- Each schedule has its own time zone and a live preview of its next runs.
+  Invalid cron expressions are rejected when an automation is saved or enabled
+  instead of silently never firing, and a scheduled automation pauses itself
+  after three failed runs in a row.
+- Library Knowledge and Tools share the Agents design. A knowledge base can
+  combine uploaded files, web pages, and API sources (GET or POST with an
+  optional credential or provider sign-in). Sync re-fetches web pages and API
+  sources and leaves uploaded files untouched; API requests pass the outbound
+  guards and refuse redirects so credentials never follow them.
+- Uploads become keyword-searchable as soon as their text is extracted, and a
+  background worker adds semantic vectors afterwards. The Library shows
+  indexing progress and upload limits, and scanned pages are OCR'd in parallel.
+  Optional settings: `APERTURE_KNOWLEDGE_DENSE_BACKGROUND`,
+  `APERTURE_KNOWLEDGE_EMBEDDING_THREADS` (now defaults to half the CPU cores,
+  between 2 and 4), and `APERTURE_KNOWLEDGE_OCR_WORKERS`.
+- MCP connections are tested before they are saved, and a saved access token
+  can be cleared. Changing a local (stdio) server's launch command stays
+  platform-owner-only. Chat sends only the tools the current user may run, so
+  one restricted tool no longer fails a whole Agent-mode reply.
+- Refreshed README screenshots and product tour for the current interface.
+- This release adds no database migrations. Back up the complete application
+  data volume before upgrading as usual.
+- API and web images publish as `v0.5.5-dev`, `v0.5.5-test`, and `v0.5.5-main`.
+  Stable `v0.5.5` and `latest` promote inspected test images without rebuilding.
+
 ## New Since v0.5.3
 
 - The sidebar is simpler: Search sits under New chat, Agents and Library have
