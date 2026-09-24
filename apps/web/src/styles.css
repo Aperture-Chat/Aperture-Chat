@@ -736,32 +736,6 @@ button:disabled {
   gap: 14px;
 }
 
-.auth-request-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-top: 2px;
-  padding-top: 15px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.auth-request-entry > span,
-.auth-request-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.auth-request-button {
-  color: var(--teal);
-  font-weight: 850;
-  white-space: nowrap;
-}
-
 .auth-eyebrow {
   color: var(--teal);
   font-size: 11px;
@@ -19514,12 +19488,6 @@ button.retention-tagged-title:focus-visible strong {
 
   .auth-name-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .auth-request-entry {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
   }
 
   .auth-input-wrap input,

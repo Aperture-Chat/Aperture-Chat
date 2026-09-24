@@ -63,11 +63,11 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.5](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.5)**:
-> redesigned Agents, Automations, and Library; automations that honor an agent's
-> instructions and knowledge and deliver to chats or drafts; per-schedule time
-> zones; knowledge from files, web pages, and APIs with background indexing.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v054) and
+> **Current release: [v0.5.6](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.6)**:
+> a simpler, more polished sign-in screen with a clear Request access button
+> for new users, and a longer access walkthrough that starts on the sign-in
+> page. Aperture Chat is now MIT licensed.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v055) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -161,7 +161,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.5
+#   APERTURE_IMAGE_TAG=v0.5.6
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -182,7 +182,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.5 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.6 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -217,10 +217,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.5` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.6` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.5-dev`, `v0.5.5-test`, `v0.5.5-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.6-dev`, `v0.5.6-test`, `v0.5.6-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

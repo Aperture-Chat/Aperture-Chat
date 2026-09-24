@@ -91,6 +91,8 @@ type UserFocus =
   | "memorySettings"
   | "memoryAddAndReview"
   | "memoryRecall"
+  | "accessSignInPage"
+  | "accessRequestEntry"
   | "accessRequestForm"
   | "accessRequestReceived"
   | "accessSignInMethod"
@@ -206,9 +208,11 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   memorySettings: { frame: "training/user/memory-manager.png", rect: { x: 280, y: 236, w: 625, h: 99 } },
   memoryAddAndReview: { frame: "training/user/memory-manager.png", rect: { x: 280, y: 342, w: 625, h: 289 } },
   memoryRecall: { frame: "training/user/memory-recall.png", rect: { x: 315, y: 311, w: 839, h: 85 } },
-  accessRequestForm: { frame: "training/user/access-request-form.png", rect: { x: 104.25, y: 317.297, w: 398, h: 291.188 } },
+  accessSignInPage: { frame: "training/user/access-sign-in-method.png", rect: { x: 104.25, y: 174.25, w: 398, h: 122.656 } },
+  accessRequestEntry: { frame: "training/user/access-sign-in-method.png", rect: { x: 104.25, y: 715.672, w: 398, h: 128 } },
+  accessRequestForm: { frame: "training/user/access-request-form.png", rect: { x: 104.25, y: 360.422, w: 398, h: 291.188 } },
   accessRequestReceived: { frame: "training/user/access-request-received.png", rect: { x: 104.25, y: 317.297, w: 398, h: 406.016 } },
-  accessSignInMethod: { frame: "training/user/access-sign-in-method.png", rect: { x: 59, y: 59, w: 488, h: 796 } },
+  accessSignInMethod: { frame: "training/user/access-sign-in-method.png", rect: { x: 104.25, y: 320.906, w: 398, h: 366.766 } },
   accessOwnPassword: { frame: "training/user/access-own-password.png", rect: { x: 348.5, y: 168.578, w: 488, h: 517.844 } },
   accessWelcome: { frame: "training/user/access-welcome.png", rect: { x: 261.547, y: 24, w: 887.906, h: 250.781 } },
   securityOverview: { frame: "training/user/account-security-overview.png", rect: { x: 793, y: 326, w: 350, h: 111 } },
@@ -256,7 +260,8 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     icon: "chat",
     outcomes: ["Access request understood", "Sign-in method confirmed", "First workspace opened"],
     setupSteps: [
-      "Open your organization's workspace address and choose Request access when you need an account.",
+      "Open the workspace address your organization gave you. The sign-in page is where every visit begins.",
+      "If you need an account, choose Request access in the section below the sign-in button that asks whether you are new.",
       "Enter your name and work email, submit the request, and contact your administrator for approval and sign-in instructions. The form does not send an email or create a password.",
       "Return to sign-in and use the method your administrator arranged. When both are offered, explicitly select Organization SSO or Email & password.",
       "If you received a temporary password, complete the required verification and choose your own password of at least 12 characters when prompted.",
@@ -264,10 +269,25 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     ],
     scenes: [
       {
+        title: "Start at your workspace address",
+        caption: "Your organization's workspace address opens the sign-in page, where every visit begins.",
+        narration: "Welcome. This walkthrough takes you from your very first visit to an open workspace. Start by opening the workspace address your organization gave you in a web browser. You land on the sign-in page. Every visit begins here, whether you already have an account or are brand new.",
+        durationSeconds: 19,
+        focus: "accessSignInPage",
+        captionPlacement: "top",
+      },
+      {
+        title: "New here? Find Request access",
+        caption: "No account yet? Below the sign-in button, the section for new users offers Request access.",
+        narration: "If you already have an account, you sign in at the top of the page. We will come back to that in a moment. If you are new, look below the sign-in button, in the section that asks whether you are new. Choose Request access. The walkthrough link underneath replays this video whenever you need it.",
+        durationSeconds: 19,
+        focus: "accessRequestEntry",
+      },
+      {
         title: "Ask to join",
         caption: "Request access asks for your first name, last name, and work email.",
-        narration: "Open the workspace address your organization gave you. Choose Request access, enter your first name, last name, and work email, then submit the form. Your administrator reviews access requests before you can enter the workspace.",
-        durationSeconds: 16,
+        narration: "Request access opens a short form. Enter your first name, last name, and work email, then choose Submit access request. Your administrator reviews access requests before you can enter the workspace.",
+        durationSeconds: 15,
         focus: "accessRequestForm",
       },
       {

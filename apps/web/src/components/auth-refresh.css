@@ -2,7 +2,10 @@
    8px rhythm; 14px field/body floor; 44px touch controls; editorial side panel. */
 .auth-refresh.auth-screen {
   min-height: 100svh;
-  background: var(--bg);
+  background:
+    radial-gradient(900px 560px at 8% -12%, color-mix(in srgb, var(--teal) 11%, transparent), transparent 70%),
+    radial-gradient(760px 520px at 104% 112%, color-mix(in srgb, var(--teal) 8%, transparent), transparent 70%),
+    var(--bg);
   padding: clamp(20px, 5vw, 72px);
 }
 .auth-refresh .auth-shell {
@@ -11,9 +14,17 @@
   gap: clamp(36px, 7vw, 96px);
 }
 .auth-refresh .auth-panel {
+  position: relative;
   padding: clamp(28px, 4vw, 44px);
   border-radius: 24px;
-  box-shadow: 0 16px 50px color-mix(in srgb, var(--text-strong) 7%, transparent);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--text-strong) 4%, transparent),
+    0 24px 64px color-mix(in srgb, var(--text-strong) 9%, transparent);
+}
+/* A hairline of brand color along the top edge. */
+.auth-refresh .auth-panel::before {
+  content: ""; position: absolute; inset: -1px 32px auto; height: 2px; border-radius: 0 0 2px 2px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent); opacity: .7;
 }
 .auth-refresh .auth-brand { margin-bottom: 36px; }
 .auth-refresh .auth-brand > div > span { font-size: 15px; color: var(--text-strong); }
@@ -46,15 +57,19 @@
   color: var(--text-strong); background: var(--surface); border-color: var(--border);
   box-shadow: 0 2px 5px color-mix(in srgb, var(--text) 5%, transparent);
 }
-.auth-refresh .auth-help-section { display: grid; justify-items: start; gap: 8px; }
+.auth-refresh .auth-help-section { display: grid; justify-items: center; gap: 8px; margin-top: -4px; }
 .auth-refresh .auth-help-section > button { min-height: 36px; font-size: 13px; }
-.auth-refresh .auth-request-entry { padding-top: 20px; font-size: 13px; font-weight: 500; }
-.auth-refresh .auth-request-button { min-height: 44px; }
-.auth-refresh .auth-video-help { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
-.auth-refresh .auth-video-help strong { color: var(--text-strong); font-size: 14px; }
-.auth-refresh .auth-video-help p { margin: 8px 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.auth-refresh .auth-video-help button { display: flex; align-items: center; gap: 8px; min-height: 44px; text-align: left; }
-.auth-refresh .auth-video-help button svg { flex-shrink: 0; }
+.auth-refresh .auth-newcomer { display: grid; gap: 12px; margin-top: 28px; }
+.auth-refresh .auth-newcomer-label {
+  display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 13px; font-weight: 550;
+}
+.auth-refresh .auth-newcomer-label::before, .auth-refresh .auth-newcomer-label::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.auth-refresh .auth-access-form ~ .auth-newcomer, .auth-refresh .auth-access-heading ~ .auth-newcomer { margin-top: 16px; }
+.auth-refresh .auth-request-button { width: 100%; min-height: 48px; gap: 8px; border-radius: 12px; font-weight: 650; }
+.auth-refresh .auth-video-link { justify-self: center; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
+.auth-refresh .auth-video-link svg { flex-shrink: 0; }
 .auth-video-dialog { margin: auto; color: var(--text); }
 .auth-video-dialog::backdrop { background: rgba(4, 16, 24, 0.65); }
 .auth-video-dialog:has(.owner-video-player-card.is-expanded) { transform: none; animation: none; overflow: visible; }
@@ -63,6 +78,10 @@
 .auth-refresh .auth-context-intro h2 {
   margin: 20px 0; font-size: clamp(32px, 4.2vw, 52px); line-height: 1.09;
   letter-spacing: -.055em; font-weight: 650; color: var(--text-strong); text-wrap: balance;
+}
+.auth-refresh .auth-context-accent {
+  background: linear-gradient(100deg, var(--teal), color-mix(in srgb, var(--teal) 55%, #5fc4d0));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .auth-refresh .auth-context-intro p { max-width: 350px; font-size: 16px; line-height: 1.75; margin: 0; }
 .auth-refresh .auth-context-item { font-size: 13px; grid-template-columns: 24px minmax(0, 1fr); }
