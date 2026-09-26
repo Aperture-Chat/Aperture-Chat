@@ -497,7 +497,9 @@ function positionalAlign(a: RedlineBlock[], b: RedlineBlock[]): AlignOp[] {
 // Word-level diff
 // ---------------------------------------------------------------------------
 
-function diffWords(baseText: string, comparisonText: string): RedlineToken[] {
+/** Word-level LCS diff. Exported for the AI edit review, which compares a
+ * highlighted passage with the model's proposed replacement. */
+export function diffWords(baseText: string, comparisonText: string): RedlineToken[] {
   const baseWords = baseText.split(/\s+/).filter(Boolean);
   const comparisonWords = comparisonText.split(/\s+/).filter(Boolean);
   const ops = lcsAlign(baseWords, comparisonWords, (x, y) => x === y);

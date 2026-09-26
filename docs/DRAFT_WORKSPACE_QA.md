@@ -2,7 +2,17 @@
 
 The drafting workspace keeps model instructions outside the deliverable, preserves document edits when switching modes, and provides previews, archive/unarchive, and confirmed deletion in history.
 
-The document toolbar keeps undo/redo, block style, bold/italic/underline, and inline AI editing on the main row. **Text** holds font, size, advanced styles, color, and highlighting; **Paragraph** holds alignment, lists, and quotes; **More** holds copy, the AI edit trail, and word count. **Insert** includes links and citations alongside visual content. Secondary panels preserve text selection, open from the keyboard with Arrow Down, and dismiss with Escape, focus moving outside, or an outside click. On phones, the formatting row remains collapsible.
+The document toolbar keeps undo/redo, block style, bold/italic/underline, and inline AI editing on the main row. **Text** holds font, size, advanced styles, color, and highlighting; **Paragraph** holds alignment, lists, and quotes; **More** holds Copy document and the AI edit trail. **Insert** includes links and citations alongside visual content. Secondary panels preserve text selection, open from the keyboard with Arrow Down, and dismiss with Escape, focus moving outside, or an outside click. On phones, the formatting row remains collapsible.
+
+Selecting text shows a floating toolbar with **Ask AI**, block style, emphasis, link, and highlight. Typing `/` at the start of a line opens the command menu (AI actions, blocks, table, divider, page break, web image, date), and Markdown shortcuts format headings, lists, quotes, dividers, and inline emphasis as you type. The status bar under the page shows page, word, character, and reading-time counts (including selected words) and opens **Outline**, **Find and replace**, the keyboard shortcut list, and zoom (50–200%, screen only). Tables and pictures show their own contextual toolbars; picture size and alignment are figure classes shared by the editor CSS and the Word export. Pasted HTML keeps structure and emphasis but drops the source's fonts, sizes, and colors.
+
+## Edit with AI
+
+**Ask AI** (or Ctrl/⌘+J) opens one composer for documents and slides. With a selection it rewrites that passage; with a collapsed caret it writes new text there. Actions, tones, translations, or a typed instruction stream a suggestion that is reviewed as **Changes** or **Result** before **Replace**, **Insert below**, **Try again**, or **Discard**; follow-up instructions refine the same suggestion. Nothing reaches the page until accepted, and accepted edits are recorded in the AI edit trail.
+
+The highlighted-passage prompt keeps `User instruction:` immediately before `Highlighted passage:`. The API reads the text between those headings as the instruction when deciding whether an inline edit asks for live web research, so surrounding document context, the placement hint, and the passage HTML come earlier in the prompt. A regression test guards the order.
+
+In decks, **Edit slide with AI** rewrites the whole slide (improve, punchier, shorter, speaker notes, better layout, split into two, spelling, tone, translation) and shows before/after thumbnails and any new notes before **Apply to slide**. Highlighted slide text uses the same composer as documents.
 
 ## Formatting and export
 
@@ -29,11 +39,11 @@ Automated component and package checks cover:
 | Surface | Behavior checked |
 | --- | --- |
 | Assistant composer | Model selection, source and file context, template application, web toggle, reasoning, request submission, unavailable-provider states |
-| Document editor | Text styles, colors, highlighting, alignment, links, citations, insertions, page navigation, undo/redo, inline AI edits and edit trail |
+| Document editor | Text styles, colors, highlighting, alignment, links, citations, insertions, page navigation, undo/redo, selection toolbar, Edit with AI review and prompt order, slash menu, find and replace, outline, zoom, Markdown autoformat, paste cleanup, tables, pictures, and edit trail |
 | Draft persistence | Save/version comparison/restore, scoped caches, account saves, conflicts, interrupted runs, quota failures, unsaved navigation recovery |
 | MLA | Preamble removal, title handling, preservation of paper text, layout undo, Word XML typography and indents, print heading order |
 | History | Preview, archive/unarchive across remounts, deletion confirmation, ownership and tenant isolation, stale-revision rejection |
-| Deck editor | Conversion, layouts, slide add/duplicate/reorder/delete/undo, text formatting, notes, presentation, templates, image gating, AI revisions |
+| Deck editor | Conversion, layouts and themes, slide add/duplicate/reorder/delete/undo, slide sorter, text box snapping, text formatting, notes, presentation, templates, image gating, whole-slide AI edits |
 | Exports | Word and PowerPoint OOXML packages, embedded media, notes, Markdown, save picker, browser-download fallback, print preparation, clipboard rejection and retry |
 | Accessibility | Keyboard mode switching, hover/focus preview, dialog focus, mobile drawers and reduced-motion styling |
 
@@ -45,7 +55,7 @@ The live pass exercised generation, editing, version saving, reload/restore, acc
 
 Migration `20260905_0019` adds the `draft_documents.archived` flag with a false default. Existing content and revisions are preserved. Deploy the API schema-head update with the migration, then rebuild the web client. Do not remove the archive column when rolling back application containers; older code can ignore it.
 
-The deck editor exposes seven scrollable layout previews, five deck color palettes, and a direct link to deck starters and uploaded brand themes. Palette changes preserve slide text, media, and layout and support Undo.
+The deck editor exposes seven layout previews and five color palettes in the **Layouts** and **Themes** strip above the slide, plus **Deck starters & brand themes**, which opens the starter decks and brand-template upload. Palette changes preserve slide text, media, and layout and support Undo. **Slide sorter** shows the whole deck as a reorderable grid, text boxes snap to slide and neighbor guides, and presenting offers **Presenter view** (timer, next slide, notes), notes, black/white screens, and jump-to-slide.
 
 The deck-kind migration uses a direct SQLite column addition with an inline check. Rebuilding the parent draft table would trigger cascading deletion of revision rows. The migration regression test seeds two revisions and checks their exact preservation through upgrade and downgrade with foreign keys enabled.
 
