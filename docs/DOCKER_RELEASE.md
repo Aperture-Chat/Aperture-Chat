@@ -231,6 +231,46 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.6
+
+- Drafts has one **Edit with AI** composer for documents and slides. Select
+  text and choose **Ask AI** (or press Ctrl/⌘+J) to rewrite a passage, or
+  place the cursor to write new text there. Actions, tones, translations, or a
+  typed instruction stream a suggestion you review as **Changes** or
+  **Result** before choosing **Replace**, **Insert below**, **Try again**, or
+  **Discard**; follow-up instructions refine the same suggestion. Nothing
+  reaches the page until you accept it, and accepted edits appear in the AI
+  edit trail.
+- In decks, **Edit slide with AI** rewrites a whole slide (improve, punchier,
+  shorter, speaker notes, better layout, split into two, spelling, tone, or
+  translation) and shows before/after thumbnails before **Apply to slide**.
+- The document editor adds a floating selection toolbar, a `/` command menu,
+  Markdown shortcuts, find and replace, a heading outline, and a status bar
+  with page, word, character, and reading-time counts and zoom from 50% to
+  200%. Tables and pictures get their own toolbars; picture size and
+  alignment carry into Word export. Pasted content keeps its structure but
+  drops the source's fonts and colors, and heading sizes now step down
+  properly from Heading 1 to Heading 3. A keyboard shortcut list opens from
+  the status bar.
+- The deck editor adds a **Layouts** and **Themes** strip above the slide,
+  a **Deck starters & brand themes** drawer, a slide sorter, snapping guides
+  for text boxes, and **Presenter view** with a timer, next slide, and notes.
+- The Drafts assistant rail shows a status line, context chips, and starter
+  requests, with **Document history** at its top. On narrower screens it
+  becomes a drawer that opens from a pull tab on its edge. History entries
+  show whether each item is a document or a deck.
+- Fixed: asking AI to edit a passage near words like "source" or "current"
+  no longer forces a web search, which had caused errors and repeated
+  retries.
+- The **Draft documents**, **Build a slide deck**, and **Save, organize, and
+  recover your drafts** lessons are re-narrated with new screenshots, and the
+  user, administrator, and owner guides and README images are refreshed. The
+  deck AI image frame still shows the earlier toolbar.
+- This release adds no database migrations. Back up the complete application
+  data volume before upgrading as usual.
+- API and web images publish as `v0.5.7-dev`, `v0.5.7-test`, and `v0.5.7-main`.
+  Stable `v0.5.7` and `latest` promote inspected test images without rebuilding.
+
 ## New Since v0.5.5
 
 - The sign-in screen is simpler. Under the Sign in button there is one

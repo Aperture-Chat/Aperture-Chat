@@ -12,20 +12,26 @@
  * CAPTURE_DRAFT_TITLE (defaults to a synthetic onboarding checklist).
  *
  * Usage: node apps/web/scripts/capture-training-refresh.cjs user,admin,owner
+ *        node apps/web/scripts/capture-training-refresh.cjs drafts
  *        node apps/web/scripts/capture-training-refresh.cjs more
  *
  * Fixtures: user needs a genuinely requestable catalog model; admin needs that
- * user's pending request and an eligible group. `more` requires usable model
- * controls and a saved DRAFT_TITLE from the user pass. All roles must already
- * have finished their first-run onboarding. No provider result is
- * simulated. Captures show the real server's state, including unavailable states.
+ * user's pending request and an eligible group. `drafts` needs a usable
+ * drafting model whose real reply fills the Edit with AI review. `more`
+ * requires usable model controls and a saved DRAFT_TITLE from the user or
+ * drafts pass. All roles must already have finished their first-run
+ * onboarding. No provider result is simulated. Captures show the real
+ * server's state, including unavailable states.
  *
  * `user` submits a model request, saves a manually written synthetic draft,
  * and deliberately disconnects the browser to capture a failed account save.
- * It may withdraw the same user's selected pending request first. `admin` changes an unsaved group selection but does not approve
- * or decline requests. `owner` and `more` are read-only. No live-instance or
- * provider mutations are permitted. All PNGs, hashes, and measured rectangles
- * stay in ignored review storage; even a complete batch is never published.
+ * It may withdraw the same user's selected pending request first. `drafts`
+ * saves a manually written synthetic document, requests one real inline AI
+ * suggestion, and discards it. `admin` changes an unsaved group selection but
+ * does not approve or decline requests. `owner` and `more` are read-only. No
+ * live-instance or provider mutations are permitted. All PNGs, hashes, and
+ * measured rectangles stay in ignored review storage; even a complete batch
+ * is never published.
  */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -33,15 +39,27 @@ const crypto = require("node:crypto");
 const { chromium } = require("playwright");
 const { validateCaptureSource } = require("./training-capture-run.cjs");
 const VIEWPORT = { width: 1185, height: 855 };
+// The app's own web font stylesheet; every other outside origin stays blocked.
+const FONT_ORIGINS = ["https://fonts.googleapis.com", "https://fonts.gstatic.com"];
 const ROLES = { user: "USER", admin: "TENANT_ADMIN", owner: "PLATFORM_OWNER" };
 const EXPECTED = {
-  user: ["model-access", "model-access-pending", "theme-schedule", "search-commands", "draft-save-state", "drafts", "draft-settings", "draft-history", "search-recent", "unsynced-work"],
+  user: ["model-access", "model-access-pending", "theme-schedule", "search-commands", "search-recent", "unsynced-work"],
+  drafts: ["draft-save-state", "drafts", "draft-settings", "draft-history", "draft-ai-edit", "draft-slash", "draft-find"],
   admin: ["model-access-requests", "model-access-trace", "retention-policy", "retention-tags"],
   owner: ["search-index", "model-browsing-policy", "provider-catalog", "branding-actions", "retention-tags"],
   more: ["model-favorites", "composer-send-options", "composer-shortcuts-help", "search-palette", "search-recent"],
 };
 let APP, API, OUT, page, role, browser, context, currentMode, offline = false;
 const DRAFT_TITLE = process.env.CAPTURE_DRAFT_TITLE || "Workspace onboarding checklist";
+// Typed with Markdown shortcuts so the outline has real headings. The last
+// paragraph is the one the Edit with AI frame rewrites.
+const DRAFT_LINES = [
+  "# Workspace onboarding checklist",
+  "## Before you start",
+  "Confirm your account security settings and add an authenticator app.",
+  "## Working with models",
+  "Request only the models your work requires, and save a version before you leave your draft so you can compare changes later.",
+];
 const measures = { user: {}, admin: {}, owner: {} };
 const sessions = {};
 const manifest = { capturedAt: new Date().toISOString(), viewport: VIEWPORT, deviceScaleFactor: 2, complete: false, completedModes: [], frames: {}, blockedRequests: [] };
@@ -76,6 +94,10 @@ async function validateSession(audience) {
   return sessions[audience] = { user: actual.user, token: saved.session.token };
 }
 function allowedWrite(method, pathname) {
+  if (currentMode === "drafts") {
+    return (method === "POST" && ["/api/drafts", "/api/chat/complete"].includes(pathname))
+      || (method === "PUT" && /^\/api\/drafts\/[^/]+$/.test(pathname));
+  }
   if (currentMode !== "user") return false;
   return (method === "POST" && ["/api/me/model-access-requests", "/api/drafts", "/api/auth/first-run-guide/seen"].includes(pathname))
     || (method === "DELETE" && /^\/api\/me\/model-access-requests\/[^/]+$/.test(pathname))
@@ -89,6 +111,7 @@ async function open(audience) {
   await context.route("**/*", async route => {
     const request = route.request();
     const url = new URL(request.url());
+    if (FONT_ORIGINS.includes(url.origin) && request.method() === "GET") return route.continue();
     if (![APP, API].includes(url.origin)) return route.abort("blockedbyclient");
     if (!url.pathname.startsWith("/api/")) return route.continue();
     if (offline) return route.abort("internetdisconnected");
@@ -215,22 +238,6 @@ async function runUser(){
   await page.getByRole('textbox',{name:'Document body',exact:true}).fill('Workspace onboarding checklist\nConfirm your account security settings.\nRequest only the models your work requires.\nSave a version before leaving your draft.');
   await page.getByRole('button',{name:'Save version',exact:true}).click();
   await page.locator('.document-server-save-state').filter({hasText:'Saved'}).waitFor();
-  await page.waitForTimeout(1200);
-  if(await page.getByRole('button',{name:'Save version',exact:true}).isEnabled()){await page.getByRole('button',{name:'Save version',exact:true}).click();await page.waitForTimeout(700);}
-  await shot("draft-save-state",{draftSaveState:page.locator('.document-editor-topbar')});
-  await shot("drafts",{
-    draftModeToggle:page.getByRole('group',{name:'Draft format'}),
-    draftComposer:page.locator('.draft-command-box'),
-    draftModel:page.getByRole('button',{name:'Document drafting model'}),
-    draftToolbar:page.locator('[aria-label="Document formatting"]'),
-    draftVersions:page.locator('.document-editor-topbar'),
-  });
-  await page.getByRole('button',{name:'Assistant settings',exact:true}).click();
-  await shot("draft-settings",{draftSettings:page.locator('.draft-settings-panel')});
-  await page.getByRole('button',{name:'Draft history',exact:true}).click();
-  await page.locator('.draft-history-document-card').first().hover();
-  await page.locator('.draft-history-preview').waitFor();
-  await shot("draft-history",{draftHistory:page.locator('.draft-history-panel'),draftHistoryPreview:page.locator('.draft-history-preview')},{keepPointer:true});
   await page.getByRole('button',{name:'Back to chat',exact:true}).click();
   await page.getByRole('button',{name:'Search',exact:true}).click();
   await shot("search-recent",{searchRecent:page.locator('.command-palette-panel')});
@@ -244,6 +251,91 @@ async function runUser(){
   await page.getByRole('button',{name:/only on this device/i}).first().click();
   await shot("unsynced-work",{unsyncedWork:page.getByRole('dialog',{name:'Only on this device'})});
   await setOffline(false);
+  await browser.close();
+}
+async function saveDraftVersion(){
+  const save = page.getByRole('button',{name:'Save version',exact:true});
+  await save.click();
+  await page.locator('.document-server-save-state').filter({hasText:'Saved'}).waitFor();
+  await page.waitForTimeout(1200);
+  // Leaving the editor can normalize pagination markup; save that too so the
+  // frame shows a clean saved version.
+  if(await save.isEnabled()){await save.click();await page.locator('.document-server-save-state').filter({hasText:'Saved'}).waitFor();await page.waitForTimeout(700);}
+}
+async function selectEditorText(text){
+  await page.getByRole('textbox',{name:'Document body',exact:true}).evaluate((body, wanted) => {
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const start = node.textContent.indexOf(wanted);
+      if (start === -1) continue;
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + wanted.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      return;
+    }
+    throw new Error('Synthetic draft text is missing.');
+  }, text);
+}
+async function runDrafts(){
+  role='user'; await open('user');
+  await page.getByRole('link',{name:'Drafts',exact:true}).click();
+  const body=page.getByRole('textbox',{name:'Document body',exact:true});
+  await body.waitFor();
+  await page.getByRole('textbox',{name:'Document title',exact:true}).fill(DRAFT_TITLE);
+  await body.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  // Typed at a person's pace; the editor reformats Markdown as it goes.
+  for(const [index,line] of DRAFT_LINES.entries()){
+    await page.keyboard.type(line,{delay:45});
+    if(index<DRAFT_LINES.length-1) await page.keyboard.press('Enter');
+  }
+  await saveDraftVersion();
+  await shot("draft-save-state",{draftSaveState:page.locator('.document-editor-topbar')});
+  await shot("drafts",{
+    draftModeToggle:page.getByRole('group',{name:'Draft format'}),
+    draftComposer:page.locator('.draft-command-box'),
+    draftModel:page.getByRole('button',{name:'Document drafting model'}),
+    draftToolbar:page.locator('[aria-label="Document formatting"]'),
+    draftVersions:page.locator('.document-editor-topbar'),
+  });
+  await page.getByRole('button',{name:'Assistant settings',exact:true}).click();
+  await shot("draft-settings",{draftSettings:page.locator('.draft-settings-panel')});
+  await page.getByRole('button',{name:'Assistant settings',exact:true}).click();
+  await page.getByRole('button',{name:'Document history',exact:true}).click();
+  // Point at the card without Playwright's scroll-into-view, which would hide
+  // the Active/Archived filter above it.
+  const card=page.locator('.draft-history-document-card').first();
+  await card.waitFor();
+  const cardBox=await card.boundingBox();
+  await page.mouse.move(cardBox.x+cardBox.width/2,cardBox.y+cardBox.height/2);
+  await page.locator('.draft-history-preview').waitFor();
+  await shot("draft-history",{draftHistory:page.locator('.draft-history-panel'),draftHistoryPreview:page.locator('.draft-history-preview')},{keepPointer:true});
+  await page.getByRole('button',{name:'Document history',exact:true}).click();
+  // One real suggestion from the drafting model, reviewed and then discarded.
+  await selectEditorText(DRAFT_LINES.at(-1));
+  await page.locator('.document-selection-toolbar').getByRole('button',{name:/^Ask AI/}).click();
+  await page.getByRole('option',{name:'Improve writing',exact:true}).click();
+  await page.locator('.ai-composer.is-review').waitFor({timeout:240000});
+  await shot("draft-ai-edit",{draftAiEdit:page.locator('.ai-composer')});
+  await page.getByRole('button',{name:'Discard AI suggestion'}).click();
+  await body.click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/');
+  await page.locator('.document-slash-menu').waitFor();
+  await shot("draft-slash",{draftSlashMenu:page.locator('.document-slash-menu')});
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await page.getByRole('button',{name:'Document outline',exact:true}).click();
+  await page.getByRole('button',{name:'Find and replace',exact:true}).click();
+  await page.keyboard.type('version');
+  await shot("draft-find",{draftStatusBar:page.locator('.document-status-bar')});
   await browser.close();
 }
 async function runMore(){
@@ -322,7 +414,7 @@ async function main() {
   API = origin("CAPTURE_API_URL");
   if (process.env.CAPTURE_MUTATION_ACK !== "isolated-synthetic") throw new Error("CAPTURE_MUTATION_ACK=isolated-synthetic is required.");
   const parts = (process.argv[2] || "user,admin,owner").split(",");
-  if (parts.some(part => !Object.hasOwn(EXPECTED, part)) || new Set(parts).size !== parts.length) throw new Error("Choose user, admin, owner, or more, each at most once.");
+  if (parts.some(part => !Object.hasOwn(EXPECTED, part)) || new Set(parts).size !== parts.length) throw new Error("Choose user, drafts, admin, owner, or more, each at most once.");
   const work = path.join(__dirname, "../../../tmp/training-captures");
   fs.mkdirSync(work, { recursive: true });
   OUT = fs.mkdtempSync(path.join(work, "capture-training-refresh-"));
@@ -330,8 +422,8 @@ async function main() {
   try {
     for (const part of parts) {
       currentMode = part;
-      await ({ user: runUser, admin: runAdmin, owner: runOwner, more: runMore })[part]();
-      const audience = part === "more" ? "user" : part;
+      await ({ user: runUser, drafts: runDrafts, admin: runAdmin, owner: runOwner, more: runMore })[part]();
+      const audience = ["more", "drafts"].includes(part) ? "user" : part;
       if (EXPECTED[part].some(name => !manifest.frames[`${audience}/${name}`])) throw new Error(`Incomplete ${part} frame batch.`);
       if (manifest.blockedRequests.length) throw new Error("An unexpected write was blocked.");
       manifest.completedModes.push(part);

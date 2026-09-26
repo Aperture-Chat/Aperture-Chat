@@ -5,7 +5,12 @@ September 24, 2026 from the v0.5.5 interface (redesigned sidebar, Agents,
 Automations, and Library). They illustrate the current interface, not a claim
 that every pixel matches an older published image.
 `sign-in.png` was recaptured the same day for v0.5.6 after the sign-in screen
-redesign.
+redesign. `drafts-light.png`, `drafts-dark.png`, `deck-light.png`,
+`deck-dark.png`, and the document-editor frame of `product-tour-light.gif`
+were recaptured on September 26, 2026 from the same instance after the Drafts
+editor upgrade (assistant chips, status bar, and the deck Layouts/Themes strip).
+The tour GIF was rebuilt from the same six frames with only that frame
+replaced; its poster, the first frame, is unchanged.
 
 ## Capture content
 

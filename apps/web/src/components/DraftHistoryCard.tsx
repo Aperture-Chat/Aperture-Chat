@@ -1,10 +1,12 @@
 import { createPortal } from "react-dom";
 import { useRef, useState } from "react";
-import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, FileText, LoaderCircle, Presentation, Trash2 } from "lucide-react";
 
 type Props = {
   title: string; summary: string; source: string; time: string; status: string;
   archived: boolean; disabled: boolean; opening?: boolean; archiveDisabled?: boolean;
+  /** Decks and documents can share a title; the icon tells them apart. */
+  kind?: "document" | "deck";
   onRestore: () => void; onArchive: () => void; onDelete: () => void;
   loadPreview: () => Promise<string>;
 };
@@ -30,23 +32,51 @@ export function DraftHistoryCard(props: Props) {
       onMouseLeave={() => setExpanded(false)} onFocus={() => void showPreview()}
       onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(false); }}>
       <button type="button" className="draft-history-document-card" disabled={props.opening} aria-busy={props.opening} onClick={() => { setExpanded(false); props.onRestore(); }}
-        aria-label={`Restore ${props.title} from document history (${props.status})`}>
-        <span><strong>{props.title}</strong><small>{props.opening ? "Opening…" : props.status}</small><small>{props.summary}</small><small>{props.source}</small></span>
-        <time>{props.time}</time>
+        aria-label={`Restore ${props.title} from document history (${props.status})`}
+        data-tooltip={props.archived ? "Open this archived draft" : "Open this draft"}>
+        <span className="draft-history-doc-icon" aria-hidden="true">
+          {props.opening ? (
+            <LoaderCircle className="is-spinning" size={15} />
+          ) : props.kind === "deck" ? (
+            <Presentation size={15} />
+          ) : (
+            <FileText size={15} />
+          )}
+        </span>
+        <span className="draft-history-doc-text">
+          <strong>{props.title}</strong>
+          <small>
+            <span className={`draft-history-state is-${historyStatusTone(props.status)}`}>
+              {props.opening ? "Opening…" : props.status}
+            </span>
+            <time>{props.time}</time>
+          </small>
+          <span className="sr-only">{[props.summary, props.source].filter(Boolean).join(". ")}</span>
+        </span>
       </button>
       <div className="draft-history-actions">
         <button type="button" disabled={props.archiveDisabled ?? props.disabled} onClick={props.onArchive}
-          aria-label={`${props.archived ? "Unarchive" : "Archive"} ${props.title}`}>
+          aria-label={`${props.archived ? "Unarchive" : "Archive"} ${props.title}`}
+          data-tooltip={props.archived ? "Move back to active drafts" : "Archive this draft"}>
           {props.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-          {props.archived ? "Unarchive" : "Archive"}
         </button>
-        <button type="button" disabled={props.disabled} onClick={props.onDelete} aria-label={`Delete ${props.title}`}>
-          <Trash2 size={14} />Delete
+        <button type="button" className="is-danger" disabled={props.disabled} onClick={props.onDelete} aria-label={`Delete ${props.title}`}
+          data-tooltip="Delete this draft">
+          <Trash2 size={14} />
         </button>
       </div>
       {expanded && createPortal(<div style={position} className="draft-history-preview" role="status" aria-label={`Preview of ${props.title}`}>
-        <span className="eyebrow">Preview</span><p>{preview ?? "Loading preview…"}</p>
+        <span className="eyebrow">Preview</span>
+        {(props.summary || props.source) && <small className="draft-history-preview-meta">{[props.summary, props.source].filter(Boolean).join(" · ")}</small>}
+        <p>{preview ?? "Loading preview…"}</p>
       </div>, document.body)}
     </div>
   );
+}
+
+function historyStatusTone(status: string) {
+  if (status === "Saved") return "saved";
+  if (status === "Drafting") return "running";
+  if (status === "Needs attention") return "failed";
+  return "local";
 }

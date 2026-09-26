@@ -2,16 +2,21 @@
  *
  *   CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION=I_HAVE_REVIEWED_SYNTHETIC_DATA \
  *   CAPTURE_APP_URL=http://127.0.0.1:5173 \
- *   CAPTURE_USER_ID=user-jane \
+ *   CAPTURE_SESSION_FILE=path/to/user-sign-in-response.json \
+ *   CAPTURE_DRAFT_TITLE="Synthetic training memo" \
  *   CAPTURE_BRAND_PPTX=apps/web/scripts/fixtures/brand-template.pptx \
  *     node scripts/capture-deck-frames.cjs
  *
- * Restores the account's memo document from Draft history so the Deck toggle
- * shows the real conversion dialog, converts it into slides, exercises the
- * deck tools (one real AI slide image included), then loads the uploaded
- * brand template's slides for the branded filmstrip shot. Decks live in the
- * browser context's localStorage. Draft generation, template uploads, and
- * provider calls can persist server-side: use an isolated synthetic stack.
+ * Restores the account's memo document from Document history so the Deck
+ * toggle shows the real conversion dialog, converts it into slides, and
+ * exercises the deck tools: one real whole-slide AI edit from the drafting
+ * model (reviewed, then accepted), the synthetic background in
+ * fixtures/deck-background.jpg uploaded as the user's own image, presenter
+ * view, export, and the uploaded brand template's slides. The AI slide image
+ * dialog needs an image-generation model; set
+ * CAPTURE_KEEP_PUBLISHED_FRAMES=deck-ai-image to keep the published frame
+ * when the isolated instance has none. Decks, templates, and provider calls
+ * can persist server-side: use an isolated synthetic stack.
  */
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -29,6 +34,7 @@ const DRAFT_TITLE = (process.env.CAPTURE_DRAFT_TITLE || "").trim();
 const BRAND = (
   process.env.CAPTURE_BRAND_PPTX || path.join(__dirname, "fixtures", "brand-template.pptx")
 ).replace(/^~/, os.homedir());
+const BACKGROUND = path.join(__dirname, "fixtures", "deck-background.jpg");
 
 (async () => {
   const { createCaptureRun } = require("./training-capture-run.cjs");
@@ -89,58 +95,104 @@ const BRAND = (
     await page.waitForTimeout(300);
   };
 
-  await nav.getByRole("button", { name: "Drafts", exact: true }).click();
+  const moveTo = async (locator) => {
+    // Point without Playwright's scroll-into-view so the frame keeps its layout.
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("Hover target is not visible.");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  const thumb = (index) => page.locator(".deck-filmstrip").getByRole("button", { name: new RegExp(`^Slide ${index}: `) });
+
+  await nav.getByRole("link", { name: "Drafts", exact: true }).click();
   await page.waitForTimeout(1500);
 
   // Restore the memo document so the Deck toggle shows the conversion dialog.
   await step("restore memo from history", async () => {
-    await page.getByRole("button", { name: "Draft history" }).click();
+    await page.getByRole("button", { name: "Document history" }).click();
     await page.waitForTimeout(800);
-    await page.getByText(DRAFT_TITLE || /Memo|memo/, { exact: Boolean(DRAFT_TITLE) }).first().click();
+    await page
+      .locator(".draft-history-document-card")
+      .filter({ hasText: DRAFT_TITLE || /memo/i })
+      .first()
+      .click();
     await page.waitForTimeout(1200);
     await closeOverlays();
-    await page
-      .waitForFunction(
-        () => (document.querySelector("[contenteditable='true']")?.textContent || "").length > 300,
-        null,
-        { timeout: 20000 },
-      );
+    await page.waitForFunction(
+      () => (document.querySelector("[aria-label='Document body']")?.textContent || "").length > 300,
+      null,
+      { timeout: 20000 },
+    );
   });
 
   // Deck toggle over the document → conversion dialog.
-  await page.getByRole("button", { name: "Deck", exact: true }).click();
-  await page.waitForTimeout(700);
-  const dialog = page.getByRole("dialog", { name: "Switch to deck mode" });
-  await dialog.waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Convert into slides" }).click();
-  await page.waitForTimeout(1800);
-  await hideTooltips();
-  await page.locator(".deck-filmstrip").evaluate((element) => { element.scrollTop = 0; });
-  await shot("deck-editor");
-
-  // Layout menu from the toolbar.
-  await step("layout menu", async () => {
-    await page.getByRole("button", { name: "Slide layout" }).first().click();
-    await page.waitForTimeout(500);
-    await shot("deck-layouts");
-    // Escape does not dismiss this menu; toggling the trigger does.
-    await page.getByRole("button", { name: "Slide layout" }).first().click();
-    await page.waitForTimeout(300);
+  await step("convert into slides", async () => {
+    await page.getByRole("button", { name: "Deck", exact: true }).click();
+    await page.getByRole("dialog", { name: "Switch to deck mode" }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Convert into slides" }).click();
+    await page.waitForTimeout(1800);
+    await hideTooltips();
+    await page.locator(".deck-filmstrip").evaluate((element) => { element.scrollTop = 0; });
+    // Hovering a thumbnail reveals its move, duplicate, and delete actions.
+    await moveTo(thumb(2));
+    await page.waitForTimeout(400);
+    await shot("deck-editor");
   });
 
-  // Speaker notes with a real note.
+  // The Layouts strip above the stage, for the second slide.
+  await step("layouts strip", async () => {
+    await thumb(2).click();
+    await page.getByRole("button", { name: "Layouts", exact: true }).click();
+    await page.mouse.move(1, 1);
+    await shot("deck-layouts");
+  });
+
+  // One real whole-slide AI edit, reviewed before and after, then accepted.
+  await step("slide ai edit", async () => {
+    await page.getByRole("button", { name: "Edit slide with AI" }).click();
+    await page.getByRole("option", { name: "Make it punchier", exact: true }).click();
+    await page.locator(".ai-composer.is-review").waitFor({ timeout: 240000 });
+    await page.mouse.move(1, 1);
+    await shot("deck-ai-edit");
+    await page.getByRole("button", { name: "Accept AI suggestion" }).click();
+    await page.waitForTimeout(600);
+  });
+
+  // Speaker notes on the title slide.
   await step("speaker notes", async () => {
+    await thumb(1).click();
     await page.locator("button", { hasText: "Speaker notes" }).first().click();
-    await page.waitForTimeout(500);
-    const notes = page.locator("textarea[aria-label='Speaker notes']");
-    await notes.fill("Open with the why: consistent AI usage keeps client data protected.");
+    await page.waitForTimeout(400);
+    await page
+      .locator("textarea[aria-label='Speaker notes']")
+      .fill("Open with the why: consistent AI habits keep client data protected.");
     await shot("deck-notes");
   });
 
-  // Presentation mode with the notes bar showing.
-  await step("present mode", async () => {
+  // Upload the synthetic background, then show the per-slide/all-slides menu.
+  await step("background upload", async () => {
+    if (!fs.existsSync(BACKGROUND)) throw new Error("Synthetic slide background is missing.");
+    await page.locator("input[aria-label='Upload slide background image']").setInputFiles(BACKGROUND);
+    await page.waitForFunction(
+      () => (document.querySelector(".deck-stage")?.style.backgroundImage || "").includes("data:image/"),
+      null,
+      { timeout: 20000 },
+    );
+    await page.getByRole("button", { name: "Slide background", exact: true }).click();
+    await page.locator(".deck-background-menu").waitFor();
+    await page.mouse.move(1, 1);
+    await shot("deck-background");
+    await page.getByRole("button", { name: "Slide background", exact: true }).click();
+    await page.waitForTimeout(300);
+  });
+
+  // Presenter view: current slide, next slide, timer, and notes.
+  await step("presenter view", async () => {
     await page.getByRole("button", { name: "Present deck" }).click();
-    await page.waitForTimeout(1200);
+    await page.getByRole("dialog", { name: "Deck presentation" }).waitFor();
+    await page.waitForTimeout(600);
+    await page.keyboard.press("p");
+    await page.locator(".deck-presenter-side").waitFor();
+    await page.mouse.move(1, 1);
     await shot("deck-present");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(500);
@@ -152,63 +204,43 @@ const BRAND = (
     await page.waitForTimeout(900);
     await page.getByRole("button", { name: /^Export/ }).first().click();
     await page.waitForTimeout(600);
+    await page.mouse.move(1, 1);
     await shot("deck-export");
     await page.getByRole("button", { name: "Close export options", exact: true }).click();
     await page.waitForTimeout(300);
   });
 
-  // Templates drawer with the brand template, then the branded filmstrip.
+  // Deck starters & brand themes with the brand template, then the branded deck.
   await step("templates drawer + brand slides", async () => {
-    await page.getByRole("button", { name: "Choose template" }).click();
+    await page.getByRole("button", { name: "Deck starters & brand themes" }).click();
     await page.waitForTimeout(800);
     if (!BRAND || !fs.existsSync(BRAND)) throw new Error("Synthetic brand template is missing.");
-    {
-      await page.locator("input[aria-label='Upload PowerPoint brand template']").setInputFiles(BRAND);
-      await page.waitForTimeout(400);
-      await page
-        .waitForFunction(() => !/Reading /.test(document.body.textContent || ""), null, { timeout: 120000 })
-        ;
-      await page.waitForTimeout(800);
-    }
+    await page.locator("input[aria-label='Upload PowerPoint brand template']").setInputFiles(BRAND);
+    await page.waitForTimeout(400);
+    await page.waitForFunction(() => !/Reading /.test(document.body.textContent || ""), null, { timeout: 120000 });
+    await page.waitForTimeout(800);
+    await page.mouse.move(1, 1);
     await shot("deck-templates");
-    const loadAll = page.getByRole("button", { name: /Load all \d+ slides/ });
-    await loadAll.click();
+    await page.getByRole("button", { name: /Load all \d+ slides/ }).click();
     await page.waitForTimeout(1500);
     await closeOverlays();
     await page.waitForTimeout(600);
+    await page.mouse.move(1, 1);
     await shot("deck-editor-brand");
   });
 
-  // Generation-dependent controls follow saved-document navigation.
-  // Selection AI edit popover over real slide text on the stage.
-  await step("ai edit popover", async () => {
-    const block = page.locator(".deck-stage [contenteditable='true']").first();
-    await block.click({ clickCount: 3 });
-    await page.waitForTimeout(400);
-    await page.getByRole("button", { name: "Edit selection with AI" }).click();
-    await page.waitForTimeout(500);
-    await page.locator("textarea[aria-label='AI edit instruction']").fill("Make this punchier");
-    await shot("deck-ai-edit");
-    await page.getByRole("button", { name: "Close AI edit" }).click();
-    await page.waitForTimeout(300);
-  });
-
-  // Real AI slide image: capture the prefilled dialog, then generate.
-  await step("ai image", async () => {
-    const previousBackground = await page.locator(".deck-stage").evaluate((element) => element.style.backgroundImage);
-    await page.getByRole("button", { name: "Generate AI slide image" }).first().click();
-    await page.waitForTimeout(600);
-    await shot("deck-ai-image");
-    const generate = page.getByRole("button", { name: "Generate image" });
-    await generate.click();
-    console.log("generating slide image");
-    await page.waitForFunction((previous) => {
-      const stage = document.querySelector(".deck-stage");
-      return stage && !stage.classList.contains("is-ai-editing") &&
-        stage.style.backgroundImage.includes("data:image/") && stage.style.backgroundImage !== previous;
-    }, previousBackground, { timeout: 180000 });
-    await shot("deck-ai-applied");
-  });
+  // Generating a slide image needs an image-generation model. Without one,
+  // keep the published frame (CAPTURE_KEEP_PUBLISHED_FRAMES=deck-ai-image).
+  if (!capture.keeps("deck-ai-image")) {
+    await step("ai image dialog", async () => {
+      const button = page.getByRole("button", { name: "Generate AI slide image" }).first();
+      if (await button.isDisabled()) throw new Error("No image-generation model is enabled for this workspace.");
+      await button.click();
+      await page.waitForTimeout(600);
+      await shot("deck-ai-image");
+      await page.getByRole("button", { name: "Close AI image dialog" }).click();
+    });
+  }
 
   await browser.close();
   capture.complete();
