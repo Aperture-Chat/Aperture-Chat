@@ -147,6 +147,27 @@ test("document figures preserve the complete image aspect ratio", async () => {
   expect(width / height).toBeCloseTo(4 / 3, 2);
 });
 
+test("a picture sized and aligned in the editor keeps that size and alignment in Word", async () => {
+  const bytes = await buildDocxExportDocument(
+    "Sized Picture",
+    `<section class="document-page" data-page-number="1">
+      <figure class="document-media-block document-media-size-md document-media-align-right" contenteditable="false">
+        <img src="data:image/jpeg;base64,${SMALL_JPEG}" alt="Half width picture">
+      </figure>
+    </section>`,
+  );
+  const documentXml = storedZipEntry(bytes, "word/document.xml");
+  expectWellFormedXml(documentXml);
+  const extent = documentXml.match(/<wp:extent cx="(\d+)" cy="(\d+)"\/>/);
+  const width = Number(extent?.[1]);
+  const height = Number(extent?.[2]);
+  // Half of the 493.9pt printed column, at the picture's own 4:3 ratio.
+  expect(width).toBe(Math.round(Math.round(728 * 0.5) * (493.9 / 728) * 12700));
+  expect(width / height).toBeCloseTo(4 / 3, 1);
+  const pictureParagraph = documentXml.slice(0, documentXml.indexOf("<wp:extent"));
+  expect(pictureParagraph.slice(pictureParagraph.lastIndexOf("<w:p>"))).toContain('<w:jc w:val="right"/>');
+});
+
 test("re-joins paginator-split paragraphs so Word gets one flowing paragraph", async () => {
   const bytes = await buildDocxExportDocument(
     "Split Draft",

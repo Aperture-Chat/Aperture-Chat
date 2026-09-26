@@ -1,6 +1,6 @@
 [project]
 name = "aperture-api"
-version = "0.5.6"
+version = "0.5.7"
 description = "Aperture Chat FastAPI service"
 requires-python = ">=3.12"
 dependencies = [
