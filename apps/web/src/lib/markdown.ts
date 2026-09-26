@@ -422,6 +422,132 @@ export function markdownToPlainText(source: string): string {
     .trim();
 }
 
+const HTML_BLOCK_TAG_PATTERN =
+  /<\/?(?:address|article|aside|blockquote|br|dd|details|div|dl|dt|figcaption|figure|footer|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul)\b[^<>]*>/gi;
+const HTML_TAG_PATTERN = /<\/?[a-z][a-z0-9-]*(?:\s[^<>]*)?\/?>/gi;
+const HTML_NAMED_ENTITIES: Record<string, string> = {
+  amp: "&", apos: "'", gt: ">", hellip: "…", ldquo: "“", lsquo: "‘", lt: "<", mdash: "—",
+  nbsp: " ", ndash: "–", quot: '"', rdquo: "”", rsquo: "’",
+};
+// Math output keeps its | bars (|x|, a | b) through the table-pipe cleanup.
+const PREVIEW_MATH_BAR = "";
+
+/**
+ * One line of reading text for list rows such as Chat Feedback: the words a
+ * reader sees in the rendered reply, with no markdown, HTML, or TeX source
+ * left behind. Stored previews are often already flattened to a single line,
+ * so block markers (headings, rules, table pipes) are also cleaned mid-line.
+ * Use markdownToPlainText when the text must keep its honest source.
+ */
+export function markdownToPreviewText(source: string): string {
+  const prose = source
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(HTML_BLOCK_TAG_PATTERN, " ")
+    .replace(HTML_TAG_PATTERN, "")
+    .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, decodeHtmlEntity)
+    .replace(
+      /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g,
+      (_match, display?: string, bracket?: string, inline?: string) => {
+        const text = texToPlainText(display ?? bracket ?? inline ?? "").replace(/\|/g, PREVIEW_MATH_BAR);
+        // Display math is its own block, so it keeps a word gap on each side.
+        return inline === undefined ? ` ${text} ` : text;
+      },
+    )
+    .replace(/!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))+(?:\s+"[^"]*")?\)/g, "$1")
+    .replace(/\[(?:K[1-9][0-9]?|U[1-9])\]/g, "")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/__([^_]+)__/g, "$1");
+  return markdownToPlainText(prose)
+    .replace(/(^|\s)#{1,6}(?=\s)/g, "$1")
+    .replace(/\s*\|\s*/g, " ")
+    .replace(/(^|\s)(?::?-{3,}:?|\*{3,}|_{3,})(?=\s|$)/g, "$1")
+    .replace(new RegExp(PREVIEW_MATH_BAR, "g"), "|")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeHtmlEntity(entity: string, name: string) {
+  if (name.startsWith("#")) {
+    const hex = name[1] === "x" || name[1] === "X";
+    const code = parseInt(name.slice(hex ? 2 : 1), hex ? 16 : 10);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+  }
+  return HTML_NAMED_ENTITIES[name.toLowerCase()] ?? entity;
+}
+
+const TEX_SYMBOLS: Record<string, string> = {
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε", zeta: "ζ",
+  eta: "η", theta: "θ", kappa: "κ", lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ",
+  sigma: "σ", tau: "τ", phi: "φ", varphi: "φ", chi: "χ", psi: "ψ", omega: "ω",
+  Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ", Phi: "Φ",
+  Psi: "Ψ", Omega: "Ω",
+  times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓", approx: "≈", neq: "≠", ne: "≠",
+  leq: "≤", le: "≤", geq: "≥", ge: "≥", equiv: "≡", sim: "∼", propto: "∝", infty: "∞",
+  to: "→", rightarrow: "→", leftarrow: "←", Rightarrow: "⇒", Leftarrow: "⇐",
+  leftrightarrow: "↔", Leftrightarrow: "⇔", partial: "∂", nabla: "∇", sum: "∑", prod: "∏",
+  int: "∫", in: "∈", notin: "∉", subset: "⊂", cup: "∪", cap: "∩", forall: "∀", exists: "∃",
+  degree: "°", circ: "∘", ldots: "…", cdots: "⋯", dots: "…", hbar: "ℏ",
+};
+const SUPERSCRIPT_CHARS: Record<string, string> = {
+  "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸",
+  "9": "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ",
+};
+const SUBSCRIPT_CHARS: Record<string, string> = {
+  "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈",
+  "9": "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+};
+// Escaped TeX characters sit behind placeholders so brace, alignment, and
+// subscript cleanup never eats a literal \{, \&, or \_.
+const TEX_ESCAPE_PLACEHOLDERS: Record<string, string> = {
+  "{": "", "}": "", "&": "", "_": "",
+};
+
+function scriptText(value: string, chars: Record<string, string>, marker: string) {
+  const compact = value.replace(/\s+/g, "");
+  if (compact && [...compact].every((char) => chars[char])) {
+    return [...compact].map((char) => chars[char]).join("");
+  }
+  return compact.length === 1 ? `${marker}${compact}` : `${marker}(${value.trim()})`;
+}
+
+function groupedTex(value: string) {
+  return /[\s+\-=/]/.test(value.trim()) ? `(${value.trim()})` : value.trim();
+}
+
+/** Readable text for a TeX expression: E=mc^2 → E=mc², \frac{E}{c^2} → E/c². */
+function texToPlainText(math: string): string {
+  let text = math
+    .replace(/\\\\/g, " ")
+    .replace(/\\([{}%$&#_])/g, (_match, char: string) => TEX_ESCAPE_PLACEHOLDERS[char] ?? char)
+    .replace(/\\\|/g, "‖")
+    .replace(/\\(?:left|right)\.|\\(?:left|right|big|Big|bigg|Bigg)\b\s*/g, "")
+    .replace(/\\(?:quad|qquad)\b|\\[,;: ]/g, " ")
+    .replace(/\\!/g, "");
+  // Innermost brace groups first, so nested arguments unwrap outward.
+  for (let pass = 0; pass < 6; pass += 1) {
+    const before = text;
+    text = text
+      .replace(/\^\{([^{}]*)\}/g, (_match, value: string) => scriptText(value, SUPERSCRIPT_CHARS, "^"))
+      .replace(/_\{([^{}]*)\}/g, (_match, value: string) => scriptText(value, SUBSCRIPT_CHARS, "_"))
+      .replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_match, top: string, bottom: string) =>
+        `${groupedTex(top)}/${groupedTex(bottom)}`,
+      )
+      .replace(/\\sqrt\{([^{}]*)\}/g, (_match, value: string) => `√${groupedTex(value)}`)
+      .replace(/\\[a-zA-Z]+\{([^{}]*)\}/g, "$1");
+    if (text === before) break;
+  }
+  text = text
+    .replace(/\^([0-9a-zA-Z+-])/g, (_match, value: string) => scriptText(value, SUPERSCRIPT_CHARS, "^"))
+    .replace(/_([0-9])/g, (_match, value: string) => scriptText(value, SUBSCRIPT_CHARS, "_"))
+    .replace(/\\([a-zA-Z]+)/g, (_match, name: string) => TEX_SYMBOLS[name] ?? name)
+    .replace(/[{}]/g, "")
+    .replace(/&/g, " ");
+  for (const [char, placeholder] of Object.entries(TEX_ESCAPE_PLACEHOLDERS)) {
+    text = text.split(placeholder).join(char);
+  }
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /**
  * Display math delimited by $$…$$ or \[…\], on one line or spread across
  * lines until the closing delimiter. Only double-dollar delimiters count —

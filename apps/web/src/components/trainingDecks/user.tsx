@@ -37,6 +37,10 @@ type UserFocus =
   | "slashMenu"
   | "agentMenu"
   | "composerField"
+  | "hashMenu"
+  | "skillMenu"
+  | "automationMenu"
+  | "sessionShortcuts"
   | "attachButton"
   | "attachUpload"
   | "attachWebLink"
@@ -157,6 +161,10 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   slashMenu: { frame: "training/user/composer-slash.png", rect: { x: 258, y: 309, w: 574, h: 325 } },
   agentMenu: { frame: "training/user/composer-agent.png", rect: { x: 258, y: 497, w: 574, h: 137 } },
   composerField: { frame: "training/user/composer-hash.png", rect: { x: 257, y: 635, w: 576, h: 198 } },
+  hashMenu: { frame: "training/user/composer-hash.png", rect: { x: 258, y: 288, w: 574, h: 346 } },
+  skillMenu: { frame: "training/user/composer-skill.png", rect: { x: 258, y: 395, w: 574, h: 239 } },
+  automationMenu: { frame: "training/user/composer-automation.png", rect: { x: 258, y: 446, w: 574, h: 188 } },
+  sessionShortcuts: { frame: "training/user/session-shortcuts.png", rect: { x: 881, y: 532.5625, w: 289, h: 307.765625 } },
   attachButton: { frame: "training/user/composer-attach.png", rect: { x: 276, y: 775, w: 38, h: 38 } },
   attachUpload: { frame: "training/user/composer-attach.png", rect: { x: 282, y: 496, w: 246, h: 45 } },
   attachWebLink: { frame: "training/user/composer-attach.png", rect: { x: 282, y: 535, w: 246, h: 45 } },
@@ -168,7 +176,7 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   sendReasoning: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 482.5, w: 434, h: 36 } },
   sendStreaming: { frame: "training/user/composer-send-options.png", rect: { x: 670.5, y: 518.5, w: 434, h: 26 } },
   sessionSummary: { frame: "training/user/chat-session-panel.png", rect: { x: 881, y: 69, w: 289, h: 325 } },
-  contextWindow: { frame: "training/user/chat-session-panel.png", rect: { x: 881, y: 400, w: 289, h: 236 } },
+  contextWindow: { frame: "training/user/chat-session-panel.png", rect: { x: 881, y: 400, w: 289, h: 235.5625 } },
   imageReply: { frame: "training/user/chat-images.png", rect: { x: 316, y: 342, w: 516, h: 513 } },
   imageDownload: { frame: "training/user/chat-images-download.png", rect: { x: 715, y: 476, w: 106, h: 34 } },
   mermaidFigure: { frame: "training/user/chat-mermaid.png", rect: { x: 315, y: 348, w: 518, h: 121 } },
@@ -474,51 +482,78 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
   {
     id: "composer-commands",
     audioSrc: "training/user/composer-commands.mp3",
-    title: "Composer symbol shortcuts",
-    description: "Insert prompts, agents, knowledge, skills, and automations with one keystroke.",
+    title: "Symbol shortcuts: / @ # $ >",
+    description: "Type a symbol in the message box to pull in prompts, agents, knowledge, skill files, or automations.",
     icon: "commands",
-    outcomes: ["Prompt inserted", "All five symbols known"],
+    outcomes: ["All five symbols known", "Resource added from a menu"],
     setupSteps: [
-      "Start a word with / to list saved prompts and enabled MCP tools.",
+      "Start a word with / to list saved prompts and enabled MCP connections.",
       "Start a word with @ to route the reply through an agent profile.",
       "Start a word with # to reference knowledge bases and their files.",
-      "Start a word with $ to insert a saved skill file.",
+      "Start a word with $ to attach a saved skill file.",
       "Start a word with > to queue an automation to run when you send.",
       "Use the arrow keys to navigate, Enter to insert, and Escape to dismiss.",
+      "Open Session details (the info button) to see the list at any time.",
     ],
     scenes: [
       {
-        title: "Browse resources and symbols",
-        caption: "Send options → Resources includes search, category filters, and a guide to all five symbols.",
+        title: "Find the list any time",
+        caption: "Session details → Symbol shortcuts lists all five symbols and what each one pulls in.",
         narration:
-          "Open Send options, then choose Resources to search the available resources and read the symbol guide. Use slash for prompts and MCP connections, at for agents, hash for knowledge, dollar for skill files, and greater-than for automations. Opening the browser does not send your message.",
-        durationSeconds: 20,
-        focus: "composerShortcuts",
+          "Five symbols pull resources straight into your message. You don't need to memorize them: select the info button at the top of the chat to open Session details, and the Symbol shortcuts list at the bottom shows every symbol and what it does.",
+        durationSeconds: 16,
+        focus: "sessionShortcuts",
         calloutPlacement: "left-rail",
+        captionPlacement: "top",
       },
       {
-        title: "Slash for prompts and tools",
-        caption: "Typing / lists your saved prompts and enabled MCP connections; the footer shows the keys.",
+        title: "Slash: prompts and MCP connections",
+        caption: "/ lists saved prompts and enabled MCP connections. ↑↓ move, Enter inserts, Esc closes.",
         narration:
-          "Type a slash and the menu lists your saved prompts and enabled MCP connections — whatever this workspace actually has. The footer shows the keys: arrows to navigate, Enter to insert, Escape to dismiss.",
-        durationSeconds: 15,
+          "Start a word with a slash to list your saved prompts and enabled MCP connections. A prompt drops its text into your message; a connection turns on for this message. Keep typing to narrow the list, use the arrow keys to move, Enter to insert, and Escape to close.",
+        durationSeconds: 19,
         focus: "slashMenu",
       },
       {
-        title: "At for agents",
-        caption: "Typing @ lists agent profiles so the reply routes through one.",
+        title: "At sign: agents",
+        caption: "@ lists agent profiles; the reply routes through the one you pick.",
         narration:
-          "Type the at sign to pick an agent profile. The reply routes through that agent with its model, knowledge, and tools.",
+          "Type the at sign to pick an agent profile. The reply runs through that agent, with its own model, knowledge, and tools.",
         durationSeconds: 9,
         focus: "agentMenu",
       },
       {
-        title: "Hash, dollar, and more",
-        caption: "# references knowledge, $ inserts skill files, > queues an automation for this send.",
+        title: "Hash: knowledge",
+        caption: "# lists knowledge bases and the files inside them to ground your question.",
         narration:
-          "The same pattern covers the rest: hash references knowledge bases and files, dollar inserts a skill file, and the angle bracket queues an automation to run when you press send.",
+          "Type a hash to ground your question in your organization's knowledge. Pick a whole knowledge base or a single file, and Knowledge turns on to search that source.",
+        durationSeconds: 11,
+        focus: "hashMenu",
+      },
+      {
+        title: "Dollar sign: skill files",
+        caption: "$ attaches a saved skill file to your message.",
+        narration:
+          "Type a dollar sign to attach a saved skill file, such as your citation rules or an approval checklist, so the model follows it for this message.",
+        durationSeconds: 11,
+        focus: "skillMenu",
+      },
+      {
+        title: "Greater-than: automations",
+        caption: "> queues an automation to run on your message when you send.",
+        narration:
+          "Type a greater-than sign to pick an automation. It is queued with this message and runs on it when you press send. Paused automations are listed too, because this is a manual run.",
         durationSeconds: 13,
-        focus: "composerField",
+        focus: "automationMenu",
+      },
+      {
+        title: "Browse without a symbol",
+        caption: "Send options → Resources searches everything and repeats the symbol guide.",
+        narration:
+          "Prefer to browse? Open Send options and choose Resources to search every prompt, agent, knowledge base, skill file, and automation by name. The same symbol guide sits below the results, and opening it does not send your message.",
+        durationSeconds: 16,
+        focus: "composerShortcuts",
+        calloutPlacement: "left-rail",
       },
     ],
   },
@@ -666,9 +701,9 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     id: "session-details",
     audioSrc: "training/user/session-details.mp3",
     title: "Session details and context",
-    description: "Real token usage, active tools, and how full the context window is.",
+    description: "Real token usage, active tools, how full the context window is, and the symbol shortcuts.",
     icon: "session",
-    outcomes: ["Usage reviewed", "Context window understood"],
+    outcomes: ["Usage reviewed", "Context window understood", "Symbol shortcuts found"],
     scenes: [
       {
         title: "The session summary",
@@ -677,6 +712,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
           "The info button opens session details: message counts, the active model, and selected knowledge, tools, and agent profile. Tokens used shows provider-reported usage, or Not reported by the provider. The separate context-window meter may use a clearly labeled estimate when older messages have no reported token data.",
         durationSeconds: 23,
         focus: "sessionSummary",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Watch the context window",
@@ -685,6 +721,16 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
           "The context window shows how much material the model can keep in view for an answer. If you see the approximate symbol or estimated, the meter is based on message length, not a measured usage total. It warns as the window fills; at one hundred percent, a new chat is usually more reliable.",
         durationSeconds: 20,
         focus: "contextWindow",
+      },
+      {
+        title: "Symbol shortcuts",
+        caption: "The bottom of Session details lists the five symbols that pull resources into a message.",
+        narration:
+          "At the bottom of the panel, Symbol shortcuts lists the five symbols you can type in the message box: slash, at, hash, dollar, and greater-than. Each one opens a menu of prompts, agents, knowledge, skill files, or automations.",
+        durationSeconds: 16,
+        focus: "sessionShortcuts",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
       },
     ],
   },

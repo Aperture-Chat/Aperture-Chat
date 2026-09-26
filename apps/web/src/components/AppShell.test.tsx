@@ -1023,7 +1023,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
 
   expect(await screen.findByText("Start chatting")).toBeInTheDocument();
   expect(screen.getByText("Follow the work trace")).toBeInTheDocument();
-  expect(screen.getByText("Composer symbol shortcuts")).toBeInTheDocument();
+  expect(screen.getByText("Symbol shortcuts: / @ # $ >")).toBeInTheDocument();
   expect(screen.getByText("Attach files and sources")).toBeInTheDocument();
   expect(screen.getByText("Knowledge, Web, Agent, and reply settings")).toBeInTheDocument();
   expect(screen.getByText("Session details and context")).toBeInTheDocument();
