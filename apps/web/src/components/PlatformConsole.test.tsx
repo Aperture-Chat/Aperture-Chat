@@ -2306,7 +2306,7 @@ test("clicking a feedback entry previews the note and the full rendered conversa
       message_id: "msg-reply-2",
       rating: "negative" as const,
       comment: "It cited the wrong clause.",
-      message_preview: "**The** escrow terms are...",
+      message_preview: "**The** escrow terms \\(x^2\\) &amp; <em>fees</em> --- ## Next are...",
       model_id: "model-synthetic",
       created_at: "2026-08-17T12:00:00Z",
       updated_at: "2026-08-17T12:00:00Z",
@@ -2351,10 +2351,11 @@ test("clicking a feedback entry previews the note and the full rendered conversa
   fireEvent.click(analyticsTab);
   expandPanel("Chat Feedback");
 
-  // The list preview reads as plain prose (markdown stripped) and carries a
-  // visible Preview affordance so the row is clearly clickable.
-  expect(await screen.findByText("The escrow terms are...")).toBeInTheDocument();
-  expect(screen.queryByText("**The** escrow terms are...")).not.toBeInTheDocument();
+  // The list preview reads as plain prose (markdown, math delimiters, and
+  // HTML stripped) and carries a visible Preview affordance so the row is
+  // clearly clickable.
+  expect(await screen.findByText("The escrow terms x² & fees Next are...")).toBeInTheDocument();
+  expect(screen.queryByText(/\*\*|\\\(|<em>|&amp;|##/)).not.toBeInTheDocument();
   const feedbackRow = screen.getByRole("button", {
     name: "Preview feedback and conversation: Escrow question",
   });

@@ -53,7 +53,7 @@ const AdminDocumentationModal = lazyWithReload("admin-documentation", () =>
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
 import { IssueReportPreview } from "./IssueReportPreview";
-import { markdownToPlainText } from "../lib/markdown";
+import { markdownToPreviewText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
 import { AuditSummaryCard, type AuditSummaryItem } from "./AuditSummaryCard";
@@ -3575,7 +3575,7 @@ export function AdminConsole({
                           <small>
                             {item.thread_title} · {item.model_id} · {item.user_name}
                           </small>
-                          <p>{markdownToPlainText(item.message_preview)}</p>
+                          <p>{markdownToPreviewText(item.message_preview)}</p>
                           {item.comment ? (
                             <p className="feedback-comment">“{item.comment}”</p>
                           ) : null}

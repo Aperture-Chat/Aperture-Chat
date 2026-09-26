@@ -693,6 +693,14 @@ const COMMAND_MENU_TITLES: Record<ComposerCommandSymbol, string> = {
   "@": "Agents",
   ">": "Automations",
 };
+/** The symbol reference shared by the Resources guide and Session details. */
+const COMPOSER_SHORTCUTS: ReadonlyArray<{ symbol: ComposerCommandSymbol; label: string; detail: string }> = [
+  { symbol: "/", label: "Prompts & MCP connections", detail: "Insert a saved prompt or connected tool" },
+  { symbol: "@", label: "Agents", detail: "Route the reply through an agent profile" },
+  { symbol: "#", label: "Knowledge bases & files", detail: "Ground the answer in your knowledge" },
+  { symbol: "$", label: "Skill files", detail: "Add a saved skill file to the message" },
+  { symbol: ">", label: "Automations", detail: "Run an automation when you send" },
+];
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 172;
 /** Mirrors the backend limit: ChatCompletionRequest.fetch_urls max_length=3. */
 const MAX_FETCH_URLS = 3;
@@ -2900,7 +2908,7 @@ export function ChatWorkspace({
                 <div className="composer-shortcut-guide" role="group" aria-label="Type shortcuts in chat">
                   <p>Type a symbol directly in the chat message box, then choose a resource. Add its name to narrow the list.</p>
                   <dl>
-                    {[["/", "Prompts & MCP connections"], ["@", "Agents"], ["#", "Knowledge bases & files"], ["$", "Skill files"], [">", "Automations"]].map(([symbol, label]) => (
+                    {COMPOSER_SHORTCUTS.map(({ symbol, label }) => (
                       <div key={symbol}><dt><code>{symbol}</code></dt><dd>{label}</dd></div>
                     ))}
                   </dl>
@@ -4724,6 +4732,23 @@ function SessionSummary({
           )}
         </div>
       )}
+      <div className="session-shortcuts" role="group" aria-label="Symbol shortcuts">
+        <div className="audit-heading">
+          <h3>Symbol shortcuts</h3>
+        </div>
+        <p>Start a word in the message box with a symbol to pick from a list.</p>
+        <dl>
+          {COMPOSER_SHORTCUTS.map(({ symbol, label, detail }) => (
+            <div key={symbol}>
+              <dt><kbd>{symbol}</kbd></dt>
+              <dd>
+                <strong>{label}</strong>
+                <small>{detail}</small>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
     </section>
   );
 }
