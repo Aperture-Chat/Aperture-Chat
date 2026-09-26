@@ -57,6 +57,9 @@ type UserFocus =
   | "draftComposer"
   | "draftModel"
   | "draftToolbar"
+  | "draftAiEdit"
+  | "draftSlashMenu"
+  | "draftStatusBar"
   | "draftSettings"
   | "draftVersions"
   | "deckModeToggle"
@@ -66,7 +69,7 @@ type UserFocus =
   | "deckBrandStage"
   | "deckAiEdit"
   | "deckAiImage"
-  | "deckStageWithBg"
+  | "deckBackgroundMenu"
   | "deckNotes"
   | "deckPresent"
   | "deckExportMenu"
@@ -133,8 +136,8 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   searchCommands: { frame: "training/user/search-commands.png", rect: { x: 282.5, y: 102.594, w: 620, h: 581.391 } },
   searchRecent: { frame: "training/user/search-recent.png", rect: { x: 282.5, y: 102.594, w: 620, h: 581.391 } },
   draftSaveState: { frame: "training/user/draft-save-state.png", rect: { x: 456, y: 0, w: 729, h: 177 } },
-  draftHistory: { frame: "training/user/draft-history.png", rect: { x: 101, y: 233.109, w: 329, h: 432.891 } },
-  draftHistoryPreview: { frame: "training/user/draft-history.png", rect: { x: 438, y: 279.109, w: 300, h: 120 } },
+  draftHistory: { frame: "training/user/draft-history.png", rect: { x: 103, y: 236.109375, w: 325, h: 429.890625 } },
+  draftHistoryPreview: { frame: "training/user/draft-history.png", rect: { x: 433.609375, y: 286.421875, w: 300, h: 226 } },
   unsyncedWork: { frame: "training/user/unsynced-work.png", rect: { x: 312.5, y: 119.688, w: 560, h: 288 } },
   themeSchedule: { frame: "training/user/theme-schedule.png", rect: { x: 362.5, y: 260.984, w: 460, h: 333.016 } },
   securitySignIn: { frame: "training/user/sign-in-verification.png", rect: { x: 59.25, y: 146.672, w: 488, h: 561.641 } },
@@ -170,23 +173,26 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   imageDownload: { frame: "training/user/chat-images-download.png", rect: { x: 715, y: 476, w: 106, h: 34 } },
   mermaidFigure: { frame: "training/user/chat-mermaid.png", rect: { x: 315, y: 348, w: 518, h: 121 } },
   searchPalette: { frame: "training/user/search-palette.png", rect: { x: 282.5, y: 102.594, w: 620, h: 581.391 } },
-  draftModeToggle: { frame: "training/user/drafts.png", rect: { x: 484.438, y: 14, w: 232.844, h: 44 } },
+  draftModeToggle: { frame: "training/user/drafts.png", rect: { x: 484.4375, y: 14, w: 233.5, h: 44 } },
   draftComposer: { frame: "training/user/drafts.png", rect: { x: 94, y: 689, w: 343, h: 144 } },
-  draftModel: { frame: "training/user/drafts.png", rect: { x: 484.438, y: 70, w: 320, h: 42 } },
+  draftModel: { frame: "training/user/drafts.png", rect: { x: 484.4375, y: 70, w: 320, h: 42 } },
   draftToolbar: { frame: "training/user/drafts.png", rect: { x: 456, y: 177, w: 729, h: 78 } },
-  draftSettings: { frame: "training/user/draft-settings.png", rect: { x: 101, y: 471, w: 329, h: 195 } },
+  draftAiEdit: { frame: "training/user/draft-ai-edit.png", rect: { x: 551.640625, y: 259.296875, w: 460, h: 320.453125 } },
+  draftSlashMenu: { frame: "training/user/draft-slash.png", rect: { x: 555.640625, y: 390.8125, w: 292, h: 380 } },
+  draftStatusBar: { frame: "training/user/draft-find.png", rect: { x: 456, y: 821, w: 729, h: 34 } },
+  draftSettings: { frame: "training/user/draft-settings.png", rect: { x: 103, y: 400.96875, w: 325, h: 265.03125 } },
   draftVersions: { frame: "training/user/drafts.png", rect: { x: 456, y: 0, w: 729, h: 177 } },
-  deckModeToggle: { frame: "training/user/deck-editor.png", rect: { x: 481, y: 13, w: 200, h: 40 } },
-  deckFilmstrip: { frame: "training/user/deck-editor.png", rect: { x: 453, y: 288, w: 174, h: 567 } },
-  deckLayoutMenu: { frame: "training/user/deck-layouts.png", rect: { x: 773, y: 450, w: 370, h: 181 } },
-  deckTemplatesDrawer: { frame: "training/user/deck-templates.png", rect: { x: 98, y: 230, w: 335, h: 439 } },
-  deckBrandStage: { frame: "training/user/deck-editor-brand.png", rect: { x: 656, y: 370, w: 497, h: 282 } },
-  deckAiEdit: { frame: "training/user/deck-ai-edit.png", rect: { x: 705, y: 250, w: 387, h: 343 } },
+  deckModeToggle: { frame: "training/user/deck-editor.png", rect: { x: 481, y: 11, w: 240, h: 50 } },
+  deckFilmstrip: { frame: "training/user/deck-editor.png", rect: { x: 453, y: 224, w: 174, h: 631 } },
+  deckLayoutMenu: { frame: "training/user/deck-layouts.png", rect: { x: 656, y: 246, w: 497, h: 155 } },
+  deckTemplatesDrawer: { frame: "training/user/deck-templates.png", rect: { x: 100, y: 233, w: 331, h: 436 } },
+  deckBrandStage: { frame: "training/user/deck-editor-brand.png", rect: { x: 656, y: 418, w: 497, h: 283 } },
+  deckAiEdit: { frame: "training/user/deck-ai-edit.png", rect: { x: 671, y: 268, w: 467, h: 453 } },
   deckAiImage: { frame: "training/user/deck-ai-image.png", rect: { x: 741, y: 250, w: 387, h: 229 } },
-  deckStageWithBg: { frame: "training/user/deck-ai-applied.png", rect: { x: 656, y: 370, w: 497, h: 282 } },
+  deckBackgroundMenu: { frame: "training/user/deck-background.png", rect: { x: 899, y: 221, w: 231, h: 181 } },
   deckNotes: { frame: "training/user/deck-notes.png", rect: { x: 656, y: 718, w: 497, h: 118 } },
-  deckPresent: { frame: "training/user/deck-present.png", rect: { x: 0, y: 681, w: 1185, h: 174 } },
-  deckExportMenu: { frame: "training/user/deck-export.png", rect: { x: 773, y: 163, w: 387, h: 197 } },
+  deckPresent: { frame: "training/user/deck-present.png", rect: { x: 772, y: 73, w: 392, h: 761 } },
+  deckExportMenu: { frame: "training/user/deck-export.png", rect: { x: 773, y: 169, w: 387, h: 197 } },
   agentsProfile: { frame: "training/user/agents.png", rect: { x: 281, y: 344, w: 849, h: 63 } },
   agentsNew: { frame: "training/user/agents.png", rect: { x: 1025, y: 141, w: 126, h: 45 } },
   knowledgeAdd: { frame: "training/user/knowledge.png", rect: { x: 909, y: 209, w: 173, h: 45 } },
@@ -686,9 +692,9 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     id: "drafts",
     audioSrc: "training/user/drafts.mp3",
     title: "Draft documents",
-    description: "Write manually or with an available model, save versions, and export documents.",
+    description: "Write manually or with an available model, edit with AI, save versions, and export documents.",
     icon: "drafts",
-    outcomes: ["Document prepared", "Version saved", "Export ready"],
+    outcomes: ["Document prepared", "AI edit reviewed", "Version saved", "Export ready"],
     scenes: [
       {
         title: "Choose Document or Deck",
@@ -700,10 +706,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Ask for a draft",
-        caption: "Describe the document you need; the assistant writes it into the editor with its own work trace.",
+        caption: "Describe the document or pick a suggestion. Sources, Web, and Templates show what the assistant can use.",
         narration:
-          "With a usable model, describe the document you need and the assistant writes it straight into the editor, showing its own work trace as it goes. You can also transfer a chat response here to keep working on it.",
-        durationSeconds: 14,
+          "With a usable model, describe the document you need, or pick one of the suggested requests, and the assistant writes it straight into the editor with its own work trace. The Sources, Web, and Templates chips above the conversation show what it can draw on. You can also transfer a chat response here to keep working on it.",
+        durationSeconds: 20,
         focus: "draftComposer",
       },
       {
@@ -715,11 +721,35 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Format like a document",
-        caption: "Text, Paragraph, and More organize formatting alongside block styles, Insert, and inline AI edit.",
+        caption: "Text, Paragraph, More, and Insert organize formatting. Selecting text also shows a floating toolbar.",
         narration:
-          "Select the text you want to change, then use Text for fonts, size, and colors; Paragraph for alignment and spacing; and More for additional document tools. Block styles, lists, and the Insert menu remain available. Inline AI edit changes selected text when a usable model is connected.",
-        durationSeconds: 20,
+          "Select the text you want to change, then use Text for fonts, size, and colors; Paragraph for alignment, lists, and quotes; More to copy the document or open the AI edit trail; and Insert for links, citations, images, charts, tables, and page breaks. Selecting text also shows a small floating toolbar with the same everyday controls.",
+        durationSeconds: 23,
         focus: "draftToolbar",
+      },
+      {
+        title: "Edit a selection with AI",
+        caption: "Select text and choose Ask AI, pick an action or describe the change, then review before you replace it.",
+        narration:
+          "Select a passage and choose Ask AI in the floating toolbar, or press Control J, or Command J on a Mac. Pick an action such as Improve writing, Make shorter, or Turn into a bulleted list, or describe your own change. Review the Changes or Result view, then choose Replace, Insert below, Try again, or Discard. Nothing in the document changes until you accept.",
+        durationSeconds: 25,
+        focus: "draftAiEdit",
+      },
+      {
+        title: "Insert with the slash menu",
+        caption: "Type / at the start of a line for AI actions, headings, lists, tables, and more.",
+        narration:
+          "Type a slash at the start of a line to open the command menu. Keep typing to filter it, then press Enter to add a heading, list, table, divider, or page break, or to have AI continue writing or summarize the document. Markdown shortcuts work as you type too: a pound sign and a space starts a title, and a dash and a space starts a bulleted list.",
+        durationSeconds: 24,
+        focus: "draftSlashMenu",
+      },
+      {
+        title: "Find, outline, and zoom",
+        caption: "The status bar counts pages and words, and opens Outline, Find, keyboard shortcuts, and zoom.",
+        narration:
+          "The status bar under the page shows the page, word count, and reading time, and counts the words you have selected. Outline lists your headings so you can jump between sections. Find opens find and replace with match case and whole-word options. The keyboard button lists every shortcut, and zoom resizes the page on screen without changing the document.",
+        durationSeconds: 23,
+        focus: "draftStatusBar",
       },
       {
         title: "Apply a consistent page layout",
@@ -752,7 +782,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     setupSteps: [
       "Save a version and wait for Saved. Both documents and decks can be saved to your account.",
       "If the server save fails, use Retry or export a copy. Local only means this browser holds the latest changes.",
-      "Open Draft history to preview and restore saved work, or switch between active and archived items.",
+      "Open Document history from the clock button at the top of the assistant rail to preview and restore saved work, or switch between active and archived items.",
       "Archive finished work when you want to keep it. Delete is a separate action with confirmation.",
       "Open Only on this device to review unsent work. Clear list and Hide this reminder change reminders; neither uploads nor deletes your content."
     ],
@@ -766,9 +796,9 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Preview and reopen saved work",
-        caption: "Draft history shows documents and decks, their save state, and a preview on hover or keyboard focus.",
-        narration: "Open Draft history in the assistant rail. Hover a card or focus it with the keyboard to preview its content before opening it. Select the card to restore the document or deck. If an account copy cannot load, the entry stays listed so you can retry when the connection recovers.",
-        durationSeconds: 19,
+        caption: "Document history shows documents and decks, their save state, and a preview on hover or keyboard focus.",
+        narration: "Open Document history with the clock button at the top of the assistant rail. Hover a card or focus it with the keyboard to preview its content before opening it. Select the card to restore the document or deck. If an account copy cannot load, the entry stays listed so you can retry when the connection recovers.",
+        durationSeconds: 21,
         focus: "draftHistoryPreview"
       },
       {
@@ -813,26 +843,26 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Slides and the filmstrip",
-        caption: "Drag thumbnails to reorder; each slide has move, duplicate, and delete actions.",
+        caption: "Drag thumbnails to reorder; hover a slide for move, duplicate, and delete. Slide sorter shows every slide.",
         narration:
-          "The filmstrip lists every slide. Drag a thumbnail to reorder the deck, and each slide carries its own move, duplicate, and delete actions.",
-        durationSeconds: 11,
+          "The filmstrip lists every slide. Drag a thumbnail to reorder the deck, and hover a slide to move, duplicate, or delete it. For the bigger picture, the Slide sorter button lays out every slide in a grid that you can reorder the same way.",
+        durationSeconds: 16,
         focus: "deckFilmstrip",
       },
       {
-        title: "Seven layouts",
-        caption: "Seven layouts cover title, bullets, columns, image, quote, section, and closing slides.",
+        title: "Layouts and themes",
+        caption: "Layouts above the slide offer seven arrangements; Themes recolors the whole deck.",
         narration:
-          "The layout menu gives each slide one of seven layouts: title, bullets, two columns, image with caption, quote, section break, and closing.",
-        durationSeconds: 11,
+          "Above the slide, Layouts gives the selected slide one of seven arrangements: title, bullets, two columns, image with caption, section break, quote, and closing. Switch to Themes to recolor every slide with one of five palettes. Your text stays as written, and undo reverses the change.",
+        durationSeconds: 20,
         focus: "deckLayoutMenu",
       },
       {
         title: "Start from a template or your brand",
-        caption: "Five starter decks, or upload a .pptx brand template — stored only on this device.",
+        caption: "Deck starters & brand themes: five starter decks, or upload a .pptx brand template stored only on this device.",
         narration:
-          "The templates panel offers five starters, or upload your own PowerPoint brand template. Its colors, fonts, logo, and every slide's design are extracted and stored only on this device — and Load all slides brings the whole template in.",
-        durationSeconds: 17,
+          "Deck starters and brand themes opens the templates panel. Start from one of five starter decks, or upload your own PowerPoint brand template. Its colors, fonts, logo, and every slide's design are extracted and stored only on this device, and Load all slides brings the whole template in.",
+        durationSeconds: 20,
         focus: "deckTemplatesDrawer",
       },
       {
@@ -844,11 +874,11 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         focus: "deckBrandStage",
       },
       {
-        title: "Edit slide text with AI",
-        caption: "Highlight text, click the AI pen, describe the change, then Replace highlight.",
+        title: "Edit a slide with AI",
+        caption: "Edit slide with AI reworks the whole slide; highlight text and choose Ask AI to change just that part.",
         narration:
-          "Highlight any slide text and click the AI pen. Describe what should change, and Replace highlight rewrites the highlighted text in place — undo restores it if you change your mind.",
-        durationSeconds: 13,
+          "Choose Edit slide with AI to improve the slide, make it punchier, cut the text in half, write speaker notes, pick a better layout, or split it into two slides, or describe your own change. To rewrite only part of a slide, highlight the text and choose Ask AI. Compare the before and after, then choose Apply to slide, Try again, or Discard. Undo restores the previous slide.",
+        durationSeconds: 25,
         focus: "deckAiEdit",
       },
       {
@@ -865,7 +895,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         narration:
           "Backgrounds are not AI-only: the background menu takes your own image uploads too, applied to just this slide or to every slide in the deck.",
         durationSeconds: 11,
-        focus: "deckStageWithBg",
+        focus: "deckBackgroundMenu",
       },
       {
         title: "Speaker notes travel with you",
@@ -877,10 +907,10 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Present the deck",
-        caption: "Present shows the deck full screen — click or arrow keys advance, notes sit below, Escape exits.",
+        caption: "Present plays full screen. Presenter view adds a timer, the next slide, and your notes; Escape exits.",
         narration:
-          "The Present button plays the deck full screen. Click anywhere or use the arrow keys to advance, keep your speaker notes open underneath to read from as you go, and leave with Escape or the Exit button.",
-        durationSeconds: 14,
+          "The Present button plays the deck full screen. Click or use the arrow keys to advance. Press N to show your speaker notes under the slide, or P for Presenter view, with a timer, the next slide, and your notes side by side. Press B to black out the screen, and leave with Escape or the Exit button.",
+        durationSeconds: 20,
         focus: "deckPresent",
       },
       {

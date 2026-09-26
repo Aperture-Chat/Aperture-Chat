@@ -94,10 +94,12 @@ policies appropriate for your organization's data.
 
 | Document editor | Slide editor |
 | --- | --- |
-| ![Document editor with a project brief, compact formatting toolbar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with thumbnails of the project brief converted into a deck](docs/images/deck-dark.png) |
+| ![Document editor with a project brief, compact formatting toolbar, status bar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with the project brief converted into a deck, layout and theme choices, and slide thumbnails](docs/images/deck-dark.png) |
 
 - **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail.
+- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything.
+- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, table and picture tools, and, for decks, layouts and themes, a slide sorter, snapping guides, and presenter view.
 - **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
 - **Export.** Download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`), or print a paginated PDF.

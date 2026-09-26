@@ -4,14 +4,14 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **49 lessons, 224 scenes, 49 MP3 tracks, and 3,910 seconds of narration timelines (65 minutes 10 seconds)**. Its 220 measured focus-map entries comprise 97 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **49 lessons, 229 scenes, 49 MP3 tracks, and 4,065 seconds of narration timelines (67 minutes 45 seconds)**. Its 225 measured focus-map entries comprise 102 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 22 | 103 | 97 | 22 | 1714 | 26 |
+| User | 22 | 108 | 102 | 22 | 1869 | 26 |
 | Administrator | 13 | 57 | 58 | 13 | 1096 | 40 |
 | Platform owner | 14 | 64 | 65 | 14 | 1100 | 58 |
-| Total | 49 | 224 | 220 | 49 | 3910 | — |
+| Total | 49 | 229 | 225 | 49 | 4065 | — |
 
 All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/58 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
@@ -40,11 +40,11 @@ Seconds are the sum of each lesson's source scene durations.
 | --- | --- | --- | ---: | ---: |
 | User | Agent profiles | `agents` | 3 | 51 |
 | User | Attach files and sources | `attachments` | 4 | 44 |
-| User | Build a slide deck | `deck-basics` | 12 | 164 |
+| User | Build a slide deck | `deck-basics` | 12 | 199 |
 | User | Choose models and request access | `model-access` | 4 | 79 |
 | User | Composer symbol shortcuts | `composer-commands` | 4 | 57 |
 | User | Dictation, images, and diagrams | `dictation-images` | 4 | 52 |
-| User | Draft documents | `drafts` | 6 | 115 |
+| User | Draft documents | `drafts` | 9 | 196 |
 | User | Follow the work trace | `work-traces` | 4 | 50 |
 | User | Knowledge bases | `knowledge` | 3 | 40 |
 | User | Knowledge, Web, Agent, and reply settings | `send-options` | 6 | 73 |
@@ -53,8 +53,8 @@ Seconds are the sum of each lesson's source scene durations.
 | User | Personalize, use mobile, and get help | `account-mobile-help` | 9 | 172 |
 | User | Preview chats at a glance | `chat-previews` | 1 | 29 |
 | User | Protect your account and recover access | `account-security` | 7 | 154 |
-| User | Request access and enter your workspace | `access-and-sign-in` | 5 | 100 |
-| User | Save, organize, and recover your drafts | `save-and-recover-work` | 4 | 83 |
+| User | Request access and enter your workspace | `access-and-sign-in` | 7 | 137 |
+| User | Save, organize, and recover your drafts | `save-and-recover-work` | 4 | 85 |
 | User | Scheduled automations | `scheduled-automations` | 4 | 56 |
 | User | Search, commands, and workspace links | `search-and-commands` | 4 | 79 |
 | User | Session details and context | `session-details` | 2 | 43 |
@@ -106,7 +106,9 @@ Run from the repository root with the intended synthetic role session. Read each
 
 | Capture task | Scripts under `apps/web/scripts/` |
 | --- | --- |
-| User chat, navigation, documents, and decks | `capture-training-frames.cjs`, `capture-deck-frames.cjs` |
+| User chat and navigation | `capture-training-frames.cjs` |
+| Deck editor, slide AI edit, uploaded background, presenter view, and brand template | `capture-deck-frames.cjs` |
+| Document editor, Edit with AI review, slash menu, find and outline, settings, and history | `capture-training-refresh.cjs drafts` |
 | Administrator console, policies, analytics, and audit | `capture-admin-frames.cjs`, `capture-admin-analytics-frames.cjs` |
 | Owner configuration, connectors, usage, audit, and retention | `capture-owner-frames.cjs` |
 | Account, Help, and mobile installation UI | `capture-user-support-frames.cjs` |
@@ -115,7 +117,7 @@ Run from the repository root with the intended synthetic role session. Read each
 | One authorized synthetic issue with a reviewed attachment | `capture-report-submission.cjs` |
 | Existing feedback and the selected issue detail | `capture-admin-support-frames.cjs` |
 | Actual policy-restricted SSO panel | `capture-admin-sso-readonly-frames.cjs` |
-| Model requests, saved work, schedules, search, and current console detail | `capture-training-refresh.cjs` |
+| Model requests, unsynced work, schedules, search, and current console detail | `capture-training-refresh.cjs` |
 | Forever defaults, source labels, sensitive-data review, holds, and policy previews | `capture-retention-governance.cjs` |
 | Already validated provider card with its key vault closed | `capture-owner-provider-readiness.cjs` |
 
@@ -191,6 +193,12 @@ The refresh follows the current user, administrator, and platform-owner interfac
 | Conditional memory controls, visible tag chips, branding actions, and CSV export | `admin-policies`, both retention lessons, `branding`, analytics and audit | Administrator/owner PDFs; website governance and operations |
 
 Captures use isolated synthetic accounts. The authenticator lifecycle was exercised through actual enrollment, subsequent verification, recovery, and session revocation; secrets were masked in published frames. Updated connected-model captures used a real validated local model. Tagging examples contain explicitly synthetic manual tags. Configuration screenshots do not claim that scheduled automations, external connectors, or SSO authentication have completed an end-to-end run.
+
+## Drafts editor refresh
+
+The Drafts document and deck editor upgrade refreshed `drafts`, `deck-basics`, and the two Drafts frames in `save-and-recover-work`. `drafts` gained scenes for Edit with AI, the slash menu, and the status bar's outline, find, and zoom; `deck-basics` now teaches the Layouts and Themes strip, Deck starters & brand themes, Edit slide with AI, and presenter view. All three lessons were re-narrated; `save-and-recover-work` now points to the **Document history** button at the top of the assistant rail, because the composer's separate history button was removed. The user, administrator, and owner guides describe the same controls.
+
+The document frames come from `capture-training-refresh.cjs drafts`, which types a synthetic checklist, saves it, and requests one real Edit with AI suggestion from the connected model before discarding it. `capture-deck-frames.cjs` converts a synthetic memo into slides, applies one real Edit slide with AI result, and uploads `fixtures/deck-background.jpg` (drawn by `fixtures/generate-deck-background.py`) as the user's own background. Both captures load the app's web font; every other outside origin stays blocked. The isolated instance had no image-generation model, so `deck-ai-image.png` was kept with `CAPTURE_KEEP_PUBLISHED_FRAMES=deck-ai-image`; it still shows the earlier toolbar and should be recaptured when an image model is available.
 
 ## Current verification
 
