@@ -3660,7 +3660,6 @@ a.nav-item {
   line-height: 1.35;
 }
 
-.draft-agent-icon,
 .draft-source-card > svg {
   display: grid;
   place-items: center;
@@ -18697,38 +18696,14 @@ button.retention-tagged-title:focus-visible strong {
   }
 }
 
+/* The seam pull tab exists only while the rail is a drawer. */
+.draft-rail-edge {
+  display: none;
+}
+
 /* Drafts on compact widths: the assistant rail becomes a left slide-out drawer
    so the document keeps the full screen instead of a tall vertical stack. */
 @media (max-width: 1180px) {
-  /* Inline in the editor topbar, just before the draft title, so it never
-     floats over the app nav sidebar (still visible down to 900px). */
-  .draft-rail-trigger {
-    position: relative;
-    flex: none;
-    /* Matches the Document/Deck segmented toggle beside it (32px buttons in
-       a 1px border shell). */
-    width: 34px;
-    height: 34px;
-    display: inline-grid;
-    place-items: center;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--teal);
-  }
-
-  .draft-rail-trigger-dot {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--teal);
-    box-shadow: 0 0 0 2px var(--surface);
-    animation: apx-pulse 1.4s ease-in-out infinite;
-  }
-
   .draft-rail-backdrop {
     position: fixed;
     inset: 0;
@@ -18739,9 +18714,13 @@ button.retention-tagged-title:focus-visible strong {
     animation: apx-fade 160ms var(--ease) both;
   }
 
+  /* Left stays auto, so the drawer keeps its static position: the seam
+     between the app nav and the editor. The clip holds its left edge on that
+     seam, so it slides out from behind the edge instead of sweeping over the
+     nav; the negative right inset keeps its shadow. */
   .document-assistant-rail.is-drawer {
     position: fixed;
-    inset: 0 auto 0 0;
+    inset: 0 auto;
     width: min(384px, 88vw);
     z-index: 85;
     gap: 14px;
@@ -18750,13 +18729,45 @@ button.retention-tagged-title:focus-visible strong {
     border-bottom: 0;
     box-shadow: var(--shadow-lg);
     transform: translateX(-100%);
+    clip-path: inset(0 -80px 0 100%);
     visibility: hidden;
-    transition: transform 220ms var(--ease), visibility 220ms var(--ease);
+    transition:
+      transform 380ms var(--ease),
+      clip-path 380ms var(--ease),
+      box-shadow 380ms var(--ease),
+      visibility 380ms var(--ease);
   }
 
   .document-assistant-rail.is-drawer.is-open {
     transform: translateX(0);
+    clip-path: inset(0 -80px 0 0);
     visibility: visible;
+  }
+
+  /* Its sections settle in just behind the panel. Zero specificity, so a
+     section with its own entrance animation keeps it. */
+  :where(.document-assistant-rail.is-drawer.is-open) > * {
+    animation: draft-rail-settle 420ms var(--ease) backwards;
+  }
+
+  :where(.document-assistant-rail.is-drawer.is-open) > :nth-child(2) {
+    animation-delay: 40ms;
+  }
+
+  :where(.document-assistant-rail.is-drawer.is-open) > :nth-child(3) {
+    animation-delay: 80ms;
+  }
+
+  :where(.document-assistant-rail.is-drawer.is-open) > :nth-child(n + 4) {
+    animation-delay: 120ms;
+  }
+
+  /* A hover peek floats over the page without dimming it; a teal edge marks
+     it as a preview until a click or keystroke pins it. */
+  .document-assistant-rail.is-drawer.is-peek {
+    box-shadow:
+      1px 0 0 color-mix(in srgb, var(--teal) 45%, transparent),
+      24px 0 60px -28px rgba(6, 40, 48, 0.5);
   }
 
   /* The rail owns the top-left when open, so the header no longer needs the
@@ -18764,17 +18775,194 @@ button.retention-tagged-title:focus-visible strong {
   .document-assistant-rail.is-drawer .draft-assistant-header {
     padding-left: 0;
   }
+
+  /* Pull tab on the same seam, the drawer's one opener: it stays in view as
+     the page scrolls. Resting the pointer on it, or anywhere along the edge,
+     peeks the drawer. Left stays auto for the same static-position reason. */
+  .draft-rail-edge {
+    position: fixed;
+    inset: 0 auto;
+    z-index: 40;
+    display: block;
+    width: 14px;
+  }
+
+  /* A thread of light gathers along the seam as the pointer arrives. */
+  .draft-rail-edge::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: linear-gradient(
+      180deg,
+      transparent 6%,
+      color-mix(in srgb, var(--teal) 75%, transparent) 50%,
+      transparent 94%
+    );
+    opacity: 0;
+    transform: scaleY(0.3);
+    transition: opacity 260ms var(--ease), transform 480ms var(--ease);
+    pointer-events: none;
+  }
+
+  .draft-rail-edge:hover::before {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+
+  .draft-rail-tab {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    min-width: 0;
+    height: 64px;
+    min-height: 0;
+    /* The spark hangs off the pen's top-left; this centers the pair. */
+    padding: 0 0 0 5px;
+    border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--border));
+    border-left: 0;
+    border-radius: 0 16px 16px 0;
+    background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--surface) 88%, transparent),
+      color-mix(in srgb, var(--teal-soft) 88%, transparent)
+    );
+    box-shadow:
+      0 14px 30px -16px rgba(6, 40, 48, 0.5),
+      inset 0 1px 0 rgb(255 255 255 / 45%);
+    backdrop-filter: blur(14px) saturate(1.3);
+    color: var(--teal);
+    cursor: pointer;
+    transform: translateY(-50%);
+    transition:
+      width 300ms var(--ease),
+      color 200ms var(--ease),
+      box-shadow 300ms var(--ease),
+      opacity 220ms var(--ease),
+      transform 300ms var(--ease);
+  }
+
+  .draft-rail-edge:hover .draft-rail-tab,
+  .draft-rail-tab:focus-visible {
+    width: 32px;
+    color: var(--teal-strong);
+    box-shadow:
+      0 18px 36px -16px rgba(6, 40, 48, 0.6),
+      0 0 0 4px color-mix(in srgb, var(--teal) 12%, transparent),
+      inset 0 1px 0 rgb(255 255 255 / 45%);
+  }
+
+  .draft-rail-tab .ai-pen-icon .ai-pen-icon-spark {
+    top: -4px;
+    left: -5px;
+    width: 10px;
+    height: 10px;
+    transition: transform 420ms var(--ease);
+  }
+
+  .draft-rail-edge:hover .draft-rail-tab .ai-pen-icon-spark {
+    transform: rotate(72deg) scale(1.15);
+  }
+
+  /* Tucks under the drawer while it is out. */
+  .draft-rail-edge.is-covered {
+    pointer-events: none;
+  }
+
+  .draft-rail-edge.is-covered .draft-rail-tab {
+    opacity: 0;
+    transform: translate(-10px, -50%);
+  }
+
+  /* While the assistant drafts, a slow glow breathes on the tab. */
+  .draft-rail-edge.is-working .draft-rail-tab {
+    animation: draft-rail-tab-breathe 2.4s ease-in-out infinite;
+  }
+
+  .draft-rail-tab-dot {
+    position: absolute;
+    top: 7px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 0 2px var(--surface);
+    animation: apx-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+/* Deck controls step clear of the pull tab. While the filmstrip runs down
+   this edge it widens so its fixed-size thumbnails clear the tab; below 861px
+   the strip moves to the bottom and the stage column (layouts, slide, notes)
+   takes the inset instead. */
+@media (min-width: 861px) and (max-width: 1180px) {
+  .rail-drawer-mode .deck-filmstrip {
+    flex-basis: 196px;
+    padding-left: 40px;
+  }
+}
+
+@media (max-width: 860px) {
+  .rail-drawer-mode .deck-stage-column {
+    padding-left: 40px;
+  }
+}
+
+@media (max-width: 1180px) and (pointer: coarse) {
+  .draft-rail-tab {
+    width: 30px;
+    height: 72px;
+  }
+}
+
+@keyframes draft-rail-settle {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+@keyframes draft-rail-tab-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 14px 30px -16px rgba(6, 40, 48, 0.5),
+      0 0 0 0 color-mix(in srgb, var(--teal) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 14px 30px -16px rgba(6, 40, 48, 0.5),
+      0 0 0 6px color-mix(in srgb, var(--teal) 16%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-assistant-rail.is-drawer,
+  .draft-rail-edge::before,
+  .draft-rail-tab,
+  .draft-rail-tab .ai-pen-icon .ai-pen-icon-spark {
+    transition: none;
+  }
+
+  :where(.document-assistant-rail.is-drawer.is-open) > *,
+  .draft-rail-edge.is-working .draft-rail-tab,
+  .draft-rail-tab-dot {
+    animation: none;
+  }
 }
 
 @media (max-width: 900px) {
-  /* Clear the mobile nav hamburger (fixed at left:10px, 38px wide); the
-     assistant trigger now sits inline in the topbar next to the title. */
+  /* Clear the mobile nav hamburger (fixed at left:10px, 38px wide). */
   .rail-drawer-mode .document-editor-topbar {
     padding-left: 58px;
   }
 
   /* Match the topbar's 14px padding so the hamburger sits level with the
-     assistant trigger beside the draft title. */
+     Document/Deck switch beside it. */
   .view-drafts .mobile-hamburger {
     top: 14px;
   }
@@ -23209,13 +23397,6 @@ button.retention-tagged-title:focus-visible strong {
   left: -6px;
   width: 10px;
   height: 10px;
-}
-
-/* The 34px trigger leaves less headroom than the toolbar buttons: tuck the
-   spark in so it clears the button border. */
-.draft-rail-trigger .ai-pen-icon .ai-pen-icon-spark {
-  top: -4px;
-  left: -4px;
 }
 
 .deck-background-menu button:disabled {

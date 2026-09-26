@@ -1,6 +1,52 @@
 import { draftHtmlForAccount, removeDraftPageLabels } from "../lib/draftPageLayout";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
+import { AiEditComposer, type AiComposerAnchor, type AiComposerPhase } from "./AiEditComposer";
+import { DocumentSelectionToolbar } from "./DocumentSelectionToolbar";
+import { DocumentSlashMenu, type SlashCommandItem } from "./DocumentSlashMenu";
+import { DocumentFindBar } from "./DocumentFindBar";
+import { DocumentOutline, type DocumentOutlineHeading } from "./DocumentOutline";
+import { DocumentStatusBar } from "./DocumentStatusBar";
+import { EditorShortcutsDialog } from "./EditorShortcutsDialog";
+import { DocumentTableToolbar, type TableAction } from "./DocumentTableToolbar";
+import { DocumentImageToolbar } from "./DocumentImageToolbar";
+import { mediaAlign, mediaSize, setMediaAlign, setMediaSize, type MediaAlign, type MediaSize } from "../lib/documentMedia";
+import {
+  deleteTable,
+  deleteTableColumn,
+  deleteTableRow,
+  insertTableColumn,
+  insertTableRow,
+  tableCellContext,
+  toggleTableHeaderRow,
+} from "../lib/documentTable";
+import { findTextRanges, replaceRangeText } from "../lib/documentFind";
+import { clampBoxToCanvas, snapMovedBox, type SnapGuides } from "../lib/deck/deckSnapping";
+import { isDividerMarker, matchBlockAutoformat, matchInlineAutoformat } from "../lib/editorAutoformat";
+import { cleanPastedHtml, plainTextToParagraphHtml } from "../lib/pasteCleanup";
+import {
+  DOCUMENT_SELECTION_ACTIONS,
+  DOCUMENT_SELECTION_CHIP_GROUPS,
+  DOCUMENT_WRITE_ACTIONS,
+  SLIDE_ACTIONS,
+  SLIDE_CHIP_GROUPS,
+  aiActionMatches,
+  aiRefineMessage,
+  aiSelectionContextLines,
+  aiWriteAtCursorPrompt,
+  textAroundRange,
+} from "../lib/aiEditPrompts";
+import {
+  caretTextOffset,
+  characterBeforeRange,
+  clearPaint,
+  endOfEditorRange,
+  paintRanges,
+  placeCaretAtTextOffset,
+  rangeViewportRect,
+  topLevelEditorBlock,
+} from "../lib/editorRanges";
 import { DraftHistoryCard } from "./DraftHistoryCard";
+import { DraftPencilMark } from "./DraftPencilMark";
 import { formatMlaDocument } from "../lib/draftMla";
 import { DictationControl } from "./DictationControl";
 import { DraftModelMenu } from "./DraftModelMenu";
@@ -13,22 +59,39 @@ import {
   AlignLeft,
   AlignRight,
   ArrowDown,
+  CalendarDays,
+  GripHorizontal,
+  Keyboard,
+  LayoutGrid,
+  Heading1,
+  Heading2,
+  Heading3,
+  ListChecks,
+  Pilcrow,
+  ScissorsLineDashed,
+  SeparatorHorizontal,
+  TextQuote,
+  WandSparkles,
   ArrowUp,
   BarChart3,
   Bold,
   BookOpen,
+  Briefcase,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
   Clipboard,
+  ClipboardList,
   Clock3,
+  Code2,
   Copy,
   Download,
   FileDiff,
   FileText,
   Globe2,
+  GraduationCap,
   Highlighter,
   History,
   Home,
@@ -48,11 +111,14 @@ import {
   PenLine,
   Plus,
   Presentation,
+  Palette,
   Printer,
   Quote,
   Redo2,
+  Rocket,
   RemoveFormatting,
   Save,
+  Scale,
   Send,
   Settings2,
   Sparkles,
@@ -86,12 +152,22 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type FormEvent,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import mammoth from "mammoth";
-import { ChatRequestError, apiBase, fetchExportImageDataUrl, sendChat } from "../lib/api";
+import {
+  ChatRequestError,
+  apiBase,
+  fetchExportImageDataUrl,
+  sendChat,
+  sendChatStream,
+  uploadChatAttachment,
+  type ChatWireMessage,
+} from "../lib/api";
 import { splitAssistantThinking } from "../lib/assistantThinking";
 import {
   buildDocxExportDocument,
@@ -201,6 +277,17 @@ import { useModalFocus } from "../lib/useModalFocus";
 /** Below this width the assistant rail becomes a slide-out drawer so the
  * document gets the full screen instead of being pushed down a vertical stack. */
 const DRAFT_RAIL_DRAWER_WIDTH = 1180;
+
+/** Resting the pointer on the editor's left seam this long peeks the drawer;
+ * a quick pass on the way to the app nav does nothing. */
+const DRAFT_RAIL_PEEK_DELAY_MS = 160;
+/** A peeked drawer tucks back this long after the pointer leaves it. */
+const DRAFT_RAIL_PEEK_LINGER_MS = 320;
+/** Toggles the drawer from anywhere on the page; Apple keyboards label ⌘. */
+const DRAFT_RAIL_SHORTCUT =
+  typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+    ? { label: "⌘.", aria: "Meta+." }
+    : { label: "Ctrl .", aria: "Control+." };
 
 /** How long a fresh AI edit stays highlighted before it settles into the page.
  * The edit itself is still recorded — the AI edit trail brings the highlight
@@ -343,10 +430,19 @@ type SaveFilePickerWindow = Window & {
   }) => Promise<FileSystemFileHandleLike>;
 };
 
+/** A file attached from this device. It is uploaded through the same
+ * attachment endpoint the chat composer uses, so the server extracts its text
+ * and every draft request can send it to the model by id. */
 type DraftSourceFile = {
   id: string;
   name: string;
   size: string;
+  status: "uploading" | "ready" | "error";
+  attachmentId?: string;
+  /** False when the server could not extract readable text (for example a
+   * scanned PDF): the model then sees only the file name. */
+  hasText?: boolean;
+  error?: string;
 };
 
 type DraftConnectorOption = {
@@ -431,15 +527,51 @@ type DraftContextOptions = {
   useTemplateContext: boolean;
 };
 
-type InlineAiEditState = {
-  open: boolean;
-  message: string | null;
-  instruction: string;
+/** One AI edit in the document: compose an instruction, stream the reply,
+ * review it as a word diff, then accept, refine, or discard. "replace" edits
+ * the highlighted text; "insert" writes new text at a collapsed caret. */
+type DocumentAiSession = {
+  mode: "replace" | "insert";
+  phase: AiComposerPhase;
   selectedText: string;
-  working: boolean;
+  runLabel: string;
+  stream: string;
+  proposalHtml: string;
+  proposalText: string;
+  /** The model's raw reply, replayed as the assistant turn when refining. */
+  proposalRaw: string;
+  error: string | null;
+  /** Conversation behind the proposal on screen; Refine continues it. */
+  messages: ChatWireMessage[];
+  /** The last request sent, so Try again repeats exactly that. */
+  pendingMessages: ChatWireMessage[];
 };
 
 type InlineAiSelectionOffer = {
+  text: string;
+};
+
+/** One AI edit on a slide: "selection" rewrites highlighted slide text;
+ * "slide" rewrites the whole slide (layout, text, notes) as validated JSON. */
+type DeckAiSession = {
+  mode: "selection" | "slide";
+  phase: AiComposerPhase;
+  slideId: string;
+  region: string | null;
+  selectedText: string;
+  runLabel: string;
+  stream: string;
+  /** Selection mode: the replacement text. */
+  proposalText: string;
+  /** Slide mode: the slide(s) that replace the edited slide. */
+  proposalSlides: DeckSlide[];
+  proposalRaw: string;
+  error: string | null;
+  messages: ChatWireMessage[];
+  pendingMessages: ChatWireMessage[];
+};
+
+type DeckAiSelectionOffer = {
   text: string;
   top: number;
   left: number;
@@ -641,12 +773,59 @@ function cleanAiDraftTitle(raw: string): string {
     .slice(0, 160);
 }
 const NO_WORKSPACE_SOURCE_LABEL = "No selected workspace source";
-const EMPTY_INLINE_AI_EDIT_STATE: InlineAiEditState = {
-  open: false,
-  message: null,
-  instruction: "",
-  selectedText: "",
-  working: false,
+/** CSS highlight name that keeps the AI edit target visibly selected while
+ * focus sits in the composer. */
+const DOCUMENT_AI_TARGET_PAINT = "aperture-ai-target";
+
+/** Everything the "/" menu can insert. Block ids double as the tag the
+ * block style applies; the hints are the Markdown shortcuts that do the same. */
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  { id: "ai-write", label: "Ask AI to write…", group: "AI", icon: Sparkles, hint: "⌘J", keywords: "ai generate draft compose" },
+  { id: "ai-continue", label: "Continue writing", group: "AI", icon: WandSparkles, keywords: "ai next more keep going" },
+  { id: "ai-summary", label: "Summarize the document", group: "AI", icon: ClipboardList, keywords: "ai summary tldr overview" },
+  { id: "ai-actions", label: "List action items", group: "AI", icon: ListChecks, keywords: "ai todo tasks next steps" },
+  { id: "p", label: "Text", group: "Basic blocks", icon: Pilcrow, hint: "⌘⌥0", keywords: "paragraph body normal plain" },
+  { id: "h1", label: "Title", group: "Basic blocks", icon: Heading1, hint: "#", keywords: "heading h1 large" },
+  { id: "h2", label: "Heading", group: "Basic blocks", icon: Heading2, hint: "##", keywords: "heading h2 section" },
+  { id: "h3", label: "Subheading", group: "Basic blocks", icon: Heading3, hint: "###", keywords: "heading h3 small" },
+  { id: "ul", label: "Bulleted list", group: "Basic blocks", icon: List, hint: "-", keywords: "bullet unordered points" },
+  { id: "ol", label: "Numbered list", group: "Basic blocks", icon: ListOrdered, hint: "1.", keywords: "numbered ordered steps" },
+  { id: "blockquote", label: "Quote", group: "Basic blocks", icon: TextQuote, hint: ">", keywords: "blockquote callout pull" },
+  { id: "table", label: "Table", group: "Insert", icon: Table2, keywords: "grid rows columns" },
+  { id: "divider", label: "Divider", group: "Insert", icon: SeparatorHorizontal, hint: "---", keywords: "rule line hr horizontal separator" },
+  { id: "page-break", label: "Page break", group: "Insert", icon: ScissorsLineDashed, keywords: "new page" },
+  { id: "image", label: "Image from the web", group: "Insert", icon: ImagePlus, keywords: "picture photo" },
+  { id: "date", label: "Today's date", group: "Insert", icon: CalendarDays, keywords: "date today time" },
+];
+
+const OUTLINE_PREFERENCE_KEY = "aperture.drafts.outline";
+const ZOOM_PREFERENCE_KEY = "aperture.drafts.zoom";
+const FIND_PAINT = "aperture-find";
+const FIND_CURRENT_PAINT = "aperture-find-current";
+
+/** View preferences (zoom, outline) belong to this browser, not the draft. */
+function readDraftPreference(key: string) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeDraftPreference(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Storage can be full or blocked; the preference just won't persist.
+  }
+}
+
+const SLASH_BLOCK_LABELS: Record<string, string> = {
+  p: "Text",
+  h1: "Title",
+  h2: "Heading",
+  h3: "Subheading",
+  blockquote: "Quote",
 };
 
 const DOCUMENT_EXPORT_OPTIONS: Array<{
@@ -689,6 +868,15 @@ const DECK_EXPORT_OPTIONS: Array<{
     description: "Slide titles, bullets, and speaker notes as text.",
     icon: FileText,
   },
+];
+
+/** Built-in slide palettes: name, accent, background, heading, body. */
+const DECK_COLOR_PALETTES: Array<[string, string, string, string, string]> = [
+  ["Aperture", "#087d8b", "#ffffff", "#0c1a26", "#22313f"],
+  ["Midnight", "#66d9ef", "#122033", "#ffffff", "#dbe5f0"],
+  ["Editorial", "#a44932", "#faf4e8", "#38271f", "#514237"],
+  ["Violet", "#7952c8", "#f7f4ff", "#2e1c4b", "#4b3c62"],
+  ["Forest", "#397b52", "#f1f6ef", "#193823", "#35533d"],
 ];
 
 const DRAFT_ATTACHMENT_CONNECTORS: DraftConnectorOption[] = [
@@ -1228,9 +1416,9 @@ export function DocumentAssistantWorkspace({
   const [serverSaveState, setServerSaveState] = useState<DraftServerSaveState>({ kind: "idle" });
   const [serverListNotice, setServerListNotice] = useState<string | null>(null);
   const [activeHistoryItemId, setActiveHistoryItemId] = useState<string | null>(null);
-  const [inlineEditState, setInlineEditState] = useState<InlineAiEditState>(
-    EMPTY_INLINE_AI_EDIT_STATE,
-  );
+  const [docAi, setDocAi] = useState<DocumentAiSession | null>(null);
+  const docAiOpenRef = useRef(false);
+  docAiOpenRef.current = docAi !== null;
   const [linkEditState, setLinkEditState] = useState<LinkEditState>(EMPTY_LINK_EDIT_STATE);
   const [formatState, setFormatState] = useState<EditorFormatState>(DEFAULT_EDITOR_FORMAT_STATE);
   // Each surface maps the raw caret formatting onto its own preset list.
@@ -1256,6 +1444,8 @@ export function DocumentAssistantWorkspace({
   const [deckLayoutMenuOpen, setDeckLayoutMenuOpen] = useState<"add" | "switch" | null>(null);
   const [deckNotesOpen, setDeckNotesOpen] = useState(false);
   const [deckPresentation, setDeckPresentation] = useState<{ index: number; notesOpen: boolean } | null>(null);
+  const deckPresentationOpenRef = useRef(false);
+  deckPresentationOpenRef.current = deckPresentation !== null;
   const [deckDropIndex, setDeckDropIndex] = useState<number | null>(null);
   const [deckImageDialog, setDeckImageDialog] = useState<{
     open: boolean;
@@ -1277,27 +1467,15 @@ export function DocumentAssistantWorkspace({
   // Selection-based AI edit for slide text: the saved range survives the
   // click into the popover, so Apply can put the rewrite exactly where the
   // highlight was.
-  const [deckAiEditState, setDeckAiEditState] = useState<{
-    open: boolean;
-    slideId: string | null;
-    region: string | null;
-    selectionText: string;
-    instruction: string;
-    working: boolean;
-    error: string | null;
-  }>({
-    open: false,
-    slideId: null,
-    region: null,
-    selectionText: "",
-    instruction: "",
-    working: false,
-    error: null,
-  });
+  const [deckAi, setDeckAi] = useState<DeckAiSession | null>(null);
   const deckAiEditRangeRef = useRef<Range | null>(null);
+  const deckAiModeRef = useRef<DeckAiSession["mode"] | null>(null);
+  deckAiModeRef.current = deckAi?.mode ?? null;
+  const deckAiAbortRef = useRef<AbortController | null>(null);
+  const deckAiRequestRef = useRef(0);
   // Floating "Ask AI" pill over highlighted slide text — the same selection
   // affordance the document editor offers, scoped to one slide block.
-  const [deckAiSelectionOffer, setDeckAiSelectionOffer] = useState<InlineAiSelectionOffer | null>(
+  const [deckAiSelectionOffer, setDeckAiSelectionOffer] = useState<DeckAiSelectionOffer | null>(
     null,
   );
   // A slide or mode switch replaces the canvas; any measured pill is stale.
@@ -1329,24 +1507,36 @@ export function DocumentAssistantWorkspace({
   const [events, setEvents] = useState<AssistantEvent[]>(importedDraftState?.events ?? []);
   const [draftTrace, setDraftTrace] = useState<DraftTraceState | null>(null);
   const [status, setStatus] = useState(importedDraftState?.status ?? "Blank draft ready");
+  // Rail actions (toggles, uploads, connectors) confirm themselves in a short
+  // visible notice; `status` alone is screen-reader only.
+  const [railNotice, setRailNotice] = useState<{ id: number; text: string } | null>(null);
+  const railNoticeTimerRef = useRef<number | null>(null);
+  const composerDockRef = useRef<HTMLDivElement | null>(null);
   const [indentLeft, setIndentLeft] = useState(0);
   const [indentRight, setIndentRight] = useState(0);
   const [indentFirstLine, setIndentFirstLine] = useState(0);
   const viewportWidth = useViewportWidth();
   const railIsDrawer = viewportWidth <= DRAFT_RAIL_DRAWER_WIDTH;
   const [railOpen, setRailOpen] = useState(false);
+  // Hover preview from the left seam: slides the drawer out without taking
+  // focus or dimming the page. A click or focus inside pins it open.
+  const [railPeek, setRailPeek] = useState(false);
+  const railPeekTimerRef = useRef<number | null>(null);
+  const railPeeking = railIsDrawer && railPeek && !railOpen;
+  const railShown = railIsDrawer && (railOpen || railPeek);
   const assistantRailRef = useRef<HTMLElement | null>(null);
   useModalFocus(assistantRailRef, railIsDrawer && railOpen, () => setRailOpen(false));
   const [mobileFormattingExpanded, setMobileFormattingExpanded] = useState(false);
   const [documentToolPanel, setDocumentToolPanel] = useState<"text" | "paragraph" | "more" | null>(null);
+  const [deckDesignTab, setDeckDesignTab] = useState<"layouts" | "themes">("layouts");
   const assistantWorking = draftTrace !== null && !draftTrace.complete;
-  const documentAiEditing = assistantWorking || inlineEditState.working;
+  const documentAiEditing = assistantWorking || docAi?.phase === "working";
   // Any deck AI at work — assistant drafting, the image pass, a selection
   // rewrite, or either image dialog — lights the slide's green working edge.
   const deckAiWorking =
     assistantWorking ||
     deckImagesWorking ||
-    deckAiEditState.working ||
+    deckAi?.phase === "working" ||
     deckAiImageDialog.working ||
     Boolean(deckImageDialog.working);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -1383,6 +1573,47 @@ export function DocumentAssistantWorkspace({
   const draftTimersRef = useRef<number[]>([]);
   const skipNextEditorSyncRef = useRef(false);
   const inlineEditRangeRef = useRef<Range | null>(null);
+  const docAiAbortRef = useRef<AbortController | null>(null);
+  const docAiRequestRef = useRef(0);
+  const docAiStreamFrameRef = useRef<number | null>(null);
+  const typingUndoRef = useRef<{ at: number; kind: string }>({ at: 0, kind: "" });
+  const [slashMenu, setSlashMenu] = useState<{ query: string; activeIndex: number } | null>(null);
+  const [findState, setFindState] = useState({
+    open: false,
+    query: "",
+    replacement: "",
+    matchCase: false,
+    wholeWord: false,
+    showReplace: false,
+    current: 0,
+    focusToken: 0,
+  });
+  const findRangesRef = useRef<Range[]>([]);
+  const editorWorkspaceRef = useRef<HTMLElement | null>(null);
+  const [findTotal, setFindTotal] = useState(0);
+  const [outlineOpen, setOutlineOpen] = useState(() => readDraftPreference(OUTLINE_PREFERENCE_KEY) === "1");
+  const [activeOutlineIndex, setActiveOutlineIndex] = useState(0);
+  const [documentZoom, setDocumentZoom] = useState(() => {
+    const stored = Number(readDraftPreference(ZOOM_PREFERENCE_KEY));
+    return Number.isFinite(stored) && stored >= 0.5 && stored <= 2 ? stored : 1;
+  });
+  const [selectionWordCount, setSelectionWordCount] = useState<number | null>(null);
+  const [tableActive, setTableActive] = useState(false);
+  /** The picture the writer clicked, for the picture tools. */
+  const activeFigureRef = useRef<HTMLElement | null>(null);
+  const [imageTools, setImageTools] = useState<{ size: MediaSize; align: MediaAlign; alt: string } | null>(null);
+  const activeTableRef = useRef<HTMLTableElement | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /** Collapsed range just before the "/" that opened the command menu. */
+  const slashStartRef = useRef<Range | null>(null);
+  /** A preset to run as soon as the AI composer opens (from the "/" menu). */
+  const pendingDocAiRunRef = useRef<{ instruction: string; label: string } | null>(null);
+  /** Set by ⌘⇧V so the paste that follows lands as plain text. */
+  const plainPasteRef = useRef(false);
+  /** True while an autoformat or paste rewrites the page; the editing
+   * commands it runs fire their own input events, which must not be treated
+   * as typing. */
+  const editorTransformRef = useRef(false);
   const linkEditRangeRef = useRef<Range | null>(null);
   // Editable slide blocks are uncontrolled DOM (like the document canvas);
   // this registry lets the model↔DOM sync effect and toolbar find them.
@@ -1401,6 +1632,19 @@ export function DocumentAssistantWorkspace({
   const [deckActiveBlock, setDeckActiveBlock] = useState<{ slideId: string; region: string } | null>(
     null,
   );
+  const deckMoveRef = useRef<{
+    pointerId: number;
+    slideId: string;
+    region: string;
+    startX: number;
+    startY: number;
+    startBox: DeckBox;
+    others: DeckBox[];
+    undoSnapshot: string;
+    moved: boolean;
+  } | null>(null);
+  const [deckGuides, setDeckGuides] = useState<SnapGuides | null>(null);
+  const [deckSorterOpen, setDeckSorterOpen] = useState(false);
   const deckResizeRef = useRef<{
     pointerId: number;
     slideId: string;
@@ -1517,7 +1761,8 @@ export function DocumentAssistantWorkspace({
   const selectedSlideBackgroundSource =
     selectedSlide && deckState ? deckSlideBackgroundSource(selectedSlide, deckState.theme) : null;
   const deckHasAnyBackground = Boolean(
-    deckState?.theme.backgroundImage || deckState?.slides.some((slide) => slide.background),
+    deckState?.theme.backgroundImage ||
+      deckState?.slides.some((slide) => slide.background || slide.backgroundId),
   );
   const hasUnsavedEdits = Boolean(
     selectedVersion &&
@@ -1656,18 +1901,26 @@ export function DocumentAssistantWorkspace({
       : sourceSummary.activeKnowledge.length > 1
         ? `${sourceSummary.activeKnowledge.length} workspace sources`
         : NO_WORKSPACE_SOURCE_LABEL;
-  const contextStripTitle =
-    sourceSummary.activeKnowledge.length > 0
-      ? `${sourceSummary.activeKnowledge.length} workspace source${
-          sourceSummary.activeKnowledge.length === 1 ? "" : "s"
-        }`
-      : "Context sources off";
-  const contextStripDetail =
-    sourceSummary.activeKnowledge.length > 0
-      ? `${sourceSummary.documentCount} indexed file${
-          sourceSummary.documentCount === 1 ? "" : "s"
-        }`
-      : `${sourceSummary.enabledKnowledge.length} available sources`;
+  const hasDraftContent = useMemo(
+    () =>
+      draftKind === "deck"
+        ? // A fresh deck has one empty slide; only typed text counts.
+          /"text":"[^"]*\S[^"]*"/.test(JSON.stringify(deckState?.slides ?? []))
+        : Boolean(documentHtmlToText(content).trim()),
+    [content, deckState, draftKind],
+  );
+  const draftSuggestionHeading = hasDraftContent
+    ? draftKind === "deck"
+      ? "How should we improve these slides?"
+      : "How should we revise this draft?"
+    : draftKind === "deck"
+      ? "What should this deck cover?"
+      : "What should we write?";
+  const draftSuggestions = draftStarterSuggestions(
+    draftKind,
+    hasDraftContent,
+    sourceSummary.activeKnowledge.length > 0 || attachedFiles.some((file) => file.status === "ready"),
+  );
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -1731,6 +1984,9 @@ export function DocumentAssistantWorkspace({
         const measured = await repaginateOverfullDocumentPages(prepared);
         const healed = measured ?? (prepared !== sourceHtml ? prepared : null);
         if (sheetHealRunRef.current !== runId) return;
+        // An open AI edit holds a live Range into the page; swapping the page
+        // HTML now would collapse it. The heal reruns when the edit closes.
+        if (docAiOpenRef.current) return;
         if (!healed) {
           if (editorRef.current?.innerHTML === sourceHtml) {
             normalizedLayoutHtmlRef.current = sourceHtml;
@@ -1818,8 +2074,96 @@ export function DocumentAssistantWorkspace({
   // A widened viewport shows the rail inline; drop any open-drawer state so it
   // never lingers as a stray overlay.
   useEffect(() => {
-    if (!railIsDrawer && railOpen) setRailOpen(false);
+    if (railIsDrawer) return;
+    if (railOpen) setRailOpen(false);
+    if (railPeek) setRailPeek(false);
+  }, [railIsDrawer, railOpen, railPeek]);
+
+  // A peeked drawer tucks itself away once the pointer wanders off it (or out
+  // of the window), and on Escape. Hit-testing each move's target stays right
+  // even when the drawer slid in under a resting pointer.
+  useEffect(() => {
+    if (!railPeeking) return;
+    const clearTimer = () => {
+      if (railPeekTimerRef.current === null) return;
+      window.clearTimeout(railPeekTimerRef.current);
+      railPeekTimerRef.current = null;
+    };
+    const tuckAway = () => {
+      if (railPeekTimerRef.current !== null) return;
+      railPeekTimerRef.current = window.setTimeout(() => {
+        railPeekTimerRef.current = null;
+        setRailPeek(false);
+      }, DRAFT_RAIL_PEEK_LINGER_MS);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.target instanceof Node && assistantRailRef.current?.contains(event.target)) clearTimer();
+      else tuckAway();
+    };
+    const onPointerOut = (event: PointerEvent) => {
+      if (!event.relatedTarget) tuckAway();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRailPeek(false);
+    };
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerout", onPointerOut);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      clearTimer();
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerout", onPointerOut);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [railPeeking]);
+
+  useEffect(
+    () => () => {
+      if (railPeekTimerRef.current !== null) window.clearTimeout(railPeekTimerRef.current);
+    },
+    [],
+  );
+
+  // ⌘. / Ctrl+. slides the drawer out, ready to type, or tucks it away from
+  // anywhere on the page, even after the topbar has scrolled out of view.
+  useEffect(() => {
+    if (!railIsDrawer) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key !== ".") return;
+      // Another open dialog (unsaved edits, confirmations) owns the keyboard.
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      const topDialog = dialogs[dialogs.length - 1];
+      if (topDialog && topDialog !== assistantRailRef.current) return;
+      event.preventDefault();
+      if (railOpen) {
+        setRailOpen(false);
+        return;
+      }
+      pinRailOpen();
+      let attempts = 8;
+      const focusComposer = () => {
+        const composer = assistantRailRef.current?.querySelector<HTMLTextAreaElement>("#draft-assistant-command");
+        composer?.focus({ preventScroll: true });
+        // The drawer can stay visibility:hidden through its first frame.
+        if (composer && document.activeElement !== composer && --attempts > 0) {
+          window.requestAnimationFrame(focusComposer);
+        }
+      };
+      window.requestAnimationFrame(focusComposer);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [railIsDrawer, railOpen]);
+
+  /** Opens the drawer as a pinned panel, promoting any hover peek. */
+  function pinRailOpen() {
+    if (railPeekTimerRef.current !== null) window.clearTimeout(railPeekTimerRef.current);
+    railPeekTimerRef.current = null;
+    setRailPeek(false);
+    setRailOpen(true);
+  }
 
   // Never leave the fresh-edit glow timer running past this workspace.
   useEffect(
@@ -1947,29 +2291,80 @@ export function DocumentAssistantWorkspace({
     setStatus(`${nextAgent.name} is now your default drafting model.`);
   }
 
+  function notifyRail(message: string) {
+    setStatus(message);
+    setRailNotice({ id: Date.now(), text: message });
+    if (railNoticeTimerRef.current !== null) window.clearTimeout(railNoticeTimerRef.current);
+    railNoticeTimerRef.current = window.setTimeout(() => {
+      railNoticeTimerRef.current = null;
+      setRailNotice(null);
+    }, 5200);
+  }
+
+  useEffect(
+    () => () => {
+      if (railNoticeTimerRef.current !== null) window.clearTimeout(railNoticeTimerRef.current);
+    },
+    [],
+  );
+
+  // Tool drawers float above the composer. Upload chips and notices change
+  // the composer's height, so publish its live offset for the drawer.
+  useLayoutEffect(() => {
+    const rail = assistantRailRef.current;
+    const dock = composerDockRef.current;
+    if (!rail || !dock || typeof ResizeObserver === "undefined") return undefined;
+    const update = () => {
+      const offset = rail.getBoundingClientRect().bottom - dock.getBoundingClientRect().top + 10;
+      rail.style.setProperty("--draft-dock-offset", `${Math.max(0, Math.round(offset))}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(dock);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, []);
+
   function toggleWebSearch() {
     if (!webSearchAvailable) {
-      setStatus("Web search is turned off for this model by your workspace configuration.");
+      notifyRail("Web search is turned off for this model by your workspace configuration.");
       return;
     }
-    setWebSearchEnabled((current) => {
-      const next = !current;
-      setStatus(
-        next
-          ? "Web search enabled for this draft. Workspace knowledge remains off unless selected."
-          : "Web search disabled for this draft.",
-      );
-      return next;
-    });
+    const next = !webSearchEnabled;
+    setWebSearchEnabled(next);
+    notifyRail(
+      next
+        ? "Web search enabled for this draft. Workspace knowledge remains off unless selected."
+        : "Web search disabled for this draft.",
+    );
   }
 
   function toggleTemplateContext(checked: boolean) {
     setTemplateContextEnabled(checked);
-    setStatus(
+    notifyRail(
       checked
         ? "Templates enabled for draft requests."
         : "Templates disabled for draft requests.",
     );
+  }
+
+  function toggleRequireCitations(checked: boolean) {
+    setRequireCitations(checked);
+    notifyRail(
+      checked
+        ? "Strict citations on. Every factual claim must cite a source or be flagged."
+        : "Strict citations off. The assistant cites sources where it uses them.",
+    );
+  }
+
+  function applyDraftSuggestion(text: string) {
+    setInstruction(text);
+    window.setTimeout(() => {
+      const field = document.getElementById("draft-assistant-command") as HTMLTextAreaElement | null;
+      if (!field) return;
+      field.focus();
+      field.setSelectionRange(text.length, text.length);
+    }, 0);
   }
 
   /** Page tops measured against the scroller's content, so the math holds no
@@ -2868,17 +3263,13 @@ export function DocumentAssistantWorkspace({
   /* --------------------------- deck AI editing --------------------------- */
 
   function closeDeckAiEdit() {
+    deckAiRequestRef.current += 1;
+    deckAiAbortRef.current?.abort();
+    deckAiAbortRef.current = null;
     deckAiEditRangeRef.current = null;
+    clearPaint(DOCUMENT_AI_TARGET_PAINT);
     setDeckAiSelectionOffer(null);
-    setDeckAiEditState({
-      open: false,
-      slideId: null,
-      region: null,
-      selectionText: "",
-      instruction: "",
-      working: false,
-      error: null,
-    });
+    setDeckAi(null);
   }
 
   /** Resolves the deck-block registry entry that owns a DOM node, or null. */
@@ -2916,13 +3307,19 @@ export function DocumentAssistantWorkspace({
     }, 0);
   }
 
-  /** Opens the selection AI editor for the text currently highlighted inside
-   * a slide block. Falls back to the floating-pill capture when the live
-   * selection was consumed by the click. Honest gate: no selection, no dialog. */
+  /** Opens the slide AI composer: on highlighted slide text when there is
+   * some, otherwise on the whole current slide. */
   function openDeckAiEdit() {
-    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
-    if (deckAiEditState.open) {
+    if (!selectedAgent) {
+      setStatus(draftAiUnavailableReason);
+      return;
+    }
+    if (deckAi) {
       closeDeckAiEdit();
+      return;
+    }
+    if (!deckState || !selectedSlide) {
+      setStatus("Add a slide first, then ask the AI to edit it.");
       return;
     }
     const selection = window.getSelection?.();
@@ -2931,78 +3328,133 @@ export function DocumentAssistantWorkspace({
       selection && !selection.isCollapsed && text
         ? deckBlockEntryForNode(selection.focusNode ?? selection.anchorNode)
         : null;
-    if (liveEntry && selection) {
-      deckAiEditRangeRef.current = selection.getRangeAt(0).cloneRange();
-      setDeckAiSelectionOffer(null);
-      setDeckAiEditState({
-        open: true,
-        slideId: liveEntry.slideId,
-        region: liveEntry.region,
-        selectionText: text.slice(0, 2000),
-        instruction: "",
-        working: false,
-        error: null,
-      });
-      return;
-    }
     const savedRange = deckAiEditRangeRef.current;
-    const savedEntry = savedRange
-      ? deckBlockEntryForNode(savedRange.commonAncestorContainer)
-      : null;
-    if (deckAiSelectionOffer && savedRange && savedEntry) {
-      setDeckAiSelectionOffer(null);
-      setDeckAiEditState({
-        open: true,
-        slideId: savedEntry.slideId,
-        region: savedEntry.region,
-        selectionText: deckAiSelectionOffer.text.slice(0, 2000),
-        instruction: "",
-        working: false,
-        error: null,
+    const savedEntry =
+      !liveEntry && deckAiSelectionOffer && savedRange
+        ? deckBlockEntryForNode(savedRange.commonAncestorContainer)
+        : null;
+    const entry = liveEntry ?? savedEntry;
+    const range = liveEntry && selection ? selection.getRangeAt(0).cloneRange() : savedEntry ? savedRange : null;
+    const selectedText = liveEntry ? text : savedEntry ? deckAiSelectionOffer?.text ?? "" : "";
+    const base = {
+      phase: "compose" as const,
+      runLabel: "",
+      stream: "",
+      proposalText: "",
+      proposalSlides: [],
+      proposalRaw: "",
+      error: null,
+      messages: [],
+      pendingMessages: [],
+    };
+    setDeckAiSelectionOffer(null);
+    if (entry && range) {
+      deckAiEditRangeRef.current = range;
+      paintRanges(DOCUMENT_AI_TARGET_PAINT, [range]);
+      setDeckAi({
+        ...base,
+        mode: "selection",
+        slideId: entry.slideId,
+        region: entry.region,
+        selectedText: selectedText.slice(0, 2000),
       });
       return;
     }
-    setStatus("Highlight slide text first, then ask the AI to change it.");
+    flushDeckTextEdits();
+    deckAiEditRangeRef.current = null;
+    setDeckAi({ ...base, mode: "slide", slideId: selectedSlide.id, region: null, selectedText: "" });
   }
 
-  /** Sends the highlighted slide text plus the instruction to the selected
-   * model and swaps the selection for the reply — the same interaction as the
-   * document editor's inline AI edit, scoped to one slide region. */
-  async function runDeckAiEdit() {
-    if (!selectedAgent) {
-      setDeckAiEditState((current) => ({ ...current, error: draftAiUnavailableReason }));
-      return;
-    }
-    const { slideId, region, selectionText, instruction } = deckAiEditState;
-    const ask = instruction.trim();
-    if (!slideId || !region || !ask) return;
-    const entry = deckBlockRefs.current.get(`${slideId}:${region}`);
+  const getDeckAiAnchor = useCallback((): AiComposerAnchor | null => {
     const range = deckAiEditRangeRef.current;
-    if (!entry || !range || !entry.element.isConnected) {
-      setDeckAiEditState((current) => ({
-        ...current,
-        error: "The highlighted text is no longer on screen. Reselect it and try again.",
-      }));
+    if (range && deckAiModeRef.current === "selection") {
+      const rect = rangeViewportRect(range);
+      if (rect) return rect;
+    }
+    const stage = deckStageViewportRef.current?.getBoundingClientRect();
+    if (!stage) return null;
+    const center = stage.left + stage.width / 2;
+    return { top: stage.bottom - 8, bottom: stage.bottom - 8, left: center - 218, right: center + 230 };
+  }, []);
+
+  function failDeckAi(message: string) {
+    setDeckAi((current) => current && { ...current, phase: "error", stream: "", error: message });
+    setStatus(message);
+  }
+
+  function runDeckAi(instruction: string, label: string) {
+    const session = deckAi;
+    if (!session || !deckState) return;
+    const deckNow = flushDeckTextEdits() ?? deckState;
+    const slide = deckNow.slides.find((item) => item.id === session.slideId);
+    if (!slide) {
+      failDeckAi("That slide is no longer in the deck.");
       return;
     }
-    setDeckAiEditState((current) => ({ ...current, working: true, error: null }));
-    try {
-      // Prompt and runtime context mirror the document editor's inline AI
-      // edit: same title framing and workspace knowledge sources.
-      const deckTitle = documentTitle.trim() || deckState?.title || EMPTY_DOCUMENT_TITLE;
-      const reply = await sendChat(completionUserId, {
-        model: selectedAgent.id,
-        messages: [
-          {
-            role: "user",
-            content: inlineRewritePrompt({
-              documentTitle: deckTitle,
-              instruction: ask,
-              selectedText: selectionText,
-              surface: "slide",
-            }),
-          },
-        ],
+    const deckTitle = documentTitle.trim() || deckNow.title || EMPTY_DOCUMENT_TITLE;
+    const prompt =
+      session.mode === "selection"
+        ? inlineRewritePrompt({
+            documentTitle: deckTitle,
+            instruction,
+            selectedText: session.selectedText,
+            surface: "slide",
+          })
+        : providerSlideEditPrompt({ ...deckNow, title: deckTitle }, slide, instruction);
+    void requestDeckAi([{ role: "user", content: prompt }], label);
+  }
+
+  function refineDeckAi(instruction: string) {
+    const session = deckAi;
+    if (!session?.proposalRaw || !session.messages.length) {
+      runDeckAi(instruction, instruction);
+      return;
+    }
+    const followUp =
+      session.mode === "slide"
+        ? `Revise your last reply according to this follow-up instruction:\n${instruction}\n\nReturn the full revised {"slides":[...]} JSON in the same format.`
+        : aiRefineMessage(instruction);
+    void requestDeckAi(
+      [...session.messages, { role: "assistant", content: session.proposalRaw }, { role: "user", content: followUp }],
+      `Refine: ${instruction}`,
+    );
+  }
+
+  function retryDeckAi() {
+    const session = deckAi;
+    if (!session?.pendingMessages.length) return;
+    void requestDeckAi(session.pendingMessages, session.runLabel);
+  }
+
+  async function requestDeckAi(messages: ChatWireMessage[], label: string) {
+    const agent = selectedAgent;
+    const session = deckAi;
+    if (!session || !deckState) return;
+    if (!agent) {
+      failDeckAi(draftAiUnavailableReason);
+      return;
+    }
+    deckAiAbortRef.current?.abort();
+    const controller = new AbortController();
+    deckAiAbortRef.current = controller;
+    const requestId = ++deckAiRequestRef.current;
+    setDeckAi((current) =>
+      current && { ...current, phase: "working", runLabel: label, stream: "", error: null, pendingMessages: messages },
+    );
+    setStatus(`Calling ${agent.name} to edit the slide.`);
+    const deckTitle = documentTitle.trim() || deckState.title || EMPTY_DOCUMENT_TITLE;
+    let pendingStream = "";
+    let frame: number | null = null;
+    const flush = () => {
+      frame = null;
+      if (requestId !== deckAiRequestRef.current) return;
+      setDeckAi((current) => (current && current.phase === "working" ? { ...current, stream: pendingStream } : current));
+    };
+    const ask = (conversation: ChatWireMessage[]) =>
+      sendChatStream(completionUserId, {
+        model: agent.id,
+        messages: conversation,
+        signal: controller.signal,
         runtime: {
           surface: "draft",
           draftTitle: deckTitle,
@@ -3010,67 +3462,138 @@ export function DocumentAssistantWorkspace({
           webEnabled: false,
           citationsEnabled: false,
           knowledgeConfigIds: activeSourceIds,
-          maxCompletionTokens: 2000,
+          maxCompletionTokens: session.mode === "slide" ? 4000 : 2000,
+        },
+        onDelta: (fullText) => {
+          const visible = splitAssistantThinking(fullText).visibleContent;
+          pendingStream = session.mode === "slide" ? slideStreamPreview(visible) : streamPreviewText(visible);
+          if (frame === null) frame = window.requestAnimationFrame(flush);
         },
       });
-      const replacement = cleanAiReplacementText(reply.content ?? "");
-      if (!replacement) {
-        throw new ChatRequestError("The model returned no replacement text.");
-      }
-      const undoSnapshot = deckEditSessionUndoRef.current ?? serializedDeck;
-      deckEditSessionUndoRef.current = null;
-      entry.element.focus();
-      const liveSelection = window.getSelection?.();
-      liveSelection?.removeAllRanges();
-      liveSelection?.addRange(range);
-      let applied = false;
-      if (typeof document.execCommand === "function") {
-        try {
-          applied = document.execCommand("insertText", false, replacement);
-        } catch {
-          applied = false;
+    try {
+      let reply = await ask(messages);
+      if (requestId !== deckAiRequestRef.current) return;
+      let raw = splitAssistantThinking(reply.content).visibleContent.trim();
+      if (session.mode === "selection") {
+        const replacement = cleanAiReplacementText(raw);
+        if (!replacement) throw new Error("The model returned no replacement text.");
+        setDeckAi((current) =>
+          current && { ...current, phase: "review", stream: "", proposalText: replacement, proposalRaw: raw, messages },
+        );
+      } else {
+        const deckNow = flushDeckTextEdits() ?? deckState;
+        let parsed = parseAiSlideReply(raw, deckNow, session.slideId);
+        if (!parsed.ok) {
+          // One corrective retry with the validator's reason, as for decks.
+          const retry: ChatWireMessage[] = [
+            ...messages,
+            { role: "assistant", content: raw },
+            { role: "user", content: `Your reply failed validation: ${parsed.error}\nReturn the corrected {"slides":[...]} JSON only.` },
+          ];
+          reply = await ask(retry);
+          if (requestId !== deckAiRequestRef.current) return;
+          raw = splitAssistantThinking(reply.content).visibleContent.trim();
+          parsed = parseAiSlideReply(raw, deckNow, session.slideId);
         }
-      }
-      if (!applied) {
-        range.deleteContents();
-        range.insertNode(document.createTextNode(replacement));
-      }
-      const slide = deckState?.slides.find((item) => item.id === slideId);
-      if (slide && deckState) {
-        const updated = deckSlideWithRegionFromElement(
-          slide,
-          region,
-          entry.element,
-          deckState.theme,
+        if (!parsed.ok) throw new Error(`The model's slide did not pass validation: ${parsed.error}`);
+        const slides = parsed.slides;
+        setDeckAi((current) =>
+          current && { ...current, phase: "review", stream: "", proposalSlides: slides, proposalRaw: raw, messages },
         );
-        commitDeck(
-          {
-            ...deckState,
-            slides: deckState.slides.map((item) => (item.id === slide.id ? updated : item)),
+      }
+      setStatus("AI suggestion ready. Apply it, refine it, or discard it.");
+    } catch (error) {
+      if (requestId !== deckAiRequestRef.current) return;
+      if (controller.signal.aborted) {
+        setDeckAi((current) =>
+          current && {
+            ...current,
+            phase: current.proposalRaw ? "review" : "compose",
+            stream: "",
           },
-          "AI edit applied to the highlighted slide text.",
-          undoSnapshot,
         );
+        setStatus("AI edit stopped.");
+        return;
       }
+      failDeckAi(`AI edit could not complete: ${error instanceof Error ? error.message : "no reply arrived."}`);
+    } finally {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      if (deckAiAbortRef.current === controller) deckAiAbortRef.current = null;
+    }
+  }
+
+  /** Applies the reviewed slide suggestion as one undo step. */
+  function acceptDeckAi() {
+    const session = deckAi;
+    const agentName = selectedAgent?.name ?? "AI";
+    if (!session || session.phase !== "review" || !deckState) return;
+    const undoSnapshot = deckEditSessionUndoRef.current ?? serializedDeck;
+    deckEditSessionUndoRef.current = null;
+    if (session.mode === "slide") {
+      const index = deckState.slides.findIndex((slide) => slide.id === session.slideId);
+      if (index === -1 || !session.proposalSlides.length) {
+        failDeckAi("That slide is no longer in the deck.");
+        return;
+      }
+      const next = {
+        ...deckState,
+        slides: [
+          ...deckState.slides.slice(0, index),
+          ...session.proposalSlides,
+          ...deckState.slides.slice(index + 1),
+        ],
+      };
+      commitDeck(
+        next,
+        session.proposalSlides.length > 1
+          ? `Slide ${index + 1} split into ${session.proposalSlides.length} slides by ${agentName}.`
+          : `Slide ${index + 1} edited by ${agentName}.`,
+        undoSnapshot,
+      );
+      setSelectedSlideId(session.proposalSlides[0].id);
       setEvents((current) => [
         ...current,
-        draftEvent(
-          "assistant",
-          "deck-ai-edit",
-          `Rewrote highlighted slide text with ${selectedAgent.name}: ${ask.slice(0, 80)}`,
-        ),
+        draftEvent("assistant", "deck-ai-edit", `Edited slide ${index + 1} with ${agentName}: ${session.runLabel.slice(0, 80)}`),
       ]);
       closeDeckAiEdit();
-    } catch (error) {
-      const message =
-        error instanceof ChatRequestError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "The AI edit failed before a replacement was returned.";
-      setDeckAiEditState((current) => ({ ...current, working: false, error: message }));
-      setStatus(`AI edit failed: ${message}`);
+      return;
     }
+    const entry = session.region ? deckBlockRefs.current.get(`${session.slideId}:${session.region}`) : undefined;
+    const range = deckAiEditRangeRef.current;
+    if (!entry || !range || !entry.element.isConnected) {
+      failDeckAi("The highlighted text is no longer on screen. Reselect it and try again.");
+      return;
+    }
+    entry.element.focus();
+    const liveSelection = window.getSelection?.();
+    liveSelection?.removeAllRanges();
+    liveSelection?.addRange(range);
+    let applied = false;
+    if (typeof document.execCommand === "function") {
+      try {
+        applied = document.execCommand("insertText", false, session.proposalText);
+      } catch {
+        applied = false;
+      }
+    }
+    if (!applied) {
+      range.deleteContents();
+      range.insertNode(document.createTextNode(session.proposalText));
+    }
+    const slide = deckState.slides.find((item) => item.id === session.slideId);
+    if (slide && session.region) {
+      const updated = deckSlideWithRegionFromElement(slide, session.region, entry.element, deckState.theme);
+      commitDeck(
+        { ...deckState, slides: deckState.slides.map((item) => (item.id === slide.id ? updated : item)) },
+        "AI edit applied to the highlighted slide text.",
+        undoSnapshot,
+      );
+    }
+    setEvents((current) => [
+      ...current,
+      draftEvent("assistant", "deck-ai-edit", `Rewrote highlighted slide text with ${agentName}: ${session.runLabel.slice(0, 80)}`),
+    ]);
+    closeDeckAiEdit();
   }
 
   function closeDeckAiImageDialog() {
@@ -3478,7 +4001,9 @@ export function DocumentAssistantWorkspace({
     const deck = flushDeckTextEdits() ?? deckState;
     if (!deck) return;
     commitDeck({ ...deck, theme: { ...deck.theme, sourceLabel: name,
-      colors: { ...deck.theme.colors, accent1: accent, accent2: accent, background, heading, body, surface: background },
+      // The surface color draws the divider bars; a hair off the background
+      // keeps them visible instead of vanishing into it.
+      colors: { ...deck.theme.colors, accent1: accent, accent2: accent, background, heading, body, surface: mixHexColors(background, heading, 0.14) },
     } }, `${name} colors applied to the deck.`, serializeSlideDeck(deck));
   }
 
@@ -3715,13 +4240,15 @@ export function DocumentAssistantWorkspace({
     const askProvider = async (prompt: string) => {
       const reply = await sendChat(completionUserId, {
         model: selectedAgent.id,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content: withCitationRequirement(prompt, requireCitations) }],
         runtime: {
           surface: "draft",
           draftTitle: documentTitle.trim() || EMPTY_DOCUMENT_TITLE,
           clientStartedAt: requestStartedAt,
           webEnabled: useWebSearch,
-          citationsEnabled: false,
+          citationsEnabled: requireCitations,
+          knowledgeConfigIds: activeSourceIds,
+          ...draftAttachmentRuntime(),
           maxCompletionTokens: 12000,
           reasoningEffort: reasoningEffortForSend,
         },
@@ -3733,13 +4260,11 @@ export function DocumentAssistantWorkspace({
       advanceDraftTrace("context");
       const fallbackTitle = documentTitle.trim() || EMPTY_DOCUMENT_TITLE;
       const basePrompt = revising
-        ? providerDeckRevisionPrompt(serializeSlideDeck(currentDeck as SlideDeck), request)
+        ? providerDeckRevisionPrompt(deckJsonForPrompt(currentDeck as SlideDeck), request)
         : providerDeckPrompt(selectedDeckTemplateOutline(), request, contextOptions);
       advanceDraftTrace("generate");
-      const keptBackgrounds = new Map<string, string>(
-        (currentDeck?.slides ?? [])
-          .filter((slide): slide is DeckSlide & { backgroundId: string } => Boolean(slide.backgroundId))
-          .map((slide) => [slide.id, slide.backgroundId]),
+      const keptBackgrounds = new Map<string, DeckSlide>(
+        (currentDeck?.slides ?? []).map((slide) => [slide.id, slide]),
       );
       let replyText = await askProvider(basePrompt);
       let parsed = parseAiDeckReply(replyText, theme, fallbackTitle, keptBackgrounds);
@@ -4195,6 +4720,184 @@ export function DocumentAssistantWorkspace({
       true,
       serializeSlideDeck(deck),
     );
+  }
+
+  /** Every other box on the slide (text regions and media), for guides. */
+  function otherDeckBoxes(slide: DeckSlide, region: string): DeckBox[] {
+    const boxes = Object.entries(resolvedTextRegions(slide))
+      .filter(([name]) => name !== region && deckRegionContent(slide, name) !== null)
+      .map(([, spec]) => spec.box);
+    const media = region === "image" ? null : resolvedMediaBox(slide);
+    return media ? [...boxes, media] : boxes;
+  }
+
+  function beginDeckBlockMove(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0 || !deckActiveBlock) return;
+    // Typing so far is its own undo step; the move is the next one.
+    endDeckEditSession();
+    const deck = flushDeckTextEdits();
+    const slide = deck?.slides.find((item) => item.id === deckActiveBlock.slideId);
+    const startBox = deckBlockBoxCurrent(deckActiveBlock.slideId, deckActiveBlock.region);
+    if (!deck || !slide || !startBox) return;
+    deckMoveRef.current = {
+      pointerId: event.pointerId,
+      slideId: deckActiveBlock.slideId,
+      region: deckActiveBlock.region,
+      startX: event.clientX,
+      startY: event.clientY,
+      startBox,
+      others: otherDeckBoxes(slide, deckActiveBlock.region),
+      undoSnapshot: serializeSlideDeck(deck),
+      moved: false,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is a nicety; the drag still tracks move events.
+    }
+    event.preventDefault();
+  }
+
+  function deckMoveDragBox(event: ReactPointerEvent<HTMLElement>) {
+    const drag = deckMoveRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) return null;
+    const scale = deckStageBox.scale || 1;
+    const dx = (event.clientX - drag.startX) / scale;
+    const dy = (event.clientY - drag.startY) / scale;
+    if (!drag.moved && Math.hypot(dx, dy) < 2) return null;
+    drag.moved = true;
+    // Alt/Option drags freely, without snapping, as in PowerPoint.
+    if (event.altKey) {
+      return { box: clampBoxToCanvas({ ...drag.startBox, x: drag.startBox.x + dx, y: drag.startBox.y + dy }), guides: null };
+    }
+    const snapped = snapMovedBox({ ...drag.startBox, x: drag.startBox.x + dx, y: drag.startBox.y + dy }, drag.others);
+    return { box: snapped.box, guides: snapped.guides };
+  }
+
+  function moveDeckBlockMove(event: ReactPointerEvent<HTMLElement>) {
+    const drag = deckMoveRef.current;
+    const next = deckMoveDragBox(event);
+    if (!drag || !next) return;
+    setDeckGuides(next.guides);
+    applyDeckBlockBox(drag.slideId, drag.region, next.box, false);
+  }
+
+  function endDeckBlockMove(event: ReactPointerEvent<HTMLElement>) {
+    const drag = deckMoveRef.current;
+    const next = deckMoveDragBox(event);
+    deckMoveRef.current = null;
+    setDeckGuides(null);
+    if (!drag || !next) return;
+    applyDeckBlockBox(drag.slideId, drag.region, next.box, true, drag.undoSnapshot);
+    setStatus("Slide block moved.");
+  }
+
+  /** Arrow keys on the move grip nudge the box 1px (Shift: 10px). */
+  function nudgeDeckBlock(event: ReactKeyboardEvent<HTMLElement>) {
+    const deltas: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    };
+    const delta = deltas[event.key];
+    if (!delta || !deckActiveBlock) return;
+    event.preventDefault();
+    event.stopPropagation();
+    endDeckEditSession();
+    const deck = flushDeckTextEdits();
+    const startBox = deckBlockBoxCurrent(deckActiveBlock.slideId, deckActiveBlock.region);
+    if (!deck || !startBox) return;
+    const step = event.shiftKey ? 10 : 1;
+    const next = clampBoxToCanvas({ ...startBox, x: startBox.x + delta[0] * step, y: startBox.y + delta[1] * step });
+    applyDeckBlockBox(deckActiveBlock.slideId, deckActiveBlock.region, next, true, serializeSlideDeck(deck));
+  }
+
+  function startDeckPresentation(fromCurrent: boolean) {
+    if (!deckState?.slides.length) return;
+    endDeckEditSession();
+    const index =
+      fromCurrent && selectedSlide
+        ? Math.max(0, deckState.slides.findIndex((slide) => slide.id === selectedSlide.id))
+        : 0;
+    setDeckPresentation({
+      index,
+      notesOpen: deckState.slides.some((slide) => slide.notes.trim().length > 0),
+    });
+  }
+
+  /** PowerPoint-style keys for the deck editor: slide management from
+   * anywhere, and list navigation while the slide list has focus. */
+  function handleDeckKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!deckState || deckPresentation) return;
+    const target = event.target as HTMLElement;
+    const inText = Boolean(target.closest("[data-deck-block], textarea, input, select, [contenteditable='true']"));
+    const inFilmstrip = Boolean(target.closest(".deck-filmstrip, .deck-sorter"));
+    const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const run = (action: () => void) => {
+      event.preventDefault();
+      event.stopPropagation();
+      action();
+    };
+    const currentIndex = selectedSlide ? deckState.slides.findIndex((slide) => slide.id === selectedSlide.id) : -1;
+    if (mod && !event.altKey && !event.shiftKey && key === "j") return run(openDeckAiEdit);
+    if (mod && !event.altKey && (key === "/" || event.code === "Slash")) return run(() => setShortcutsOpen(true));
+    if (mod && !event.altKey && !event.shiftKey && key === "d" && selectedSlide) {
+      return run(() => duplicateDeckSlide(selectedSlide.id));
+    }
+    if ((mod && event.shiftKey && !event.altKey && key === "n") || (event.ctrlKey && !event.metaKey && !event.shiftKey && key === "m")) {
+      return run(() => addDeckSlide("title-bullets"));
+    }
+    if ((mod && key === "enter") || event.key === "F5") {
+      return run(() => startDeckPresentation(event.shiftKey));
+    }
+    if (!inText && mod && !event.altKey && key === "z") {
+      return run(() => (event.shiftKey ? redoDeckChange() : undoDeckChange()));
+    }
+    if (!inText && mod && !event.altKey && !event.shiftKey && key === "y") return run(redoDeckChange);
+    if (inText && event.key === "Escape") {
+      return run(() => {
+        (target.closest("[data-deck-block]") as HTMLElement | null)?.blur();
+        setDeckActiveBlock(null);
+        setDeckAiSelectionOffer(null);
+      });
+    }
+    if (!inFilmstrip || currentIndex === -1) return;
+    const focusThumb = (index: number) =>
+      window.requestAnimationFrame(() =>
+        deckFilmstripRef.current
+          ?.closest(".deck-editor-body")
+          ?.querySelectorAll<HTMLElement>(".deck-slide-thumb, .deck-sorter-card")
+          [index]?.focus(),
+      );
+    if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      const step = event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 1;
+      return run(() => {
+        moveDeckSlide(deckState.slides[currentIndex].id, currentIndex + step);
+        focusThumb(Math.max(0, Math.min(deckState.slides.length - 1, currentIndex + step)));
+      });
+    }
+    if (!mod && !event.altKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      const last = deckState.slides.length - 1;
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? last
+            : Math.max(0, Math.min(last, currentIndex + (event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 1)));
+      return run(() => {
+        endDeckEditSession();
+        setSelectedSlideId(deckState.slides[next].id);
+        focusThumb(next);
+      });
+    }
+    if (!mod && (event.key === "Delete" || event.key === "Backspace")) {
+      return run(() => {
+        deleteDeckSlide(deckState.slides[currentIndex].id);
+        focusThumb(Math.max(0, Math.min(deckState.slides.length - 2, currentIndex)));
+      });
+    }
   }
 
   function resetDeckBlockBox() {
@@ -4754,6 +5457,7 @@ export function DocumentAssistantWorkspace({
           content: snapshot.revision.content,
           updatedAt: snapshot.document.updated_at,
           status: "complete",
+          kind: snapshot.document.kind ?? item.kind,
           serverRevision: snapshot.document.current_revision,
           serverContentStale: false,
         };
@@ -4993,7 +5697,10 @@ export function DocumentAssistantWorkspace({
         messages: [
           {
             role: "user",
-            content: providerDraftPrompt(template, requestText, contextOptions),
+            content: withCitationRequirement(
+              providerDraftPrompt(template, requestText, contextOptions),
+              requireCitations,
+            ),
           },
         ],
         runtime: {
@@ -5003,6 +5710,7 @@ export function DocumentAssistantWorkspace({
           webEnabled: liveWebSearch,
           citationsEnabled: true,
           knowledgeConfigIds: sourceIdsForDraft,
+          ...draftAttachmentRuntime(),
           maxCompletionTokens: pageTotal > 1 ? 24000 : 12000,
           reasoningEffort: reasoningEffortForSend,
         },
@@ -5260,12 +5968,15 @@ export function DocumentAssistantWorkspace({
         messages: [
           {
             role: "user",
-            content: providerRevisionPrompt(
-              documentTitle,
-              currentDraftText,
-              request,
-              contextOptions,
-              revisionTemplate,
+            content: withCitationRequirement(
+              providerRevisionPrompt(
+                documentTitle,
+                currentDraftText,
+                request,
+                contextOptions,
+                revisionTemplate,
+              ),
+              requireCitations,
             ),
           },
         ],
@@ -5276,6 +5987,7 @@ export function DocumentAssistantWorkspace({
           webEnabled: contextOptions.useWebSearch,
           citationsEnabled: true,
           knowledgeConfigIds: sourceIdsForRevision,
+          ...draftAttachmentRuntime(),
           maxCompletionTokens: revisionCompletionTokenBudget(
             currentDraftText,
             requestedAdditionalPages,
@@ -5766,21 +6478,67 @@ export function DocumentAssistantWorkspace({
 
   function handleAttachFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
     if (!files.length) return;
     setAttachMenuOpen(false);
-    setAttachedFiles((current) => [
-      ...current,
-      ...files.map((file) => ({
-        id: `${file.name}-${file.lastModified}-${file.size}`,
+    const batch = Date.now();
+    const pending = files.map((file, index) => ({
+      file,
+      entry: {
+        id: `${batch}-${index}-${file.name}`,
         name: file.name,
         size: formatBytes(file.size),
-      })),
-    ]);
-    setActiveAssistantTool("sources");
-    setStatus(
-      `Attached ${files.length} draft source${files.length === 1 ? "" : "s"} for this document.`,
-    );
-    event.target.value = "";
+        status: "uploading" as const,
+      },
+    }));
+    setAttachedFiles((current) => [...current, ...pending.map((item) => item.entry)]);
+    notifyRail(`Attached ${files.length} draft source${files.length === 1 ? "" : "s"}; uploading for the assistant…`);
+    for (const { file, entry } of pending) {
+      void uploadChatAttachment(completionUserId, file, { tenantId: data.currentTenant?.id })
+        .then((uploaded) => {
+          const attachmentId = uploaded.id;
+          if (!attachmentId) throw new ChatRequestError("The server did not return an attachment id.");
+          const hasText = Boolean(uploaded.text_preview?.trim()) || uploaded.kind === "image";
+          setAttachedFiles((current) =>
+            current.map((item) =>
+              item.id === entry.id
+                ? { ...item, status: "ready", attachmentId, hasText }
+                : item,
+            ),
+          );
+          notifyRail(
+            hasText
+              ? `${entry.name} is ready. The assistant reads it with your next request.`
+              : `${entry.name} is attached, but no readable text could be extracted, so the assistant sees only its name.`,
+          );
+        })
+        .catch((error: unknown) => {
+          const message =
+            error instanceof ChatRequestError ? error.message : "The upload did not complete.";
+          setAttachedFiles((current) =>
+            current.map((item) =>
+              item.id === entry.id ? { ...item, status: "error", error: message } : item,
+            ),
+          );
+          notifyRail(`${entry.name} could not be attached: ${message}`);
+        });
+    }
+  }
+
+  /** Uploaded draft sources that finished uploading, in the shape the chat
+   * runtime sends as `attachment_ids` / `attachment_names`. */
+  function draftAttachmentRuntime() {
+    const ready = attachedFiles.filter((file) => file.status === "ready" && file.attachmentId);
+    return {
+      attachmentIds: ready.map((file) => file.attachmentId as string),
+      attachmentNames: ready.map((file) => file.name),
+    };
+  }
+
+  function removeAttachedFile(fileId: string) {
+    const file = attachedFiles.find((item) => item.id === fileId);
+    setAttachedFiles((current) => current.filter((item) => item.id !== fileId));
+    if (file) notifyRail(`${file.name} removed from this draft's sources.`);
   }
 
   async function handleWordTemplateUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -5924,7 +6682,7 @@ export function DocumentAssistantWorkspace({
           new Set([...current, ...matchingSources.map((source) => source.id)]),
         ),
       );
-      setStatus(
+      notifyRail(
         `${connector.label} source${matchingSources.length === 1 ? "" : "s"} added to this draft context.`,
       );
       return;
@@ -5934,7 +6692,7 @@ export function DocumentAssistantWorkspace({
       (item) =>
         item.tenant_enabled && connector.connectorIds.includes(item.id),
     );
-    setStatus(
+    notifyRail(
       enabledConnector
         ? `${connector.label} is connected. Add an indexed knowledge source to use it in this draft.`
         : `${connector.label} needs connector setup before it can be used for drafting.`,
@@ -5949,7 +6707,7 @@ export function DocumentAssistantWorkspace({
     );
     const sourceName =
       data.knowledgeBases.find((source) => source.id === sourceId)?.name ?? "Source";
-    setStatus(`${sourceName} ${checked ? "included in" : "removed from"} this draft context.`);
+    notifyRail(`${sourceName} ${checked ? "included in" : "removed from"} this draft context.`);
   }
 
   function clearEditHistory() {
@@ -5957,7 +6715,13 @@ export function DocumentAssistantWorkspace({
     setRedoStack([]);
   }
 
-  function recordUndoSnapshot(snapshot = editorRef.current?.innerHTML ?? content) {
+  function recordUndoSnapshot(
+    snapshot = editorRef.current?.innerHTML ?? content,
+    { typing = false }: { typing?: boolean } = {},
+  ) {
+    // A command between two typing bursts ends the first burst, so undo
+    // steps back through typing, the command, and typing separately.
+    if (!typing) typingUndoRef.current = { at: 0, kind: "" };
     setUndoStack((current) => {
       if (current[current.length - 1] === snapshot) return current;
       return [...current.slice(-79), snapshot];
@@ -5972,14 +6736,16 @@ export function DocumentAssistantWorkspace({
     }
     const previousHtml = undoStack[undoStack.length - 1];
     const currentHtml = editorRef.current?.innerHTML ?? content;
+    const caret = editorRef.current ? caretTextOffset(editorRef.current) : null;
     setUndoStack(undoStack.slice(0, -1));
     setRedoStack((current) =>
       current[0] === currentHtml ? current : [currentHtml, ...current].slice(0, 80),
     );
+    typingUndoRef.current = { at: 0, kind: "" };
     setContent(previousHtml);
     setShowEdits(true);
     setStatus("Undo applied.");
-    window.setTimeout(() => editorRef.current?.focus(), 0);
+    window.setTimeout(() => restoreEditorCaret(caret), 0);
   }
 
   function redoDocumentChange() {
@@ -5989,16 +6755,27 @@ export function DocumentAssistantWorkspace({
     }
     const nextHtml = redoStack[0];
     const currentHtml = editorRef.current?.innerHTML ?? content;
+    const caret = editorRef.current ? caretTextOffset(editorRef.current) : null;
     setRedoStack(redoStack.slice(1));
     setUndoStack((current) =>
       current[current.length - 1] === currentHtml
         ? current
         : [...current.slice(-79), currentHtml],
     );
+    typingUndoRef.current = { at: 0, kind: "" };
     setContent(nextHtml);
     setShowEdits(true);
     setStatus("Redo applied.");
-    window.setTimeout(() => editorRef.current?.focus(), 0);
+    window.setTimeout(() => restoreEditorCaret(caret), 0);
+  }
+
+  /** Focuses the page and puts the caret back near where it was before the
+   * whole document HTML was swapped by undo or redo. */
+  function restoreEditorCaret(offset: number | null) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus({ preventScroll: offset !== null });
+    if (offset !== null) placeCaretAtTextOffset(editor, offset);
   }
 
   function applyMlaLayout() {
@@ -6019,6 +6796,33 @@ export function DocumentAssistantWorkspace({
     // Convert legacy execCommand output (font tags, transparent highlight
     // wrappers) into the inline markup the sanitizer and exports preserve.
     normalizeEditorInlineMarkup(editor);
+    if (hasNestedParagraphBlocks(editor)) {
+      // The fix moves nodes rather than rebuilding them, so the caret's own
+      // node survives; its text offset is only a fallback.
+      const selection = window.getSelection?.();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const anchor =
+        range && editor.contains(range.startContainer)
+          ? { node: range.startContainer, offset: range.startOffset }
+          : null;
+      const caret = caretTextOffset(editor);
+      normalizeParagraphNesting(editor);
+      if (anchor?.node.isConnected && editor.contains(anchor.node) && selection) {
+        const restored = document.createRange();
+        restored.setStart(anchor.node, Math.min(anchor.offset, anchor.node.childNodes.length || (anchor.node.textContent?.length ?? 0)));
+        restored.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(restored);
+      } else if (caret !== null) {
+        placeCaretAtTextOffset(editor, caret);
+      }
+    }
+    // Editing commands can leave truly empty paragraphs behind (no text, no
+    // <br> placeholder); they take up space but can never hold the caret.
+    const caretNode = window.getSelection?.()?.anchorNode ?? null;
+    editor.querySelectorAll("p:empty").forEach((paragraph) => {
+      if (caretNode !== paragraph) paragraph.remove();
+    });
     skipNextEditorSyncRef.current = true;
     setContent(editor.innerHTML);
     setStatus(label);
@@ -6030,6 +6834,14 @@ export function DocumentAssistantWorkspace({
     if (!editor) return;
     focusEditorPreservingSelection(editor);
     recordUndoSnapshot(editor.innerHTML);
+    applyEditorCommand(command, label, value);
+  }
+
+  /** The command half of runEditorCommand, for callers that already took the
+   * undo snapshot (autoformat keeps the typed marker as the undo point). */
+  function applyEditorCommand(command: string, label: string, value?: string) {
+    const editor = editorRef.current;
+    if (!editor) return;
     if (command === "insertHTML" && value) {
       insertHtmlAtSelection(editor, value);
       commitEditorHtml(label);
@@ -6274,28 +7086,796 @@ export function DocumentAssistantWorkspace({
     setCitationsOpen(true);
   }
 
+  /** Records the highlighted text so the selection toolbar can float over
+   * it. Runs after the browser settles the selection (mouseup/keyup). */
   function captureInlineAiSelection() {
     window.setTimeout(() => {
+      if (docAiOpenRef.current) return;
       const selection = getEditorSelection(editorRef.current);
       if (!selection) {
         setInlineAiSelectionOffer(null);
         return;
       }
       inlineEditRangeRef.current = selection.range;
-      const rect =
-        typeof selection.range.getBoundingClientRect === "function"
-          ? selection.range.getBoundingClientRect()
-          : null;
-      const left = Math.max(
-        12,
-        Math.min(rect?.left ?? 24, Math.max(12, window.innerWidth - 132)),
-      );
-      const top = Math.max(12, Math.min((rect?.bottom ?? 64) + 8, window.innerHeight - 48));
-      setInlineAiSelectionOffer({ text: selection.text, top, left });
+      setInlineAiSelectionOffer({ text: selection.text });
     }, 0);
   }
 
+  /** Anchor for the selection toolbar and the AI composer: the saved range,
+   * read fresh so both follow the text as the page scrolls. */
+  const getDocumentAiAnchor = useCallback((): AiComposerAnchor | null => {
+    const range = inlineEditRangeRef.current;
+    const editor = editorRef.current;
+    if (!range || !editor || !isRangeInsideEditor(editor, range)) return null;
+    return rangeViewportRect(range);
+  }, []);
+
+  // A "/" menu AI action runs as soon as its composer is open.
+  useEffect(() => {
+    if (docAi?.phase !== "compose" || !pendingDocAiRunRef.current) return;
+    const pending = pendingDocAiRunRef.current;
+    pendingDocAiRunRef.current = null;
+    runDocumentAi(pending.instruction, pending.label);
+  }, [docAi?.phase]);
+
+  /** Whether this input starts a new undo step. Consecutive keystrokes of the
+   * same kind within a short burst share one step; a space, Enter, paste, or
+   * formatting change always starts a fresh one. */
+  function startsTypingUndoStep(native: Event) {
+    const input = native as InputEvent;
+    const inputType = typeof input.inputType === "string" ? input.inputType : "";
+    const typingKind = /^insert(Text|CompositionText)$/.test(inputType)
+      ? "insert"
+      : /^delete(Content|Word)(Backward|Forward)$/.test(inputType)
+        ? "delete"
+        : "";
+    const now = Date.now();
+    const last = typingUndoRef.current;
+    typingUndoRef.current = { at: now, kind: typingKind };
+    if (!typingKind) return true;
+    if (typingKind === "insert" && /\s/.test(input.data ?? "")) return true;
+    return !(last.kind === typingKind && now - last.at < TYPING_UNDO_BURST_MS);
+  }
+
+  // ---- Find & replace ----
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!findState.open || !editor || draftKind !== "document") {
+      findRangesRef.current = [];
+      setFindTotal(0);
+      clearPaint(FIND_PAINT);
+      clearPaint(FIND_CURRENT_PAINT);
+      return;
+    }
+    const ranges = findTextRanges(editor, findState.query, {
+      matchCase: findState.matchCase,
+      wholeWord: findState.wholeWord,
+    });
+    findRangesRef.current = ranges;
+    setFindTotal(ranges.length);
+    const current = ranges[Math.min(findState.current, ranges.length - 1)];
+    paintRanges(FIND_PAINT, ranges);
+    paintRanges(FIND_CURRENT_PAINT, current ? [current] : []);
+  }, [
+    findState.open,
+    findState.query,
+    findState.matchCase,
+    findState.wholeWord,
+    findState.current,
+    content,
+    draftKind,
+  ]);
+
+  // ⌘F, ⌃H/⌘⇧H and ⌘/ work anywhere in the document view, not only while
+  // the page has focus (the page's own key handler covers that case).
+  const openFindRef = useRef<(withReplace?: boolean) => void>(() => {});
+  openFindRef.current = openFind;
+  const deckViewKeysRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  deckViewKeysRef.current = (event: KeyboardEvent) => {
+    const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    if ((mod && key === "enter") || event.key === "F5") {
+      event.preventDefault();
+      startDeckPresentation(event.shiftKey);
+    } else if (mod && !event.shiftKey && !event.altKey && key === "j") {
+      event.preventDefault();
+      openDeckAiEdit();
+    } else if (mod && !event.altKey && (key === "/" || event.code === "Slash")) {
+      event.preventDefault();
+      setShortcutsOpen(true);
+    }
+  };
+  useEffect(() => {
+    if (draftKind !== "deck") return undefined;
+    const handle = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || deckPresentationOpenRef.current) return;
+      const target = event.target instanceof Node ? event.target : null;
+      const inView = !target || target === document.body || Boolean(editorWorkspaceRef.current?.contains(target));
+      if (inView) deckViewKeysRef.current(event);
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [draftKind]);
+  useEffect(() => {
+    if (draftKind !== "document") return undefined;
+    const handle = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.defaultPrevented) return;
+      const target = event.target instanceof Node ? event.target : null;
+      const inView = !target || target === document.body || Boolean(editorWorkspaceRef.current?.contains(target));
+      if (!inView || (target && editorRef.current?.contains(target))) return;
+      const key = event.key.toLowerCase();
+      if (key === "f" && !event.shiftKey) {
+        event.preventDefault();
+        openFindRef.current(false);
+      } else if (key === "h" && (event.shiftKey || (event.ctrlKey && !event.metaKey))) {
+        event.preventDefault();
+        openFindRef.current(true);
+      } else if (key === "/" || event.code === "Slash") {
+        event.preventDefault();
+        setShortcutsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [draftKind]);
+
+  function openFind(withReplace = false) {
+    const selected = getEditorSelection(editorRef.current)?.text ?? "";
+    setFindState((current) => ({
+      ...current,
+      open: true,
+      showReplace: withReplace || current.showReplace,
+      query: selected && selected.length <= 120 ? selected : current.query,
+      current: 0,
+      focusToken: current.focusToken + 1,
+    }));
+  }
+
+  function closeFind() {
+    setFindState((current) => ({ ...current, open: false }));
+    editorRef.current?.focus({ preventScroll: true });
+  }
+
+  /** Moves to another match and scrolls it into the middle of the page. */
+  function stepFind(direction: 1 | -1) {
+    const ranges = findRangesRef.current;
+    if (!ranges.length) return;
+    const next = (Math.min(findState.current, ranges.length - 1) + direction + ranges.length) % ranges.length;
+    setFindState((current) => ({ ...current, current: next }));
+    revealRange(ranges[next]);
+  }
+
+  function revealRange(range: Range) {
+    const scroller = pageScrollRef.current;
+    const rect = rangeViewportRect(range);
+    if (!scroller || !rect) return;
+    const box = scroller.getBoundingClientRect();
+    if (rect.top < box.top + 60 || rect.bottom > box.bottom - 60) {
+      animatePageScroll(scroller, Math.max(0, scroller.scrollTop + rect.top - box.top - box.height / 3));
+    }
+  }
+
+  function replaceCurrentMatch() {
+    const editor = editorRef.current;
+    const range = findRangesRef.current[Math.min(findState.current, findRangesRef.current.length - 1)];
+    if (!editor || !range) return;
+    recordUndoSnapshot(editor.innerHTML);
+    replaceRangeText(range, findState.replacement);
+    commitEditorHtml("Replaced 1 match.");
+  }
+
+  function replaceAllMatches() {
+    const editor = editorRef.current;
+    const ranges = [...findRangesRef.current];
+    if (!editor || !ranges.length) return;
+    recordUndoSnapshot(editor.innerHTML);
+    for (let index = ranges.length - 1; index >= 0; index -= 1) {
+      replaceRangeText(ranges[index], findState.replacement);
+    }
+    setFindState((current) => ({ ...current, current: 0 }));
+    commitEditorHtml(`Replaced ${ranges.length} ${ranges.length === 1 ? "match" : "matches"}.`);
+  }
+
+  // ---- Outline, zoom, selection count ----
+  const outlineHeadings = useMemo<DocumentOutlineHeading[]>(() => {
+    if (draftKind !== "document" || !outlineOpen || typeof document === "undefined") return [];
+    const template = document.createElement("template");
+    template.innerHTML = content;
+    return Array.from(template.content.querySelectorAll("h1,h2,h3")).map((heading) => ({
+      level: Number(heading.tagName[1]) as 1 | 2 | 3,
+      text: (heading.textContent ?? "").replace(/\s+/g, " ").trim(),
+    }));
+  }, [content, outlineOpen, draftKind]);
+
+  function toggleOutline() {
+    setOutlineOpen((current) => {
+      writeDraftPreference(OUTLINE_PREFERENCE_KEY, current ? "0" : "1");
+      return !current;
+    });
+  }
+
+  function jumpToHeading(index: number) {
+    const editor = editorRef.current;
+    const scroller = pageScrollRef.current;
+    const heading = editor?.querySelectorAll<HTMLElement>("h1,h2,h3")[index];
+    if (!editor || !scroller || !heading) return;
+    const top = heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    animatePageScroll(scroller, Math.max(0, top - 56));
+    setActiveOutlineIndex(index);
+    editor.focus({ preventScroll: true });
+    placeCaretAtEdge(heading, true);
+  }
+
+  function updateActiveOutline() {
+    if (!outlineOpen) return;
+    const editor = editorRef.current;
+    const scroller = pageScrollRef.current;
+    if (!editor || !scroller) return;
+    const limit = scroller.getBoundingClientRect().top + 120;
+    let active = 0;
+    editor.querySelectorAll<HTMLElement>("h1,h2,h3").forEach((heading, index) => {
+      if (heading.getBoundingClientRect().top <= limit) active = index;
+    });
+    setActiveOutlineIndex(active);
+  }
+
+  function changeDocumentZoom(zoom: number) {
+    const next = Math.min(2, Math.max(0.5, Math.round(zoom * 100) / 100));
+    setDocumentZoom(next);
+    writeDraftPreference(ZOOM_PREFERENCE_KEY, String(next));
+    setStatus(`Zoom ${Math.round(next * 100)}%.`);
+  }
+
+  useEffect(() => {
+    if (typeof document.addEventListener !== "function") return undefined;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const selection = getEditorSelection(editorRef.current);
+      const words = selection ? selection.text.split(/\s+/).filter(Boolean).length : null;
+      setSelectionWordCount((current) => (current === words ? current : words));
+      const editor = editorRef.current;
+      const focusNode = window.getSelection?.()?.focusNode ?? null;
+      const context = editor ? tableCellContext(focusNode, editor) : null;
+      activeTableRef.current = context?.table ?? null;
+      setTableActive(Boolean(context));
+    };
+    const handle = () => {
+      if (!frame) frame = window.requestAnimationFrame(measure);
+    };
+    document.addEventListener("selectionchange", handle);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", handle);
+    };
+  }, []);
+
+  function selectEditorFigure(target: EventTarget | null) {
+    const editor = editorRef.current;
+    const element = target instanceof Element ? target : null;
+    const figure = element?.closest<HTMLElement>("figure") ?? null;
+    const image = figure?.querySelector("img") ?? null;
+    if (!editor || !figure || !image || !editor.contains(figure) || figure.classList.contains("document-diagram-figure")) {
+      if (activeFigureRef.current) {
+        activeFigureRef.current = null;
+        setImageTools(null);
+      }
+      return;
+    }
+    activeFigureRef.current = figure;
+    setImageTools({ size: mediaSize(figure), align: mediaAlign(figure), alt: image.getAttribute("alt") ?? "" });
+  }
+
+  const getActiveFigureRect = useCallback(() => {
+    const figure = activeFigureRef.current;
+    return figure?.isConnected ? figure.getBoundingClientRect() : null;
+  }, []);
+
+  function updateActiveFigure(change: (figure: HTMLElement, image: HTMLImageElement) => void, label: string) {
+    const editor = editorRef.current;
+    const figure = activeFigureRef.current;
+    const image = figure?.querySelector("img");
+    if (!editor || !figure?.isConnected || !image) {
+      setImageTools(null);
+      return;
+    }
+    recordUndoSnapshot(editor.innerHTML);
+    change(figure, image);
+    if (figure.isConnected) {
+      setImageTools({ size: mediaSize(figure), align: mediaAlign(figure), alt: image.getAttribute("alt") ?? "" });
+    } else {
+      activeFigureRef.current = null;
+      setImageTools(null);
+    }
+    commitEditorHtml(label);
+  }
+
+  const getActiveTableRect = useCallback(() => {
+    const table = activeTableRef.current;
+    return table?.isConnected ? table.getBoundingClientRect() : null;
+  }, []);
+
+  function handleTableAction(action: TableAction) {
+    const editor = editorRef.current;
+    const context = editor ? tableCellContext(window.getSelection?.()?.focusNode ?? null, editor) : null;
+    if (!editor || !context) return;
+    recordUndoSnapshot(editor.innerHTML);
+    let focus: HTMLElement | null = null;
+    let label = "";
+    if (action === "row-above" || action === "row-below") {
+      focus = insertTableRow(context, action === "row-above" ? "above" : "below");
+      label = "Row inserted.";
+    } else if (action === "column-left" || action === "column-right") {
+      focus = insertTableColumn(context, action === "column-left" ? "left" : "right");
+      label = "Column inserted.";
+    } else if (action === "delete-row") {
+      focus = deleteTableRow(context);
+      label = "Row deleted.";
+    } else if (action === "delete-column") {
+      focus = deleteTableColumn(context);
+      label = "Column deleted.";
+    } else if (action === "toggle-header") {
+      label = toggleTableHeaderRow(context.table) ? "Header row turned on." : "Header row turned off.";
+      focus = context.table.querySelector("th,td");
+    } else {
+      focus = deleteTable(context.table);
+      label = "Table deleted.";
+    }
+    if (focus?.isConnected) placeCaretAtEdge(focus, true);
+    else setTableActive(false);
+    commitEditorHtml(label);
+  }
+
+  /** Word/Google Docs keyboard shortcuts for the document canvas. Returns true
+   * when the key was handled. */
+  function handleDocumentShortcut(event: ReactKeyboardEvent<HTMLElement>) {
+    const mod = event.metaKey || event.ctrlKey;
+    if (!mod) return false;
+    const key = event.key.toLowerCase();
+    const run = (action: () => void) => {
+      event.preventDefault();
+      event.stopPropagation();
+      action();
+      return true;
+    };
+    if (!event.altKey && !event.shiftKey && key === "j") return run(openInlineAiEdit);
+    if (!event.altKey && !event.shiftKey && key === "f") return run(() => openFind());
+    if ((event.ctrlKey && !event.metaKey && key === "h") || (event.shiftKey && !event.altKey && key === "h")) {
+      return run(() => openFind(true));
+    }
+    if (!event.altKey && key === "g" && findState.open) return run(() => stepFind(event.shiftKey ? -1 : 1));
+    if (!event.altKey && (key === "/" || event.code === "Slash")) return run(() => setShortcutsOpen(true));
+    // One undo history for everything: typing, formatting, and AI edits.
+    if (!event.altKey && !event.shiftKey && key === "z") return run(undoDocumentChange);
+    if (!event.altKey && ((event.shiftKey && key === "z") || (!event.shiftKey && key === "y"))) {
+      return run(redoDocumentChange);
+    }
+    if (event.altKey && !event.shiftKey) {
+      const blockByDigit: Record<string, string> = { Digit0: "p", Digit1: "h1", Digit2: "h2", Digit3: "h3" };
+      const block = blockByDigit[event.code];
+      if (block) return run(() => applyBlockStyle(block));
+    }
+    if (event.shiftKey && !event.altKey) {
+      if (event.code === "Digit7") {
+        return run(() => runEditorCommand("insertOrderedList", "Numbered list applied."));
+      }
+      if (event.code === "Digit8") {
+        return run(() => runEditorCommand("insertUnorderedList", "Bulleted list applied."));
+      }
+      if (key === "x") return run(() => runEditorCommand("strikeThrough", "Strikethrough toggled."));
+      if (event.code === "Period") return run(() => runEditorCommand("superscript", "Superscript toggled."));
+      if (event.code === "Comma") return run(() => runEditorCommand("subscript", "Subscript toggled."));
+      const alignByKey: Record<string, DocumentAlignment> = { l: "left", e: "center", r: "right", j: "justify" };
+      const align = alignByKey[key];
+      if (align) return run(() => applyAlignment(align));
+    }
+    if (!event.altKey && !event.shiftKey && event.code === "Backslash") return run(clearInlineFormatting);
+    return false;
+  }
+
+  const slashItems = useMemo(
+    () =>
+      slashMenu
+        ? SLASH_COMMANDS.filter((item) => aiActionMatches(item, slashMenu.query, item.group))
+        : [],
+    [slashMenu],
+  );
+
+  const getSlashAnchor = useCallback((): AiComposerAnchor | null => {
+    const start = slashStartRef.current;
+    return start ? rangeViewportRect(start) : null;
+  }, []);
+
+  function closeSlashMenu() {
+    slashStartRef.current = null;
+    setSlashMenu(null);
+  }
+
+  /** Opens the "/" menu when a slash is typed at the start of a line or
+   * after a space, and keeps its filter in step with what follows it. */
+  function updateSlashMenu(native: InputEvent) {
+    const editor = editorRef.current;
+    const caret = getCollapsedEditorRange(editor);
+    if (!editor || !caret) {
+      if (slashMenu) closeSlashMenu();
+      return;
+    }
+    if (!slashMenu) {
+      if (native.inputType !== "insertText" || native.data !== "/") return;
+      if (caret.startContainer.nodeType !== Node.TEXT_NODE || caret.startOffset < 1) return;
+      const before = (caret.startContainer.textContent ?? "").slice(0, caret.startOffset - 1);
+      if (before && !/[\s\u00a0]$/.test(before)) return;
+      const start = document.createRange();
+      start.setStart(caret.startContainer, caret.startOffset - 1);
+      start.collapse(true);
+      slashStartRef.current = start;
+      setSlashMenu({ query: "", activeIndex: 0 });
+      return;
+    }
+    const start = slashStartRef.current;
+    let query: string | null = null;
+    if (start && isRangeInsideEditor(editor, start)) {
+      try {
+        const span = document.createRange();
+        span.setStart(start.startContainer, start.startOffset);
+        span.setEnd(caret.startContainer, caret.startOffset);
+        const typed = span.toString().replace(/\u00a0/g, " ");
+        if (typed.startsWith("/") && typed.length <= 32 && !/^\/\s|\s{2}/.test(typed)) {
+          query = typed.slice(1);
+        }
+      } catch {
+        query = null;
+      }
+    }
+    if (query === null) closeSlashMenu();
+    else setSlashMenu({ query, activeIndex: 0 });
+  }
+
+  /** Removes the "/query" text and runs the chosen command where it was. */
+  function pickSlashCommand(item: SlashCommandItem) {
+    const editor = editorRef.current;
+    const start = slashStartRef.current;
+    const caret = getCollapsedEditorRange(editor);
+    closeSlashMenu();
+    if (!editor || !start || !caret || !isRangeInsideEditor(editor, start)) return;
+    recordUndoSnapshot(editor.innerHTML);
+    const typed = document.createRange();
+    typed.setStart(start.startContainer, start.startOffset);
+    typed.setEnd(caret.startContainer, caret.startOffset);
+    typed.deleteContents();
+    const block = inlineAiBlockAncestor(typed.startContainer, editor);
+    const selection = window.getSelection?.();
+    if (block && !hasRenderableContent(block)) {
+      if (!block.querySelector("br")) block.appendChild(document.createElement("br"));
+      placeCaretAtEdge(block, true);
+    } else {
+      selection?.removeAllRanges();
+      selection?.addRange(typed);
+    }
+    const writeAction = DOCUMENT_WRITE_ACTIONS.find(
+      (action) =>
+        (item.id === "ai-continue" && action.id === "continue") ||
+        (item.id === "ai-summary" && action.id === "summary") ||
+        (item.id === "ai-actions" && action.id === "actions"),
+    );
+    if (item.id === "ai-write" || writeAction) {
+      commitEditorHtml("Slash command removed.");
+      if (writeAction) pendingDocAiRunRef.current = { instruction: writeAction.instruction, label: writeAction.label };
+      openInlineAiEdit();
+      return;
+    }
+    if (SLASH_BLOCK_LABELS[item.id]) {
+      applyEditorCommand("formatBlock", `${SLASH_BLOCK_LABELS[item.id]} applied.`, item.id);
+      return;
+    }
+    if (item.id === "ul" || item.id === "ol") {
+      applyEditorCommand(
+        item.id === "ul" ? "insertUnorderedList" : "insertOrderedList",
+        item.id === "ul" ? "Bulleted list applied." : "Numbered list applied.",
+      );
+      return;
+    }
+    if (item.id === "table") {
+      insertEditorBlock(emptyTableHtml(3, 3), "Table inserted. Press Tab to move between cells.");
+      return;
+    }
+    if (item.id === "divider") {
+      insertEditorBlock("<hr>", "Divider inserted.");
+      return;
+    }
+    if (item.id === "page-break") {
+      commitEditorHtml("Slash command removed.");
+      insertPageBreak();
+      return;
+    }
+    if (item.id === "image") {
+      commitEditorHtml("Slash command removed.");
+      void insertVisual("web-image");
+      return;
+    }
+    if (item.id === "date") {
+      const today = new Date().toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      insertHtmlAtSelection(editor, escapeHtml(today));
+      commitEditorHtml("Today's date inserted.");
+    }
+  }
+
+  /** Inserts a block (table, divider) at the caret: in place of an empty
+   * paragraph, otherwise after the current block, with a paragraph after it
+   * so writing can continue below. */
+  function insertEditorBlock(html: string, label: string) {
+    const editor = editorRef.current;
+    const caret = getCollapsedEditorRange(editor) ?? (editor ? endOfEditorRange(editor) : null);
+    if (!editor || !caret) return;
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const inserted = Array.from(template.content.children) as HTMLElement[];
+    if (!inserted.length) return;
+    const block = topLevelEditorBlock(caret.startContainer, editor);
+    const last = inserted[inserted.length - 1];
+    if (block && !hasRenderableContent(block)) block.replaceWith(...inserted);
+    else if (block) block.after(...inserted);
+    else editor.append(...inserted);
+    let next = last.nextElementSibling as HTMLElement | null;
+    if (!next || !/^(P|H[1-6]|UL|OL|BLOCKQUOTE)$/.test(next.tagName)) {
+      next = document.createElement("p");
+      next.appendChild(document.createElement("br"));
+      last.after(next);
+    }
+    const firstCell = inserted[0].querySelector<HTMLElement>("th,td");
+    placeCaretAtEdge(firstCell ?? next, true);
+    commitEditorHtml(label);
+  }
+
+  /** Word's AutoFormat as you type: Markdown block markers and inline
+   * emphasis turn into real formatting. Undo restores the typed characters. */
+  function applyTypingAutoformat(native: InputEvent) {
+    const editor = editorRef.current;
+    if (!editor || native.inputType !== "insertText" || !native.data) return false;
+    const caret = getCollapsedEditorRange(editor);
+    if (!caret) return false;
+    const block = autoformatBlock(caret.startContainer, editor);
+    if (native.data === " " || native.data === "\u00a0") {
+      if (!block) return false;
+      const probe = document.createRange();
+      probe.selectNodeContents(block);
+      probe.setEnd(caret.startContainer, caret.startOffset);
+      const format = matchBlockAutoformat(probe.toString());
+      if (!format) return false;
+      if (format.command === "formatBlock" && block.tagName.toLowerCase() === format.value) return false;
+      recordUndoSnapshot(editor.innerHTML);
+      probe.deleteContents();
+      if (!hasRenderableContent(block) && !block.querySelector("br")) {
+        block.appendChild(document.createElement("br"));
+      }
+      placeCaretAtEdge(block, true);
+      applyEditorCommand(format.command, `${format.label} applied. Press ⌘Z to keep the characters instead.`, format.value);
+      return true;
+    }
+    if (!/^[*_`~]$/.test(native.data) || caret.startContainer.nodeType !== Node.TEXT_NODE) return false;
+    if (typeof document.execCommand !== "function") return false;
+    const textNode = caret.startContainer as Text;
+    const match = matchInlineAutoformat(textNode.data.slice(0, caret.startOffset));
+    if (!match) return false;
+    recordUndoSnapshot(editor.innerHTML);
+    const selection = window.getSelection?.();
+    if (!selection) return false;
+    const marked = document.createRange();
+    marked.setStart(textNode, match.start);
+    marked.setEnd(textNode, caret.startOffset);
+    selection.removeAllRanges();
+    selection.addRange(marked);
+    try {
+      if (match.kind === "code") {
+        document.execCommand("insertHTML", false, `<code>${escapeHtml(match.content)}</code>`);
+      } else {
+        const command = match.kind === "bold" ? "bold" : match.kind === "italic" ? "italic" : "strikeThrough";
+        document.execCommand("insertText", false, match.content);
+        const after = selection.rangeCount ? selection.getRangeAt(0) : null;
+        if (after && after.startContainer.nodeType === Node.TEXT_NODE && after.startOffset >= match.content.length) {
+          const styled = document.createRange();
+          styled.setStart(after.startContainer, after.startOffset - match.content.length);
+          styled.setEnd(after.startContainer, after.startOffset);
+          selection.removeAllRanges();
+          selection.addRange(styled);
+          document.execCommand(command);
+          selection.collapseToEnd();
+          // Turn the style back off so the next words are typed plain.
+          document.execCommand(command);
+        }
+      }
+    } catch {
+      return false;
+    }
+    commitEditorHtml(`${match.kind === "code" ? "Code" : match.kind[0].toUpperCase() + match.kind.slice(1)} formatting applied.`);
+    return true;
+  }
+
+  function handleEditorInput(native: InputEvent) {
+    if (editorTransformRef.current) return;
+    if (activeFigureRef.current) {
+      activeFigureRef.current = null;
+      setImageTools(null);
+    }
+    editorTransformRef.current = true;
+    try {
+      const editor = editorRef.current;
+      if (editor && wrapLooseCaretLine(editor)) {
+        skipNextEditorSyncRef.current = true;
+        setContent(editor.innerHTML);
+      }
+      if (!applyTypingAutoformat(native)) updateSlashMenu(native);
+      else if (slashMenu) closeSlashMenu();
+    } finally {
+      editorTransformRef.current = false;
+    }
+  }
+
+  /** Tab moves between table cells (adding a row past the last cell, as in
+   * Word) and indents or outdents list items. */
+  function handleEditorTab(event: ReactKeyboardEvent<HTMLElement>) {
+    const editor = editorRef.current;
+    const node = window.getSelection?.()?.focusNode ?? null;
+    const element = node instanceof HTMLElement ? node : node?.parentElement ?? null;
+    if (!editor || !element || !editor.contains(element)) return false;
+    const cell = element.closest<HTMLElement>("td,th");
+    if (cell && editor.contains(cell)) {
+      event.preventDefault();
+      const table = cell.closest("table");
+      if (!table) return true;
+      const cells = Array.from(table.querySelectorAll<HTMLElement>("th,td"));
+      let target = cells[cells.indexOf(cell) + (event.shiftKey ? -1 : 1)];
+      if (!target && !event.shiftKey) {
+        recordUndoSnapshot(editor.innerHTML);
+        const rows = table.querySelectorAll("tr");
+        const lastRow = rows[rows.length - 1] ?? cell.closest("tr");
+        if (!lastRow) return true;
+        const row = document.createElement("tr");
+        Array.from(lastRow.children).forEach(() => {
+          const td = document.createElement("td");
+          td.appendChild(document.createElement("br"));
+          row.appendChild(td);
+        });
+        lastRow.after(row);
+        target = row.firstElementChild as HTMLElement;
+        commitEditorHtml("Table row added.");
+      }
+      if (target) {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        const selection = window.getSelection?.();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      return true;
+    }
+    if (element.closest("li") && editor.contains(element.closest("li"))) {
+      event.preventDefault();
+      runEditorCommand(event.shiftKey ? "outdent" : "indent", event.shiftKey ? "List item outdented." : "List item indented.");
+      return true;
+    }
+    return false;
+  }
+
+  /** Paste keeps structure and emphasis but drops the source's fonts and
+   * colors (Word's "Merge Formatting"); ⌘⇧V pastes plain text; a pasted
+   * picture lands as an image. */
+  function handleEditorPaste(event: ReactClipboardEvent<HTMLElement>) {
+    const editor = editorRef.current;
+    const data = event.clipboardData;
+    if (!editor || !data) return;
+    const plain = plainPasteRef.current;
+    plainPasteRef.current = false;
+    const html = data.getData("text/html");
+    const text = data.getData("text/plain");
+    const image = Array.from(data.files ?? []).find((file) => /^image\/(png|jpe?g|gif|webp)$/.test(file.type));
+    if (image && !html && !plain) {
+      event.preventDefault();
+      void pasteEditorImage(image);
+      return;
+    }
+    if (!html && !text) return;
+    event.preventDefault();
+    const fragment = !plain && html ? cleanPastedHtml(html) : plainTextToParagraphHtml(text);
+    if (!fragment) return;
+    const selection = window.getSelection?.();
+    const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range || !isRangeInsideEditor(editor, range)) return;
+    recordUndoSnapshot(editor.innerHTML);
+    editorTransformRef.current = true;
+    try {
+      const last = insertInlineAiSuggestion(editor, range, fragment, null);
+      if (last && selection) {
+        const after = document.createRange();
+        after.setStartAfter(last);
+        after.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(after);
+      }
+    } finally {
+      editorTransformRef.current = false;
+    }
+    setInlineAiSelectionOffer(null);
+    commitEditorHtml(plain ? "Pasted as plain text." : "Pasted using the document's formatting.");
+  }
+
+  async function pasteEditorImage(file: File) {
+    const editor = editorRef.current;
+    const selection = window.getSelection?.();
+    const range = selection && selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    const source = await readFileAsDataUrl(file);
+    if (!editor || !source) return;
+    const image = (await imageUrlToJpegDataUrl(source, 1400)) ?? source;
+    if (image.length > 900_000) {
+      setStatus("That picture is too large to paste. Use a smaller image or a screenshot of part of it.");
+      return;
+    }
+    const target = range && isRangeInsideEditor(editor, range) ? range : endOfEditorRange(editor);
+    recordUndoSnapshot(editor.innerHTML);
+    const figure = `<figure class="document-media-block" contenteditable="false"><img src="${escapeHtml(image)}" alt="${escapeHtml(file.name || "Pasted image")}"></figure>`;
+    insertInlineAiSuggestion(editor, target, figure, null);
+    commitEditorHtml("Picture pasted into the document.");
+  }
+
   function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape" && activeFigureRef.current) {
+      activeFigureRef.current = null;
+      setImageTools(null);
+    }
+    // Moving the caret or starting a new line ends the current undo burst.
+    if (event.key.length !== 1 && event.key !== "Backspace" && event.key !== "Delete") {
+      typingUndoRef.current = { at: 0, kind: "" };
+    }
+    if (slashMenu) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setSlashMenu((current) =>
+          current && slashItems.length
+            ? { ...current, activeIndex: (current.activeIndex + step + slashItems.length) % slashItems.length }
+            : current,
+        );
+        return;
+      }
+      if ((event.key === "Enter" || event.key === "Tab") && slashItems.length) {
+        event.preventDefault();
+        pickSlashCommand(slashItems[Math.min(slashMenu.activeIndex, slashItems.length - 1)]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSlashMenu();
+        return;
+      }
+      if (["ArrowLeft", "ArrowRight", "Home", "End", "Enter"].includes(event.key)) closeSlashMenu();
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === "v") {
+      plainPasteRef.current = true;
+      window.setTimeout(() => {
+        plainPasteRef.current = false;
+      }, 1000);
+    }
+    if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey && handleEditorTab(event)) return;
+    if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const editor = editorRef.current;
+      const caret = getCollapsedEditorRange(editor);
+      const block = editor && caret ? autoformatBlock(caret.startContainer, editor) : null;
+      if (editor && block && /^(P|DIV)$/.test(block.tagName) && isDividerMarker(block.textContent ?? "")) {
+        event.preventDefault();
+        recordUndoSnapshot(editor.innerHTML);
+        const rule = document.createElement("hr");
+        const next = document.createElement("p");
+        next.appendChild(document.createElement("br"));
+        block.replaceWith(rule, next);
+        placeCaretAtEdge(next, true);
+        commitEditorHtml("Divider inserted.");
+        return;
+      }
+    }
     if (
       (event.metaKey || event.ctrlKey) &&
       !event.altKey &&
@@ -6307,6 +7887,7 @@ export function DocumentAssistantWorkspace({
       openLinkEditor();
       return;
     }
+    if (handleDocumentShortcut(event)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (!["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
     const editor = editorRef.current;
@@ -6365,45 +7946,276 @@ export function DocumentAssistantWorkspace({
     commitEditorHtml("Page boundary removed. Continue editing normally.");
   }
 
+  /** Opens the AI composer: on the highlighted text when there is some,
+   * otherwise at the caret (or the end of the document) to write new text. */
   function openInlineAiEdit() {
-    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
-    closeLinkEditor();
-    const liveSelection = getEditorSelection(editorRef.current);
-    const savedRange = inlineEditRangeRef.current;
-    const selection =
-      liveSelection ??
-      (inlineAiSelectionOffer && savedRange && editorRef.current && isRangeInsideEditor(editorRef.current, savedRange)
-        ? { range: savedRange, text: inlineAiSelectionOffer.text }
-        : null);
-    if (!selection) {
-      inlineEditRangeRef.current = null;
-      setInlineEditState({
-        open: true,
-        message: "Highlight text in the document before using inline AI edit.",
-        instruction: "",
-        selectedText: "",
-        working: false,
-      });
-      setStatus("Highlight text before using inline AI edit.");
+    if (!selectedAgent) {
+      setStatus(draftAiUnavailableReason);
       return;
     }
-
-    inlineEditRangeRef.current = selection.range;
+    const editor = editorRef.current;
+    if (!editor) return;
+    closeLinkEditor();
+    const liveSelection = getEditorSelection(editor);
+    const savedRange = inlineEditRangeRef.current;
+    const offered =
+      inlineAiSelectionOffer && savedRange && !savedRange.collapsed && isRangeInsideEditor(editor, savedRange)
+        ? { range: savedRange, text: inlineAiSelectionOffer.text }
+        : null;
+    const selection = liveSelection ?? offered;
+    const range = selection?.range ?? getCollapsedEditorRange(editor) ?? endOfEditorRange(editor);
+    inlineEditRangeRef.current = range.cloneRange();
+    paintRanges(DOCUMENT_AI_TARGET_PAINT, selection ? [range] : []);
     setInlineAiSelectionOffer(null);
-    setInlineEditState({
-      open: true,
-      message: null,
-      instruction: "",
-      selectedText: selection.text,
-      working: false,
+    setDocAi({
+      mode: selection ? "replace" : "insert",
+      phase: "compose",
+      selectedText: selection?.text ?? "",
+      runLabel: "",
+      stream: "",
+      proposalHtml: "",
+      proposalText: "",
+      proposalRaw: "",
+      error: null,
+      messages: [],
+      pendingMessages: [],
     });
-    setStatus("Inline AI edit ready for the highlighted text.");
+    setStatus(
+      selection ? "AI edit ready for the highlighted text." : "AI writing ready at the cursor.",
+    );
   }
 
   function closeInlineAiEdit() {
+    docAiRequestRef.current += 1;
+    docAiAbortRef.current?.abort();
+    docAiAbortRef.current = null;
+    if (docAiStreamFrameRef.current !== null) {
+      window.cancelAnimationFrame(docAiStreamFrameRef.current);
+      docAiStreamFrameRef.current = null;
+    }
+    clearPaint(DOCUMENT_AI_TARGET_PAINT);
     inlineEditRangeRef.current = null;
     setInlineAiSelectionOffer(null);
-    setInlineEditState(EMPTY_INLINE_AI_EDIT_STATE);
+    // The page rebalance skipped while the edit was open runs on the page's
+    // next blur, so it never moves the caret the writer just got back.
+    docAiOpenRef.current = false;
+    setDocAi(null);
+  }
+
+  /** Discard keeps the page exactly as it was and hands the selection back,
+   * so the writer can carry on where they were. */
+  function discardDocumentAi() {
+    const editor = editorRef.current;
+    const range = inlineEditRangeRef.current;
+    closeInlineAiEdit();
+    if (!editor || !range || !isRangeInsideEditor(editor, range)) return;
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection?.();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    setStatus("AI suggestion discarded. The text is unchanged.");
+  }
+
+  /** Builds the first request for an instruction: a rewrite of the
+   * highlight, or new text for the caret, with the sentences around it. */
+  function runDocumentAi(instruction: string, label: string) {
+    const editor = editorRef.current;
+    const range = inlineEditRangeRef.current;
+    const session = docAi;
+    if (!session) return;
+    if (!editor || !range || !isRangeInsideEditor(editor, range)) {
+      failDocumentAi("The text changed before AI could edit it. Close this and highlight the text again.");
+      return;
+    }
+    const around = textAroundRange(editor, range);
+    const prompt =
+      session.mode === "replace"
+        ? inlineRewritePrompt({
+            documentTitle,
+            instruction,
+            selectedText: session.selectedText,
+            selectedHtml: inlineAiSelectionHtml(range),
+            structureHint: inlineAiStructureHint(editor, range),
+            contextBefore: around.before,
+            contextAfter: around.after,
+          })
+        : aiWriteAtCursorPrompt({
+            documentTitle,
+            instruction,
+            before: around.before,
+            after: around.after,
+            structureHint: inlineAiCaretHint(editor, range),
+            formatRules: INLINE_AI_FORMAT_RULES,
+          });
+    void requestDocumentAi([{ role: "user", content: prompt }], label);
+  }
+
+  /** Continues the conversation behind the suggestion on screen. */
+  function refineDocumentAi(instruction: string) {
+    const session = docAi;
+    if (!session?.proposalRaw || !session.messages.length) {
+      runDocumentAi(instruction, instruction);
+      return;
+    }
+    void requestDocumentAi(
+      [
+        ...session.messages,
+        { role: "assistant", content: session.proposalRaw },
+        { role: "user", content: aiRefineMessage(instruction) },
+      ],
+      `Refine: ${instruction}`,
+    );
+  }
+
+  function retryDocumentAi() {
+    const session = docAi;
+    if (!session?.pendingMessages.length) return;
+    void requestDocumentAi(session.pendingMessages, session.runLabel);
+  }
+
+  function failDocumentAi(message: string) {
+    setDocAi((current) => current && { ...current, phase: "error", stream: "", error: message });
+    setStatus(message);
+  }
+
+  async function requestDocumentAi(messages: ChatWireMessage[], label: string) {
+    const agent = selectedAgent;
+    const session = docAi;
+    if (!session) return;
+    if (!agent) {
+      failDocumentAi(draftAiUnavailableReason);
+      return;
+    }
+    docAiAbortRef.current?.abort();
+    const controller = new AbortController();
+    docAiAbortRef.current = controller;
+    const requestId = ++docAiRequestRef.current;
+    setDocAi((current) =>
+      current && {
+        ...current,
+        phase: "working",
+        runLabel: label,
+        stream: "",
+        error: null,
+        pendingMessages: messages,
+      },
+    );
+    setStatus(`Calling ${agent.name} for an AI edit.`);
+    let pendingStream = "";
+    const flushStream = () => {
+      docAiStreamFrameRef.current = null;
+      if (requestId !== docAiRequestRef.current) return;
+      setDocAi((current) =>
+        current && current.phase === "working" ? { ...current, stream: pendingStream } : current,
+      );
+    };
+    try {
+      const reply = await sendChatStream(completionUserId, {
+        model: agent.id,
+        messages,
+        signal: controller.signal,
+        runtime: {
+          surface: "draft",
+          draftTitle: documentTitle,
+          clientStartedAt: draftNowIso(),
+          webEnabled: false,
+          citationsEnabled: false,
+          knowledgeConfigIds: activeSourceIds,
+          maxCompletionTokens: session.mode === "insert" ? 3000 : 2000,
+        },
+        onDelta: (fullText) => {
+          pendingStream = streamPreviewText(fullText);
+          if (docAiStreamFrameRef.current === null) {
+            docAiStreamFrameRef.current = window.requestAnimationFrame(flushStream);
+          }
+        },
+      });
+      if (requestId !== docAiRequestRef.current) return;
+      const raw = splitAssistantThinking(reply.content).visibleContent.trim();
+      const html = inlineAiReplacementHtmlFromReply(raw);
+      if (!html) throw new Error("The selected model did not return replacement text.");
+      setDocAi((current) =>
+        current && {
+          ...current,
+          phase: "review",
+          stream: "",
+          proposalHtml: html,
+          proposalText: htmlPlainText(html),
+          proposalRaw: raw,
+          messages,
+          error: null,
+        },
+      );
+      setStatus("AI suggestion ready. Accept it, refine it, or discard it.");
+    } catch (error) {
+      if (requestId !== docAiRequestRef.current) return;
+      if (controller.signal.aborted) {
+        setDocAi((current) =>
+          current && { ...current, phase: current.proposalHtml ? "review" : "compose", stream: "" },
+        );
+        setStatus("AI edit stopped.");
+        return;
+      }
+      const message =
+        error instanceof Error ? error.message : "The inline AI edit failed before a replacement was returned.";
+      failDocumentAi(`Inline AI edit could not complete: ${message}`);
+    } finally {
+      if (docAiAbortRef.current === controller) docAiAbortRef.current = null;
+    }
+  }
+
+  /** Applies the reviewed suggestion: in place of the highlight (or at the
+   * caret), or as new blocks below the highlighted passage. */
+  function acceptDocumentAi(placement: "replace" | "below" = "replace") {
+    const session = docAi;
+    const editor = editorRef.current;
+    const range = inlineEditRangeRef.current;
+    if (!session || session.phase !== "review" || !session.proposalHtml) return;
+    if (!editor || !range || !isRangeInsideEditor(editor, range) || (session.mode === "replace" && range.collapsed)) {
+      failDocumentAi("The text changed before the suggestion could be applied. Close this and try again.");
+      return;
+    }
+    const agentName = selectedAgent?.name ?? "AI";
+    let target = range;
+    let html = session.proposalHtml;
+    const inlineOnly = htmlIsInlineOnly(html);
+    if (placement === "below") {
+      const block = topLevelEditorBlock(range.endContainer, editor);
+      target = document.createRange();
+      if (block) target.setStartAfter(block);
+      else {
+        target.selectNodeContents(editor);
+        target.collapse(false);
+      }
+      target.collapse(true);
+      if (inlineOnly) html = `<p>${html}</p>`;
+    } else if (session.mode === "insert" && inlineOnly) {
+      const before = characterBeforeRange(range, inlineAiBlockAncestor(range.startContainer, editor));
+      if (before && !/\s/.test(before) && !/^[\s.,;:!?)]/.test(html)) html = ` ${html}`;
+    }
+    recordUndoSnapshot(editor.innerHTML);
+    const inserted = insertInlineAiSuggestion(editor, target, html, {
+      at: draftNowIso(),
+      by: agentName,
+    });
+    if (!inserted) {
+      failDocumentAi("The suggestion was empty, so nothing changed.");
+      return;
+    }
+    const selection = window.getSelection?.();
+    if (selection) {
+      const nextRange = document.createRange();
+      nextRange.setStartAfter(inserted);
+      nextRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(nextRange);
+    }
+    commitEditorHtml(`Inline AI edit applied through ${agentName}.`);
+    rememberDocumentSnapshot(documentTitle, editor.innerHTML, "Inline AI edit applied");
+    setShowEdits(true);
+    glowFreshAiEdits();
+    closeInlineAiEdit();
+    window.setTimeout(() => editorRef.current?.focus(), 0);
   }
 
   /** Glows the edits that just landed, then lets them settle. A second edit
@@ -6458,103 +8270,6 @@ export function DocumentAssistantWorkspace({
     );
   }
 
-  async function applyInlineAiEdit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
-    const editor = editorRef.current;
-    const range = inlineEditRangeRef.current;
-    const instructionText = inlineEditState.instruction.trim();
-    if (!editor || !range || !isRangeInsideEditor(editor, range)) {
-      setInlineEditState({
-        open: true,
-        message: "Highlight text in the document before using inline AI edit.",
-        instruction: "",
-        selectedText: "",
-        working: false,
-      });
-      setStatus("Highlight text before using inline AI edit.");
-      return;
-    }
-    if (!instructionText) return;
-
-    const requestStartedAt = draftNowIso();
-    setInlineEditState((current) => ({ ...current, working: true }));
-    setStatus(`Calling ${selectedAgent.name} to rewrite the highlighted text.`);
-
-    try {
-      const reply = await sendChat(completionUserId, {
-        model: selectedAgent.id,
-        messages: [
-          {
-            role: "user",
-            content: inlineRewritePrompt({
-              documentTitle,
-              instruction: instructionText,
-              selectedText: inlineEditState.selectedText,
-              selectedHtml: inlineAiSelectionHtml(range),
-              structureHint: inlineAiStructureHint(editor, range),
-            }),
-          },
-        ],
-        runtime: {
-          surface: "draft",
-          draftTitle: documentTitle,
-          clientStartedAt: requestStartedAt,
-          webEnabled: false,
-          citationsEnabled: false,
-          knowledgeConfigIds: activeSourceIds,
-          maxCompletionTokens: 2000,
-        },
-      });
-      const replacementHtml = inlineAiReplacementHtmlFromReply(reply.content);
-      if (!replacementHtml) {
-        throw new Error("The selected model did not return replacement text.");
-      }
-      if (!isRangeInsideEditor(editor, range)) {
-        throw new Error("The highlighted text changed before the inline edit finished.");
-      }
-
-      recordUndoSnapshot(editor.innerHTML);
-      const inserted = insertInlineAiSuggestion(editor, range, replacementHtml, {
-        at: draftNowIso(),
-        by: selectedAgent.name,
-      });
-      if (!inserted) {
-        throw new Error("The selected model did not return replacement text.");
-      }
-
-      const selection = window.getSelection?.();
-      if (selection) {
-        const nextRange = document.createRange();
-        nextRange.setStartAfter(inserted);
-        nextRange.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(nextRange);
-      }
-
-      commitEditorHtml(`Inline AI edit applied through ${selectedAgent.name}.`);
-      rememberDocumentSnapshot(documentTitle, editor.innerHTML, "Inline AI edit applied");
-      setShowEdits(true);
-      glowFreshAiEdits();
-      closeInlineAiEdit();
-      window.setTimeout(() => editorRef.current?.focus(), 0);
-    } catch (error) {
-      const message =
-        error instanceof ChatRequestError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "The inline AI edit failed before a replacement was returned.";
-      setInlineEditState((current) => ({
-        ...current,
-        open: true,
-        message: `Inline AI edit could not complete: ${message}`,
-        working: false,
-      }));
-      setStatus(`Inline AI edit could not complete: ${message}`);
-    }
-  }
-
   async function insertWebImageForRequest(request: string, requestStartedAt = draftNowIso()) {
     const subject = extractVisualSubject(request, documentTitle);
     const result = await resolveWebImageResult(subject);
@@ -6586,7 +8301,12 @@ export function DocumentAssistantWorkspace({
       return;
     }
     if (kind === "table") {
-      runEditorCommand("insertHTML", "Table inserted.", sampleTableHtml());
+      const editor = editorRef.current;
+      if (editor) {
+        focusEditorPreservingSelection(editor);
+        recordUndoSnapshot(editor.innerHTML);
+      }
+      insertEditorBlock(emptyTableHtml(3, 3), "Table inserted. Press Tab to move between cells.");
       return;
     }
     if (kind === "divider") {
@@ -6641,7 +8361,8 @@ export function DocumentAssistantWorkspace({
   function moveIndentDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     const drag = indentDragRef.current;
     if (!drag) return;
-    const delta = event.clientX - drag.startX;
+    // Handle positions are in unzoomed page pixels; the pointer is not.
+    const delta = (event.clientX - drag.startX) / documentZoom;
     if (drag.kind === "left") {
       applyIndentChange("left", drag.left + delta, drag.first, drag.right);
     } else if (drag.kind === "first") {
@@ -6732,6 +8453,43 @@ export function DocumentAssistantWorkspace({
         </div>,
         document.body,
       )}
+      {railIsDrawer && (
+        <div
+          className={`draft-rail-edge ${railShown ? "is-covered" : ""} ${assistantWorking ? "is-working" : ""}`}
+          inert={railShown || pendingDraftNavigation !== null}
+          onPointerEnter={(event) => {
+            // Only a resting mouse peeks: never touch, pen, or a selection drag.
+            if (event.pointerType !== "mouse" || event.buttons !== 0) return;
+            if (railPeekTimerRef.current !== null) window.clearTimeout(railPeekTimerRef.current);
+            railPeekTimerRef.current = window.setTimeout(() => {
+              railPeekTimerRef.current = null;
+              setRailPeek(true);
+            }, DRAFT_RAIL_PEEK_DELAY_MS);
+          }}
+          onPointerLeave={() => {
+            if (railPeekTimerRef.current === null) return;
+            window.clearTimeout(railPeekTimerRef.current);
+            railPeekTimerRef.current = null;
+          }}
+        >
+          <button
+            type="button"
+            className="draft-rail-tab"
+            aria-label={`Open the ${draftKind === "deck" ? "deck" : "document"} assistant${
+              assistantWorking ? " (drafting…)" : ""
+            }`}
+            aria-expanded={railOpen}
+            aria-keyshortcuts={DRAFT_RAIL_SHORTCUT.aria}
+            data-tooltip={`Open the assistant panel to chat about and revise this ${
+              draftKind === "deck" ? "deck" : "draft"
+            } (${DRAFT_RAIL_SHORTCUT.label})`}
+            onClick={pinRailOpen}
+          >
+            <AiPenIcon size={16} />
+            {assistantWorking && <span className="draft-rail-tab-dot" aria-hidden="true" />}
+          </button>
+        </div>
+      )}
       {railIsDrawer && railOpen && (
         <button
           type="button"
@@ -6747,14 +8505,16 @@ export function DocumentAssistantWorkspace({
         <aside
           ref={assistantRailRef}
           className={`document-assistant-rail ${railIsDrawer ? "is-drawer" : ""} ${
-            railIsDrawer && railOpen ? "is-open" : ""
-          }`}
+            railShown ? "is-open" : ""
+          } ${railPeeking ? "is-peek" : ""}`}
           aria-label="Assistant workflow"
           role={railIsDrawer ? "dialog" : undefined}
           aria-modal={railIsDrawer && railOpen ? true : undefined}
-          aria-hidden={(railIsDrawer && !railOpen) || pendingDraftNavigation !== null}
-          inert={(railIsDrawer && !railOpen) || pendingDraftNavigation !== null}
+          aria-hidden={(railIsDrawer && !railShown) || pendingDraftNavigation !== null}
+          inert={(railIsDrawer && !railShown) || pendingDraftNavigation !== null}
           tabIndex={railIsDrawer ? -1 : undefined}
+          onPointerDownCapture={railPeeking ? pinRailOpen : undefined}
+          onFocusCapture={railPeeking ? pinRailOpen : undefined}
         >
           <header className="draft-assistant-header">
             <button
@@ -6771,20 +8531,26 @@ export function DocumentAssistantWorkspace({
                 className="icon-button draft-rail-close"
                 type="button"
                 aria-label="Close the document assistant"
-                data-tooltip="Collapse the assistant drawer to give the document full width"
+                data-tooltip={`Collapse the assistant drawer to give the document full width (${DRAFT_RAIL_SHORTCUT.label})`}
                 onClick={() => setRailOpen(false)}
               >
                 <X size={18} />
               </button>
             )}
             <div className="draft-assistant-title">
-              <span className="draft-agent-icon">
-                {draftKind === "deck" ? <Presentation size={18} /> : <FileText size={18} />}
-              </span>
               <div>
                 <h1>{draftKind === "deck" ? "Deck Assistant" : "Document Assistant"}</h1>
-                <small>
-                  {workspaceName} {draftKind === "deck" ? "slide workspace" : "drafting workspace"}
+                <small className={assistantWorking ? "is-working" : undefined}>
+                  {assistantWorking && <PenLine size={12} aria-hidden="true" />}
+                  {assistantWorking
+                    ? draftKind === "deck"
+                      ? "Building slides…"
+                      : "Writing…"
+                    : draftAiAvailable
+                      ? draftKind === "deck"
+                        ? "Ready to build slides"
+                        : "Ready to write"
+                      : "No drafting model connected"}
                 </small>
               </div>
             </div>
@@ -6798,7 +8564,6 @@ export function DocumentAssistantWorkspace({
                 setActiveAssistantTool((current) =>
                   current === "history" ? null : "history",
                 );
-                setStatus("Document history opened.");
               }}
             >
               <History size={18} />
@@ -6839,19 +8604,81 @@ export function DocumentAssistantWorkspace({
           />
 
           <section className="draft-context-strip" aria-label="Draft context">
-            <BookOpen size={18} />
-            <div>
-              <strong>{contextStripTitle}</strong>
-              <span>
-                {contextStripDetail}
-                {attachedFiles.length > 0
-                  ? ` · ${attachedFiles.length} upload${attachedFiles.length === 1 ? "" : "s"}`
-                  : ""}
-                {` · ${webSearchEnabled ? "web on" : "web off"} · ${
-                  templateContextEnabled ? "templates on" : "templates off"
-                }`}
-              </span>
-            </div>
+            <button
+              type="button"
+              className={`draft-context-chip ${sourceSummary.activeKnowledge.length > 0 ? "is-on" : ""}`}
+              aria-label="Sources and files"
+              aria-pressed={activeAssistantTool === "sources"}
+              data-tooltip={
+                sourceSummary.activeKnowledge.length > 0
+                  ? `${activeSourceLabel} · ${sourceSummary.documentCount} indexed file${
+                      sourceSummary.documentCount === 1 ? "" : "s"
+                    }. Choose which workspace sources the assistant can draw on and cite.`
+                  : `${sourceSummary.enabledKnowledge.length} workspace source${
+                      sourceSummary.enabledKnowledge.length === 1 ? "" : "s"
+                    } available. Choose which ones the assistant can draw on and cite.`
+              }
+              onClick={() =>
+                setActiveAssistantTool((current) => (current === "sources" ? null : "sources"))
+              }
+            >
+              <LibraryBig size={14} aria-hidden="true" />
+              <span>Sources</span>
+              <em>{sourceSummary.activeKnowledge.length > 0 ? sourceSummary.activeKnowledge.length : "Off"}</em>
+            </button>
+            <button
+              type="button"
+              className={`draft-context-chip draft-web-chip ${webSearchEnabled && webSearchAvailable ? "is-on" : ""}`}
+              aria-label={
+                webSearchAvailable
+                  ? webSearchEnabled
+                    ? "Disable web search"
+                    : "Enable web search"
+                  : "Web search unavailable"
+              }
+              aria-pressed={webSearchEnabled}
+              disabled={!webSearchAvailable}
+              data-tooltip={
+                webSearchAvailable
+                  ? "Turn web search on or off to ground this draft in current facts"
+                  : "Web search is turned off for this model by your workspace"
+              }
+              onClick={toggleWebSearch}
+            >
+              <Globe2 size={14} aria-hidden="true" />
+              <span>Web</span>
+              <em>{webSearchAvailable ? (webSearchEnabled ? "On" : "Off") : "N/A"}</em>
+            </button>
+            <button
+              type="button"
+              className={`draft-context-chip ${templateContextEnabled ? "is-on" : ""}`}
+              aria-label="Choose template"
+              aria-pressed={activeAssistantTool === "templates"}
+              data-tooltip={
+                draftKind === "deck"
+                  ? "Browse deck templates and your uploaded brand template"
+                  : "Browse templates that shape the structure of your next draft"
+              }
+              onClick={() =>
+                setActiveAssistantTool((current) => (current === "templates" ? null : "templates"))
+              }
+            >
+              <LayoutTemplate size={14} aria-hidden="true" />
+              <span>Templates</span>
+              <em>{templateContextEnabled ? "On" : "Off"}</em>
+            </button>
+            {requireCitations && (
+              <button
+                type="button"
+                className="draft-context-chip is-on"
+                aria-label="Strict citations settings"
+                data-tooltip="Every factual claim must cite a source. Open settings to change."
+                onClick={() => setActiveAssistantTool("settings")}
+              >
+                <Quote size={14} aria-hidden="true" />
+                <span>Cited</span>
+              </button>
+            )}
           </section>
 
           <section className="draft-activity-panel" aria-label="Draft assistant activity">
@@ -6869,6 +8696,33 @@ export function DocumentAssistantWorkspace({
                 <DraftEventRow event={event} key={event.id} />
               ))}
             </div>
+            {events.length === 0 && !draftTrace && !activeAssistantTool && (
+              <div className="draft-chat-empty">
+                <span className="draft-chat-empty-mark" aria-hidden="true">
+                  <DraftPencilMark size={40} />
+                </span>
+                <strong>{draftSuggestionHeading}</strong>
+                <small>
+                  {draftKind === "deck"
+                    ? "Describe the deck in plain words. Slides are built right in the editor."
+                    : "Describe what you need in plain words. The assistant writes right on the page."}
+                </small>
+                <div className="draft-suggestion-list" aria-label="Suggested requests">
+                  {draftSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      disabled={assistantWorking}
+                      data-tooltip="Put this request in the message box so you can edit it before sending"
+                      onClick={() => applyDraftSuggestion(suggestion)}
+                    >
+                      <span>{suggestion}</span>
+                      <ChevronRight size={14} aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
 
           {activeAssistantTool && (
@@ -6877,13 +8731,24 @@ export function DocumentAssistantWorkspace({
               aria-label="Draft tool drawer"
             >
               <div className="draft-tool-drawer-header">
+                <span className="draft-tool-drawer-icon" aria-hidden="true">
+                  {activeAssistantTool === "templates" ? (
+                    <LayoutTemplate size={15} />
+                  ) : activeAssistantTool === "sources" ? (
+                    <LibraryBig size={15} />
+                  ) : activeAssistantTool === "settings" ? (
+                    <Settings2 size={15} />
+                  ) : (
+                    <History size={15} />
+                  )}
+                </span>
                 <strong>
                   {activeAssistantTool === "templates"
                     ? "Templates"
                     : activeAssistantTool === "sources"
                       ? "Sources"
                       : activeAssistantTool === "settings"
-                        ? "Agent settings"
+                        ? "Assistant settings"
                         : "Document history"}
                 </strong>
                 <button
@@ -6897,35 +8762,72 @@ export function DocumentAssistantWorkspace({
               </div>
 
               {activeAssistantTool === "templates" && draftKind === "deck" && (
-                <div className="draft-template-panel" aria-label="Deck templates">
-                  <label className="draft-context-toggle">
+                <div className="draft-template-panel is-deck" aria-label="Deck templates">
+                  <label className="draft-switch-row">
+                    <span>
+                      <strong>Use templates in chat</strong>
+                      <small>Off by default. When on, the selected starter guides the deck assistant.</small>
+                    </span>
                     <input
                       type="checkbox"
+                      role="switch"
+                      className="draft-switch"
                       checked={templateContextEnabled}
                       onChange={(event) => toggleTemplateContext(event.target.checked)}
                     />
-                    <span>
-                      <strong>Use templates in chat</strong>
-                      <small>
-                        Off by default. Turn on to let the selected deck template guide the deck
-                        assistant.
-                      </small>
-                    </span>
                   </label>
-                  <div className="deck-theme-card" aria-label="Deck brand theme">
-                    <div className="draft-panel-heading">
-                      <strong>Brand theme</strong>
-                      <small>
-                        {deckBrandTheme
-                          ? `Extracted from ${deckBrandTheme.filename}${
-                              deckBrandTheme.slides.length
-                                ? ` · ${deckBrandTheme.slides.length} slide${
-                                    deckBrandTheme.slides.length === 1 ? "" : "s"
-                                  } available`
-                                : ""
-                            }. Fonts render when installed.`
-                          : "No brand theme. Slides use the neutral Aperture theme."}
-                      </small>
+                  <div className={`deck-brand-card ${deckBrandTheme ? "has-theme" : ""}`} aria-label="Deck brand theme">
+                    <div className="deck-brand-row">
+                      <span className="deck-brand-mark" aria-hidden="true">
+                        {deckBrandTheme ? (
+                          deckBrandTheme.theme.logo ? (
+                            <img src={deckBrandTheme.theme.logo.dataUrl} alt="" />
+                          ) : (
+                            <span className="deck-brand-mark-swatches">
+                              {Object.values(deckBrandTheme.theme.colors).slice(0, 4).map((color, index) => (
+                                <span key={`${color}-${index}`} style={{ background: color }} />
+                              ))}
+                            </span>
+                          )
+                        ) : (
+                          <Palette size={16} />
+                        )}
+                      </span>
+                      <span className="deck-brand-text">
+                        <strong>{deckBrandTheme ? deckBrandTheme.name : "Brand theme"}</strong>
+                        <small>
+                          {deckBrandUploadState.kind === "working"
+                            ? `Reading ${deckBrandUploadState.filename}…`
+                            : deckBrandUploadState.kind === "error"
+                              ? deckBrandUploadState.message
+                              : deckBrandTheme
+                                ? `${deckBrandTheme.theme.fonts.major}${
+                                    deckBrandTheme.theme.fonts.minor !== deckBrandTheme.theme.fonts.major
+                                      ? ` · ${deckBrandTheme.theme.fonts.minor}`
+                                      : ""
+                                  }${
+                                    deckBrandTheme.slides.length
+                                      ? ` · ${deckBrandTheme.slides.length} slide${deckBrandTheme.slides.length === 1 ? "" : "s"}`
+                                      : ""
+                                  }`
+                                : "No brand theme. Slides use the neutral Aperture theme."}
+                        </small>
+                      </span>
+                      <button
+                        className="deck-brand-upload"
+                        type="button"
+                        aria-label={deckBrandTheme ? "Replace brand template" : "Upload brand template"}
+                        data-tooltip="Upload a .pptx or .potx brand template; colors, fonts, logo, and background are extracted on the server and stored only on this device"
+                        disabled={deckBrandUploadState.kind === "working"}
+                        onClick={triggerDeckBrandUpload}
+                      >
+                        {deckBrandUploadState.kind === "working" ? (
+                          <LoaderCircle className="is-spinning" size={14} aria-hidden="true" />
+                        ) : (
+                          <Upload size={14} aria-hidden="true" />
+                        )}
+                        {deckBrandTheme ? "Replace" : "Upload"}
+                      </button>
                     </div>
                     {deckBrandTheme && (
                       <>
@@ -6938,21 +8840,10 @@ export function DocumentAssistantWorkspace({
                               title={color}
                             />
                           ))}
-                          {deckBrandTheme.theme.logo && (
-                            <img
-                              className="deck-theme-logo"
-                              src={deckBrandTheme.theme.logo.dataUrl}
-                              alt={`${deckBrandTheme.name} logo`}
-                            />
+                          {deckBrandTheme.theme.backgroundImage && (
+                            <small className="deck-theme-fonts">+ background image</small>
                           )}
                         </div>
-                        <small className="deck-theme-fonts">
-                          {deckBrandTheme.theme.fonts.major}
-                          {deckBrandTheme.theme.fonts.minor !== deckBrandTheme.theme.fonts.major
-                            ? ` · ${deckBrandTheme.theme.fonts.minor}`
-                            : ""}
-                          {deckBrandTheme.theme.backgroundImage ? " · background image" : ""}
-                        </small>
                         <div className="deck-theme-actions">
                           <button
                             type="button"
@@ -6979,6 +8870,7 @@ export function DocumentAssistantWorkspace({
                           )}
                           <button
                             type="button"
+                            className="is-icon"
                             aria-label="Delete stored brand theme"
                             data-tooltip="Delete this stored brand theme from this device"
                             onClick={deleteStoredDeckBrandTheme}
@@ -6989,88 +8881,65 @@ export function DocumentAssistantWorkspace({
                       </>
                     )}
                   </div>
-                  <button
-                    className="draft-template-upload-button"
-                    type="button"
-                    data-tooltip="Upload a .pptx or .potx brand template; colors, fonts, logo, and background are extracted on the server and stored only on this device"
-                    disabled={deckBrandUploadState.kind === "working"}
-                    onClick={triggerDeckBrandUpload}
-                  >
-                    <Upload size={16} />
-                    <span>
-                      <strong>
-                        {deckBrandUploadState.kind === "working"
-                          ? `Reading ${deckBrandUploadState.filename}…`
-                          : "Upload brand template"}
-                      </strong>
-                      <small>
-                        {deckBrandUploadState.kind === "error"
-                          ? deckBrandUploadState.message
-                          : ".pptx or .potx — brand colors, fonts, logo, and every slide's text are extracted."}
-                      </small>
-                    </span>
-                  </button>
                   <div className="draft-template-list" aria-label="Deck starter templates">
-                    {BUILT_IN_DECK_TEMPLATES.map((template) => (
-                      <button
-                        key={template.id}
-                        type="button"
-                        data-tooltip={`Select the ${template.name} structure`}
-                        className={`draft-template-card ${
-                          selectedDeckTemplateId === template.id ? "is-selected" : ""
-                        }`}
-                        aria-pressed={selectedDeckTemplateId === template.id}
-                        onClick={() => setSelectedDeckTemplateId(template.id)}
-                      >
-                        <span>
-                          <strong>{template.name}</strong>
-                          <small>
-                            {template.category} · {template.description}
-                          </small>
-                        </span>
-                        <CheckCircle2 size={15} className="draft-template-check" aria-hidden="true" />
-                      </button>
-                    ))}
+                    {BUILT_IN_DECK_TEMPLATES.map((template) => {
+                      const CategoryIcon = deckTemplateCategoryIcon(template.category);
+                      return (
+                        <button
+                          key={template.id}
+                          type="button"
+                          data-tooltip={`Select the ${template.name} structure`}
+                          className={`draft-template-card ${
+                            selectedDeckTemplateId === template.id ? "is-selected" : ""
+                          }`}
+                          aria-pressed={selectedDeckTemplateId === template.id}
+                          onClick={() => setSelectedDeckTemplateId(template.id)}
+                        >
+                          <span className="draft-template-icon" aria-hidden="true">
+                            <CategoryIcon size={15} />
+                          </span>
+                          <span>
+                            <strong>{template.name}</strong>
+                            <small>
+                              {template.category} · {template.description}
+                            </small>
+                          </span>
+                          <CheckCircle2 size={15} className="draft-template-check" aria-hidden="true" />
+                        </button>
+                      );
+                    })}
                   </div>
-                  <button
-                    className="draft-template-start-button"
-                    type="button"
-                    data-tooltip={`Start a ${
-                      builtInDeckTemplate(selectedDeckTemplateId)?.name ?? "deck"
-                    } with scaffold slides you replace`}
-                    onClick={() => startDeckFromTemplate(selectedDeckTemplateId)}
-                  >
-                    <Presentation size={16} />
-                    Start {builtInDeckTemplate(selectedDeckTemplateId)?.name ?? "deck"}
-                  </button>
+                  <div className="draft-template-footer">
+                    <button
+                      className="draft-template-start-button"
+                      type="button"
+                      data-tooltip={`Start a ${
+                        builtInDeckTemplate(selectedDeckTemplateId)?.name ?? "deck"
+                      } with scaffold slides you replace`}
+                      onClick={() => startDeckFromTemplate(selectedDeckTemplateId)}
+                    >
+                      <Presentation size={16} />
+                      Start {builtInDeckTemplate(selectedDeckTemplateId)?.name ?? "deck"}
+                    </button>
+                  </div>
                 </div>
               )}
 
               {activeAssistantTool === "templates" && draftKind === "document" && (
-                <div className="draft-template-panel" aria-label="Draft templates">
-                  <label className="draft-context-toggle">
+                <div className="draft-template-panel is-document" aria-label="Draft templates">
+                  <label className="draft-switch-row">
+                    <span>
+                      <strong>Use templates in chat</strong>
+                      <small>Off by default. When on, the selected template shapes new drafts.</small>
+                    </span>
                     <input
                       type="checkbox"
+                      role="switch"
+                      className="draft-switch"
                       checked={templateContextEnabled}
                       onChange={(event) => toggleTemplateContext(event.target.checked)}
                     />
-                    <span>
-                      <strong>Use templates in chat</strong>
-                      <small>Off by default. Turn on to let saved templates guide new drafts.</small>
-                    </span>
                   </label>
-                  <button
-                    className="draft-template-upload-button"
-                    type="button"
-                    data-tooltip="Upload a .docx file to reuse its layout as a drafting template"
-                    onClick={triggerWordTemplateUpload}
-                  >
-                    <Upload size={16} />
-                    <span>
-                      <strong>Upload Word template</strong>
-                      <small>Add a .docx or Word-openable template to this canvas.</small>
-                    </span>
-                  </button>
                   <div className="draft-template-tabs" aria-label="Template categories">
                     {templateCategories.map((category) => (
                       <button
@@ -7091,47 +8960,64 @@ export function DocumentAssistantWorkspace({
                     ))}
                   </div>
                   <div className="draft-template-list" aria-label="Available draft templates">
-                    {visibleTemplates.map((template) => (
-                      <button
-                        key={template.id}
-                        type="button"
-                        data-template-id={template.id}
-                        data-tooltip={`Apply the ${template.name} template to your current draft`}
-                        className={`draft-template-card ${
-                          selectedTemplate.id === template.id ? "is-selected" : ""
-                        }`}
-                        aria-pressed={selectedTemplate.id === template.id}
-                        onClick={() => applyTemplateToCurrentDraft(template)}
-                      >
-                        <span>
-                          <strong>{template.name}</strong>
-                          <small>
-                            {template.category} · {template.description}
-                          </small>
-                        </span>
-                        <CheckCircle2 size={15} className="draft-template-check" aria-hidden="true" />
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    className="draft-template-start-button"
-                    type="button"
-                    disabled={!draftAiAvailable}
-                    data-tooltip={draftAiAvailable ? `Create a new draft using the selected ${selectedTemplate.name} template` : draftAiUnavailableReason}
-                    onClick={() => {
-                      setTemplateContextEnabled(true);
-                      void startDraftFromTemplate(
-                        selectedTemplate,
-                        instruction.trim() || undefined,
-                        sourceSummary,
-                        activeSourceIds,
-                        { useTemplateContext: true },
+                    {visibleTemplates.map((template) => {
+                      const CategoryIcon = draftTemplateCategoryIcon(template.category);
+                      return (
+                        <button
+                          key={template.id}
+                          type="button"
+                          data-template-id={template.id}
+                          data-tooltip={`Apply the ${template.name} template to your current draft`}
+                          className={`draft-template-card ${
+                            selectedTemplate.id === template.id ? "is-selected" : ""
+                          }`}
+                          aria-pressed={selectedTemplate.id === template.id}
+                          onClick={() => applyTemplateToCurrentDraft(template)}
+                        >
+                          <span className="draft-template-icon" aria-hidden="true">
+                            <CategoryIcon size={15} />
+                          </span>
+                          <span>
+                            <strong>{template.name}</strong>
+                            <small>
+                              {template.category} · {template.description}
+                            </small>
+                          </span>
+                          <CheckCircle2 size={15} className="draft-template-check" aria-hidden="true" />
+                        </button>
                       );
-                    }}
-                  >
-                    <Sparkles size={16} />
-                    Create {selectedTemplate.name} draft
-                  </button>
+                    })}
+                  </div>
+                  <div className="draft-template-footer">
+                    <button
+                      className="draft-template-upload-button"
+                      type="button"
+                      aria-label="Upload Word template"
+                      data-tooltip="Upload a .docx or Word-openable file to reuse its layout as a drafting template"
+                      onClick={triggerWordTemplateUpload}
+                    >
+                      <Upload size={16} />
+                    </button>
+                    <button
+                      className="draft-template-start-button"
+                      type="button"
+                      disabled={!draftAiAvailable}
+                      data-tooltip={draftAiAvailable ? `Create a new draft using the selected ${selectedTemplate.name} template` : draftAiUnavailableReason}
+                      onClick={() => {
+                        setTemplateContextEnabled(true);
+                        void startDraftFromTemplate(
+                          selectedTemplate,
+                          instruction.trim() || undefined,
+                          sourceSummary,
+                          activeSourceIds,
+                          { useTemplateContext: true },
+                        );
+                      }}
+                    >
+                      <Sparkles size={16} />
+                      Create {selectedTemplate.name} draft
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -7171,7 +9057,7 @@ export function DocumentAssistantWorkspace({
                       <strong>Draft uploads</strong>
                       {attachedFiles.map((file) => (
                         <span key={file.id}>
-                          {file.name} · {file.size}
+                          {file.name} · {file.size} · {draftUploadStateLabel(file)}
                         </span>
                       ))}
                     </div>
@@ -7181,12 +9067,6 @@ export function DocumentAssistantWorkspace({
 
               {activeAssistantTool === "settings" && (
                 <div className="draft-settings-panel" aria-label="Assistant drafting settings">
-                  {draftKind === "document" && (
-                    <button type="button" disabled={assistantWorking || !content.trim()} onClick={applyMlaLayout}
-                      data-tooltip="Apply MLA spacing and typography to this paper; keep its text and make the change undoable">
-                      Apply MLA layout
-                    </button>
-                  )}
                   <label className="draft-setting-field">
                     <span>Drafting agent</span>
                     <SelectControl
@@ -7203,14 +9083,6 @@ export function DocumentAssistantWorkspace({
                       ))}
                     </SelectControl>
                   </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={requireCitations}
-                      onChange={(event) => setRequireCitations(event.target.checked)}
-                    />
-                    Require source citations
-                  </label>
                   <div className="draft-setting-field">
                     <span>Reasoning</span>
                     <ReasoningSlider
@@ -7220,6 +9092,27 @@ export function DocumentAssistantWorkspace({
                       onChange={updateReasoningLevel}
                     />
                   </div>
+                  <label className="draft-switch-row">
+                    <span>
+                      <strong>Require source citations</strong>
+                      <small>Every factual claim must cite a source, or it is flagged [citation needed].</small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      className="draft-switch"
+                      aria-label="Require source citations"
+                      checked={requireCitations}
+                      onChange={(event) => toggleRequireCitations(event.target.checked)}
+                    />
+                  </label>
+                  {draftKind === "document" && (
+                    <button type="button" className="draft-settings-action" disabled={assistantWorking || !content.trim()} onClick={applyMlaLayout}
+                      data-tooltip="Apply MLA spacing and typography to this paper; keep its text and make the change undoable">
+                      <AlignLeft size={15} aria-hidden="true" />
+                      Apply MLA layout
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -7249,6 +9142,7 @@ export function DocumentAssistantWorkspace({
                             time={formatHistoryTimestamp(item.updatedAt)} status={draftHistoryStatusLabel(item)}
                             archiveDisabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverId && item.serverSavePending) || assistantWorking}
                             opening={historyOpeningId === item.id}
+                            kind={item.kind === "deck" ? "deck" : "document"}
                             archived={Boolean(item.archived)}
                             disabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverSavePending) || assistantWorking}
                             onRestore={() => void restoreDocumentHistoryItem(item)}
@@ -7315,7 +9209,7 @@ export function DocumentAssistantWorkspace({
                     </div>
                   )}
                   <div className="draft-history-section">
-                    <strong className="draft-history-section-title">Current document versions</strong>
+                    <strong className="draft-history-section-title">Versions of this draft</strong>
                     {versions.length === 1 ? (
                       <p className="draft-history-empty">
                         New revisions will appear after you save or ask the assistant to revise.
@@ -7357,11 +9251,56 @@ export function DocumentAssistantWorkspace({
             </section>
           )}
 
+          <div className="draft-composer-dock" ref={composerDockRef}>
+          {railNotice && (
+            <p className="draft-rail-notice" key={railNotice.id} aria-hidden="true">
+              <CheckCircle2 size={14} />
+              <span>{railNotice.text}</span>
+              <button type="button" tabIndex={-1} aria-label="Dismiss notice" onClick={() => setRailNotice(null)}>
+                <X size={12} />
+              </button>
+            </p>
+          )}
+
           <form
             className="draft-command-box"
             onSubmit={submitInstruction}
             aria-busy={assistantWorking}
           >
+            {attachedFiles.length > 0 && (
+              <ul className="draft-upload-chips" aria-label="Attached draft sources">
+                {attachedFiles.map((file) => (
+                  <li
+                    key={file.id}
+                    className={`draft-upload-chip is-${file.status} ${
+                      file.status === "ready" && !file.hasText ? "is-name-only" : ""
+                    }`}
+                    data-tooltip={
+                      file.status === "error"
+                        ? file.error
+                        : file.status === "ready" && !file.hasText
+                          ? "No readable text was extracted, so the assistant sees only the file name"
+                          : `${file.size} · ${draftUploadStateLabel(file)}`
+                    }
+                  >
+                    {file.status === "uploading" ? (
+                      <LoaderCircle className="is-spinning" size={13} aria-hidden="true" />
+                    ) : (
+                      <FileText size={13} aria-hidden="true" />
+                    )}
+                    <span>{file.name}</span>
+                    <small className="sr-only">{draftUploadStateLabel(file)}</small>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => removeAttachedFile(file.id)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <label className="sr-only" htmlFor="draft-assistant-command">
               {draftKind === "deck" ? "Ask the deck assistant" : "Ask the document assistant"}
             </label>
@@ -7375,6 +9314,11 @@ export function DocumentAssistantWorkspace({
               }
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }}
               disabled={assistantWorking}
               placeholder={
                 assistantWorking
@@ -7448,58 +9392,6 @@ export function DocumentAssistantWorkspace({
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                aria-label="Choose template"
-                data-tooltip={
-                  draftKind === "deck"
-                    ? "Browse deck templates and your uploaded brand template"
-                    : "Browse templates that shape the structure of your next draft"
-                }
-                aria-pressed={activeAssistantTool === "templates"}
-                onClick={() =>
-                  setActiveAssistantTool((current) =>
-                    current === "templates" ? null : "templates",
-                  )
-                }
-              >
-                {draftKind === "deck" ? <Presentation size={18} /> : <FileText size={18} />}
-              </button>
-              <button
-                type="button"
-                aria-label="Sources and files"
-                data-tooltip="Choose which workspace sources the assistant can draw on and cite"
-                aria-pressed={activeAssistantTool === "sources"}
-                onClick={() => {
-                  setActiveAssistantTool((current) =>
-                    current === "sources" ? null : "sources",
-                  );
-                  setStatus("Sources opened for this draft.");
-                }}
-              >
-                <LibraryBig size={18} />
-              </button>
-              <button
-                className="draft-web-toggle"
-                type="button"
-                aria-label={
-                  webSearchAvailable
-                    ? webSearchEnabled
-                      ? "Disable web search"
-                      : "Enable web search"
-                    : "Web search unavailable"
-                }
-                aria-pressed={webSearchEnabled}
-                disabled={!webSearchAvailable}
-                data-tooltip={
-                  webSearchAvailable
-                    ? "Turn web search on or off to ground this draft in current facts"
-                    : "Web search is turned off for this model by your workspace"
-                }
-                onClick={toggleWebSearch}
-              >
-                <Globe2 size={18} />
-              </button>
               {draftKind === "deck" && (
                 <button
                   type="button"
@@ -7512,14 +9404,12 @@ export function DocumentAssistantWorkspace({
                       : "No image-generation model is enabled for your workspace"
                   }
                   onClick={() => {
-                    setDeckImagesEnabled((value) => {
-                      setStatus(
-                        value
-                          ? "AI slide images off. New decks keep their layout colors."
-                          : "AI slide images on. The assistant will generate an image for each drafted slide.",
-                      );
-                      return !value;
-                    });
+                    notifyRail(
+                      deckImagesEnabled
+                        ? "AI slide images off. New decks keep their layout colors."
+                        : "AI slide images on. The assistant will generate an image for each drafted slide.",
+                    );
+                    setDeckImagesEnabled(!deckImagesEnabled);
                   }}
                 >
                   <ImagePlus size={18} />
@@ -7534,30 +9424,16 @@ export function DocumentAssistantWorkspace({
                   setActiveAssistantTool((current) =>
                     current === "settings" ? null : "settings",
                   );
-                  setStatus("Assistant drafting controls toggled.");
                 }}
               >
                 <Settings2 size={18} />
-              </button>
-              <button
-                type="button"
-                aria-label="Draft history"
-                data-tooltip="Review earlier documents and saved versions of this draft"
-                aria-pressed={activeAssistantTool === "history"}
-                onClick={() =>
-                  setActiveAssistantTool((current) =>
-                    current === "history" ? null : "history",
-                  )
-                }
-              >
-                <History size={18} />
               </button>
               <DictationControl
                 userId={completionUserId}
                 disabled={assistantWorking}
                 subjectLabel="instruction"
                 onError={(message) => {
-                  if (message) setStatus(message);
+                  if (message) notifyRail(message);
                 }}
                 onTranscript={(text) => {
                   setInstruction((current) => [current.trim(), text].filter(Boolean).join(" "));
@@ -7569,7 +9445,12 @@ export function DocumentAssistantWorkspace({
                 type="submit"
                 aria-label="Apply instruction"
                 data-tooltip={draftAiAvailable ? "Send this instruction so the assistant drafts or revises the document" : draftAiUnavailableReason}
-                disabled={!draftAiAvailable || !instruction.trim() || assistantWorking}
+                disabled={
+                  !draftAiAvailable ||
+                  !instruction.trim() ||
+                  assistantWorking ||
+                  attachedFiles.some((file) => file.status === "uploading")
+                }
               >
                 {assistantWorking ? (
                   <LoaderCircle className="is-spinning" size={18} />
@@ -7579,30 +9460,12 @@ export function DocumentAssistantWorkspace({
               </button>
             </div>
           </form>
+          </div>
         </aside>
 
-        <main className="document-editor-workspace" inert={(railIsDrawer && railOpen) || pendingDraftNavigation !== null}>
+        <main ref={editorWorkspaceRef} className="document-editor-workspace" inert={(railIsDrawer && railOpen) || pendingDraftNavigation !== null}>
           <header className="document-editor-topbar">
             <div className="document-title-cluster">
-              {railIsDrawer && (
-                <button
-                  type="button"
-                  className={`draft-rail-trigger ${assistantWorking ? "is-working" : ""}`}
-                  aria-label={`Open the ${draftKind === "deck" ? "deck" : "document"} assistant${
-                    assistantWorking ? " (drafting…)" : ""
-                  }`}
-                  aria-expanded={railOpen}
-                  data-tooltip={`Open the assistant panel to chat about and revise this ${
-                    draftKind === "deck" ? "deck" : "draft"
-                  }`}
-                  onClick={() => setRailOpen(true)}
-                >
-                  {/* Pencil + AI spark: this button edits documents AND decks
-                      and opens the AI assistant. */}
-                  <AiPenIcon size={18} />
-                  {assistantWorking && <span className="draft-rail-trigger-dot" aria-hidden="true" />}
-                </button>
-              )}
               <div
                 className="segmented-control deck-mode-switch"
                 data-mode={draftKind}
@@ -8262,7 +10125,8 @@ export function DocumentAssistantWorkspace({
               <button
                 type="button"
                 aria-label="Inline AI edit"
-                data-tooltip={draftAiAvailable ? "Rewrite the highlighted text with AI using your own instruction" : draftAiUnavailableReason}
+                aria-keyshortcuts="Meta+J Control+J"
+                data-tooltip={draftAiAvailable ? "Edit the highlighted text with AI, or write at the cursor (⌘J)" : draftAiUnavailableReason}
                 disabled={!draftAiAvailable}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={openInlineAiEdit}
@@ -8310,13 +10174,6 @@ export function DocumentAssistantWorkspace({
                 )}
               </button>
                 </div></section>
-              <span
-                className="document-word-count"
-                data-tooltip={`${wordCount.words.toLocaleString()} words, ${wordCount.characters.toLocaleString()} characters`}
-                aria-label={`${wordCount.words.toLocaleString()} words, ${wordCount.characters.toLocaleString()} characters`}
-              >
-                {wordCount.words.toLocaleString()} {wordCount.words === 1 ? "word" : "words"}
-              </span>
 
               </DocumentToolbarPanel>
               {aiTrailOpen && aiEditTrail.length > 0 && (
@@ -8444,85 +10301,6 @@ export function DocumentAssistantWorkspace({
                   )}
                 </form>
               )}
-              {inlineEditState.open && (
-                <form
-                  className={`inline-ai-popover ${inlineEditState.message ? "is-message" : ""}`}
-                  role="dialog"
-                  aria-label="Inline AI edit panel"
-                  onSubmit={applyInlineAiEdit}
-                >
-                  <div className="inline-ai-popover-header">
-                    <strong>Inline AI edit</strong>
-                    <button
-                      type="button"
-                      aria-label="Close inline AI edit"
-                      data-tooltip="Close the inline edit panel without changing your text"
-                      onClick={closeInlineAiEdit}
-                    >
-                      <X size={15} />
-                    </button>
-                  </div>
-                  {inlineEditState.message ? (
-                    <p>{inlineEditState.message}</p>
-                  ) : (
-                    <>
-                      <div className="inline-ai-selected-text">
-                        <span>Selected text</span>
-                        <blockquote>{inlineEditState.selectedText}</blockquote>
-                      </div>
-                      <label>
-                        <span>How should this highlighted text change?</span>
-                        <textarea
-                          aria-label="Inline edit instruction"
-                          value={inlineEditState.instruction}
-                          disabled={inlineEditState.working}
-                          onChange={(event) =>
-                            setInlineEditState((current) => ({
-                              ...current,
-                              instruction: event.target.value,
-                            }))
-                          }
-                          placeholder="Make it clearer, shorter, more formal, client-ready..."
-                        />
-                      </label>
-                      <div className="inline-ai-prompts" aria-label="Suggested edit instructions">
-                        {["Make it clearer", "Shorten it", "More formal"].map((prompt) => (
-                          <button
-                            key={prompt}
-                            type="button"
-                            disabled={inlineEditState.working}
-                            onClick={() =>
-                              setInlineEditState((current) => ({
-                                ...current,
-                                instruction: prompt,
-                              }))
-                            }
-                          >
-                            {prompt}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="inline-ai-actions">
-                        <button
-                          type="button"
-                          data-tooltip="Discard this inline edit and keep the original text"
-                          onClick={closeInlineAiEdit}
-                          disabled={inlineEditState.working}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          data-tooltip="Replace the highlighted text with the AI rewrite"
-                          disabled={!draftAiAvailable || !inlineEditState.instruction.trim() || inlineEditState.working}
-                        >
-                          {inlineEditState.working ? "Rewriting..." : "Replace highlight"}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </form>
-              )}
             </div>
             <div className="document-toolbar-group document-toolbar-actions">
               <div className="document-insert-control">
@@ -8631,7 +10409,7 @@ export function DocumentAssistantWorkspace({
 
           {draftKind === "deck" && deckState && (
             <div
-              className={`document-toolbar ${mobileFormattingExpanded ? "is-mobile-expanded" : ""}`}
+              className={`document-toolbar document-toolbar-compact deck-toolbar ${mobileFormattingExpanded ? "is-mobile-expanded" : ""}`}
               aria-label="Deck formatting"
             >
               <button
@@ -8678,6 +10456,37 @@ export function DocumentAssistantWorkspace({
                   <Redo2 size={18} />
                 </button>
                 <span className="document-toolbar-divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  aria-label="Bold"
+                  aria-pressed={formatState.bold}
+                  data-tooltip="Make the selected bullet text bold"
+                  onClick={() => runDeckTextCommand("bold", "Bold formatting applied.")}
+                >
+                  <Bold size={18} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Italic"
+                  aria-pressed={formatState.italic}
+                  data-tooltip="Set the selected bullet text in italics"
+                  onClick={() => runDeckTextCommand("italic", "Italic formatting applied.")}
+                >
+                  <Italic size={18} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Underline"
+                  aria-pressed={formatState.underline}
+                  data-tooltip="Underline the selected bullet text"
+                  onClick={() => runDeckTextCommand("underline", "Underline formatting applied.")}
+                >
+                  <Underline size={18} />
+                </button>
+                <DocumentToolbarPanel label="Text" title="Slide text formatting" open={documentToolPanel === "text"}
+                  onToggle={() => setDocumentToolPanel((current) => (current === "text" ? null : "text"))}
+                  onClose={() => setDocumentToolPanel(null)}>
+                  <section className="document-tool-section" aria-label="Font and size"><span className="document-tool-section-label">Font and size</span><div className="document-tool-section-controls">
                 <SelectControl
                   className="document-font-select"
                   aria-label="Slide text font"
@@ -8709,34 +10518,8 @@ export function DocumentAssistantWorkspace({
                     ))}
                   </SelectControl>
                 </span>
-                <span className="document-toolbar-divider" aria-hidden="true" />
-                <button
-                  type="button"
-                  aria-label="Bold"
-                  aria-pressed={formatState.bold}
-                  data-tooltip="Make the selected bullet text bold"
-                  onClick={() => runDeckTextCommand("bold", "Bold formatting applied.")}
-                >
-                  <Bold size={18} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Italic"
-                  aria-pressed={formatState.italic}
-                  data-tooltip="Set the selected bullet text in italics"
-                  onClick={() => runDeckTextCommand("italic", "Italic formatting applied.")}
-                >
-                  <Italic size={18} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Underline"
-                  aria-pressed={formatState.underline}
-                  data-tooltip="Underline the selected bullet text"
-                  onClick={() => runDeckTextCommand("underline", "Underline formatting applied.")}
-                >
-                  <Underline size={18} />
-                </button>
+                  </div></section>
+                  <section className="document-tool-section" aria-label="Advanced styles"><span className="document-tool-section-label">Advanced styles</span><div className="document-tool-section-controls">
                 <button
                   type="button"
                   aria-label="Strikethrough"
@@ -8746,7 +10529,16 @@ export function DocumentAssistantWorkspace({
                 >
                   <Strikethrough size={18} />
                 </button>
-                <span className="document-toolbar-divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  aria-label="Clear formatting"
+                  data-tooltip="Remove bold, color, and other styling from the selected bullet text"
+                  onClick={() => runDeckTextCommand("removeFormat", "Formatting cleared from the selected text.")}
+                >
+                  <RemoveFormatting size={18} />
+                </button>
+                  </div></section>
+                  <section className="document-tool-section" aria-label="Color"><span className="document-tool-section-label">Color</span><div className="document-tool-section-controls">
                 <div className="document-color-control" aria-label="Text color control">
                   <input
                     type="color"
@@ -8768,127 +10560,24 @@ export function DocumentAssistantWorkspace({
                     ))}
                   </div>
                 </div>
-                <span className="document-toolbar-divider" aria-hidden="true" />
+                  </div></section>
+                </DocumentToolbarPanel>
                 <button
                   type="button"
-                  aria-label="Clear formatting"
-                  data-tooltip="Remove bold, color, and other styling from the selected bullet text"
-                  onClick={() => runDeckTextCommand("removeFormat", "Formatting cleared from the selected text.")}
+                  aria-label="Edit slide with AI"
+                  aria-keyshortcuts="Meta+J Control+J"
+                  aria-expanded={Boolean(deckAi)}
+                  data-tooltip={
+                    draftAiAvailable
+                      ? "Edit this slide with AI, or highlight slide text to rewrite just that (⌘J)"
+                      : draftAiUnavailableReason
+                  }
+                  disabled={!draftAiAvailable}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={openDeckAiEdit}
                 >
-                  <RemoveFormatting size={18} />
+                  <AiPenIcon size={18} />
                 </button>
-                <button
-                  type="button"
-                  aria-label="Copy deck outline"
-                  data-tooltip="Copy the whole deck as a text outline for pasting elsewhere"
-                  onClick={copyDeckOutline}
-                >
-                  <Copy size={18} />
-                </button>
-                <span className="document-toolbar-divider" aria-hidden="true" />
-                <div className="document-insert-control">
-                  <button
-                    type="button"
-                    aria-label="Edit selection with AI"
-                    aria-expanded={deckAiEditState.open}
-                    data-tooltip={draftAiAvailable ? "Highlight slide text, then tell the AI how to change it" : draftAiUnavailableReason}
-                    disabled={!draftAiAvailable}
-                    onClick={openDeckAiEdit}
-                  >
-                    <AiPenIcon size={18} />
-                  </button>
-                  {deckAiEditState.open && (
-                    <form
-                      className="inline-ai-popover deck-toolbar-popover"
-                      role="dialog"
-                      aria-label="Edit selection with AI"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void runDeckAiEdit();
-                      }}
-                    >
-                      <div className="inline-ai-popover-header">
-                        <strong>Edit selection with AI</strong>
-                        <button
-                          type="button"
-                          aria-label="Close AI edit"
-                          data-tooltip="Close without changing the slide"
-                          onClick={closeDeckAiEdit}
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                      <div className="inline-ai-selected-text">
-                        <span>Selected text</span>
-                        <blockquote>{deckAiEditState.selectionText}</blockquote>
-                      </div>
-                      <label>
-                        <span>What should change?</span>
-                        <textarea
-                          rows={2}
-                          aria-label="AI edit instruction"
-                          value={deckAiEditState.instruction}
-                          disabled={deckAiEditState.working}
-                          placeholder="Make this punchier"
-                          onChange={(event) =>
-                            setDeckAiEditState((current) => ({
-                              ...current,
-                              instruction: event.target.value,
-                              error: null,
-                            }))
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.shiftKey) {
-                              event.preventDefault();
-                              void runDeckAiEdit();
-                            }
-                          }}
-                        />
-                      </label>
-                      <div className="inline-ai-prompts">
-                        {["Make it clearer", "Shorten it", "More formal"].map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            type="button"
-                            disabled={deckAiEditState.working}
-                            data-tooltip={`Use "${suggestion}" as the instruction`}
-                            onClick={() =>
-                              setDeckAiEditState((current) => ({
-                                ...current,
-                                instruction: suggestion,
-                                error: null,
-                              }))
-                            }
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                      {deckAiEditState.error && (
-                        <p className="document-link-error" role="alert">
-                          {deckAiEditState.error}
-                        </p>
-                      )}
-                      <div className="inline-ai-actions">
-                        <button
-                          type="button"
-                          disabled={deckAiEditState.working}
-                          data-tooltip="Close without changing the slide"
-                          onClick={closeDeckAiEdit}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          data-tooltip={selectedAgent ? `Rewrite the highlighted text with ${selectedAgent.name}` : draftAiUnavailableReason}
-                          disabled={!draftAiAvailable || deckAiEditState.working || !deckAiEditState.instruction.trim()}
-                        >
-                          {deckAiEditState.working ? "Rewriting…" : "Replace highlight"}
-                        </button>
-                      </div>
-                    </form>
-                  )}
-                </div>
                 <div className="document-insert-control">
                   <button
                     type="button"
@@ -8976,7 +10665,7 @@ export function DocumentAssistantWorkspace({
                   data-tooltip={
                     deckState.slides.length === 0
                       ? "Add a slide before presenting"
-                      : "Present full screen — click or use the arrow keys to advance, Escape exits"
+                      : "Present from this slide (⇧⌘Enter) — arrows advance, P opens presenter view, Esc exits"
                   }
                   onClick={() => {
                     const index = selectedSlide
@@ -8993,8 +10682,47 @@ export function DocumentAssistantWorkspace({
                 >
                   <MonitorPlay size={18} />
                 </button>
+                <DocumentToolbarPanel label="More" title="Deck tools" open={documentToolPanel === "more"}
+                  onToggle={() => setDocumentToolPanel((current) => (current === "more" ? null : "more"))}
+                  onClose={() => setDocumentToolPanel(null)}>
+                  <section className="document-tool-section document-tool-actions" aria-label="Tools"><span className="document-tool-section-label">Tools</span><div className="document-tool-section-controls">
+                <button
+                  type="button"
+                  aria-label="Copy deck outline"
+                  data-tooltip="Copy the whole deck as a text outline for pasting elsewhere"
+                  onClick={copyDeckOutline}
+                >
+                  <Copy size={18} /><span>Copy deck outline</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Keyboard shortcuts"
+                  data-tooltip="Every deck keyboard shortcut (⌘/)"
+                  onClick={() => {
+                    setDocumentToolPanel(null);
+                    setShortcutsOpen(true);
+                  }}
+                >
+                  <Keyboard size={18} /><span>Keyboard shortcuts</span>
+                </button>
+                  </div></section>
+                </DocumentToolbarPanel>
               </div>
               <div className="document-toolbar-group document-toolbar-actions">
+                <button
+                  type="button"
+                  className="deck-sorter-toggle"
+                  aria-label="Slide sorter"
+                  aria-pressed={deckSorterOpen}
+                  data-tooltip={deckSorterOpen ? "Back to the slide editor" : "See every slide at once to reorder and review"}
+                  disabled={deckState.slides.length === 0}
+                  onClick={() => {
+                    endDeckEditSession();
+                    setDeckSorterOpen((value) => !value);
+                  }}
+                >
+                  <LayoutGrid size={17} />
+                </button>
                 <span
                   className="document-word-count deck-slide-count"
                   aria-label={`Slide ${
@@ -9107,7 +10835,22 @@ export function DocumentAssistantWorkspace({
           )}
 
           {draftKind === "deck" && deckState && (
-            <div className="deck-editor-body">
+            <div className={`deck-editor-body ${deckSorterOpen ? "is-sorting" : ""}`} onKeyDown={handleDeckKeyDown}>
+              {deckSorterOpen && (
+                <DeckSlideSorter
+                  slides={deckState.slides}
+                  theme={deckState.theme}
+                  selectedId={selectedSlide?.id ?? null}
+                  onSelect={(id) => setSelectedSlideId(id)}
+                  onOpen={(id) => {
+                    setSelectedSlideId(id);
+                    setDeckSorterOpen(false);
+                  }}
+                  onMove={moveDeckSlide}
+                  onDuplicate={duplicateDeckSlide}
+                  onDelete={deleteDeckSlide}
+                />
+              )}
               <div className="deck-filmstrip" aria-label="Slides" ref={deckFilmstripRef}>
                 {deckState.slides.map((slide, index) => (
                   <div className="deck-thumb" key={slide.id} data-slide-thumb={slide.id}>
@@ -9187,10 +10930,16 @@ export function DocumentAssistantWorkspace({
                   className="deck-add-slide"
                   aria-haspopup="menu"
                   aria-expanded={deckLayoutMenuOpen === "add"}
-                  data-tooltip="Add a slide from a layout"
-                  onClick={() =>
-                    setDeckLayoutMenuOpen((value) => (value === "add" ? null : "add"))
-                  }
+                  data-tooltip="Add a slide from a layout (⇧⌘N)"
+                  onClick={() => {
+                    // The layout menu lives on the stage; an empty deck has no
+                    // stage yet, so its first slide starts as a title slide.
+                    if (!selectedSlide) {
+                      addDeckSlide("title");
+                      return;
+                    }
+                    setDeckLayoutMenuOpen((value) => (value === "add" ? null : "add"));
+                  }}
                 >
                   <Plus size={16} />
                   Add slide
@@ -9199,39 +10948,112 @@ export function DocumentAssistantWorkspace({
               <div className="deck-stage-column">
                 <section className="deck-design-browser" aria-label="Slide design choices">
                   <div className="deck-design-heading">
-                    <strong>Slide layouts</strong>
-                    <button type="button" className="secondary-button compact" onClick={() => { setActiveAssistantTool("templates"); if (railIsDrawer) setRailOpen(true); }}>Deck starters &amp; brand themes</button>
-                  </div>
-                  <div className="deck-theme-gallery" role="group" aria-label="Deck color themes">
-                    {[
-                      ["Aperture", "#087d8b", "#ffffff", "#0c1a26", "#22313f"],
-                      ["Midnight", "#66d9ef", "#122033", "#ffffff", "#dbe5f0"],
-                      ["Editorial", "#a44932", "#faf4e8", "#38271f", "#514237"],
-                      ["Violet", "#7952c8", "#f7f4ff", "#2e1c4b", "#4b3c62"],
-                      ["Forest", "#397b52", "#f1f6ef", "#193823", "#35533d"],
-                    ].map(([name, accent, background, heading, body]) => (
-                      <button key={name} type="button" aria-label={`Apply ${name} color theme`}
-                        aria-pressed={deckState.theme.colors.accent1 === accent && deckState.theme.colors.background === background}
-                        onClick={() => applyDeckPalette(name, accent, background, heading, body)}>
-                        <span aria-hidden="true" style={{ background, borderColor: accent, color: heading }}>Aa</span>{name}
+                    <div className="deck-design-tabs" role="group" aria-label="Slide design view">
+                      <button type="button" aria-pressed={deckDesignTab === "layouts"} onClick={() => setDeckDesignTab("layouts")}>
+                        <LayoutTemplate size={14} aria-hidden="true" />
+                        Layouts
                       </button>
-                    ))}
-                  </div>
-                  <div className="deck-layout-gallery" aria-label="Browse slide layouts">
-                    {SUPPORTED_DECK_LAYOUTS.map(layout => (
-                      <button type="button" key={layout} aria-label={`Apply ${DECK_LAYOUT_LABELS[layout]} layout`}
-                        aria-pressed={selectedSlide?.layout === layout} onClick={() => switchDeckSlideLayout(layout)}>
-                        <span className="deck-layout-preview" aria-hidden="true"><span className="deck-thumb-scale"><DeckSlideStatic slide={previewDeckLayout(layout)} theme={deckState.theme} /></span></span>
-                        <span>{DECK_LAYOUT_LABELS[layout]}</span>
+                      <button type="button" aria-pressed={deckDesignTab === "themes"} onClick={() => setDeckDesignTab("themes")}>
+                        <Palette size={14} aria-hidden="true" />
+                        Themes
                       </button>
-                    ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="deck-design-starters"
+                      data-tooltip="Open deck starters and upload a PowerPoint brand template in the assistant panel"
+                      onClick={() => { setActiveAssistantTool("templates"); if (railIsDrawer) setRailOpen(true); }}
+                    >
+                      <Sparkles size={14} aria-hidden="true" />
+                      Deck starters &amp; brand themes
+                    </button>
                   </div>
+                  {deckDesignTab === "layouts" ? (
+                    <div className="deck-layout-gallery" aria-label="Browse slide layouts">
+                      {SUPPORTED_DECK_LAYOUTS.map(layout => (
+                        <button type="button" key={layout} aria-label={`Apply ${DECK_LAYOUT_LABELS[layout]} layout`}
+                          data-tooltip={`Switch the selected slide to the ${DECK_LAYOUT_LABELS[layout]} layout`}
+                          aria-pressed={selectedSlide?.layout === layout} onClick={() => switchDeckSlideLayout(layout)}>
+                          <span className="deck-layout-preview" aria-hidden="true"><span className="deck-thumb-scale"><DeckSlideStatic slide={previewDeckLayout(layout)} theme={deckState.theme} /></span></span>
+                          <span>{DECK_LAYOUT_LABELS[layout]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="deck-theme-gallery" role="group" aria-label="Deck color themes">
+                      {DECK_COLOR_PALETTES.map(([name, accent, background, heading, body]) => {
+                        const active = deckState.theme.colors.accent1 === accent && deckState.theme.colors.background === background;
+                        return (
+                          <button key={name} type="button" aria-label={`Apply ${name} color theme`}
+                            data-tooltip={`Recolor every slide with the ${name} palette; your text stays as written`}
+                            aria-pressed={active}
+                            onClick={() => applyDeckPalette(name, accent, background, heading, body)}>
+                            <span className="deck-theme-preview" aria-hidden="true" style={{ background }}>
+                              <span className="deck-theme-preview-title" style={{ background: heading }} />
+                              <span className="deck-theme-preview-rule" style={{ background: accent }} />
+                              <span className="deck-theme-preview-line" style={{ background: body }} />
+                              <span className="deck-theme-preview-line is-short" style={{ background: body }} />
+                              {active && <CheckCircle2 className="deck-theme-preview-check" size={14} />}
+                            </span>
+                            <span>{name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </section>
                 {selectedSlide ? (
                   <>
                     {/* Fixed-position pill; must live OUTSIDE the scaled
                         .deck-stage or the transform would re-anchor it. */}
-                    {deckAiSelectionOffer && !deckAiEditState.open && (
+                    {deckAi && (
+                      <AiEditComposer
+                        getAnchor={getDeckAiAnchor}
+                        title={deckAi.mode === "slide" ? "Edit slide with AI" : "Edit slide text with AI"}
+                        targetLabel={
+                          deckAi.mode === "slide"
+                            ? `Slide ${Math.max(1, deckState.slides.findIndex((slide) => slide.id === deckAi.slideId) + 1)} · ${
+                                DECK_LAYOUT_LABELS[
+                                  deckState.slides.find((slide) => slide.id === deckAi.slideId)?.layout ?? "title"
+                                ] ?? "Slide"
+                              }`
+                            : `“${deckAi.selectedText.length > 90 ? `${deckAi.selectedText.slice(0, 90)}…` : deckAi.selectedText}”`
+                        }
+                        placeholder={
+                          deckAi.mode === "slide"
+                            ? "Tell AI how to change this slide…"
+                            : "Tell AI how to change the highlighted text…"
+                        }
+                        actions={deckAi.mode === "slide" ? SLIDE_ACTIONS : DOCUMENT_SELECTION_ACTIONS.filter((action) => action.group === "improve")}
+                        chipGroups={deckAi.mode === "slide" ? SLIDE_CHIP_GROUPS : DOCUMENT_SELECTION_CHIP_GROUPS}
+                        phase={deckAi.phase}
+                        agentName={selectedAgent?.name ?? "AI"}
+                        streamText={deckAi.stream}
+                        runLabel={deckAi.runLabel}
+                        baseText={deckAi.mode === "selection" ? deckAi.selectedText : undefined}
+                        proposalText={deckAi.mode === "selection" ? deckAi.proposalText : undefined}
+                        proposalHtml={deckAi.mode === "selection" ? escapeHtml(deckAi.proposalText) : undefined}
+                        reviewPreview={
+                          deckAi.mode === "slide" && deckAi.phase === "review" ? (
+                            <SlideAiPreview
+                              before={deckState.slides.find((slide) => slide.id === deckAi.slideId) ?? null}
+                              after={deckAi.proposalSlides}
+                              theme={deckState.theme}
+                            />
+                          ) : undefined
+                        }
+                        error={deckAi.error}
+                        disabledReason={draftAiAvailable ? null : draftAiUnavailableReason}
+                        acceptLabel={deckAi.mode === "slide" ? "Apply to slide" : "Replace"}
+                        onRun={runDeckAi}
+                        onRefine={refineDeckAi}
+                        onAccept={acceptDeckAi}
+                        onRetry={retryDeckAi}
+                        onStop={() => deckAiAbortRef.current?.abort()}
+                        onClose={closeDeckAiEdit}
+                      />
+                    )}
+                    {deckAiSelectionOffer && !deckAi && (
                       <button
                         className="inline-ai-selection-trigger"
                         type="button"
@@ -9375,6 +11197,12 @@ export function DocumentAssistantWorkspace({
                             );
                           },
                         )}
+                        {deckGuides?.x.map((x) => (
+                          <span key={`gx-${x}`} className="deck-snap-guide is-vertical" style={{ left: x }} aria-hidden="true" />
+                        ))}
+                        {deckGuides?.y.map((y) => (
+                          <span key={`gy-${y}`} className="deck-snap-guide is-horizontal" style={{ top: y }} aria-hidden="true" />
+                        ))}
                         {deckActiveBlock &&
                           deckActiveBlock.slideId === selectedSlide.id &&
                           (() => {
@@ -9393,6 +11221,32 @@ export function DocumentAssistantWorkspace({
                                   height: frameBox.h,
                                 }}
                               >
+                                {(["top", "right", "bottom", "left"] as const).map((edge) => (
+                                  <span
+                                    key={edge}
+                                    className={`deck-block-edge deck-block-edge--${edge}`}
+                                    data-deck-handle=""
+                                    aria-hidden="true"
+                                    onPointerDown={beginDeckBlockMove}
+                                    onPointerMove={moveDeckBlockMove}
+                                    onPointerUp={endDeckBlockMove}
+                                    onPointerCancel={endDeckBlockMove}
+                                  />
+                                ))}
+                                <button
+                                  type="button"
+                                  className="deck-block-move"
+                                  data-deck-handle=""
+                                  aria-label={`Move the ${deckActiveBlock.region} block`}
+                                  data-tooltip="Drag to move. It snaps to the slide's center and to other blocks; hold Option to move freely. Arrow keys nudge."
+                                  onPointerDown={beginDeckBlockMove}
+                                  onPointerMove={moveDeckBlockMove}
+                                  onPointerUp={endDeckBlockMove}
+                                  onPointerCancel={endDeckBlockMove}
+                                  onKeyDown={nudgeDeckBlock}
+                                >
+                                  <GripHorizontal size={14} />
+                                </button>
                                 {DECK_RESIZE_CORNERS.map((corner) => (
                                   <button
                                     key={corner}
@@ -9584,7 +11438,7 @@ export function DocumentAssistantWorkspace({
                     <Presentation size={28} />
                     <strong>No slides yet</strong>
                     <p>Add a slide to start from a layout.</p>
-                    <button type="button" onClick={() => setDeckLayoutMenuOpen("add")}>
+                    <button type="button" onClick={() => addDeckSlide("title")}>
                       <Plus size={16} />
                       Add slide
                     </button>
@@ -9595,32 +11449,151 @@ export function DocumentAssistantWorkspace({
           )}
 
           {draftKind === "document" && (
-          <div className={`document-editor-body ${citationsOpen ? "has-citation-panel" : ""}`}>
+          <div
+            className={`document-editor-body ${citationsOpen ? "has-citation-panel" : ""} ${
+              outlineOpen ? "has-outline" : ""
+            }`}
+          >
+            {outlineOpen && (
+              <DocumentOutline
+                headings={outlineHeadings}
+                activeIndex={activeOutlineIndex}
+                onJump={jumpToHeading}
+                onClose={toggleOutline}
+              />
+            )}
+            {findState.open && (
+              <DocumentFindBar
+                query={findState.query}
+                replacement={findState.replacement}
+                matchCase={findState.matchCase}
+                wholeWord={findState.wholeWord}
+                showReplace={findState.showReplace}
+                total={findTotal}
+                current={Math.min(findState.current, Math.max(0, findTotal - 1))}
+                focusToken={findState.focusToken}
+                onQueryChange={(query) => setFindState((current) => ({ ...current, query, current: 0 }))}
+                onReplacementChange={(replacement) => setFindState((current) => ({ ...current, replacement }))}
+                onToggleCase={() => setFindState((current) => ({ ...current, matchCase: !current.matchCase, current: 0 }))}
+                onToggleWholeWord={() => setFindState((current) => ({ ...current, wholeWord: !current.wholeWord, current: 0 }))}
+                onToggleReplace={() => setFindState((current) => ({ ...current, showReplace: !current.showReplace }))}
+                onNext={() => stepFind(1)}
+                onPrevious={() => stepFind(-1)}
+                onReplace={replaceCurrentMatch}
+                onReplaceAll={replaceAllMatches}
+                onClose={closeFind}
+              />
+            )}
             <div
               ref={pageScrollRef}
               className="document-page-scroll"
               onScroll={() => {
                 updatePageMetrics();
-                setInlineAiSelectionOffer(null);
+                updateActiveOutline();
               }}
             >
-              {inlineAiSelectionOffer && !inlineEditState.open && (
-                <button
-                  className="inline-ai-selection-trigger"
-                  type="button"
-                  style={{ top: inlineAiSelectionOffer.top, left: inlineAiSelectionOffer.left }}
-                  aria-label="Ask AI to edit highlighted text"
-                  data-tooltip={!draftAiAvailable ? draftAiUnavailableReason : undefined}
-                  disabled={!draftAiAvailable}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={openInlineAiEdit}
-                >
-                  <Sparkles size={14} />
-                  Ask AI
-                </button>
+              {slashMenu && (
+                <DocumentSlashMenu
+                  getAnchor={getSlashAnchor}
+                  items={slashItems}
+                  activeIndex={Math.min(slashMenu.activeIndex, Math.max(0, slashItems.length - 1))}
+                  query={slashMenu.query}
+                  onPick={pickSlashCommand}
+                  onHover={(index) => setSlashMenu((current) => (current ? { ...current, activeIndex: index } : current))}
+                />
+              )}
+              {imageTools && !docAi && (
+                <DocumentImageToolbar
+                  getRect={getActiveFigureRect}
+                  size={imageTools.size}
+                  align={imageTools.align}
+                  alt={imageTools.alt}
+                  onSize={(size) => updateActiveFigure((figure) => setMediaSize(figure, size), "Picture resized.")}
+                  onAlign={(align) => updateActiveFigure((figure) => setMediaAlign(figure, align), "Picture aligned.")}
+                  onAlt={(alt) => updateActiveFigure((_figure, image) => image.setAttribute("alt", alt.trim()), "Picture alt text updated.")}
+                  onDelete={() => updateActiveFigure((figure) => figure.remove(), "Picture deleted. Undo restores it.")}
+                />
+              )}
+              {tableActive && !inlineAiSelectionOffer && !docAi && !slashMenu && (
+                <DocumentTableToolbar getTableRect={getActiveTableRect} onAction={handleTableAction} />
+              )}
+              {inlineAiSelectionOffer && !docAi && !slashMenu && (
+                <DocumentSelectionToolbar
+                  getAnchor={getDocumentAiAnchor}
+                  format={{
+                    bold: formatState.bold,
+                    italic: formatState.italic,
+                    underline: formatState.underline,
+                    strikethrough: formatState.strikethrough,
+                    blockStyle: selectionListTag(editorRef.current) ?? formatState.blockStyle,
+                  }}
+                  aiDisabledReason={draftAiAvailable ? null : draftAiUnavailableReason}
+                  onAskAi={openInlineAiEdit}
+                  onCommand={(command) => {
+                    const labels = {
+                      bold: "Bold",
+                      italic: "Italic",
+                      underline: "Underline",
+                      strikeThrough: "Strikethrough",
+                    } as const;
+                    runEditorCommand(command, `${labels[command]} formatting toggled.`);
+                    captureInlineAiSelection();
+                  }}
+                  onBlockStyle={(value) => {
+                    if (value === "ul" || value === "ol") {
+                      runEditorCommand(
+                        value === "ul" ? "insertUnorderedList" : "insertOrderedList",
+                        value === "ul" ? "Bulleted list applied." : "Numbered list applied.",
+                      );
+                    } else {
+                      applyBlockStyle(value);
+                    }
+                    captureInlineAiSelection();
+                  }}
+                  onLink={openLinkEditor}
+                  onHighlight={(color) => {
+                    applyHighlight(color);
+                    captureInlineAiSelection();
+                  }}
+                />
+              )}
+              {docAi && (
+                <AiEditComposer
+                  getAnchor={getDocumentAiAnchor}
+                  title={docAi.mode === "replace" ? "Edit with AI" : "Write with AI"}
+                  targetLabel={
+                    docAi.mode === "replace"
+                      ? `“${docAi.selectedText.length > 90 ? `${docAi.selectedText.slice(0, 90)}…` : docAi.selectedText}”`
+                      : "New text at the cursor"
+                  }
+                  placeholder={
+                    docAi.mode === "replace"
+                      ? "Tell AI how to change the highlighted text…"
+                      : "Tell AI what to write here…"
+                  }
+                  actions={docAi.mode === "replace" ? DOCUMENT_SELECTION_ACTIONS : DOCUMENT_WRITE_ACTIONS}
+                  chipGroups={docAi.mode === "replace" ? DOCUMENT_SELECTION_CHIP_GROUPS : []}
+                  phase={docAi.phase}
+                  agentName={selectedAgent?.name ?? "AI"}
+                  streamText={docAi.stream}
+                  runLabel={docAi.runLabel}
+                  baseText={docAi.mode === "replace" ? docAi.selectedText : undefined}
+                  proposalText={docAi.proposalText}
+                  proposalHtml={docAi.proposalHtml}
+                  error={docAi.error}
+                  disabledReason={draftAiAvailable ? null : draftAiUnavailableReason}
+                  acceptLabel={docAi.mode === "replace" ? "Replace" : "Insert"}
+                  onRun={runDocumentAi}
+                  onRefine={refineDocumentAi}
+                  onAccept={() => acceptDocumentAi("replace")}
+                  onInsertBelow={docAi.mode === "replace" ? () => acceptDocumentAi("below") : undefined}
+                  onRetry={retryDocumentAi}
+                  onStop={() => docAiAbortRef.current?.abort()}
+                  onClose={discardDocumentAi}
+                />
               )}
               <div className="document-ruler">
-                <div className="document-ruler-track">
+                <div className="document-ruler-track" style={documentZoom !== 1 ? { zoom: documentZoom } : undefined}>
                   <button
                     type="button"
                     className="document-ruler-handle is-first"
@@ -9743,23 +11716,41 @@ export function DocumentAssistantWorkspace({
                     "--doc-indent-left": `${indentLeft}px`,
                     "--doc-indent-right": `${indentRight}px`,
                     "--doc-indent-first": `${indentFirstLine}px`,
+                    ...(documentZoom !== 1 ? { zoom: documentZoom } : {}),
                   } as CSSProperties
                 }
                 onInput={(event) => {
                   skipNextEditorSyncRef.current = true;
                   normalizedLayoutHtmlRef.current = null;
+                  // Editing commands run by an autoformat or paste report
+                  // their own input; the transform already took the undo step.
+                  if (editorTransformRef.current) return;
                   setInlineAiSelectionOffer(null);
-                  if (content !== event.currentTarget.innerHTML) {
-                    recordUndoSnapshot(content);
+                  if (
+                    content !== event.currentTarget.innerHTML &&
+                    startsTypingUndoStep(event.nativeEvent)
+                  ) {
+                    recordUndoSnapshot(content, { typing: true });
                   }
                   setContent(event.currentTarget.innerHTML);
                   setStatus("Draft edited manually.");
+                  handleEditorInput(event.nativeEvent as InputEvent);
                 }}
                 onKeyDown={handleEditorKeyDown}
+                onPaste={handleEditorPaste}
+                onMouseDown={(event) => {
+                  if (slashMenu) closeSlashMenu();
+                  selectEditorFigure(event.target);
+                }}
+                onFocus={() => setParagraphSeparator("p")}
                 onKeyUp={captureInlineAiSelection}
                 onMouseUp={captureInlineAiSelection}
                 onSelect={captureInlineAiSelection}
-                onBlur={(event) => scheduleSheetOverflowHeal(event.currentTarget.innerHTML)}
+                onBlur={(event) => {
+                  setParagraphSeparator("div");
+                  if (slashMenu) closeSlashMenu();
+                  if (!docAiOpenRef.current) scheduleSheetOverflowHeal(event.currentTarget.innerHTML);
+                }}
               />
             </div>
             {citationsOpen && (
@@ -9810,7 +11801,26 @@ export function DocumentAssistantWorkspace({
                 </div>
               </aside>
             )}
+            <DocumentStatusBar
+              page={currentPage}
+              pageCount={renderedPageCount}
+              words={wordCount.words}
+              characters={wordCount.characters}
+              selectionWords={selectionWordCount}
+              zoom={documentZoom}
+              outlineOpen={outlineOpen}
+              onZoomChange={changeDocumentZoom}
+              onToggleOutline={toggleOutline}
+              onOpenFind={() => openFind()}
+              onShowShortcuts={() => setShortcutsOpen(true)}
+            />
           </div>
+          )}
+          {shortcutsOpen && (
+            <EditorShortcutsDialog
+              kind={draftKind === "deck" ? "deck" : "document"}
+              onClose={() => setShortcutsOpen(false)}
+            />
           )}
         </main>
         {compareOpen && redlineDiff && compareBaseVersion && compareComparisonVersion && (
@@ -11800,6 +13810,92 @@ function DraftWorkTrace({
   );
 }
 
+/** Starter requests for the empty draft chat. They only fill the message box;
+ * nothing is sent until the user presses send. */
+function deckTemplateCategoryIcon(category: string): LucideIcon {
+  switch (category) {
+    case "Pitch":
+      return Rocket;
+    case "Business":
+      return BarChart3;
+    case "Project":
+      return ClipboardList;
+    case "Training":
+      return GraduationCap;
+    default:
+      return Presentation;
+  }
+}
+
+function draftTemplateCategoryIcon(category: string): LucideIcon {
+  switch (category) {
+    case "Legal":
+      return Scale;
+    case "Finance":
+      return BarChart3;
+    case "Business":
+      return Briefcase;
+    case "Writing":
+      return PenLine;
+    case "Code":
+      return Code2;
+    case "Library":
+      return LibraryBig;
+    case "Uploaded":
+      return Upload;
+    default:
+      return FileText;
+  }
+}
+
+function draftUploadStateLabel(file: DraftSourceFile) {
+  if (file.status === "uploading") return "uploading";
+  if (file.status === "error") return "upload failed";
+  return file.hasText ? "ready" : "name only";
+}
+
+function draftStarterSuggestions(kind: "document" | "deck", hasContent: boolean, hasSources: boolean) {
+  if (kind === "deck") {
+    return hasContent
+      ? [
+          "Tighten every slide to three short bullets",
+          "Add a closing slide with clear next steps",
+          "Rewrite the speaker notes in a confident, conversational tone",
+        ]
+      : [
+          hasSources
+            ? "Build a 6-slide briefing from my sources"
+            : "Build a 6-slide project kickoff deck",
+          "Create a 5-slide quarterly update with goals, results, and risks",
+          "Build a short pitch deck for a new internal tool",
+        ];
+  }
+  return hasContent
+    ? [
+        "Tighten this draft and make the tone more confident",
+        "Add a short executive summary at the top",
+        hasSources
+          ? "Check each claim against my sources and add citations"
+          : "Turn the key points into a clear bulleted list",
+      ]
+    : [
+        hasSources
+          ? "Write a one-page brief that summarizes my sources"
+          : "Draft a one-page project status memo with risks and next steps",
+        "Write a friendly client email that recaps today's meeting",
+        "Draft a team policy outline with headings and short explanations",
+      ];
+}
+
+/** "Require source citations" tightens the provider's default citation
+ * behavior: every factual claim must carry a source label or be flagged. */
+function withCitationRequirement(prompt: string, required: boolean) {
+  if (!required) return prompt;
+  return `${prompt}
+
+Citation requirement: cite every factual claim inline with the exact source label provided in context (for example [K1] for workspace knowledge, the web citation for web results, or the attachment name for uploaded files). If no provided source supports a claim, keep it only if essential and mark it [citation needed]. Never invent sources.`;
+}
+
 function DraftEventRow({ event }: { event: AssistantEvent }) {
   const timestamp = draftEventTimestamp(event);
   const duration = typeof event.durationMs === "number" ? formatDuration(event.durationMs) : null;
@@ -11903,6 +13999,7 @@ function serverDraftHistoryStub(doc: ServerDraftDocument): DraftDocumentHistoryI
     createdAt: doc.created_at,
     status: "complete",
     archived: doc.archived ?? false,
+    kind: doc.kind ?? "document",
     serverId: doc.id,
     serverRevision: null,
     serverListedRevision: doc.current_revision,
@@ -12111,6 +14208,122 @@ function getEditorSelection(editor: HTMLElement | null) {
   if (range.collapsed || !selectedText) return null;
   return { range: range.cloneRange(), text: selectedText };
 }
+
+/** Enter makes a real paragraph in the document (Word's model) rather than
+ * the browser's default <div>; slide text blocks keep the default, so the
+ * setting is switched with the document canvas's focus. */
+function setParagraphSeparator(tag: "p" | "div") {
+  if (typeof document.execCommand !== "function") return;
+  try {
+    document.execCommand("defaultParagraphSeparator", false, tag);
+  } catch {
+    // Older engines ignore the command; Enter still works, just with <div>.
+  }
+}
+
+/** The paragraph-level block an autoformat rule may restyle. */
+function autoformatBlock(node: Node, editor: HTMLElement) {
+  const element = node instanceof HTMLElement ? node : node.parentElement;
+  const block = element?.closest<HTMLElement>("p,div,h1,h2,h3,li,blockquote,td,th,figure") ?? null;
+  if (!block || block === editor || !editor.contains(block)) return null;
+  return /^(P|DIV|H1|H2|H3)$/.test(block.tagName) ? block : null;
+}
+
+/** Typing into an empty page leaves bare text directly in the page; wrap
+ * that line in a paragraph so it behaves like every other block. */
+function wrapLooseCaretLine(editor: HTMLElement) {
+  const selection = window.getSelection?.();
+  if (!selection || !selection.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  const node = range.startContainer;
+  if (!range.collapsed || node.nodeType !== Node.TEXT_NODE) return false;
+  const container = node.parentElement;
+  if (!container) return false;
+  const isRoot =
+    container === editor ||
+    (container.matches("section.document-page") && container.parentElement === editor);
+  if (!isRoot) return false;
+  const isInline = (candidate: Node) =>
+    candidate.nodeType === Node.TEXT_NODE ||
+    (candidate instanceof HTMLElement && INLINE_AI_INLINE_TAGS.has(candidate.tagName.toLowerCase()));
+  let first: Node = node;
+  while (first.previousSibling && isInline(first.previousSibling) && first.previousSibling.nodeName !== "BR") {
+    first = first.previousSibling;
+  }
+  let last: Node = node;
+  while (last.nextSibling && isInline(last.nextSibling)) {
+    last = last.nextSibling;
+    if (last.nodeName === "BR") break;
+  }
+  const offset = range.startOffset;
+  const paragraph = document.createElement("p");
+  container.insertBefore(paragraph, first);
+  let cursor: Node | null = first;
+  while (cursor) {
+    const next: Node | null = cursor === last ? null : cursor.nextSibling;
+    paragraph.appendChild(cursor);
+    cursor = next;
+  }
+  const caret = document.createRange();
+  caret.setStart(node, Math.min(offset, node.textContent?.length ?? 0));
+  caret.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(caret);
+  return true;
+}
+
+const PARAGRAPH_BLOCK_CHILD = /^(P|UL|OL|TABLE|H[1-6]|BLOCKQUOTE|HR|PRE|FIGURE|DIV|SECTION)$/;
+
+function hasNestedParagraphBlocks(root: HTMLElement) {
+  return Array.from(root.querySelectorAll("p")).some((paragraph) =>
+    Array.from(paragraph.children).some((child) => PARAGRAPH_BLOCK_CHILD.test(child.tagName)),
+  );
+}
+
+/** Browsers sometimes build a list or a paragraph inside a <p> (invalid
+ * HTML that exports badly). Split such paragraphs around their block
+ * children so every block sits at block level. */
+function normalizeParagraphNesting(root: HTMLElement) {
+  for (let guard = 0; guard < 200; guard += 1) {
+    const paragraph = Array.from(root.querySelectorAll<HTMLElement>("p")).find((candidate) =>
+      Array.from(candidate.children).some((child) => PARAGRAPH_BLOCK_CHILD.test(child.tagName)),
+    );
+    if (!paragraph) return;
+    const parts: HTMLElement[] = [];
+    let run: HTMLElement | null = null;
+    Array.from(paragraph.childNodes).forEach((child) => {
+      if (child instanceof HTMLElement && PARAGRAPH_BLOCK_CHILD.test(child.tagName)) {
+        run = null;
+        parts.push(child);
+        return;
+      }
+      if (!run) {
+        run = paragraph.cloneNode(false) as HTMLElement;
+        parts.push(run);
+      }
+      run.appendChild(child);
+    });
+    paragraph.replaceWith(
+      ...parts.filter(
+        (part) => part.tagName !== "P" || part.parentElement !== null || hasRenderableContent(part) || part.querySelector("br,img"),
+      ),
+    );
+  }
+}
+
+/** "ul"/"ol" when the caret sits in a list, so style menus can say so. */
+function selectionListTag(editor: HTMLElement | null) {
+  const selection = window.getSelection?.();
+  const node = selection?.focusNode ?? null;
+  if (!editor || !node || !editor.contains(node)) return null;
+  const element = node instanceof HTMLElement ? node : node.parentElement;
+  const list = element?.closest("ul,ol");
+  return list && editor.contains(list) ? (list.tagName.toLowerCase() as "ul" | "ol") : null;
+}
+
+/** Undo steps coalesce a typing burst into one entry per word, like Word,
+ * instead of one entry per keystroke. */
+const TYPING_UNDO_BURST_MS = 1200;
 
 function getCollapsedEditorRange(editor: HTMLElement | null) {
   const selection = window.getSelection?.();
@@ -12330,6 +14543,8 @@ function inlineRewritePrompt({
   selectedHtml = "",
   structureHint = "",
   surface = "document",
+  contextBefore = "",
+  contextAfter = "",
 }: {
   documentTitle: string;
   instruction: string;
@@ -12342,6 +14557,9 @@ function inlineRewritePrompt({
   /** Same rewrite contract on both drafting surfaces; only the framing noun
    * changes, and slides additionally forbid markup (regions are plain runs). */
   surface?: "document" | "slide";
+  /** Sentences around the highlight, so the rewrite fits where it lands. */
+  contextBefore?: string;
+  contextAfter?: string;
 }) {
   return [
     surface === "slide"
@@ -12352,15 +14570,74 @@ function inlineRewritePrompt({
       ? "Return only the replacement text as plain text — no quotes, no markdown, no headings, no explanations, and no surrounding slide content."
       : "Return only the replacement text. Do not add labels, explanations, or any surrounding document section.",
     ...(surface === "slide" ? [] : ["", INLINE_AI_FORMAT_RULES]),
+    ...(structureHint ? ["", "Where the highlight sits:", structureHint] : []),
+    ...aiSelectionContextLines(contextBefore, contextAfter),
+    ...(selectedHtml ? ["", "Highlighted passage (HTML):", selectedHtml] : []),
+    // The API reads everything between these two headings as the instruction
+    // when deciding whether an inline edit asks for live web research, so
+    // document context must never sit between them.
     "",
     "User instruction:",
     instruction,
-    ...(structureHint ? ["", "Where the highlight sits:", structureHint] : []),
-    ...(selectedHtml ? ["", "Highlighted passage (HTML):", selectedHtml] : []),
     "",
     "Highlighted passage:",
     selectedText,
   ].join("\n");
+}
+
+/** Describes where a collapsed caret sits, for the write-at-cursor prompt. */
+function inlineAiCaretHint(editor: HTMLElement, range: Range) {
+  const block = inlineAiBlockAncestor(range.startContainer, editor);
+  if (!block) return "The cursor sits between blocks in the document body. Return whole blocks.";
+  const tag = block.tagName.toLowerCase();
+  const empty = !(block.textContent ?? "").trim();
+  if (tag === "li") {
+    const listLabel = block.parentElement?.tagName.toLowerCase() === "ol" ? "numbered" : "bulleted";
+    return `The cursor is ${empty ? "in an empty" : "inside a"} ${listLabel} list item. Return <li> elements to add items to that list.`;
+  }
+  const label = INLINE_AI_BLOCK_LABELS[tag] ?? "paragraph";
+  if (empty) return `The cursor is in an empty ${label}. Return whole blocks (paragraphs, lists, headings, or a table).`;
+  const atEnd = isCaretAtBlockEnd(block, range);
+  return atEnd
+    ? `The cursor is at the end of a ${label}. Return inline text to continue it, or whole blocks for new paragraphs.`
+    : `The cursor is in the middle of a ${label}. Return inline text that fits the sentence.`;
+}
+
+/** Live text for the streaming preview: thinking traces and markup removed
+ * so the writer reads words, not tags, while the model is still writing. */
+function streamPreviewText(raw: string) {
+  const visible = splitAssistantThinking(raw).visibleContent;
+  if (/^\s*<(think|thinking)>/i.test(visible)) return "";
+  return visible
+    .replace(/^```[a-z]*\n?/i, "")
+    .replace(/<\/(p|h[1-6]|li|tr|blockquote|pre)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<\/t[dh]>/gi, "   ")
+    .replace(/<[^>]*>?/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimStart();
+}
+
+/** Visible words of an HTML fragment, blocks separated by spaces. */
+function htmlPlainText(html: string) {
+  const template = document.createElement("template");
+  template.innerHTML = html
+    .replace(/<\/(p|h[1-6]|li|td|th|blockquote|pre|tr)>/gi, "$& ")
+    .replace(/<br\s*\/?>/gi, " ");
+  return (template.content.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function htmlIsInlineOnly(html: string) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return Array.from(template.content.childNodes).every(isInlineAiNode);
 }
 
 /** Tags the reply may use inside a sentence. Anything else it returns is
@@ -12719,7 +14996,8 @@ function insertInlineAiSuggestion(
   editor: HTMLElement,
   range: Range,
   html: string,
-  stamp: AiEditStamp,
+  /** Provenance for AI edits; null inserts plain content (paste, blocks). */
+  stamp: AiEditStamp | null,
 ): Node | null {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -12730,9 +15008,15 @@ function insertInlineAiSuggestion(
   const blockTag = block?.tagName.toLowerCase() ?? "";
 
   if (nodes.every(isInlineAiNode)) {
+    range.deleteContents();
+    if (!stamp) {
+      const fragment = document.createDocumentFragment();
+      nodes.forEach((node) => fragment.appendChild(node));
+      range.insertNode(fragment);
+      return nodes[nodes.length - 1];
+    }
     const marker = markInlineAiSuggestion(document.createElement("span"), stamp);
     nodes.forEach((node) => marker.appendChild(node));
-    range.deleteContents();
     range.insertNode(marker);
     return marker;
   }
@@ -12743,17 +15027,20 @@ function insertInlineAiSuggestion(
   const listItems =
     blockTag === "li" ? (inlineAiListItems(nodes) ?? paragraphsAsListItems(blocks)) : null;
   if (block && listItems) {
-    listItems.forEach((item) => markInlineAiSuggestion(item, stamp));
+    if (stamp) listItems.forEach((item) => markInlineAiSuggestion(item, stamp));
     if (endBlock === block && !rangeCoversBlock(block, range)) {
       // Only part of one item was highlighted: the first new item takes the
       // highlighted words' place and the rest follow as their own bullets.
       const [first, ...rest] = listItems;
-      const marker = markInlineAiSuggestion(document.createElement("span"), stamp);
+      const marker = stamp
+        ? markInlineAiSuggestion(document.createElement("span"), stamp)
+        : document.createElement("span");
       while (first.firstChild) marker.appendChild(first.firstChild);
       range.deleteContents();
       range.insertNode(marker);
+      if (!stamp) marker.replaceWith(...Array.from(marker.childNodes));
       if (rest.length) block.after(...rest);
-      return rest.length ? rest[rest.length - 1] : marker;
+      return rest.length ? rest[rest.length - 1] : block;
     }
     // Whole items — possibly several — were highlighted, so the new items take
     // their place and any item the highlight emptied is dropped.
@@ -12765,7 +15052,7 @@ function insertInlineAiSuggestion(
     return listItems[listItems.length - 1];
   }
 
-  blocks.forEach((node) => markInlineAiSuggestion(node, stamp));
+  if (stamp) blocks.forEach((node) => markInlineAiSuggestion(node, stamp));
 
   // Table cells and the page body already hold blocks, so the reply can drop in
   // where the highlight was.
@@ -13262,8 +15549,12 @@ function sampleChartHtml() {
   return `<figure class="document-chart-block" contenteditable="false"><figcaption>Inserted chart</figcaption><div class="document-chart-bars"><span style="height: 42%"></span><span style="height: 70%"></span><span style="height: 54%"></span><span style="height: 86%"></span><span style="height: 62%"></span></div></figure>`;
 }
 
-function sampleTableHtml() {
-  return `<table class="document-data-table"><thead><tr><th>Item</th><th>Owner</th><th>Status</th></tr></thead><tbody><tr><td>Draft section</td><td>Assistant</td><td>In review</td></tr><tr><td>Source check</td><td>Reviewer</td><td>Open</td></tr></tbody></table>`;
+/** A blank table with a header row, ready to type into. */
+function emptyTableHtml(rows: number, columns: number) {
+  const cells = (tag: "th" | "td") =>
+    Array.from({ length: columns }, () => `<${tag}><br></${tag}>`).join("");
+  const body = Array.from({ length: Math.max(1, rows - 1) }, () => `<tr>${cells("td")}</tr>`).join("");
+  return `<table class="document-data-table"><thead><tr>${cells("th")}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 /** Whole-artifact nouns the "make me a …" verb family can target. Bare
@@ -14537,6 +16828,19 @@ function deckRegionStyle(
   };
 }
 
+/** Linear mix of two #RRGGBB colors; `amount` is the share of `b`. */
+function mixHexColors(a: string, b: string, amount: number) {
+  const parse = (hex: string) => {
+    const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    const value = match ? parseInt(match[1], 16) : 0xffffff;
+    return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  };
+  const [ar, ag, ab] = parse(a);
+  const [br, bg, bb] = parse(b);
+  const mix = (x: number, y: number) => Math.round(x + (y - x) * amount).toString(16).padStart(2, "0");
+  return `#${mix(ar, br)}${mix(ag, bg)}${mix(ab, bb)}`.toUpperCase();
+}
+
 function deckDecorationColor(theme: DeckTheme, role: string): string {
   switch (role) {
     case "accent1":
@@ -14584,7 +16888,7 @@ function deckCanvasBackground(slide: DeckSlide, theme: DeckTheme): CSSProperties
 }
 
 /** Pencil with an AI spark — the visual for "AI helps you write here",
- * shared by the assistant trigger and the deck's selection editor. */
+ * shared by the assistant pull tab and the deck's selection editor. */
 function AiPenIcon({ size = 18 }: { size?: number }) {
   return (
     <span className="ai-pen-icon" aria-hidden="true">
@@ -14653,6 +16957,17 @@ function DeckPresentationOverlay({
   }));
   const indexRef = useRef(index);
   indexRef.current = index;
+  /** Presenter view: current slide, next slide, timer, and notes together. */
+  const [presenter, setPresenter] = useState(false);
+  /** B / W blank the screen (PowerPoint's black and white screens). */
+  const [blank, setBlank] = useState<"black" | "white" | null>(null);
+  const blankRef = useRef(blank);
+  blankRef.current = blank;
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const timerRef = useRef({ startedAt: Date.now(), pausedTotal: 0, pausedAt: 0 as number | 0 });
+  const digitsRef = useRef({ value: "", at: 0 });
+  const [jumpDigits, setJumpDigits] = useState("");
 
   useEffect(() => {
     const root = rootRef.current;
@@ -14673,38 +16988,95 @@ function DeckPresentationOverlay({
   }, []);
 
   useEffect(() => {
+    const tick = window.setInterval(() => {
+      const timer = timerRef.current;
+      if (timer.pausedAt) return;
+      setElapsedMs(Date.now() - timer.startedAt - timer.pausedTotal);
+    }, 500);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  function toggleTimer() {
+    const timer = timerRef.current;
+    if (timer.pausedAt) {
+      timer.pausedTotal += Date.now() - timer.pausedAt;
+      timer.pausedAt = 0;
+      setTimerPaused(false);
+    } else {
+      timer.pausedAt = Date.now();
+      setTimerPaused(true);
+    }
+  }
+
+  function resetTimer() {
+    timerRef.current = { startedAt: Date.now(), pausedTotal: 0, pausedAt: timerRef.current.pausedAt ? Date.now() : 0 };
+    setElapsedMs(0);
+  }
+
+  useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       const current = indexRef.current;
+      const go = (next: number) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setBlank(null);
+        onIndexChange(Math.max(0, Math.min(slides.length - 1, next)));
+      };
       if (event.key === "Escape") {
         event.stopPropagation();
+        if (blankRef.current) {
+          setBlank(null);
+          return;
+        }
         onExit();
         return;
       }
-      if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(event.key)) {
+      // Typing a slide number then Enter jumps straight to it.
+      if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
-        event.stopPropagation();
-        onIndexChange(Math.min(current + 1, slides.length - 1));
+        const recent = Date.now() - digitsRef.current.at < 1500 ? digitsRef.current.value : "";
+        digitsRef.current = { value: `${recent}${event.key}`.slice(-3), at: Date.now() };
+        setJumpDigits(digitsRef.current.value);
         return;
       }
-      if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+      if (event.key === "Enter" && digitsRef.current.value && Date.now() - digitsRef.current.at < 1500) {
+        const target = Number(digitsRef.current.value) - 1;
+        digitsRef.current = { value: "", at: 0 };
+        setJumpDigits("");
+        go(target);
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "b" || key === "." || key === "w" || key === ",") {
         event.preventDefault();
-        event.stopPropagation();
-        onIndexChange(Math.max(current - 1, 0));
+        const mode = key === "w" || key === "," ? "white" : "black";
+        setBlank((value) => (value === mode ? null : mode));
+        return;
+      }
+      if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(event.key)) {
+        go(current + 1);
+        return;
+      }
+      if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(event.key)) {
+        go(current - 1);
         return;
       }
       if (event.key === "Home") {
-        event.preventDefault();
-        onIndexChange(0);
+        go(0);
         return;
       }
       if (event.key === "End") {
-        event.preventDefault();
-        onIndexChange(slides.length - 1);
+        go(slides.length - 1);
         return;
       }
-      if (event.key.toLowerCase() === "n") {
+      if (key === "n") {
         event.preventDefault();
         onToggleNotes();
+        return;
+      }
+      if (key === "p") {
+        event.preventDefault();
+        setPresenter((value) => !value);
       }
     };
     window.addEventListener("keydown", handleKey, true);
@@ -14713,30 +17085,162 @@ function DeckPresentationOverlay({
 
   const slide = slides[index];
   if (!slide) return null;
+  const next = slides[index + 1] ?? null;
   const notesText = slide.notes.trim();
   const topBarPx = 52;
-  const notesPx = notesOpen ? Math.max(120, Math.round(viewport.h * 0.2)) : 0;
-  const stageH = Math.max(160, viewport.h - topBarPx - notesPx);
-  const scale = Math.max(
-    0.05,
-    Math.min((viewport.w - 128) / DECK_PREVIEW_WIDTH_PX, stageH / DECK_PREVIEW_HEIGHT_PX),
-  );
+  const minutes = Math.floor(elapsedMs / 60000);
+  const seconds = Math.floor((elapsedMs % 60000) / 1000);
+  const clock = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  const progress = slides.length > 1 ? index / (slides.length - 1) : 1;
+
+  let stage: ReactNode;
+  if (presenter) {
+    const mainW = viewport.w * 0.64 - 48;
+    const mainH = viewport.h - topBarPx - 48;
+    const mainScale = Math.max(0.05, Math.min(mainW / DECK_PREVIEW_WIDTH_PX, mainH / DECK_PREVIEW_HEIGHT_PX));
+    const sideW = Math.max(160, viewport.w * 0.36 - 56);
+    const nextScale = Math.min(sideW, 420) / DECK_PREVIEW_WIDTH_PX;
+    stage = (
+      <div className="deck-presenter" style={{ height: viewport.h - topBarPx }}>
+        <div className="deck-presenter-current">
+          <div
+            key={slide.id}
+            className="deck-present-frame"
+            style={{
+              width: DECK_PREVIEW_WIDTH_PX * mainScale,
+              height: DECK_PREVIEW_HEIGHT_PX * mainScale,
+            }}
+          >
+            <div className="deck-present-frame-scale" style={{ transform: `scale(${mainScale})` }}>
+              <DeckSlideStatic slide={slide} theme={theme} />
+            </div>
+          </div>
+        </div>
+        <aside className="deck-presenter-side" aria-label="Presenter tools">
+          <div className="deck-presenter-timer">
+            <span className={timerPaused ? "is-paused" : undefined}>{clock}</span>
+            <button type="button" onClick={toggleTimer} aria-label={timerPaused ? "Resume timer" : "Pause timer"}>
+              {timerPaused ? "Resume" : "Pause"}
+            </button>
+            <button type="button" onClick={resetTimer} aria-label="Reset timer">
+              Reset
+            </button>
+          </div>
+          <div className="deck-presenter-next">
+            <strong>{next ? `Next · slide ${index + 2}` : "End of deck"}</strong>
+            {next && (
+              <div
+                className="deck-present-frame is-next"
+                style={{ width: DECK_PREVIEW_WIDTH_PX * nextScale, height: DECK_PREVIEW_HEIGHT_PX * nextScale }}
+              >
+                <div className="deck-present-frame-scale" style={{ transform: `scale(${nextScale})` }}>
+                  <DeckSlideStatic slide={next} theme={theme} />
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="deck-presenter-notes" aria-label="Speaker notes">
+            <strong>Notes</strong>
+            <p>{notesText || "No notes for this slide."}</p>
+          </div>
+        </aside>
+      </div>
+    );
+  } else {
+    const notesPx = notesOpen ? Math.max(120, Math.round(viewport.h * 0.2)) : 0;
+    const stageH = Math.max(160, viewport.h - topBarPx - notesPx);
+    const scale = Math.max(
+      0.05,
+      Math.min((viewport.w - 128) / DECK_PREVIEW_WIDTH_PX, stageH / DECK_PREVIEW_HEIGHT_PX),
+    );
+    stage = (
+      <>
+        <div
+          className="deck-present-stage"
+          style={{ height: stageH }}
+          onClick={() => {
+            setBlank(null);
+            onIndexChange(Math.min(index + 1, slides.length - 1));
+          }}
+        >
+          <button
+            type="button"
+            className="deck-present-nav is-prev"
+            aria-label="Previous slide"
+            disabled={index === 0}
+            onClick={(event) => {
+              event.stopPropagation();
+              onIndexChange(Math.max(index - 1, 0));
+            }}
+          >
+            <ChevronLeft size={26} />
+          </button>
+          <div
+            key={slide.id}
+            className="deck-present-scale"
+            style={{
+              width: DECK_PREVIEW_WIDTH_PX,
+              height: DECK_PREVIEW_HEIGHT_PX,
+              transform: `translate(-50%, -50%) scale(${scale})`,
+            }}
+          >
+            <DeckSlideStatic slide={slide} theme={theme} />
+          </div>
+          <button
+            type="button"
+            className="deck-present-nav is-next"
+            aria-label="Next slide"
+            disabled={index === slides.length - 1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onIndexChange(Math.min(index + 1, slides.length - 1));
+            }}
+          >
+            <ChevronRight size={26} />
+          </button>
+        </div>
+        {notesOpen && (
+          <div className="deck-present-notes" style={{ height: notesPx }} aria-label="Speaker notes">
+            <strong>Notes</strong>
+            <p>{notesText || "No notes for this slide."}</p>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return createPortal(
     <div className="deck-present-overlay" role="dialog" aria-modal="true" aria-label="Deck presentation" ref={rootRef}>
+      <div className="deck-present-progress" aria-hidden="true">
+        <span style={{ width: `${progress * 100}%` }} />
+      </div>
       <div className="deck-present-topbar">
         <span aria-live="polite">
           Slide {index + 1} of {slides.length}
+          {jumpDigits && <span className="deck-present-jump"> · go to {jumpDigits}</span>}
         </span>
         <span className="deck-present-topbar-actions">
+          <span className="deck-present-clock" aria-label={`Elapsed ${clock}`}>
+            {clock}
+          </span>
           <button
             type="button"
-            aria-pressed={notesOpen}
-            data-tooltip="Show or hide this slide's speaker notes (N)"
-            onClick={onToggleNotes}
+            aria-pressed={presenter}
+            data-tooltip="Presenter view: current and next slide, timer, and notes (P)"
+            onClick={() => setPresenter((value) => !value)}
           >
-            Notes
+            Presenter view
           </button>
+          {!presenter && (
+            <button
+              type="button"
+              aria-pressed={notesOpen}
+              data-tooltip="Show or hide this slide's speaker notes (N)"
+              onClick={onToggleNotes}
+            >
+              Notes
+            </button>
+          )}
           <button
             type="button"
             aria-label="Exit presentation"
@@ -14747,51 +17251,13 @@ function DeckPresentationOverlay({
           </button>
         </span>
       </div>
-      <div
-        className="deck-present-stage"
-        style={{ height: stageH }}
-        onClick={() => onIndexChange(Math.min(index + 1, slides.length - 1))}
-      >
-        <button
-          type="button"
-          className="deck-present-nav is-prev"
-          aria-label="Previous slide"
-          disabled={index === 0}
-          onClick={(event) => {
-            event.stopPropagation();
-            onIndexChange(Math.max(index - 1, 0));
-          }}
-        >
-          <ChevronLeft size={26} />
-        </button>
+      {stage}
+      {blank && (
         <div
-          className="deck-present-scale"
-          style={{
-            width: DECK_PREVIEW_WIDTH_PX,
-            height: DECK_PREVIEW_HEIGHT_PX,
-            transform: `translate(-50%, -50%) scale(${scale})`,
-          }}
-        >
-          <DeckSlideStatic slide={slide} theme={theme} />
-        </div>
-        <button
-          type="button"
-          className="deck-present-nav is-next"
-          aria-label="Next slide"
-          disabled={index === slides.length - 1}
-          onClick={(event) => {
-            event.stopPropagation();
-            onIndexChange(Math.min(index + 1, slides.length - 1));
-          }}
-        >
-          <ChevronRight size={26} />
-        </button>
-      </div>
-      {notesOpen && (
-        <div className="deck-present-notes" style={{ height: notesPx }} aria-label="Speaker notes">
-          <strong>Notes</strong>
-          <p>{notesText || "No notes for this slide."}</p>
-        </div>
+          className={`deck-present-blank is-${blank}`}
+          role="presentation"
+          onClick={() => setBlank(null)}
+        />
       )}
     </div>,
     document.body,
@@ -14852,6 +17318,154 @@ function DeckSlideStatic({ slide, theme }: { slide: DeckSlide; theme: DeckTheme 
           />
         );
       })}
+    </div>
+  );
+}
+
+/** PowerPoint's Slide Sorter: every slide as a card to review, reorder by
+ * dragging, duplicate, or delete. Double-click (or Enter) opens a slide. */
+function DeckSlideSorter({
+  slides,
+  theme,
+  selectedId,
+  onSelect,
+  onOpen,
+  onMove,
+  onDuplicate,
+  onDelete,
+}: {
+  slides: DeckSlide[];
+  theme: DeckTheme;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onOpen: (id: string) => void;
+  onMove: (id: string, targetIndex: number) => void;
+  onDuplicate: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  return (
+    <div className="deck-sorter" role="listbox" aria-label="Slide sorter">
+      {slides.map((slide, index) => (
+        <div
+          key={slide.id}
+          className={`deck-sorter-item ${dropIndex === index ? "is-drop-before" : ""} ${
+            dragId === slide.id ? "is-dragging" : ""
+          }`}
+          onDragOver={(event) => {
+            if (!dragId) return;
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setDropIndex(event.clientX > rect.left + rect.width / 2 ? index + 1 : index);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (!dragId || dropIndex === null) return;
+            const from = slides.findIndex((item) => item.id === dragId);
+            const target = dropIndex > from ? dropIndex - 1 : dropIndex;
+            if (from !== -1 && target !== from) onMove(dragId, target);
+            setDragId(null);
+            setDropIndex(null);
+          }}
+        >
+          <button
+            type="button"
+            role="option"
+            aria-selected={slide.id === selectedId}
+            aria-label={`Slide ${index + 1}: ${DECK_LAYOUT_LABELS[slide.layout]}`}
+            className={`deck-sorter-card ${slide.id === selectedId ? "is-selected" : ""}`}
+            draggable
+            onDragStart={(event) => {
+              setDragId(slide.id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", slide.id);
+            }}
+            onDragEnd={() => {
+              setDragId(null);
+              setDropIndex(null);
+            }}
+            onClick={() => onSelect(slide.id)}
+            onDoubleClick={() => onOpen(slide.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onOpen(slide.id);
+              }
+            }}
+          >
+            <span className="deck-sorter-thumb" aria-hidden="true">
+              <DeckSlideStatic slide={slide} theme={theme} />
+            </span>
+          </button>
+          <div className="deck-sorter-meta">
+            <span className="deck-sorter-number">{index + 1}</span>
+            <span className="deck-sorter-layout">{DECK_LAYOUT_LABELS[slide.layout]}</span>
+            {slide.notes.trim() && (
+              <span className="deck-sorter-notes" title={slide.notes}>
+                Notes
+              </span>
+            )}
+            <span className="deck-sorter-actions">
+              <button type="button" aria-label={`Duplicate slide ${index + 1}`} onClick={() => onDuplicate(slide.id)}>
+                <Copy size={13} />
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete slide ${index + 1}`}
+                disabled={slides.length === 1}
+                onClick={() => onDelete(slide.id)}
+              >
+                <Trash2 size={13} />
+              </button>
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Before/after thumbnails for a whole-slide AI edit, plus the speaker notes
+ * when the edit changed them. */
+function SlideAiPreview({
+  before,
+  after,
+  theme,
+}: {
+  before: DeckSlide | null;
+  after: DeckSlide[];
+  theme: DeckTheme;
+}) {
+  const notesChanged = after.some((slide, index) => (index === 0 ? slide.notes !== before?.notes : Boolean(slide.notes)));
+  return (
+    <div className="slide-ai-preview">
+      <div className="slide-ai-compare">
+        {before && (
+          <figure>
+            <figcaption>Before</figcaption>
+            <div className="slide-ai-thumb">
+              <DeckSlideStatic slide={before} theme={theme} />
+            </div>
+          </figure>
+        )}
+        <figure>
+          <figcaption>{after.length > 1 ? `After · ${after.length} slides` : "After"}</figcaption>
+          <div className="slide-ai-after">
+            {after.map((slide) => (
+              <div key={slide.id} className="slide-ai-thumb is-after">
+                <DeckSlideStatic slide={slide} theme={theme} />
+              </div>
+            ))}
+          </div>
+        </figure>
+      </div>
+      {notesChanged && (
+        <div className="slide-ai-notes">
+          <strong>Speaker notes</strong>
+          {after.map((slide) => (slide.notes ? <p key={slide.id}>{slide.notes}</p> : null))}
+        </div>
+      )}
     </div>
   );
 }
@@ -15030,10 +17644,8 @@ function imageUrlToJpegDataUrl(src: string, maxDimension = 1280): Promise<string
 
 /** The strict JSON contract for AI deck output, embedded in prompts and
  * enforced by parseSlideDeck — nothing renders without passing the validator. */
-const DECK_JSON_CONTRACT = [
-  'Return ONLY a fenced ```json code block containing one JSON object, no prose before or after.',
-  "The object shape:",
-  '{"schema":"aperture-deck-v1","title":"<deck title>","slides":[...]}',
+/** Per-layout slide shapes, shared by whole-deck and single-slide prompts. */
+const DECK_LAYOUT_RULES = [
   "Each slide has: \"id\" (short unique string), \"notes\" (1-3 sentence speaker notes), \"layout\", and the layout's fields:",
   '- {"layout":"title","title":"...","subtitle":"..."} — opening slide.',
   '- {"layout":"section","title":"...","subtitle":"..."} — section divider.',
@@ -15042,6 +17654,13 @@ const DECK_JSON_CONTRACT = [
   '- {"layout":"image-caption","title":"...","image":{"src":"","alt":"<describe the picture to add>"},"caption":"..."} — always leave src empty; images attach in the editor.',
   '- {"layout":"quote","quote":"...","attribution":"..."}.',
   '- {"layout":"closing","title":"...","body":"..."}.',
+];
+
+const DECK_JSON_CONTRACT = [
+  'Return ONLY a fenced ```json code block containing one JSON object, no prose before or after.',
+  "The object shape:",
+  '{"schema":"aperture-deck-v1","title":"<deck title>","slides":[...]}',
+  ...DECK_LAYOUT_RULES,
   'Do NOT include a "theme" field. Keep slide text tight: bullets are short phrases of at most ~12 words, never paragraphs. Prefer more focused slides over dense ones.',
 ].join("\n");
 
@@ -15076,10 +17695,55 @@ function providerDeckPrompt(
   ].join("\n");
 }
 
+/**
+ * The deck as the model sees it for a revision: text, layouts, and notes
+ * only. The theme (with its background library and logo data URLs) and slide
+ * artwork are left out; they could be megabytes of base64 and the model is
+ * never allowed to change them anyway. parseAiDeckReply puts them back.
+ */
+function deckJsonForPrompt(deck: SlideDeck) {
+  return JSON.stringify({
+    schema: deck.schema,
+    title: deck.title,
+    slides: deck.slides.map((slide) => slideJsonForPrompt(slide)),
+  });
+}
+
+function slideJsonForPrompt(slide: DeckSlide) {
+  const {
+    background: _background,
+    backgroundId: _backgroundId,
+    boxes: _boxes,
+    textColor: _textColor,
+    ...content
+  } = slide as DeckSlide & { background?: unknown };
+  if (content.layout === "image-caption") {
+    return { ...content, image: { src: "", alt: content.image.alt } };
+  }
+  return content;
+}
+
+/** Puts back what the model never sees for slides it kept (same id): the
+ * picture background, text color, image, and, when the layout is unchanged,
+ * the resized text boxes. */
+function restoreKeptSlideFields(entry: Record<string, unknown>, kept: DeckSlide | undefined) {
+  if (!kept) return entry;
+  const restored: Record<string, unknown> = { ...entry };
+  if (kept.backgroundId && restored.backgroundId === undefined) restored.backgroundId = kept.backgroundId;
+  if (kept.textColor && restored.textColor === undefined) restored.textColor = kept.textColor;
+  if (kept.boxes && restored.boxes === undefined && restored.layout === kept.layout) restored.boxes = kept.boxes;
+  if (kept.layout === "image-caption" && restored.layout === "image-caption" && kept.image.src) {
+    const image = (restored.image && typeof restored.image === "object" ? restored.image : {}) as Record<string, unknown>;
+    if (!image.src) restored.image = { ...image, src: kept.image.src, alt: image.alt || kept.image.alt };
+  }
+  return restored;
+}
+
 function providerDeckRevisionPrompt(deckJson: string, request: string): string {
   return [
     "You are revising an existing slide deck. Apply the user's instruction and return the COMPLETE revised deck.",
     "Keep slide ids stable for slides you keep; give new slides new ids. Keep text you were not asked to change.",
+    "Pictures are not shown to you: leave image src empty and the editor keeps each kept slide's picture and background.",
     "Exception: if the instruction asks for a different topic, a whole new deck, or to start over, discard the current slides entirely and build the newly requested deck from scratch — all-new slides with new ids, matching any requested slide count, carrying nothing over from the old deck.",
     "",
     "Current deck JSON:",
@@ -15104,6 +17768,100 @@ function extractDeckJsonBlock(reply: string): string | null {
   return null;
 }
 
+/** Prompt for editing one slide in place: the slide's own JSON plus the deck's
+ * slide titles for context. The reply is one slide, or several for a split. */
+function providerSlideEditPrompt(deck: SlideDeck, slide: DeckSlide, instruction: string) {
+  const index = deck.slides.findIndex((item) => item.id === slide.id);
+  const outline = deck.slides
+    .map((item, position) => `${position + 1}. ${deckSlideOutline(item).split("\n")[0] || item.layout}`)
+    .join("\n");
+  return [
+    `You are editing slide ${index + 1} of ${deck.slides.length} in the presentation "${deck.title}".`,
+    "Apply the user's instruction to this slide only.",
+    'Return ONLY a fenced ```json code block containing {"slides":[ ... ]}, no prose before or after.',
+    `- Normally return exactly one slide and keep its "id": "${slide.id}".`,
+    "- Only when the instruction asks to split the slide or add slides, return several slides: the first keeps that id, the others get new short ids.",
+    "- Keep the layout unless the instruction asks for a different design or structure.",
+    "- Keep text and speaker notes you were not asked to change.",
+    "- Pictures are not shown to you: leave image src empty and the editor keeps the current picture.",
+    "- Slide text stays tight: short phrases of at most ~12 words, never paragraphs.",
+    "",
+    ...DECK_LAYOUT_RULES,
+    "",
+    "Deck outline, for context only:",
+    outline,
+    "",
+    "Current slide JSON:",
+    "```json",
+    JSON.stringify(slideJsonForPrompt(slide)),
+    "```",
+    "",
+    "User instruction:",
+    instruction,
+  ].join("\n");
+}
+
+type SlideEditResult =
+  | { ok: true; slides: DeckSlide[]; deck: SlideDeck }
+  | { ok: false; error: string };
+
+/** Validates a single-slide AI reply by placing it in the deck and running
+ * the one deck validator, so an edited slide can never be something the
+ * deck (or its exports) cannot hold. */
+function parseAiSlideReply(reply: string, deck: SlideDeck, slideId: string): SlideEditResult {
+  const block = extractDeckJsonBlock(reply);
+  if (!block) return { ok: false, error: "The reply contained no slide JSON." };
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(block);
+  } catch {
+    return { ok: false, error: "The reply's JSON could not be parsed." };
+  }
+  const record = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? (candidate as Record<string, unknown>)
+    : null;
+  const list = Array.isArray(record?.slides) ? (record.slides as unknown[]) : record?.layout ? [record] : null;
+  if (!list?.length) return { ok: false, error: "The reply did not include a slide." };
+  if (list.length > 4) return { ok: false, error: "The reply split the slide into more than four slides." };
+  const original = deck.slides.find((slide) => slide.id === slideId);
+  const takenIds = new Set(deck.slides.map((slide) => slide.id).filter((id) => id !== slideId));
+  const replacements = list.map((item, index) => {
+    const entry = item && typeof item === "object" && !Array.isArray(item) ? { ...(item as Record<string, unknown>) } : {};
+    if (index === 0) {
+      entry.id = slideId;
+      return restoreKeptSlideFields(entry, original);
+    }
+    let id = typeof entry.id === "string" && entry.id.trim() && !takenIds.has(entry.id) ? entry.id : "";
+    if (!id) id = nextDeckSlideId({ ...deck, slides: deck.slides });
+    while (takenIds.has(id) || id === slideId) id = `${id}-x`;
+    takenIds.add(id);
+    entry.id = id;
+    if (typeof entry.notes !== "string") entry.notes = "";
+    return entry;
+  });
+  const slideIndex = deck.slides.findIndex((slide) => slide.id === slideId);
+  if (slideIndex === -1) return { ok: false, error: "That slide is no longer in the deck." };
+  const raw = JSON.parse(serializeSlideDeck(deck)) as Record<string, unknown> & { slides: unknown[] };
+  raw.slides = [...raw.slides.slice(0, slideIndex), ...replacements, ...raw.slides.slice(slideIndex + 1)];
+  const parsed = parseSlideDeck(raw);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const ids = new Set(replacements.map((entry) => entry.id as string));
+  return { ok: true, slides: parsed.deck.slides.filter((slide) => ids.has(slide.id)), deck: parsed.deck };
+}
+
+/** Readable text out of a partial slide JSON stream, so the writer watches
+ * words arrive rather than braces. */
+function slideStreamPreview(raw: string) {
+  const values: string[] = [];
+  const pattern = /"(title|subtitle|text|quote|attribution|caption|body|notes)"\s*:\s*"((?:[^"\\]|\\.)*)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw))) {
+    const value = match[2].replace(/\\n/g, " ").replace(/\\(.)/g, "$1").trim();
+    if (value) values.push(match[1] === "notes" ? `Notes: ${value}` : match[1] === "text" ? `• ${value}` : value);
+  }
+  return values.join("\n");
+}
+
 /** Validates an AI deck reply. The model never controls the theme, the schema
  * tag, or slide artwork; all three are normalized before the single validation
  * gate runs. Slides the model kept (same id) keep their background picture —
@@ -15112,7 +17870,7 @@ function parseAiDeckReply(
   reply: string,
   theme: DeckTheme,
   fallbackTitle: string,
-  backgroundsBySlideId: Map<string, string> = new Map(),
+  keptSlides: Map<string, DeckSlide> = new Map(),
 ): ReturnType<typeof parseSlideDeck> {
   const block = extractDeckJsonBlock(reply);
   if (!block) return { ok: false, error: "The reply contained no JSON deck object." };
@@ -15129,12 +17887,11 @@ function parseAiDeckReply(
     if (typeof record.title !== "string" || !record.title.trim()) {
       record.title = fallbackTitle;
     }
-    if (backgroundsBySlideId.size && Array.isArray(record.slides)) {
+    if (keptSlides.size && Array.isArray(record.slides)) {
       record.slides = record.slides.map((slide) => {
         if (!slide || typeof slide !== "object" || Array.isArray(slide)) return slide;
         const entry = slide as Record<string, unknown>;
-        const kept = typeof entry.id === "string" ? backgroundsBySlideId.get(entry.id) : undefined;
-        return kept ? { ...entry, backgroundId: kept } : entry;
+        return restoreKeptSlideFields(entry, typeof entry.id === "string" ? keptSlides.get(entry.id) : undefined);
       });
     }
   }

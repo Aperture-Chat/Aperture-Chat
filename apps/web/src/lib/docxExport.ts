@@ -12,6 +12,7 @@
  */
 
 import { buildZip, type ZipEntry } from "./ooxmlZip";
+import { mediaAlign, mediaSizeRatio, type MediaAlign } from "./documentMedia";
 
 /** Preview canvas geometry the exports mirror (styles.css .document-canvas):
  * 860px page, ~66px side padding, so 728px of content. Media-block images
@@ -68,9 +69,24 @@ function exportImageLayout(image: HTMLElement): ExportImageLayout {
 /** Display geometry in preview pixels, matching the editor CSS: media and
  * figure images contain-fit inside their width and height limits without
  * cropping; inline images render at natural size up to the content width. */
-function exportImageDisplaySize(layout: ExportImageLayout, width: number, height: number) {
+function exportImageDisplaySize(
+  layout: ExportImageLayout,
+  width: number,
+  height: number,
+  sizeRatio: number | null = null,
+) {
   const naturalWidth = width || PREVIEW_CONTENT_WIDTH_PX;
   const naturalHeight = height || Math.round(PREVIEW_CONTENT_WIDTH_PX * 0.6);
+  if (sizeRatio && layout !== "diagram") {
+    // A picture the writer sized (Small / Half / Large) spans that share of
+    // the text column at its own aspect ratio, exactly as on screen.
+    const sized = Math.max(1, Math.round(PREVIEW_CONTENT_WIDTH_PX * sizeRatio));
+    return {
+      width: sized,
+      height: Math.max(1, Math.round((sized * naturalHeight) / naturalWidth)),
+      crop: null,
+    };
+  }
   if (layout === "diagram") {
     // Diagrams scale to fit (preview object-fit: contain) — never cover-cropped.
     const fitScale = Math.min(
@@ -341,7 +357,17 @@ type DocBlock =
   | { kind: "quote"; runs: DocRun[]; align?: DocBlockAlignment }
   | { kind: "code"; text: string }
   | { kind: "caption"; runs: DocRun[] }
-  | { kind: "image"; index: number; src: string; alt: string; layout: ExportImageLayout; caption: string }
+  | {
+      kind: "image";
+      index: number;
+      src: string;
+      alt: string;
+      layout: ExportImageLayout;
+      caption: string;
+      /** Share of the text column the writer sized the picture to. */
+      sizeRatio?: number | null;
+      align?: MediaAlign;
+    }
   | {
       kind: "table";
       rows: { header: boolean; cells: DocRun[][]; aligns?: (DocBlockAlignment | undefined)[] }[];
@@ -490,6 +516,8 @@ function collectDocBlocks(node: Node, blocks: DocBlock[], imageCounter: { value:
             ? "figure"
             : "media",
         caption,
+        sizeRatio: mediaSizeRatio(node),
+        align: mediaAlign(node),
       });
     } else if (caption) {
       blocks.push({ kind: "caption", runs: [{ text: caption, bold: false, italic: false }] });
@@ -765,6 +793,7 @@ async function loadDocxImageResources(blocks: DocBlock[], imageProxy?: ExportIma
       block.layout,
       loaded?.width ?? embeddedJpeg?.width ?? 0,
       loaded?.height ?? embeddedJpeg?.height ?? 0,
+      block.sizeRatio ?? null,
     );
     const rasterizedBytes = loaded ? rasterizeExportImage(loaded, display.crop) : null;
     const bytes = rasterizedBytes ?? embeddedJpeg?.bytes ?? null;
@@ -1126,13 +1155,17 @@ function renderDocBlocks(
           );
           break;
         }
-        const centered = block.layout === "figure" || block.layout === "diagram";
+        const aligned = block.sizeRatio ? (block.align ?? "center") : null;
+        const centered = aligned
+          ? aligned === "center"
+          : block.layout === "figure" || block.layout === "diagram";
         // OOXML requires drawings inside a run; a bare w:drawing under w:p is
         // invalid and Word drops (or rejects) the picture.
         paragraph(`<w:r>${imageDrawingXml(resource, block.index, block.alt)}</w:r>`, {
           spacingBeforeTwips: block.layout === "figure" ? twips(16) : twips(28),
           spacingAfterTwips: block.caption ? twips(6) : twips(18),
           centered,
+          align: aligned === "right" ? "right" : undefined,
           keepNext: Boolean(block.caption),
         });
         if (block.caption) {

@@ -206,13 +206,35 @@ function disableWebSearch() {
   }
 }
 
-function installChatCompletionFetchMock(content: string | ((payload: Record<string, unknown>) => string)) {
+function installChatCompletionFetchMock(
+  content: string | ((payload: Record<string, unknown>) => string),
+  options: { uploadError?: string } = {},
+) {
   const requests: unknown[] = [];
   const fetchMock = globalThis.fetch as unknown as {
     mockImplementation: (implementation: typeof fetch) => void;
   };
   fetchMock.mockImplementation(async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.endsWith("/api/chat/attachments")) {
+      if (options.uploadError) {
+        return new Response(JSON.stringify({ detail: options.uploadError }), {
+          status: 413,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const file = (init?.body as FormData).get("file") as File;
+      return new Response(
+        JSON.stringify({
+          id: `upload-${file.name}`,
+          name: file.name,
+          size: `${file.size} B`,
+          kind: "document",
+          text_preview: file.name.endsWith(".pdf") ? null : "Synthetic extracted text.",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (url.endsWith("/api/chat/complete")) {
       const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       requests.push(payload);
@@ -239,6 +261,21 @@ function installChatCompletionFetchMock(content: string | ((payload: Record<stri
     });
   });
   return requests;
+}
+
+/** Types an instruction into the AI edit composer and runs it. */
+function submitInlineAiInstruction(instruction: string) {
+  fireEvent.change(screen.getByRole("combobox", { name: "AI instruction" }), {
+    target: { value: instruction },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Run AI instruction" }));
+}
+
+/** Runs an instruction through the AI edit composer and accepts the reviewed
+ * suggestion, the way a writer applies an inline edit. */
+async function applyInlineAiInstruction(instruction: string) {
+  submitInlineAiInstruction(instruction);
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
 }
 
 function installDeferredChatCompletionFetchMock(content: string) {
@@ -289,6 +326,26 @@ function storedDraftHistory() {
     serverRevision?: number | null;
     events?: Array<{ kind?: string; text?: string }>;
   }>;
+}
+
+/** Rail actions confirm in a visible notice and in the screen-reader status. */
+function expectRailNotice(message: RegExp) {
+  const notice = document.querySelector(".draft-rail-notice");
+  expect(notice).not.toBeNull();
+  expect(notice).toHaveTextContent(message);
+  const announcements = Array.from(document.querySelectorAll('.sr-only[role="status"]'));
+  expect(announcements.some((element) => message.test(element.textContent ?? ""))).toBe(true);
+}
+
+/** The rail's context chips show each context switch's live state. */
+function expectDraftContext(expected: { sources: string; web: string; templates: string }) {
+  expect(screen.getByRole("button", { name: "Sources and files" })).toHaveTextContent(
+    `Sources${expected.sources}`,
+  );
+  expect(screen.getByRole("button", { name: /web search/i })).toHaveTextContent(`Web${expected.web}`);
+  expect(screen.getByRole("button", { name: "Choose template" })).toHaveTextContent(
+    `Templates${expected.templates}`,
+  );
 }
 
 function draftHistoryPanel() {
@@ -354,8 +411,7 @@ test("starts the draft chat clean until the user talks to the assistant", () => 
   expect(screen.getByLabelText("Document title")).toHaveValue("Untitled Draft");
   expect(documentText()).toBe("");
   expect(screen.getByText("Blank draft ready")).toBeInTheDocument();
-  expect(screen.getByText("Context sources off")).toBeInTheDocument();
-  expect(screen.getByText(/web on · templates off/)).toBeInTheDocument();
+  expectDraftContext({ sources: "Off", web: "On", templates: "Off" });
   expect(screen.getByRole("button", { name: "Disable web search" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -418,9 +474,7 @@ test("keeps workspace knowledge and templates off while web search defaults on f
   expect(
     within(assistantEvents).getByRole("region", { name: "Aperture Chat document work trace" }),
   ).toBeInTheDocument();
-  const contextStrip = screen.getByRole("region", { name: "Draft context" });
-  expect(contextStrip).toHaveTextContent("Context sources off");
-  expect(contextStrip).toHaveTextContent(/web on · templates off/);
+  expectDraftContext({ sources: "Off", web: "On", templates: "Off" });
   expect(screen.getByText(/drafted with provider-hosted web search/)).toBeInTheDocument();
 });
 
@@ -485,7 +539,7 @@ test("web search defaults on and can be toggled off for research drafts", async 
     "aria-pressed",
     "false",
   );
-  expect(screen.getByText(/Web search disabled for this draft/)).toBeInTheDocument();
+  expectRailNotice(/Web search disabled for this draft/);
 
   fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
     target: {
@@ -505,9 +559,7 @@ test("web search defaults on and can be toggled off for research drafts", async 
   expect(payload.messages[0].content).toContain("Do not claim live web research");
   expect(screen.getByLabelText("Document title")).toHaveValue("Artemis II Mission Draft");
   expect(documentText()).not.toContain("Star Wars");
-  const contextStrip = screen.getByRole("region", { name: "Draft context" });
-  expect(contextStrip).toHaveTextContent("Context sources off");
-  expect(contextStrip).toHaveTextContent(/web off · templates off/);
+  expectDraftContext({ sources: "Off", web: "Off", templates: "Off" });
 });
 
 test("keeps in-progress provider drafts in history when opening a new draft workspace", async () => {
@@ -534,7 +586,7 @@ test("keeps in-progress provider drafts in history when opening a new draft work
       summary: expect.stringMatching(/Drafting with/i),
     });
   });
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   expect(draftHistoryPanel()).toHaveTextContent("Drafting");
 
   firstWorkspace.unmount();
@@ -543,7 +595,7 @@ test("keeps in-progress provider drafts in history when opening a new draft work
   );
 
   expect(screen.getByLabelText("Document title")).toHaveValue("Untitled Draft");
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   expect(draftHistoryPanel()).toHaveTextContent("Drafting");
 
   deferredDraft.resolve();
@@ -636,8 +688,11 @@ test("applies assistant instructions as a provider-backed new document version",
   expect(
     screen.getByRole("heading", { name: "Document Assistant" }),
   ).toBeInTheDocument();
-  expect(screen.getByText("Context sources off")).toBeInTheDocument();
-  expect(screen.getByText(/3 available sources/)).toBeInTheDocument();
+  expectDraftContext({ sources: "Off", web: "On", templates: "Off" });
+  expect(screen.getByRole("button", { name: "Sources and files" })).toHaveAttribute(
+    "data-tooltip",
+    expect.stringMatching(/^3 workspace sources available/),
+  );
 
   fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
     target: {
@@ -1102,7 +1157,7 @@ test("restores a selected prior version in the editor", async () => {
     expect(documentText()).toContain("Source control:");
   });
 
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(screen.getByRole("button", { name: /Version 1/ }));
   expect(documentText()).not.toContain("Source control:");
   expect(screen.getByText(/Version 1 restored/)).toBeInTheDocument();
@@ -1126,7 +1181,7 @@ test("keeps manual document edits in a single stable editor value", () => {
   fireEvent.click(screen.getByRole("button", { name: "Save version" }));
 
   expect(screen.getByText(/Version 2 saved from manual edits/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   expect(screen.getByRole("button", { name: /Version 2/ })).toBeInTheDocument();
   expect(documentText()).toContain("Manual client note.");
   expect(manualText).toContain("Matter: Anderson");
@@ -1546,7 +1601,7 @@ test("without connected models Drafts preserves prompts and manual document work
   expect(saved.some((item) => item.title === "Manually renamed document" && item.content.includes("Manually edited imported content."))).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Export" }));
   expect(screen.getByRole("dialog", { name: "Export document" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   expect(screen.getByRole("button", { name: /Restore Manually renamed document from document history/ })).toBeInTheDocument();
   expect(chatRequests).toHaveLength(0);
 });
@@ -1560,21 +1615,21 @@ test("an unavailable model keeps an open inline edit and composer prompt intact"
   fireEvent.change(prompt, { target: { value: "My pending document instruction" } });
   selectEditorText("original selected wording");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  const dialog = screen.getByRole("dialog", { name: "Inline AI edit panel" });
-  fireEvent.change(within(dialog).getByRole("textbox", { name: "Inline edit instruction" }), { target: { value: "My pending inline instruction" } });
+  const dialog = screen.getByRole("dialog", { name: "Edit with AI" });
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "AI instruction" }), { target: { value: "My pending inline instruction" } });
 
   view.rerender(<DocumentAssistantWorkspace data={{ ...sampleData, providers: sampleData.providers.map((provider) => ({ ...provider, connected: false })) }} />);
-  expect(within(dialog).getByRole("button", { name: "Replace highlight" })).toBeDisabled();
-  fireEvent.submit(dialog);
+  expect(within(dialog).getByRole("button", { name: "Run AI instruction" })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Run AI instruction" }));
   fireEvent.submit(prompt.closest("form")!);
   expect(prompt).toHaveValue("My pending document instruction");
-  expect(within(dialog).getByRole("textbox", { name: "Inline edit instruction" })).toHaveValue("My pending inline instruction");
+  expect(within(dialog).getByRole("combobox", { name: "AI instruction" })).toHaveValue("My pending inline instruction");
   expect(documentText()).toContain("Preserve the original selected wording.");
   expect(chatRequests).toHaveLength(0);
 
   view.rerender(<DocumentAssistantWorkspace data={sampleData} />);
   expect(screen.getByRole("button", { name: "Apply instruction" })).toBeEnabled();
-  expect(within(dialog).getByRole("button", { name: "Replace highlight" })).toBeEnabled();
+  expect(within(dialog).getByRole("button", { name: "Run AI instruction" })).toBeEnabled();
   expect(prompt).toHaveValue("My pending document instruction");
 });
 
@@ -1585,7 +1640,7 @@ test("without connected models deck creation remains manual and AI requests reta
   fireEvent.click(screen.getByRole("button", { name: "Deck", exact: true }));
   expect(screen.getByText("Slide 1 of 1")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Rename deck with AI" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Edit selection with AI" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Edit slide with AI" })).toBeDisabled();
   const prompt = screen.getByRole("textbox", { name: "Ask the deck assistant" });
   fireEvent.change(prompt, { target: { value: "Build this deck after setup." } });
   fireEvent.submit(prompt.closest("form")!);
@@ -2596,10 +2651,13 @@ test("adds citations and applies inline AI edits only to highlighted text", asyn
   const inlineToolbarButton = screen.getByRole("button", { name: "Inline AI edit" });
   expect(fireEvent.mouseDown(inlineToolbarButton)).toBe(false);
   fireEvent.click(inlineToolbarButton);
-  expect(screen.getByRole("dialog", { name: "Inline AI edit panel" })).toHaveTextContent(
-    /Highlight text in the document before using inline AI edit/,
+  // With nothing highlighted, AI writes new text at the cursor instead.
+  expect(screen.getByRole("dialog", { name: "Write with AI" })).toHaveTextContent(
+    "New text at the cursor",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Close inline AI edit" }));
+  expect(screen.getByRole("option", { name: "Continue writing" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close Write with AI" }));
+  expect(screen.queryByRole("dialog", { name: "Write with AI" })).not.toBeInTheDocument();
 
   const selectedText = "The discovery deadline remains July 12, 2026.";
   selectEditorText(selectedText);
@@ -2608,12 +2666,15 @@ test("adds citations and applies inline AI edits only to highlighted text", asyn
     name: "Ask AI to edit highlighted text",
   });
   fireEvent.click(contextualAiButton);
-  expect(screen.getByRole("dialog", { name: "Inline AI edit panel" })).toHaveTextContent(
+  expect(screen.getByRole("dialog", { name: "Edit with AI" })).toHaveTextContent(
     selectedText,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Make it clearer" }));
-  expect(screen.getByLabelText("Inline edit instruction")).toHaveValue("Make it clearer");
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  // A preset runs immediately; the reply is reviewed before it touches the page.
+  fireEvent.click(screen.getByRole("option", { name: "Improve writing" }));
+  const accept = await screen.findByRole("button", { name: "Accept AI suggestion" });
+  expect(documentText()).toContain(selectedText);
+  expect(screen.getByLabelText("AI suggestion")).toHaveTextContent("confirmed for client review");
+  fireEvent.click(accept);
 
   await waitFor(() => {
     expect(documentText()).toContain(
@@ -2632,6 +2693,15 @@ test("adds citations and applies inline AI edits only to highlighted text", asyn
   expect(inlinePayload.max_completion_tokens).toBe(2000);
   expect(inlinePayload.messages[0].content).toContain("Return only the replacement text");
   expect(inlinePayload.messages[0].content).toContain(selectedText);
+  // The API reads the text between these headings as the instruction when it
+  // decides whether an edit needs live web research, so the surrounding
+  // document context must stay outside them.
+  const instructionSection = /\nUser instruction:\s*\n([\s\S]*?)\n\s*\nHighlighted passage:\s*\n/.exec(
+    inlinePayload.messages[0].content,
+  );
+  expect(instructionSection?.[1].trim()).toMatch(/^Improve the writing/);
+  expect(instructionSection?.[1]).not.toMatch(/Text just (before|after) the highlight|Highlighted passage \(HTML\)/);
+  expect(inlinePayload.messages[0].content).toMatch(/Text just (before|after) the highlight/);
   expect(documentBody().innerHTML).toContain("document-ai-suggestion");
   expect(documentText()).not.toContain(`Client-ready: ${selectedText}`);
   expect(screen.getByText(/Inline AI edit applied through/)).toBeInTheDocument();
@@ -2666,10 +2736,7 @@ test("keeps provider HTML formatting in the inline replacement", async () => {
   const selectedText = "The ship crossed the stars.";
   selectEditorText(selectedText);
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Expand on the spaceship's journey." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Expand on the spaceship's journey.");
 
   await waitFor(() => {
     expect(documentText()).toContain(
@@ -2721,10 +2788,7 @@ test("inline AI edit adds list items as real bullets instead of markdown text", 
   });
   selectEditorText(selectedText);
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Add the other estate documents as bullets." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Add the other estate documents as bullets.");
 
   await waitFor(() => {
     expect(documentText()).toContain("2017 Mirrored Revocable Trusts (Kansas law)");
@@ -2774,10 +2838,7 @@ test("inline AI edit keeps plain-paragraph replies inside the list they edit", a
 
   selectEditorText("Existing durable powers of attorney");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Add the trust and pour-over will bullets." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Add the trust and pour-over will bullets.");
 
   await waitFor(() => {
     expect(documentText()).toContain("Pour-over will");
@@ -2821,10 +2882,7 @@ test("inline AI edit splits a paragraph for a structural signature block", async
 
   selectEditorText("Signed by the client.");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Make this a realistic signature block." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Make this a realistic signature block.");
 
   await waitFor(() => {
     expect(documentText()).toContain("IN WITNESS WHEREOF");
@@ -2910,10 +2968,7 @@ test("inline AI edit rules a signature label the model left dangling", async () 
 
   selectEditorText("Signed by the client.");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Make this a realistic signature block." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Make this a realistic signature block.");
 
   await waitFor(() => {
     expect(documentText()).toContain("Printed Name:");
@@ -2948,10 +3003,7 @@ test("a fresh AI edit glows for ten seconds, then settles into the page", async 
 
     selectEditorText("The original sentence is muddy.");
     fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-    fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-      target: { value: "Make it clearer." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+    await applyInlineAiInstruction("Make it clearer.");
 
     await waitFor(() => {
       expect(documentText()).toContain("The revised sentence reads clearly.");
@@ -2993,10 +3045,7 @@ test("the AI edit trail lists recorded edits, re-lights them, and clears the mar
 
   selectEditorText("The original sentence is muddy.");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Make it clearer." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Make it clearer.");
 
   await waitFor(() => {
     expect(documentText()).toContain("The revised sentence reads clearly.");
@@ -3047,10 +3096,7 @@ test("inline AI edit prompt describes where the highlight sits", async () => {
 
   selectEditorText("Existing durable powers of attorney");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Tighten this bullet." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  await applyInlineAiInstruction("Tighten this bullet.");
 
   await waitFor(() => {
     expect(documentText()).toContain("Refreshed bullet text.");
@@ -3082,10 +3128,7 @@ test("shows the document editing glow only while inline AI is working", async ()
 
   selectEditorText("The ship crossed the stars.");
   fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
-  fireEvent.change(screen.getByLabelText("Inline edit instruction"), {
-    target: { value: "Expand on the spacecraft's journey." },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Replace highlight" }));
+  submitInlineAiInstruction("Expand on the spacecraft's journey.");
 
   expect(documentBody()).toHaveClass("is-ai-editing");
   expect(documentBody()).toHaveAttribute("aria-busy", "true");
@@ -3093,11 +3136,365 @@ test("shows the document editing glow only while inline AI is working", async ()
 
   deferredInlineEdit.resolve();
 
+  // Review is not editing: the glow stops once the reply is ready to review.
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
   await waitFor(() => {
     expect(documentText()).toContain("carefully plotted lunar trajectory");
   });
   expect(documentBody()).not.toHaveClass("is-ai-editing");
   expect(documentBody()).toHaveAttribute("aria-busy", "false");
+});
+
+test("AI edit review refines a suggestion as a follow-up turn and discard keeps the text", async () => {
+  const chatRequests = installChatCompletionFetchMock((payload) => {
+    const messages = payload.messages as Array<{ role: string; content: string }>;
+    return messages.length === 1 ? "A first, longer rewrite of the sentence." : "A tighter rewrite.";
+  });
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "inline-refine-transfer",
+        title: "Board Note",
+        sourceLabel: "transferred chat",
+        createdAt: "9:10 AM",
+        content: "# Board Note\n\nThe original sentence stays unless accepted.\n\nA second paragraph gives context.",
+      }}
+    />,
+  );
+
+  selectEditorText("The original sentence stays unless accepted.");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  submitInlineAiInstruction("Rewrite this.");
+  await screen.findByRole("button", { name: "Accept AI suggestion" });
+  expect(screen.getByLabelText("AI suggestion")).toHaveTextContent("A first, longer rewrite");
+  // The model sees the neighbouring text so the rewrite fits where it lands.
+  const firstPrompt = (chatRequests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(firstPrompt).toContain("Text just after the highlight");
+  expect(firstPrompt).toContain("A second paragraph gives context.");
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Refine the AI suggestion" }), {
+    target: { value: "Make it shorter" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Refine suggestion" }));
+  await waitFor(() => {
+    expect(screen.getByLabelText("AI suggestion")).toHaveTextContent("A tighter rewrite.");
+  });
+  const refinePayload = chatRequests[1] as { messages: Array<{ role: string; content: string }> };
+  expect(refinePayload.messages).toHaveLength(3);
+  expect(refinePayload.messages[1]).toEqual({
+    role: "assistant",
+    content: "A first, longer rewrite of the sentence.",
+  });
+  expect(refinePayload.messages[2].content).toContain("Make it shorter");
+
+  fireEvent.click(screen.getByRole("button", { name: "Discard AI suggestion" }));
+  expect(screen.queryByRole("dialog", { name: "Edit with AI" })).not.toBeInTheDocument();
+  expect(documentText()).toContain("The original sentence stays unless accepted.");
+  expect(documentText()).not.toContain("tighter rewrite");
+  expect(documentBody().innerHTML).not.toContain("document-ai-suggestion");
+});
+
+test("⌘J writes new text at the cursor and inserts it only after review", async () => {
+  const chatRequests = installChatCompletionFetchMock("<p>Next steps follow in the appendix.</p>");
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "inline-write-transfer",
+        title: "Launch Plan",
+        sourceLabel: "transferred chat",
+        createdAt: "9:20 AM",
+        content: "# Launch Plan\n\nThe launch moves to March.",
+      }}
+    />,
+  );
+
+  const textNode = documentBody().querySelector("p")?.firstChild as Text;
+  const caret = document.createRange();
+  caret.setStart(textNode, textNode.data.length);
+  caret.collapse(true);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(caret);
+  fireEvent.keyDown(documentBody(), { key: "j", metaKey: true });
+
+  const dialog = screen.getByRole("dialog", { name: "Write with AI" });
+  fireEvent.click(within(dialog).getByRole("option", { name: "Continue writing" }));
+  const accept = await screen.findByRole("button", { name: "Accept AI suggestion" });
+  expect(documentText()).not.toContain("Next steps follow");
+  const prompt = (chatRequests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(prompt).toContain("Write only the new content to insert at the cursor");
+  expect(prompt).toContain("The launch moves to March.");
+
+  fireEvent.click(accept);
+  await waitFor(() => {
+    expect(documentText()).toContain("Next steps follow in the appendix.");
+  });
+  expect(documentText()).toContain("The launch moves to March.");
+  expect(documentBody().querySelector("[data-ai-edit-at]")).not.toBeNull();
+});
+
+test("Insert below keeps the highlight, and ⌘Z / ⌘⇧Z undo and redo the AI edit", async () => {
+  installChatCompletionFetchMock("An added supporting sentence.");
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "inline-below-transfer",
+        title: "Memo",
+        sourceLabel: "transferred chat",
+        createdAt: "9:30 AM",
+        content: "# Memo\n\nKeep this original sentence.",
+      }}
+    />,
+  );
+
+  selectEditorText("Keep this original sentence.");
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  submitInlineAiInstruction("Add a supporting sentence.");
+  fireEvent.click(await screen.findByRole("button", { name: "Insert below" }));
+  await waitFor(() => {
+    expect(documentText()).toContain("An added supporting sentence.");
+  });
+  expect(documentText()).toContain("Keep this original sentence.");
+  const paragraphs = Array.from(documentBody().querySelectorAll("p")).map((node) => node.textContent);
+  expect(paragraphs.indexOf("An added supporting sentence.")).toBe(
+    paragraphs.indexOf("Keep this original sentence.") + 1,
+  );
+
+  fireEvent.keyDown(documentBody(), { key: "z", metaKey: true });
+  await waitFor(() => {
+    expect(documentText()).not.toContain("An added supporting sentence.");
+  });
+  fireEvent.keyDown(documentBody(), { key: "z", metaKey: true, shiftKey: true });
+  await waitFor(() => {
+    expect(documentText()).toContain("An added supporting sentence.");
+  });
+});
+
+test("typing / opens the block menu, filters it, and inserts a table in place of the command", () => {
+  installChatCompletionFetchMock("unused");
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "slash-menu-transfer",
+        title: "Ops Review",
+        sourceLabel: "transferred chat",
+        createdAt: "9:40 AM",
+        content: "# Ops Review\n\nMetrics follow.\n\n/",
+      }}
+    />,
+  );
+
+  const slashNode = Array.from(documentBody().querySelectorAll("p")).find((node) => node.textContent === "/")!
+    .firstChild as Text;
+  const caret = document.createRange();
+  caret.setStart(slashNode, 1);
+  caret.collapse(true);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(caret);
+  fireEvent.input(documentBody(), { inputType: "insertText", data: "/" });
+
+  const menu = screen.getByRole("listbox", { name: "Insert block" });
+  expect(within(menu).getByRole("option", { name: /Continue writing/ })).toBeInTheDocument();
+  expect(within(menu).getByRole("option", { name: /Heading/ })).toBeInTheDocument();
+
+  slashNode.data = "/tab";
+  caret.setStart(slashNode, 4);
+  caret.collapse(true);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(caret);
+  fireEvent.input(documentBody(), { inputType: "insertText", data: "b" });
+  const filtered = screen.getByRole("listbox", { name: "Insert block" });
+  expect(within(filtered).getAllByRole("option").map((option) => option.textContent)).toEqual(["Table"]);
+
+  fireEvent.keyDown(documentBody(), { key: "Enter" });
+  expect(screen.queryByRole("listbox", { name: "Insert block" })).not.toBeInTheDocument();
+  expect(documentBody().querySelector("table.document-data-table thead th")).not.toBeNull();
+  expect(documentBody().querySelectorAll("table tr")).toHaveLength(3);
+  expect(documentText()).not.toContain("/tab");
+  expect(documentText()).toContain("Metrics follow.");
+});
+
+test("paste keeps structure but drops the source page's fonts and colors", () => {
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "paste-cleanup-transfer",
+        title: "Notes",
+        sourceLabel: "transferred chat",
+        createdAt: "9:50 AM",
+        content: "# Notes\n\nPaste after this.",
+      }}
+    />,
+  );
+  const textNode = documentBody().querySelector("p")!.firstChild as Text;
+  const caret = document.createRange();
+  caret.setStart(textNode, textNode.data.length);
+  caret.collapse(true);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(caret);
+  const html =
+    '<span style="font-family:Comic Sans MS;font-size:30px;color:#ff0000;font-weight:700"> Pasted bold</span>';
+  fireEvent.paste(documentBody(), {
+    clipboardData: {
+      getData: (type: string) => (type === "text/html" ? html : type === "text/plain" ? " Pasted bold" : ""),
+      files: [],
+    },
+  });
+  expect(documentBody().innerHTML).toContain("<strong> Pasted bold</strong>");
+  expect(documentBody().innerHTML).not.toMatch(/Comic Sans|30px|#ff0000/);
+  expect(screen.getByText("Pasted using the document's formatting.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentText()).not.toContain("Pasted bold");
+});
+
+test("find highlights every match, steps through them, and replace all is one undo step", () => {
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "find-replace-transfer",
+        title: "Review",
+        sourceLabel: "transferred chat",
+        createdAt: "10:00 AM",
+        content: "# Review\n\nRevenue grew. Revenue per **customer** rose.\n\nCustomer revenue held.",
+      }}
+    />,
+  );
+
+  fireEvent.keyDown(documentBody(), { key: "f", metaKey: true });
+  const findBox = screen.getByRole("textbox", { name: "Find in document" });
+  fireEvent.change(findBox, { target: { value: "revenue" } });
+  expect(screen.getByText("1 of 3")).toBeInTheDocument();
+  fireEvent.keyDown(findBox, { key: "Enter" });
+  expect(screen.getByText("2 of 3")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+  // Only the lowercase occurrence matches exactly.
+  expect(screen.getByText("1 of 1")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Show replace" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Replace with" }), { target: { value: "sales" } });
+  fireEvent.click(screen.getByRole("button", { name: "Replace all" }));
+  expect(documentText()).not.toMatch(/revenue/i);
+  expect(documentText()).toContain("sales per customer rose.");
+  expect(documentBody().querySelector("strong")?.textContent).toBe("customer");
+  expect(screen.getByText("No results")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentText()).toContain("Revenue grew. Revenue per customer rose.");
+});
+
+test("the status bar counts words, opens the outline, and zooms the page", () => {
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "status-outline-transfer",
+        title: "Plan",
+        sourceLabel: "transferred chat",
+        createdAt: "10:05 AM",
+        content: "# Plan\n\n## Goals\n\nShip the release.\n\n## Risks\n\nTimeline pressure.",
+      }}
+    />,
+  );
+  const status = screen.getByRole("contentinfo", { name: "Document status" });
+  expect(status).toHaveTextContent("Page 1 of 1");
+  expect(status).toHaveTextContent(/\d+ words/);
+
+  fireEvent.click(within(status).getByRole("button", { name: "Document outline" }));
+  const outline = screen.getByRole("navigation", { name: "Document outline" });
+  expect(within(outline).getAllByRole("button").map((button) => button.textContent)).toEqual([
+    "",
+    "Plan",
+    "Goals",
+    "Risks",
+  ]);
+  fireEvent.click(within(outline).getByRole("button", { name: "Risks" }));
+  expect(window.getSelection()?.anchorNode?.textContent).toBe("Risks");
+
+  fireEvent.click(within(status).getByRole("button", { name: "Zoom in" }));
+  expect(within(status).getByRole("button", { name: /Zoom 110 percent/ })).toBeInTheDocument();
+  expect(documentBody().style.zoom).toBe("1.1");
+  fireEvent.click(within(status).getByRole("button", { name: /Zoom 110 percent/ }));
+  expect(documentBody().style.zoom).toBe("");
+});
+
+test("Insert → Table adds a blank table and the table tools add and remove rows and columns", async () => {
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "table-tools-transfer",
+        title: "Tracker",
+        sourceLabel: "transferred chat",
+        createdAt: "10:10 AM",
+        content: "# Tracker\n\nTable below.",
+      }}
+    />,
+  );
+  const paragraph = documentBody().querySelector("p")!;
+  const caret = document.createRange();
+  caret.selectNodeContents(paragraph);
+  caret.collapse(false);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(caret);
+  fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Table/ }));
+  const table = documentBody().querySelector("table")!;
+  expect(table.querySelectorAll("tr")).toHaveLength(3);
+  expect(table.querySelectorAll("th")).toHaveLength(3);
+  expect(table.textContent).toBe("");
+
+  document.dispatchEvent(new Event("selectionchange"));
+  const tools = await screen.findByRole("toolbar", { name: "Table tools" });
+  fireEvent.click(within(tools).getByRole("button", { name: "Insert row below" }));
+  expect(documentBody().querySelectorAll("table tr")).toHaveLength(4);
+  fireEvent.click(within(tools).getByRole("button", { name: "Insert column right" }));
+  expect(documentBody().querySelector("table tr")!.children).toHaveLength(4);
+  fireEvent.click(within(tools).getByRole("button", { name: "Delete column" }));
+  expect(documentBody().querySelector("table tr")!.children).toHaveLength(3);
+  fireEvent.click(within(tools).getByRole("button", { name: "Delete table" }));
+  expect(documentBody().querySelector("table")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentBody().querySelector("table")).not.toBeNull();
+});
+
+test("clicking a picture opens picture tools for size, alignment, alt text and delete", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  documentBody().innerHTML =
+    '<p>Before the picture.</p><figure class="document-media-block" contenteditable="false"><img src="https://example.com/chart.png" alt="Old alt"></figure><p>After.</p>';
+  fireEvent.input(documentBody());
+  const image = documentBody().querySelector("img")!;
+  fireEvent.mouseDown(image);
+  const tools = screen.getByRole("toolbar", { name: "Picture tools" });
+  expect(within(tools).getByRole("button", { name: "Full width" })).toHaveAttribute("aria-pressed", "true");
+
+  fireEvent.click(within(tools).getByRole("button", { name: "Half" }));
+  expect(documentBody().querySelector("figure")).toHaveClass("document-media-size-md");
+  fireEvent.click(within(tools).getByRole("button", { name: "Align picture right" }));
+  expect(documentBody().querySelector("figure")).toHaveClass("document-media-align-right");
+  const alt = within(tools).getByRole("textbox", { name: "Alt text" });
+  fireEvent.change(alt, { target: { value: "Quarterly revenue chart" } });
+  fireEvent.keyDown(alt, { key: "Enter" });
+  expect(documentBody().querySelector("img")).toHaveAttribute("alt", "Quarterly revenue chart");
+
+  fireEvent.click(within(tools).getByRole("button", { name: "Delete picture" }));
+  expect(documentBody().querySelector("figure")).toBeNull();
+  expect(screen.queryByRole("toolbar", { name: "Picture tools" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentBody().querySelector("figure")).toHaveClass("document-media-size-md", "document-media-align-right");
 });
 
 test("exposes chat connector sources from the draft attach menu", () => {
@@ -3117,9 +3514,102 @@ test("exposes chat connector sources from the draft attach menu", () => {
 
   fireEvent.click(screen.getByRole("menuitem", { name: /Box/ }));
 
-  expect(screen.getByText(/Box source added to this draft context/)).toBeInTheDocument();
+  expectRailNotice(/Box source added to this draft context/);
   expect(screen.getByLabelText("Workspace sources for this draft")).toBeInTheDocument();
   expect(screen.getByLabelText(/Box Matter Knowledge/)).toBeChecked();
+});
+
+test("uploaded draft sources reach the model and strict citations tighten the request", async () => {
+  const chatRequests = installChatCompletionFetchMock("# Brief\n\nA synthetic brief.");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.change(screen.getByLabelText("Attach draft source files"), {
+    target: {
+      files: [
+        new File(["Synthetic notes"], "notes.txt", { type: "text/plain" }),
+        new File(["%PDF"], "scan.pdf", { type: "application/pdf" }),
+      ],
+    },
+  });
+  const chips = screen.getByRole("list", { name: "Attached draft sources" });
+  expect(within(chips).getAllByRole("listitem")).toHaveLength(2);
+  // Sending waits for uploads so no request goes out without its sources.
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Write a one-page brief from my notes." },
+  });
+  expect(screen.getByRole("button", { name: "Apply instruction" })).toBeDisabled();
+  await waitFor(() => expect(within(chips).getByText("notes.txt").closest("li")).toHaveClass("is-ready"));
+  await waitFor(() => expect(within(chips).getByText("scan.pdf").closest("li")).toHaveClass("is-name-only"));
+
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  fireEvent.click(screen.getByLabelText("Require source citations"));
+  expect(screen.getByRole("button", { name: "Strict citations settings" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const payload = chatRequests[0] as { attachment_ids: string[]; attachment_names: string[]; messages: Array<{ content: string }> };
+  expect(payload.attachment_ids).toEqual(["upload-notes.txt", "upload-scan.pdf"]);
+  expect(payload.attachment_names).toEqual(["notes.txt", "scan.pdf"]);
+  expect(payload.messages[0].content).toContain("Citation requirement:");
+
+  // Removing a chip removes it from the next request.
+  fireEvent.click(within(chips).getByRole("button", { name: "Remove scan.pdf" }));
+  expect(within(chips).queryByText("scan.pdf")).not.toBeInTheDocument();
+});
+
+test("a failed upload is shown on its chip and never sent", async () => {
+  const chatRequests = installChatCompletionFetchMock("# Draft\n\nSynthetic.", {
+    uploadError: "Attachment exceeds the 25 MB chat upload limit.",
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.change(screen.getByLabelText("Attach draft source files"), {
+    target: { files: [new File(["x"], "huge.txt", { type: "text/plain" })] },
+  });
+  const chips = screen.getByRole("list", { name: "Attached draft sources" });
+  await waitFor(() => expect(within(chips).getByText("huge.txt").closest("li")).toHaveClass("is-error"));
+  expectRailNotice(/huge.txt could not be attached: Attachment exceeds the 25 MB/);
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Write a short memo." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect((chatRequests[0] as { attachment_ids: string[] }).attachment_ids).toEqual([]);
+});
+
+test("empty draft chat offers starter requests that only fill the message box", () => {
+  const chatRequests = installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  expect(screen.getByText("What should we write?")).toBeInTheDocument();
+  const suggestions = within(screen.getByLabelText("Suggested requests")).getAllByRole("button");
+  expect(suggestions).toHaveLength(3);
+  fireEvent.click(suggestions[0]);
+  expect(screen.getByLabelText("Ask the document assistant")).toHaveValue(suggestions[0].textContent);
+  expect(chatRequests).toHaveLength(0);
+});
+
+test("Enter sends the draft instruction and Shift+Enter keeps a new line", async () => {
+  const chatRequests = installChatCompletionFetchMock("# Memo\n\nSynthetic memo.");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  const prompt = screen.getByLabelText("Ask the document assistant");
+  fireEvent.change(prompt, { target: { value: "Write a short memo." } });
+  fireEvent.keyDown(prompt, { key: "Enter", shiftKey: true });
+  expect(chatRequests).toHaveLength(0);
+  fireEvent.keyDown(prompt, { key: "Enter" });
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+});
+
+test("deck requests use the selected workspace sources", async () => {
+  const chatRequests = installChatCompletionFetchMock("unused deck reply");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Deck", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Sources and files" }));
+  fireEvent.click(screen.getByLabelText(/Litigation Playbook/));
+  const prompt = screen.getByRole("textbox", { name: "Ask the deck assistant" });
+  fireEvent.change(prompt, { target: { value: "Build a 3-slide briefing." } });
+  fireEvent.submit(prompt.closest("form")!);
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  const ids = (chatRequests[0] as { knowledge_config_ids: string[] }).knowledge_config_ids;
+  expect(ids.length).toBe(1);
 });
 
 test("connects local source files and drafting settings to the workspace state", () => {
@@ -3145,17 +3635,20 @@ test("connects local source files and drafting settings to the workspace state",
     },
   });
 
-  expect(screen.getByText(/supplemental-log.txt/)).toBeInTheDocument();
-  expect(screen.getByText(/Attached 1 draft source/)).toBeInTheDocument();
+  expect(screen.getByRole("list", { name: "Attached draft sources" })).toHaveTextContent(
+    "supplemental-log.txt",
+  );
+  expectRailNotice(/Attached 1 draft source/);
+  fireEvent.click(screen.getByRole("button", { name: "Sources and files" }));
 
   expect(screen.getByLabelText(/Litigation Playbook/)).not.toBeChecked();
   fireEvent.click(screen.getByLabelText(/Litigation Playbook/));
   expect(screen.getByLabelText(/Litigation Playbook/)).toBeChecked();
-  expect(screen.getByText(/included in this draft context/)).toBeInTheDocument();
+  expectRailNotice(/included in this draft context/);
 
   fireEvent.click(screen.getByLabelText(/Litigation Playbook/));
   expect(screen.getByLabelText(/Litigation Playbook/)).not.toBeChecked();
-  expect(screen.getByText(/removed from this draft context/)).toBeInTheDocument();
+  expectRailNotice(/removed from this draft context/);
 
   fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
   const agentSelector = screen.getByLabelText("Drafting agent");
@@ -3284,7 +3777,7 @@ test("queued saves retain their document identity when another draft opens befor
   fireEvent.input(documentBody());
   fireEvent.click(screen.getByRole("button", { name: "Save version" }));
   await waitFor(() => expect(creates).toBe(1));
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Draft B/ }));
   await waitFor(() => expect(documentText()).toContain("Original B."));
   documentBody().innerHTML = "<p>Updated B.</p>";
@@ -3318,7 +3811,7 @@ test("an earlier save acknowledgement never replaces a newer queued local versio
   expect(storedDraftHistory()).toHaveLength(1);
   expect(storedDraftHistory()[0]).toMatchObject({ serverId: "queued-1", serverRevision: 1, content: "<p>Latest pending work.</p>", serverSavePending: true });
   expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({ expected_revision: 1, content: "<p>Latest pending work.</p>" });
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   expect(draftHistoryPanel()).toHaveTextContent("Local changes");
 });
 
@@ -3355,7 +3848,7 @@ test("reopening a draft during its first save joins the same queue across worksp
   await waitFor(() => expect(calls.some((call) => call.method === "POST")).toBe(true));
   first.unmount();
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Untitled Draft/ }));
   documentBody().innerHTML = "<p>Newer reopened edits.</p>";
   fireEvent.input(documentBody());
@@ -3408,7 +3901,7 @@ test("a rename-only edit can be saved and survives reopening without duplicate h
   expect(storedDraftHistory()).toHaveLength(1);
   view.unmount();
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Renamed memo/ }));
   expect(screen.getByRole("textbox", { name: "Document title" })).toHaveValue("Renamed memo");
   expect(documentText()).toContain("Keep this body unchanged.");
@@ -3484,7 +3977,7 @@ test("unsaved history navigation can be cancelled or preserve a recovery copy be
   render(<DocumentAssistantWorkspace data={sampleData} />);
   documentBody().innerHTML = "<p>Unsaved work worth keeping.</p>";
   fireEvent.input(documentBody());
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Saved target/ }));
   const dialog = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
@@ -3505,7 +3998,7 @@ test("restoring a prior version requires explicit discard and Escape keeps the e
   await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Local only"));
   documentBody().innerHTML = "<p>Unsaved replacement.</p>";
   fireEvent.input(documentBody());
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(screen.getByRole("button", { name: /Version 1/ }));
   expect(screen.getByRole("dialog", { name: "Unsaved draft edits" })).toBeInTheDocument();
   fireEvent.keyDown(document, { key: "Escape" });
@@ -3525,7 +4018,7 @@ test("a failed recovery checkpoint keeps the current edits until explicit discar
   await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Local only"));
   documentBody().innerHTML = "<p>Cannot lose this.</p>";
   fireEvent.input(documentBody());
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(screen.getByRole("button", { name: /Version 1/ }));
   const storageWrite = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
   try {
@@ -3630,7 +4123,7 @@ test("a concurrent server change surfaces as an explicit conflict, never a silen
   });
   render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
 
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Bound Draft/ }));
   await waitFor(() => expect(documentText()).toContain("Cached copy."));
 
@@ -3658,7 +4151,7 @@ test("conflict reload leaves local edits intact when their recovery copy cannot 
     update: () => jsonResponse({ detail: "Changed elsewhere." }, 409),
   });
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Conflict recovery/ }));
   await waitFor(() => expect(documentText()).toContain("Server original."));
   documentBody().innerHTML = "<p>Local conflict edits.</p>";
@@ -3705,7 +4198,7 @@ test("legacy unscoped drafts stay quarantined until an explicit confirmed import
   // Legacy entries never leak into the account-scoped history list.
   expect(storedDraftHistory().some((entry) => entry.id === "legacy-memo")).toBe(false);
 
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   const legacySection = screen.getByLabelText("Legacy local drafts");
   expect(legacySection).toHaveTextContent("Legacy Memo");
   expect(legacySection).toHaveTextContent(/never uploaded unless you explicitly import/);
@@ -3746,7 +4239,7 @@ test("restores cached draft HTML only through the sanitizer", async () => {
   );
   render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
 
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(screen.getByRole("button", { name: /Restore Cached Draft/ }));
 
   await waitFor(() => expect(documentText()).toContain("Safe body."));
@@ -3767,7 +4260,7 @@ test("server draft content is sanitized before entering the editor", async () =>
   });
   render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
 
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Server Stored Draft/ }));
 
   await waitFor(() => expect(documentText()).toContain("Server body."));
@@ -3826,6 +4319,7 @@ test("deck toolbar font and size selects restyle the highlighted slide text", ()
   selection.removeAllRanges();
   selection.addRange(range);
 
+  openDocumentTools("Text");
   fireEvent.change(screen.getByLabelText("Slide text size"), { target: { value: "28" } });
   expect(bullets.innerHTML).toContain("font-size: 28px");
 
@@ -3836,6 +4330,7 @@ test("deck toolbar font and size selects restyle the highlighted slide text", ()
   selection.removeAllRanges();
   selection.addRange(range2);
   void sizedText;
+  openDocumentTools("Text");
   fireEvent.change(screen.getByLabelText("Slide text font"), { target: { value: "times" } });
   expect(bullets.innerHTML).toMatch(/font-family:\s*(&quot;|['"])?times new roman/i);
 });
@@ -3980,6 +4475,90 @@ test("Escape closes an unsaved-edits dialog without also closing its mobile assi
     expect(screen.getByRole("dialog", { name: "Assistant workflow" })).not.toHaveAttribute("inert");
     expect(onClose).not.toHaveBeenCalled();
     expect(documentText()).toContain("Keep my unsaved mobile draft.");
+  } finally {
+    view.unmount();
+    window.innerWidth = previousWidth;
+  }
+});
+
+/** jsdom has no PointerEvent; React reads pointerType off the native event. */
+function firePointer(node: Element, type: string, pointerType = "mouse", init: MouseEventInit = {}) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+  Object.defineProperty(event, "pointerType", { value: pointerType });
+  fireEvent(node, event);
+}
+
+test("the compact assistant drawer opens from its seam pull tab and the ⌘. shortcut", () => {
+  const previousWidth = window.innerWidth;
+  window.innerWidth = 1000;
+  const view = render(<DocumentAssistantWorkspace data={sampleData} />);
+  try {
+    const rail = screen.getByLabelText("Assistant workflow");
+    expect(rail).toHaveAttribute("inert");
+    // The seam tab is the drawer's only opener, so it must stay keyboard reachable.
+    const tab = screen.getByRole("button", { name: "Open the document assistant" });
+    expect(tab).toHaveClass("draft-rail-tab");
+    expect(tab).not.toHaveAttribute("tabindex");
+    expect(tab).toHaveAttribute("aria-keyshortcuts");
+    expect(tab).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector(".document-editor-topbar .ai-pen-icon")).toBeNull();
+
+    fireEvent.click(tab);
+    expect(rail).toHaveAttribute("aria-modal", "true");
+    expect(rail).not.toHaveAttribute("inert");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(rail).toHaveAttribute("inert");
+
+    fireEvent.keyDown(document, { key: ".", metaKey: true });
+    expect(rail).toHaveAttribute("aria-modal", "true");
+    fireEvent.keyDown(document, { key: ".", ctrlKey: true });
+    expect(rail).toHaveAttribute("inert");
+    // Shift or Alt variants are left alone.
+    fireEvent.keyDown(document, { key: ".", metaKey: true, shiftKey: true });
+    expect(rail).toHaveAttribute("inert");
+  } finally {
+    view.unmount();
+    window.innerWidth = previousWidth;
+  }
+});
+
+test("resting the mouse on the drawer seam peeks the assistant without taking focus", async () => {
+  const previousWidth = window.innerWidth;
+  window.innerWidth = 1000;
+  const view = render(<DocumentAssistantWorkspace data={sampleData} />);
+  try {
+    const rail = screen.getByLabelText("Assistant workflow");
+    const editor = documentBody().closest("main")!;
+    const edge = document.querySelector(".draft-rail-edge")!;
+    documentBody().focus();
+
+    // Touch never peeks; a quick mouse pass that leaves in time does nothing either.
+    firePointer(edge, "pointerover", "touch");
+    firePointer(edge, "pointerover");
+    firePointer(edge, "pointerout", "mouse", { relatedTarget: editor });
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    expect(rail).toHaveAttribute("inert");
+
+    firePointer(edge, "pointerover");
+    await waitFor(() => expect(rail).not.toHaveAttribute("inert"));
+    expect(rail).toHaveClass("is-peek");
+    expect(rail).not.toHaveAttribute("aria-modal");
+    expect(editor).not.toHaveAttribute("inert");
+    expect(documentBody()).toHaveFocus();
+
+    // Wandering off the drawer tucks it away again.
+    firePointer(documentBody(), "pointermove");
+    await waitFor(() => expect(rail).toHaveAttribute("inert"));
+
+    // A click inside a peeked drawer pins it as the modal panel.
+    firePointer(edge, "pointerover");
+    await waitFor(() => expect(rail).toHaveClass("is-peek"));
+    firePointer(within(rail).getByRole("textbox", { name: "Ask the document assistant" }), "pointerdown");
+    expect(rail).toHaveAttribute("aria-modal", "true");
+    expect(rail).not.toHaveClass("is-peek");
+    firePointer(documentBody(), "pointermove");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(rail).not.toHaveAttribute("inert");
   } finally {
     view.unmount();
     window.innerWidth = previousWidth;
@@ -4309,7 +4888,7 @@ test("deck templates drawer offers starters, brand upload, and honest AI image g
   // Templates drawer switches to the deck variant.
   fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
   expect(screen.getByText("Pitch deck")).toBeInTheDocument();
-  expect(screen.getByText("Upload brand template")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Upload brand template" })).toBeInTheDocument();
   expect(screen.getByText(/No brand theme/)).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /Start Pitch deck/ }));
@@ -4343,16 +4922,18 @@ test("slide background menu offers upload and honestly gates the remove actions"
 });
 
 
-test("deck AI tools gate honestly: selection edit needs a highlight, images need a model", () => {
+test("deck AI tools: without a highlight the AI edits the whole slide, images need a model", () => {
   render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
   switchToDeckMode();
 
-  // Selection AI edit refuses to open without highlighted slide text.
-  fireEvent.click(screen.getByRole("button", { name: "Edit selection with AI" }));
-  expect(
-    screen.getByText("Highlight slide text first, then ask the AI to change it."),
-  ).toBeInTheDocument();
-  expect(screen.queryByRole("dialog", { name: "Edit selection with AI" })).not.toBeInTheDocument();
+  // With nothing highlighted, AI edit targets the whole current slide.
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  const slideDialog = screen.getByRole("dialog", { name: "Edit slide with AI" });
+  expect(slideDialog).toHaveTextContent("Slide 1");
+  expect(within(slideDialog).getByRole("option", { name: "Split into two slides" })).toBeInTheDocument();
+  expect(within(slideDialog).getByRole("option", { name: "Write speaker notes" })).toBeInTheDocument();
+  fireEvent.click(within(slideDialog).getByRole("button", { name: "Close Edit slide with AI" }));
+  expect(screen.queryByRole("dialog", { name: "Edit slide with AI" })).not.toBeInTheDocument();
 
   // No image model in this workspace: both image entry points disable with an
   // honest tooltip instead of pretending.
@@ -4384,20 +4965,64 @@ test("deck AI selection edit rewrites the highlighted text through the provider"
   selection.removeAllRanges();
   selection.addRange(range);
 
-  fireEvent.click(screen.getByRole("button", { name: "Edit selection with AI" }));
-  const dialog = screen.getByRole("dialog", { name: "Edit selection with AI" });
-  fireEvent.change(within(dialog).getByLabelText("AI edit instruction"), {
-    target: { value: "Spell out the number" },
-  });
-  fireEvent.submit(dialog);
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  expect(screen.getByRole("dialog", { name: "Edit slide text with AI" })).toBeInTheDocument();
+  submitInlineAiInstruction("Spell out the number");
 
-  await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+  const accept = await screen.findByRole("button", { name: "Accept AI suggestion" });
   const sent = requests[0] as { messages: Array<{ content: string }> };
   expect(sent.messages[0].content).toContain("Pipeline grew 30 percent");
   expect(sent.messages[0].content).toContain("Spell out the number");
+  // Reviewed first: the slide is untouched until the suggestion is accepted.
+  expect(bullets.textContent).toContain("Pipeline grew 30 percent");
+  fireEvent.click(accept);
   await waitFor(() =>
     expect(bullets.textContent).toContain("Pipeline expanded thirty percent"),
   );
+});
+
+test("whole-slide AI edit previews before and after, then splits the slide on accept", async () => {
+  const requests = installChatCompletionFetchMock(
+    [
+      "```json",
+      JSON.stringify({
+        slides: [
+          {
+            id: "model-picked-id",
+            layout: "title-bullets",
+            title: "Growth drivers",
+            bullets: [{ runs: [{ text: "Pipeline up 30%" }], level: 0 }],
+            notes: "Walk through the pipeline numbers.",
+          },
+          { id: "slide-extra", layout: "quote", quote: "Fast onboarding keeps customers.", attribution: "CS lead", notes: "" },
+        ],
+      }),
+      "```",
+    ].join("\n"),
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  expect(screen.getByText("Slide 1 of 1")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  fireEvent.click(screen.getByRole("option", { name: "Split into two slides" }));
+  const accept = await screen.findByRole("button", { name: "Accept AI suggestion" });
+  expect(screen.getByLabelText("AI suggestion")).toHaveTextContent("After · 2 slides");
+  expect(screen.getByLabelText("AI suggestion")).toHaveTextContent("Walk through the pipeline numbers.");
+  // Nothing changes until the suggestion is applied.
+  expect(screen.getByText("Slide 1 of 1")).toBeInTheDocument();
+
+  const prompt = (requests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(prompt).toContain("You are editing slide 1 of 1");
+  expect(prompt).toContain("Split it into two focused slides");
+  expect(prompt).not.toContain("data:image");
+
+  fireEvent.click(accept);
+  await waitFor(() => expect(screen.getByText("Slide 1 of 2")).toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "Slide 1: Title + bullets" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Slide 2: Quote" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  await waitFor(() => expect(screen.getByText("Slide 1 of 1")).toBeInTheDocument());
 });
 
 test("highlighting slide text floats the Ask AI pill that opens the inline editor", async () => {
@@ -4423,17 +5048,101 @@ test("highlighting slide text floats the Ask AI pill that opens the inline edito
     name: "Ask AI to edit highlighted slide text",
   });
   fireEvent.click(pill);
-  const dialog = screen.getByRole("dialog", { name: "Edit selection with AI" });
-  expect(within(dialog).getByText("Quarterly revenue targets")).toBeInTheDocument();
-  // Quick suggestion chips fill the instruction like the document editor.
-  fireEvent.click(within(dialog).getByRole("button", { name: "Shorten it" }));
-  expect(within(dialog).getByLabelText("AI edit instruction")).toHaveValue("Shorten it");
-  // Cancel closes without touching the slide.
-  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  const dialog = screen.getByRole("dialog", { name: "Edit slide text with AI" });
+  expect(dialog).toHaveTextContent("Quarterly revenue targets");
+  // The same one-click actions as the document editor.
+  expect(within(dialog).getByRole("option", { name: "Make shorter" })).toBeInTheDocument();
+  expect(within(dialog).getByRole("option", { name: "Spanish" })).toBeInTheDocument();
+  // Closing leaves the slide untouched.
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close Edit slide text with AI" }));
   expect(
-    screen.queryByRole("dialog", { name: "Edit selection with AI" }),
+    screen.queryByRole("dialog", { name: "Edit slide text with AI" }),
   ).not.toBeInTheDocument();
   expect(bullets.textContent).toContain("Quarterly revenue targets");
+});
+
+test("deck keyboard shortcuts duplicate, navigate, reorder, and delete slides", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const firstThumb = screen.getByRole("button", { name: "Slide 1: Title" });
+  firstThumb.focus();
+  fireEvent.keyDown(firstThumb, { key: "d", metaKey: true });
+  expect(screen.getByText("Slide 2 of 2")).toBeInTheDocument();
+
+  fireEvent.keyDown(document.activeElement ?? firstThumb, { key: "n", metaKey: true, shiftKey: true });
+  expect(screen.getByText("Slide 3 of 3")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Slide 3: Title + bullets" })).toBeInTheDocument();
+
+  const thumb3 = screen.getByRole("button", { name: "Slide 3: Title + bullets" });
+  fireEvent.keyDown(thumb3, { key: "ArrowUp", altKey: true });
+  expect(screen.getByRole("button", { name: "Slide 2: Title + bullets" })).toBeInTheDocument();
+
+  fireEvent.keyDown(screen.getByRole("button", { name: "Slide 2: Title + bullets" }), { key: "ArrowUp" });
+  expect(screen.getByText("Slide 1 of 3")).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Slide 1: Title" }), { key: "Delete" });
+  expect(screen.getByText(/of 2$/)).toBeInTheDocument();
+  expect(screen.getByText(/Slide 1 deleted/)).toBeInTheDocument();
+
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Slide 1:/ }), { key: "z", metaKey: true });
+  expect(screen.getByText(/of 3$/)).toBeInTheDocument();
+});
+
+test("slide sorter shows every slide and opens one on Enter", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Quote" }));
+  fireEvent.click(screen.getByRole("button", { name: "Slide sorter" }));
+  const sorter = screen.getByRole("listbox", { name: "Slide sorter" });
+  expect(within(sorter).getAllByRole("option")).toHaveLength(2);
+  fireEvent.keyDown(within(sorter).getByRole("option", { name: "Slide 1: Title" }), { key: "Enter" });
+  expect(screen.queryByRole("listbox", { name: "Slide sorter" })).not.toBeInTheDocument();
+  expect(screen.getByText("Slide 1 of 2")).toBeInTheDocument();
+});
+
+test("presenter view shows the next slide and timer; B blanks the screen; digits jump", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Quote" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Closing" }));
+  fireEvent.click(screen.getByRole("button", { name: "Slide 1: Title" }));
+  fireEvent.click(screen.getByRole("button", { name: "Present deck" }));
+  const overlay = screen.getByRole("dialog", { name: "Deck presentation" });
+  expect(overlay).toHaveTextContent("Slide 1 of 3");
+
+  fireEvent.keyDown(window, { key: "p" });
+  expect(within(overlay).getByLabelText("Presenter tools")).toHaveTextContent("Next · slide 2");
+  expect(within(overlay).getByRole("button", { name: "Pause timer" })).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "b" });
+  expect(overlay.querySelector(".deck-present-blank.is-black")).not.toBeNull();
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  expect(overlay.querySelector(".deck-present-blank")).toBeNull();
+  expect(overlay).toHaveTextContent("Slide 2 of 3");
+
+  fireEvent.keyDown(window, { key: "3" });
+  fireEvent.keyDown(window, { key: "Enter" });
+  expect(overlay).toHaveTextContent("Slide 3 of 3");
+  expect(within(overlay).getByLabelText("Presenter tools")).toHaveTextContent("End of deck");
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Deck presentation" })).not.toBeInTheDocument();
+});
+
+test("the move grip nudges a slide block with the arrow keys as one undo step each", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const title = screen.getByRole("textbox", { name: "Title slide title" });
+  fireEvent.focus(title);
+  const grip = screen.getByRole("button", { name: "Move the title block" });
+  const before = parseFloat(title.style.left);
+  fireEvent.keyDown(grip, { key: "ArrowRight", shiftKey: true });
+  expect(parseFloat(screen.getByRole("textbox", { name: "Title slide title" }).style.left)).toBe(before + 10);
+  fireEvent.keyDown(grip, { key: "ArrowLeft" });
+  expect(parseFloat(screen.getByRole("textbox", { name: "Title slide title" }).style.left)).toBe(before + 9);
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  expect(parseFloat(screen.getByRole("textbox", { name: "Title slide title" }).style.left)).toBe(before + 10);
 });
 
 test("a starred drafting model survives mounts where it is temporarily unavailable", async () => {
@@ -4554,7 +5263,7 @@ test.each(['document', 'deck'] as const)('copy %s reports denied clipboard acces
       fireEvent.click(screen.getByRole('button', { name: 'Deck', exact: true }));
       fireEvent.click(screen.getByRole('button', { name: 'Convert into slides' }));
     }
-    if (mode === 'document') openDocumentTools('More');
+    openDocumentTools('More');
     const button = screen.getByRole('button', { name: mode === 'deck' ? 'Copy deck outline' : 'Copy document' });
     fireEvent.click(button);
     // Decks now also report their server save in a status badge; read the
@@ -4647,7 +5356,7 @@ test("saved draft loading failures are visible and selecting the card retries", 
   let available = false;
   installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => available ? jsonResponse(saved) : offlineResponse() });
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Retry review/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not open");
   expect(screen.getAllByText("Document history")).toHaveLength(1);
@@ -4674,6 +5383,7 @@ test("palette changes preserve slide text and can be undone", () => {
   const title = screen.getByRole("textbox", { name: "Title slide title" });
   title.innerHTML = "A title to keep";
   fireEvent.input(title);
+  fireEvent.click(screen.getByRole("button", { name: "Themes", exact: true }));
   fireEvent.click(screen.getByRole("button", { name: "Apply Midnight color theme" }));
   expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("A title to keep");
   expect(screen.getByRole("button", { name: "Apply Midnight color theme" })).toHaveAttribute("aria-pressed", "true");
@@ -4689,7 +5399,7 @@ test("local pending drafts can be archived without deleting their only copy", as
     status: "complete", serverSavePending: true,
   }]));
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(screen.getByRole("button", { name: "Archive Offline notes" }));
   await waitFor(() => expect(storedDraftHistory().find(item => item.id === "pending-archive")).toMatchObject({archived: true, content: "<p>Keep these notes.</p>"}));
 });
@@ -4699,11 +5409,11 @@ test("reopening the same document from deck mode rehydrates its newly mounted ed
   const saved = serverDraftSnapshot("remount-doc", "Remount review", "<p>Document body survives mode changes.</p>", 1);
   installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => jsonResponse(saved) });
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Remount review/ }));
   await waitFor(() => expect(documentText()).toContain("Document body survives mode changes."));
   fireEvent.click(screen.getByRole("button", { name: "Deck" }));
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(screen.getByRole("button", { name: /Restore Remount review/ }));
   await waitFor(() => expect(documentText()).toContain("Document body survives mode changes."));
 });
@@ -4728,7 +5438,7 @@ test("restoring an old account draft rebuilds pages and keeps page numbers outsi
   const saved = serverDraftSnapshot("old-pagination", "Archived paper", body, 1);
   installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => jsonResponse(saved) });
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Archived paper/ }));
   await waitFor(() => expect(documentBody().querySelectorAll("section.document-page").length).toBeGreaterThan(1));
   expect(documentBody().querySelector(".document-page-label")).toBeNull();
@@ -4745,7 +5455,7 @@ test("restored explicit page breaks remain real boundaries without label text", 
   const saved = serverDraftSnapshot("manual-pagination", "Manual breaks", "<p>First page.</p><hr class=\"document-page-break\"><p>Second page.</p>", 1);
   installDraftsApiFetchMock({ list: () => jsonResponse([saved.document]), get: () => jsonResponse(saved) });
   render(<DocumentAssistantWorkspace data={sampleData} />);
-  fireEvent.click(screen.getByRole("button", { name: "Draft history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Restore Manual breaks/ }));
   await waitFor(() => expect(documentBody().querySelectorAll("section.document-page")).toHaveLength(2));
   expect(documentBody().querySelectorAll("section.document-page")[1]).toHaveAttribute("data-page-break-before", "manual");
