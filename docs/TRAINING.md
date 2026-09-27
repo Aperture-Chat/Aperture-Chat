@@ -4,14 +4,14 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **49 lessons, 229 scenes, 49 MP3 tracks, and 4,065 seconds of narration timelines (67 minutes 45 seconds)**. Its 225 measured focus-map entries comprise 102 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **49 lessons, 233 scenes, 49 MP3 tracks, and 4,119 seconds of narration timelines (68 minutes 39 seconds)**. Its 229 measured focus-map entries comprise 106 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 22 | 108 | 102 | 22 | 1869 | 26 |
+| User | 22 | 112 | 106 | 22 | 1923 | 26 |
 | Administrator | 13 | 57 | 58 | 13 | 1096 | 40 |
 | Platform owner | 14 | 64 | 65 | 14 | 1100 | 58 |
-| Total | 49 | 229 | 225 | 49 | 4065 | — |
+| Total | 49 | 233 | 229 | 49 | 4119 | — |
 
 All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/58 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
@@ -42,7 +42,6 @@ Seconds are the sum of each lesson's source scene durations.
 | User | Attach files and sources | `attachments` | 4 | 44 |
 | User | Build a slide deck | `deck-basics` | 12 | 199 |
 | User | Choose models and request access | `model-access` | 4 | 79 |
-| User | Composer symbol shortcuts | `composer-commands` | 4 | 57 |
 | User | Dictation, images, and diagrams | `dictation-images` | 4 | 52 |
 | User | Draft documents | `drafts` | 9 | 196 |
 | User | Follow the work trace | `work-traces` | 4 | 50 |
@@ -57,8 +56,9 @@ Seconds are the sum of each lesson's source scene durations.
 | User | Save, organize, and recover your drafts | `save-and-recover-work` | 4 | 85 |
 | User | Scheduled automations | `scheduled-automations` | 4 | 56 |
 | User | Search, commands, and workspace links | `search-and-commands` | 4 | 79 |
-| User | Session details and context | `session-details` | 2 | 43 |
+| User | Session details and context | `session-details` | 3 | 59 |
 | User | Start chatting | `chat-basics` | 4 | 55 |
+| User | Symbol shortcuts: / @ # $ > | `composer-commands` | 7 | 95 |
 | User | Tools and the Library | `tools-automations` | 3 | 48 |
 | Administrator | Alerts and delivery | `admin-alerts` | 4 | 67 |
 | Administrator | Approve access and finish sign-in | `admin-access-onboarding` | 5 | 96 |
@@ -109,6 +109,7 @@ Run from the repository root with the intended synthetic role session. Read each
 | User chat and navigation | `capture-training-frames.cjs` |
 | Deck editor, slide AI edit, uploaded background, presenter view, and brand template | `capture-deck-frames.cjs` |
 | Document editor, Edit with AI review, slash menu, find and outline, settings, and history | `capture-training-refresh.cjs drafts` |
+| Session details, its Symbol shortcuts list, and the five composer symbol menus | `capture-training-refresh.cjs symbols` |
 | Administrator console, policies, analytics, and audit | `capture-admin-frames.cjs`, `capture-admin-analytics-frames.cjs` |
 | Owner configuration, connectors, usage, audit, and retention | `capture-owner-frames.cjs` |
 | Account, Help, and mobile installation UI | `capture-user-support-frames.cjs` |
@@ -199,6 +200,12 @@ Captures use isolated synthetic accounts. The authenticator lifecycle was exerci
 The Drafts document and deck editor upgrade refreshed `drafts`, `deck-basics`, and the two Drafts frames in `save-and-recover-work`. `drafts` gained scenes for Edit with AI, the slash menu, and the status bar's outline, find, and zoom; `deck-basics` now teaches the Layouts and Themes strip, Deck starters & brand themes, Edit slide with AI, and presenter view. All three lessons were re-narrated; `save-and-recover-work` now points to the **Document history** button at the top of the assistant rail, because the composer's separate history button was removed. The user, administrator, and owner guides describe the same controls.
 
 The document frames come from `capture-training-refresh.cjs drafts`, which types a synthetic checklist, saves it, and requests one real Edit with AI suggestion from the connected model before discarding it. `capture-deck-frames.cjs` converts a synthetic memo into slides, applies one real Edit slide with AI result, and uploads `fixtures/deck-background.jpg` (drawn by `fixtures/generate-deck-background.py`) as the user's own background. Both captures load the app's web font; every other outside origin stays blocked. The isolated instance had no image-generation model, so `deck-ai-image.png` was kept with `CAPTURE_KEEP_PUBLISHED_FRAMES=deck-ai-image`; it still shows the earlier toolbar and should be recaptured when an image model is available.
+
+## Symbol shortcuts refresh
+
+Session details now ends with a **Symbol shortcuts** list of the five message-box symbols (`/`, `@`, `#`, `$`, `>`). The `composer-commands` lesson was renamed **Symbol shortcuts: / @ # $ >** so the symbols show in the Help list, and it grew from four scenes to seven: where to find the list, one scene per symbol menu with real synthetic items, and the Resources browser. `session-details` gained a third scene for the new list. Both lessons were re-narrated and transcribed with speech recognition against their scripts.
+
+`capture-training-refresh.cjs symbols` is read-only: it opens a saved synthetic chat, captures Session details at the top and scrolled to the list, then types each symbol into the composer without sending. It needs at least one saved prompt, agent profile, knowledge base, skill file, and automation, and it fails rather than capture an empty menu. It recaptured `chat-session-panel`, `composer-slash`, `composer-agent`, and `composer-hash`, and added `session-shortcuts`, `composer-skill`, and `composer-automation`. Other frames that show the Session details panel incidentally still show it without the new list. The written guides' symbol table now matches what each menu does, and their Session details section points to the list.
 
 ## Current verification
 

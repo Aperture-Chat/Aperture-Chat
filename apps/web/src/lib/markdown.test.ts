@@ -5,6 +5,7 @@ import {
   isVisualDiagramBlock,
   markdownToDocumentHtml,
   markdownToPlainText,
+  markdownToPreviewText,
   mermaidDiagramSource,
   parseMarkdownBlocks,
   replaceDiagramFence,
@@ -112,6 +113,52 @@ test("single-dollar amounts and unterminated openers stay prose", () => {
 test("document HTML and plain text keep display math as honest source", () => {
   expect(markdownToDocumentHtml("$$E = mc^2$$")).toBe("<p>$$E = mc^2$$</p>");
   expect(markdownToPlainText("$$E = mc^2$$")).toBe("$$E = mc^2$$");
+});
+
+test("preview text reads TeX math as prose instead of delimited source", () => {
+  expect(
+    markdownToPreviewText(
+      "\\[ \\boxed{E=mc^2} \\] Mass–energy equivalence. \\(E\\) = rest energy. \\(c\\) = the speed of light...",
+    ),
+  ).toBe("E=mc² Mass–energy equivalence. E = rest energy. c = the speed of light...");
+  expect(markdownToPreviewText("$$E = \\frac{m v^{2}}{2}$$")).toBe("E = (m v²)/2");
+  expect(markdownToPreviewText("Solve \\(\\frac{E}{c^2} \\times \\sqrt{x+1}\\) for \\(\\Delta t\\).")).toBe(
+    "Solve E/c² × √(x+1) for Δ t.",
+  );
+  expect(markdownToPreviewText("$$|a| + |b| = c$$")).toBe("|a| + |b| = c");
+  // Single dollars are finance prose, never math.
+  expect(markdownToPreviewText("The deal is $5M or $6M.")).toBe("The deal is $5M or $6M.");
+});
+
+test("preview text drops HTML tags and decodes entities", () => {
+  expect(
+    markdownToPreviewText("<p>First&nbsp;line</p><p>Second <strong>bold</strong> &amp; <em>calm</em></p>"),
+  ).toBe("First line Second bold & calm");
+  expect(markdownToPreviewText("Line one<br>Line two &lt;tag&gt; &#8220;quoted&#x201D;")).toBe(
+    "Line one Line two <tag> “quoted”",
+  );
+  // A comparison is prose, not a tag.
+  expect(markdownToPreviewText("Use a < b and c > d.")).toBe("Use a < b and c > d.");
+});
+
+test("preview text cleans markdown left behind in flattened one-line previews", () => {
+  expect(
+    markdownToPreviewText(
+      "Artemis II Student Name: Date: August 2, 2026 --- ## Introduction More than **fifty** years later...",
+    ),
+  ).toBe("Artemis II Student Name: Date: August 2, 2026 Introduction More than fifty years later...");
+  expect(
+    markdownToPreviewText(
+      "See [the report](https://example.test/wiki/Report_(2026)) and ![Crew photo](https://example.test/crew.png) [K1] for ~~old~~ __new__ `data`.",
+    ),
+  ).toBe("See the report and Crew photo for old new data.");
+  expect(markdownToPreviewText("| Name | Role |\n| --- | :---: |\n| Ada | Pilot |")).toBe(
+    "Name Role Ada Pilot",
+  );
+  expect(markdownToPreviewText("# Heading\n\n- first item\n- second item\n\n> quoted note")).toBe(
+    "Heading first item second item quoted note",
+  );
+  expect(markdownToPreviewText("C# tips and issue #42")).toBe("C# tips and issue #42");
 });
 
 test("mermaid fences become document diagram figures without mermaid source text", () => {

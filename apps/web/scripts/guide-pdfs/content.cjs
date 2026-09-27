@@ -325,20 +325,20 @@ const SECTIONS = [
     id: "symbols",
     part: "chat",
     minRole: "user",
-    title: "Composer symbol shortcuts",
-    summary: "Five characters that insert prompts, agents, knowledge, skills, and automations.",
+    title: "Symbol shortcuts: / @ # $ >",
+    summary: "Five characters that pull prompts, agents, knowledge, skill files, and automations into a message.",
     blocks: [
       p(
-        "Start a word in the composer with one of five symbols and a menu opens with matching items. You can also choose Send options → Resources to browse without memorizing a symbol. The Reply settings tab's MCP connections and resources button opens the same resource browser.",
+        "Start a word in the message box with one of five symbols and a menu opens with matching items. You can also choose Send options → Resources to browse without memorizing a symbol. Forgot one? The bottom of Session details (ⓘ) lists all five, and Help → Symbol shortcuts: / @ # $ > shows each menu in action.",
       ),
       table(
         ["Type", "What it opens"],
         [
-          ["/", "Your saved prompts and enabled MCP connections."],
+          ["/", "Saved prompts (inserted as text) and enabled MCP connections (turned on for this message)."],
           ["@", "Agent profiles — the reply routes through the one you pick."],
-          ["#", "Knowledge bases and the files inside them, to ground your question."],
-          ["$", "Saved skill files, inserted into the message."],
-          [">", "Automations — the one you pick queues and runs when you send."],
+          ["#", "Knowledge bases and the files inside them. Picking one turns on Knowledge for that source."],
+          ["$", "Saved skill files. The one you pick is attached to the message."],
+          [">", "Automations, including paused ones. The one you pick runs on your message when you send."],
         ],
       ),
       steps([
@@ -415,7 +415,7 @@ const SECTIONS = [
     part: "chat",
     minRole: "user",
     title: "Session details and sources",
-    summary: "Real token usage, active tools, and every source this chat gathered.",
+    summary: "Real token usage, active tools, every source this chat gathered, and the symbol shortcuts.",
     blocks: [
       steps([
         "Click the round information button (ⓘ) at the right end of the chat's top bar.",
@@ -426,6 +426,7 @@ const SECTIONS = [
         "Tokens used — shown only when the model provider reported real numbers. Otherwise the panel says “Not reported by the provider”.",
         "Tools — exactly what is switched on for your next message: web search, knowledge, agent mode, plus any automations or MCP connections you added in the composer. “Off” means nothing is active.",
         "Sources gathered — every web source (as clickable links) and workspace citation collected during this conversation.",
+        "Symbol shortcuts — at the bottom of the panel, the five symbols you can type in the message box and what each one pulls in. See “Symbol shortcuts: / @ # $ >”.",
       ]),
       p("The Context window meter describes how much context this conversation uses. For older conversations without provider counts it can show ≈ and estimated from message length. Treat that as an estimate; Tokens used remains based on actual provider reports. When the context window fills, start a new chat and include the details it needs to continue reliably."),
     ],
