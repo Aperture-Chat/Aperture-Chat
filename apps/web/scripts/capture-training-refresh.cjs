@@ -14,12 +14,16 @@
  * Usage: node apps/web/scripts/capture-training-refresh.cjs user,admin,owner
  *        node apps/web/scripts/capture-training-refresh.cjs drafts
  *        node apps/web/scripts/capture-training-refresh.cjs more
+ *        node apps/web/scripts/capture-training-refresh.cjs symbols
  *
  * Fixtures: user needs a genuinely requestable catalog model; admin needs that
  * user's pending request and an eligible group. `drafts` needs a usable
  * drafting model whose real reply fills the Edit with AI review. `more`
  * requires usable model controls and a saved DRAFT_TITLE from the user or
- * drafts pass. All roles must already have finished their first-run
+ * drafts pass. `symbols` needs a saved chat titled CAPTURE_SYMBOLS_CHAT_TITLE
+ * (default: the synthetic vendor review checklist) and at least one saved
+ * prompt, agent profile, knowledge base, skill file, and automation, so every
+ * symbol menu shows real items. All roles must already have finished their first-run
  * onboarding. No provider result is simulated. Captures show the real
  * server's state, including unavailable states.
  *
@@ -28,7 +32,8 @@
  * It may withdraw the same user's selected pending request first. `drafts`
  * saves a manually written synthetic document, requests one real inline AI
  * suggestion, and discards it. `admin` changes an unsaved group selection but
- * does not approve or decline requests. `owner` and `more` are read-only. No
+ * does not approve or decline requests. `owner`, `more`, and `symbols` are
+ * read-only; `symbols` types each symbol into the composer but never sends. No
  * live-instance or provider mutations are permitted. All PNGs, hashes, and
  * measured rectangles stay in ignored review storage; even a complete batch
  * is never published.
@@ -48,9 +53,11 @@ const EXPECTED = {
   admin: ["model-access-requests", "model-access-trace", "retention-policy", "retention-tags"],
   owner: ["search-index", "model-browsing-policy", "provider-catalog", "branding-actions", "retention-tags"],
   more: ["model-favorites", "composer-send-options", "composer-shortcuts-help", "search-palette", "search-recent"],
+  symbols: ["chat-session-panel", "session-shortcuts", "composer-slash", "composer-agent", "composer-hash", "composer-skill", "composer-automation"],
 };
 let APP, API, OUT, page, role, browser, context, currentMode, offline = false;
 const DRAFT_TITLE = process.env.CAPTURE_DRAFT_TITLE || "Workspace onboarding checklist";
+const SYMBOLS_CHAT_TITLE = process.env.CAPTURE_SYMBOLS_CHAT_TITLE || "Synthetic training — vendor review checklist";
 // Typed with Markdown shortcuts so the outline has real headings. The last
 // paragraph is the one the Edit with AI frame rewrites.
 const DRAFT_LINES = [
@@ -170,6 +177,17 @@ function unionTarget(...locators) {
     const y = Math.min(...boxes.map(box => box.y));
     return { x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x,
       height: Math.max(...boxes.map(box => box.y + box.height)) - y };
+  } };
+}
+function unionAll(locator) {
+  return { boundingBox: async () => unionTarget(...await locator.all()).boundingBox() };
+}
+// Matches measureFrameFocus: a small margin keeps the highlight border off
+// text that sits flush with the element's edge.
+function padded(target, margin = 3) {
+  return { boundingBox: async () => {
+    const box = await target.boundingBox();
+    return box && { x: box.x - margin, y: box.y - margin, width: box.width + 2 * margin, height: box.height + 2 * margin };
   } };
 }
 async function expandPanel(title) {
@@ -366,6 +384,46 @@ async function runMore(){
   await shot("search-recent",{searchRecent:page.locator('.command-palette-panel')});
   await browser.close();
 }
+async function openSymbolMenu(symbol) {
+  const textarea = page.locator('.composer textarea');
+  await textarea.click();
+  await textarea.press('Meta+a');
+  await textarea.press('Backspace');
+  await textarea.pressSequentially(symbol, { delay: 60 });
+  const menu = page.locator(".composer-command-menu[role='listbox']");
+  await menu.waitFor();
+  await page.locator('.composer-command-loading').filter({ hasText: 'Loading files' }).waitFor({ state: 'detached' });
+  if (!await menu.getByRole('option').count()) throw new Error(`The ${symbol} menu has no synthetic items to show.`);
+  return menu;
+}
+async function runSymbols(){
+  role='user';await open('user');
+  const chat = page.getByRole('button',{name:SYMBOLS_CHAT_TITLE,exact:true}).first();
+  if (await chat.isVisible()) await chat.click();
+  else {
+    await page.getByRole('button',{name:'View all chats',exact:true}).click();
+    await page.getByRole('dialog',{name:'All chats',exact:true}).getByRole('button',{name:SYMBOLS_CHAT_TITLE,exact:true}).click();
+  }
+  await page.locator('.assistant-message').first().waitFor();
+  await page.getByRole('button',{name:'Session info',exact:true}).click();
+  const panel = page.locator('.session-panel');
+  await panel.waitFor();
+  await shot("chat-session-panel",{
+    sessionSummary:padded(unionAll(panel.locator('.audit-list > .audit-heading:first-child, .audit-list > .audit-row'))),
+    contextWindow:padded(panel.locator('.context-window-detail')),
+  });
+  // The symbol menus keep the panel scrolled to its shortcut list, so the
+  // reference and the live menu appear side by side.
+  await panel.evaluate(element => element.scrollTo(0, element.scrollHeight));
+  await shot("session-shortcuts",{sessionShortcuts:padded(panel.locator('.session-shortcuts'))});
+  await shot("composer-slash",{slashMenu:padded(await openSymbolMenu('/'))});
+  await shot("composer-agent",{agentMenu:padded(await openSymbolMenu('@'))});
+  const hashMenu = padded(await openSymbolMenu('#'));
+  await shot("composer-hash",{hashMenu,composerField:padded(page.locator('.composer'))});
+  await shot("composer-skill",{skillMenu:padded(await openSymbolMenu('$'))});
+  await shot("composer-automation",{automationMenu:padded(await openSymbolMenu('>'))});
+  await browser.close();
+}
 async function runAdmin(){
   role='admin';await open('admin');
   await page.goto(APP+'/admin/model-access');
@@ -414,7 +472,7 @@ async function main() {
   API = origin("CAPTURE_API_URL");
   if (process.env.CAPTURE_MUTATION_ACK !== "isolated-synthetic") throw new Error("CAPTURE_MUTATION_ACK=isolated-synthetic is required.");
   const parts = (process.argv[2] || "user,admin,owner").split(",");
-  if (parts.some(part => !Object.hasOwn(EXPECTED, part)) || new Set(parts).size !== parts.length) throw new Error("Choose user, drafts, admin, owner, or more, each at most once.");
+  if (parts.some(part => !Object.hasOwn(EXPECTED, part)) || new Set(parts).size !== parts.length) throw new Error("Choose user, drafts, admin, owner, more, or symbols, each at most once.");
   const work = path.join(__dirname, "../../../tmp/training-captures");
   fs.mkdirSync(work, { recursive: true });
   OUT = fs.mkdtempSync(path.join(work, "capture-training-refresh-"));
@@ -422,8 +480,8 @@ async function main() {
   try {
     for (const part of parts) {
       currentMode = part;
-      await ({ user: runUser, drafts: runDrafts, admin: runAdmin, owner: runOwner, more: runMore })[part]();
-      const audience = ["more", "drafts"].includes(part) ? "user" : part;
+      await ({ user: runUser, drafts: runDrafts, admin: runAdmin, owner: runOwner, more: runMore, symbols: runSymbols })[part]();
+      const audience = ["more", "drafts", "symbols"].includes(part) ? "user" : part;
       if (EXPECTED[part].some(name => !manifest.frames[`${audience}/${name}`])) throw new Error(`Incomplete ${part} frame batch.`);
       if (manifest.blockedRequests.length) throw new Error("An unexpected write was blocked.");
       manifest.completedModes.push(part);

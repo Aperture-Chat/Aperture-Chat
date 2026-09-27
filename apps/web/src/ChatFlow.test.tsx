@@ -2880,6 +2880,17 @@ test("session details behaves as a keyboard modal on smaller screens", async () 
   }
 });
 
+test("session details lists every composer symbol shortcut", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Session info" }));
+  const shortcuts = await screen.findByRole("group", { name: "Symbol shortcuts" });
+  expect(shortcuts).toHaveTextContent("Start a word in the message box with a symbol");
+  for (const [symbol, label] of [["/", "Prompts & MCP connections"], ["@", "Agents"], ["#", "Knowledge bases & files"], ["$", "Skill files"], [">", "Automations"]]) {
+    const row = within(shortcuts).getByText(label).closest("div")!;
+    expect(row.querySelector("dt")).toHaveTextContent(symbol);
+  }
+});
+
 test("cloud file arrow navigation moves focus and Space toggles a file without attaching it", async () => {
   const originalFetch = globalThis.fetch;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

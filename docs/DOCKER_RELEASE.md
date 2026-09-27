@@ -231,6 +231,25 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.7
+
+- **Session details** (ⓘ in a chat's top bar) now ends with a **Symbol
+  shortcuts** list of the five characters you can type in the message box
+  and what each one pulls in: `/` prompts and MCP connections, `@` agents,
+  `#` knowledge bases and files, `$` skill files, and `>` automations.
+- **Chat Feedback** rows in the administrator and owner consoles show the
+  reply as readable text. Markdown, HTML tags and entities, and math source
+  are flattened (for example, `E=mc^2` reads as E=mc²).
+- The **Composer symbol shortcuts** lesson is renamed **Symbol shortcuts:
+  / @ # $ >** and grows from four scenes to seven, one per symbol menu plus
+  the Resources browser. **Session details and context** gains a scene for
+  the new list. Both are re-narrated with new screenshots, and the user,
+  administrator, and owner guides describe what each symbol menu does.
+- This release adds no database migrations. Back up the complete application
+  data volume before upgrading as usual.
+- API and web images publish as `v0.5.8-dev`, `v0.5.8-test`, and `v0.5.8-main`.
+  Stable `v0.5.8` and `latest` promote inspected test images without rebuilding.
+
 ## New Since v0.5.6
 
 - Drafts has one **Edit with AI** composer for documents and slides. Select
