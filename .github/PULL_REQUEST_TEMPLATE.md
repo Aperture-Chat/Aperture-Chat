@@ -1,39 +1,29 @@
+<!--
+Thanks for contributing! Pull requests target `dev`; see CONTRIBUTING.md.
+Delete any section that doesn't apply.
+-->
+
 ## Summary
 
-<!-- What changed, and why is this change needed? -->
+<!-- What changes, and why is it needed? -->
 
-## Scope
+Closes #
 
-<!-- What is included? What did you intentionally leave out? -->
+## How it was tested
 
-## Validation
+<!-- Commands you ran and what you checked by hand. -->
 
-<!-- List exact commands and results. Do not write only "tests pass." -->
+## Screenshots
 
-## Visual proof
+<!-- For visible changes: before and after, using synthetic data. Include light and dark themes if both are affected. -->
 
-<!-- For visible changes, add synthetic-data screenshots or a short clip when practical. Delete this section when not applicable. -->
+## Notes for reviewers
 
-## Risk and rollback
-
-<!-- Describe behavior, security, migration, compatibility, and rollback concerns. -->
-
-## Container inspection
-
-<!-- Required for test -> main promotion. -->
-
-- API image: `ghcr.io/aperture-chat/aperture-chat-api:test-<full-commit-sha>`
-- Web image: `ghcr.io/aperture-chat/aperture-chat-web:test-<full-commit-sha>`
+<!-- Risks, migrations, compatibility, rollback, or follow-up work. -->
 
 ## Checklist
 
-- [ ] This pull request contains one cohesive change or an intentionally small batch.
-- [ ] I included clear implementation and review notes.
-- [ ] I added focused tests or explained why tests are not applicable.
-- [ ] I ran the relevant checks and recorded their exact results.
-- [ ] I updated documentation and configuration when their contract changed.
-- [ ] Visual evidence uses synthetic data and contains no private information.
-- [ ] I did not commit secrets, production data, private infrastructure, or customer information.
-- [ ] I have the right to submit this contribution under the MIT License in `LICENSE.md`.
-- [ ] No automated or human review is still active at merge time.
-- [ ] A `test` -> `main` promotion will use a merge commit so the inspected test commit remains verifiable.
+- [ ] Targets `dev` and covers one focused change
+- [ ] Tests added or updated, or the summary explains why none are needed
+- [ ] Documentation and `.env.example` updated if behavior or configuration changed
+- [ ] No secrets, personal data, or private infrastructure details in code, screenshots, or logs

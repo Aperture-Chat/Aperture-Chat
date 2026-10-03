@@ -31,6 +31,6 @@ Before handing work off, report:
 - risks, assumptions, and rollback notes;
 - visual evidence for user-facing changes when practical.
 
-Follow the `dev` -> `test` -> `main` promotion process in
-[CONTRIBUTING.md](CONTRIBUTING.md). Automated work must not merge itself or
-bypass an active human or agent review.
+Follow [CONTRIBUTING.md](CONTRIBUTING.md) for pull requests and
+[docs/RELEASING.md](docs/RELEASING.md) for `dev` -> `test` -> `main` promotion.
+Automated work must not merge itself or bypass an active human or agent review.
