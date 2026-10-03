@@ -231,6 +231,40 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.8
+
+- **Elastic Analytics** moves from server-only settings to **Platform → Org
+  Settings → Elastic Analytics**: an endpoint or Elastic Cloud ID, a vaulted
+  API key, and an index prefix, with **Save and check**, connection checks,
+  **Sync now**, and **Re-send everything**. The export now sends five streams
+  (audit, usage, chats with their messages, uploaded documents, and users).
+  Tags, legal holds, archiving, matters, and retention state stay current, and
+  deleted chats and users are flagged rather than erased. The
+  `APERTURE_ELASTIC_URL`, new `APERTURE_ELASTIC_CLOUD_ID`, and
+  `APERTURE_ELASTIC_API_KEY` server values remain fallbacks for blank fields.
+- **Alerts** can email on chosen prompt detections. A **Prompt-injection
+  template** and an **Only these detections** filter target one detector,
+  rules that could never fire are rejected, and emails name the detection
+  without including the flagged text. SMTP now verifies the relay's TLS
+  certificate, adds `Date` and `Message-ID` headers, and retries failed
+  deliveries with backoff. `/v1/responses` prompts are scanned like chat
+  prompts, and **Send test email** waits until SMTP edits are saved.
+- **Audit** dashboards for administrators and owners group signals by what
+  needs attention, add **Audit Insights** trend charts, and open the matching
+  records from any chart mark or signal row.
+- **Drafts**: the paperclip's **From this device** menu adds **Open in
+  editor**, which opens a Word, Markdown, or text file as the document or a
+  PowerPoint file as the deck.
+- Training adds the owner **Elastic Analytics export** lesson and refreshes the
+  owner and administrator audit and alert lessons and the **Draft documents**
+  lesson, with new narration and screenshots. The user, administrator, and
+  owner guides are regenerated.
+- This release adds one database migration (`20261002_0025`, Elastic export
+  stream cursors). Back up the complete application data volume before
+  upgrading.
+- API and web images publish as `v0.5.9-dev`, `v0.5.9-test`, and `v0.5.9-main`.
+  Stable `v0.5.9` and `latest` promote inspected test images without rebuilding.
+
 ## New Since v0.5.7
 
 - **Session details** (ⓘ in a chat's top bar) now ends with a **Symbol

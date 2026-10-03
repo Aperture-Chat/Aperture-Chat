@@ -55,6 +55,7 @@ from app.db.orm import (
     ChatThreadRow,
     ChatRetentionTombstoneRow,
     ChatThreadTagRow,
+    ElasticExportCursorRow,
     IssueReportRow,
     SearchIndexEntryRow,
     MatterRow,
@@ -246,6 +247,17 @@ def _freeze_notification(notification: AlertNotification) -> AlertNotification:
 
 def _freeze_chat_thread(thread: ChatThread) -> ChatThread:
     return _FrozenChatThread.model_validate(thread.model_dump(mode="python"))
+
+
+def _chat_thread_export_row(row: ChatThreadRow) -> ChatThreadExportRow:
+    return ChatThreadExportRow(
+        sequence=row.sequence,
+        thread=_freeze_chat_thread(row.to_model()),
+        created_at=row.created_at,
+        last_activity_at=row.last_activity_at,
+        disposition_state=row.disposition_state,
+        disposition_pending_since=row.disposition_pending_since,
+    )
 
 
 def _freeze_chat_folder(folder: ChatFolder) -> ChatFolder:
@@ -452,6 +464,44 @@ def _clone_chat_import_marker(row: ChatStateImportRow) -> ChatStateImportRow:
         api_key_count=row.api_key_count,
         watermark_count=row.watermark_count,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ChatThreadExportRow:
+    """A chat thread plus the server-owned state the Elastic export reports."""
+
+    sequence: int
+    thread: ChatThread
+    created_at: datetime | None
+    last_activity_at: datetime | None
+    disposition_state: str | None = None
+    disposition_pending_since: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatThreadMetadataRow:
+    """Thread fields that change in place, without re-saving the thread."""
+
+    id: str
+    tenant_id: str
+    title: str
+    archived: bool
+    pinned: bool
+    folder_id: str | None
+    matter_id: str | None
+    disposition_state: str | None
+    disposition_pending_since: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatThreadGovernance:
+    """Retention tags and active legal holds on one thread."""
+
+    tags: tuple[ChatThreadTag, ...] = ()
+    holds: tuple[tuple[str, str], ...] = ()  # (hold id, hold name)
+
+
+_IN_CLAUSE_CHUNK = 500
 
 
 class ApplicationStateRepository:
@@ -1251,6 +1301,247 @@ class ApplicationStateRepository:
             )
             session.execute(delete(AuditOutboxRow).where(AuditOutboxRow.sequence.in_(sequences)))
             return len(sequences)
+
+        return self.run_transaction(operation)
+
+    def requeue_delivered_outbox(self) -> int:
+        """Mark every delivered outbox row pending again for a full re-send."""
+
+        def operation(session: Session) -> int:
+            result = session.execute(
+                update(AuditOutboxRow)
+                .where(AuditOutboxRow.delivered_at.is_not(None))
+                .values(delivered_at=None)
+            )
+            return result.rowcount or 0
+
+        return self.run_transaction(operation)
+
+    # Elastic export cursors ---------------------------------------------
+
+    def elastic_export_cursor(self, stream: str, target_signature: str) -> int:
+        """Return the delivered position, or 0 when it belongs to another target."""
+
+        def operation(session: Session) -> int:
+            row = session.get(ElasticExportCursorRow, stream)
+            if row is None or row.target_signature != target_signature:
+                return 0
+            return row.position
+
+        return self.run_transaction(operation)
+
+    def set_elastic_export_cursor(self, stream: str, target_signature: str, position: int) -> None:
+        if position < 0:
+            raise ValueError("Elastic export cursor positions are nonnegative.")
+
+        def operation(session: Session) -> None:
+            now = datetime.now(UTC)
+            row = session.get(ElasticExportCursorRow, stream)
+            if row is None:
+                session.add(
+                    ElasticExportCursorRow(
+                        stream=stream,
+                        target_signature=target_signature,
+                        position=position,
+                        updated_at=now,
+                    )
+                )
+            else:
+                row.target_signature = target_signature
+                row.position = position
+                row.updated_at = now
+            session.flush()
+
+        self.run_transaction(operation)
+
+    def reset_elastic_export_cursors(self) -> int:
+        def operation(session: Session) -> int:
+            count = session.scalar(select(func.count()).select_from(ElasticExportCursorRow)) or 0
+            session.execute(delete(ElasticExportCursorRow))
+            return count
+
+        return self.run_transaction(operation)
+
+    def chat_threads_after_sequence(self, after: int, *, limit: int) -> list[ChatThreadExportRow]:
+        """Threads saved after ``after``, oldest save first.
+
+        A thread save re-inserts its row, so ``sequence`` advances on every
+        content change and a cursor over it sees each edited thread again.
+        """
+
+        _validate_limit(limit)
+
+        def operation(session: Session) -> list[ChatThreadExportRow]:
+            rows = session.scalars(
+                select(ChatThreadRow)
+                .where(ChatThreadRow.sequence > after)
+                .order_by(ChatThreadRow.sequence)
+                .limit(limit)
+            )
+            return [_chat_thread_export_row(row) for row in rows]
+
+        return self.run_transaction(operation)
+
+    def chat_thread_export_rows(self, thread_ids: Iterable[str]) -> list[ChatThreadExportRow]:
+        selected = list(dict.fromkeys(thread_ids))
+
+        def operation(session: Session) -> list[ChatThreadExportRow]:
+            found: list[ChatThreadExportRow] = []
+            for start in range(0, len(selected), _IN_CLAUSE_CHUNK):
+                chunk = selected[start : start + _IN_CLAUSE_CHUNK]
+                rows = session.scalars(
+                    select(ChatThreadRow)
+                    .where(ChatThreadRow.id.in_(chunk))
+                    .order_by(ChatThreadRow.sequence)
+                )
+                found.extend(_chat_thread_export_row(row) for row in rows)
+            return found
+
+        return self.run_transaction(operation)
+
+    def chat_thread_metadata_page(self, *, after_id: str, limit: int) -> list[ChatThreadMetadataRow]:
+        """In-place-mutable thread fields by id, without loading messages."""
+
+        _validate_limit(limit)
+
+        def operation(session: Session) -> list[ChatThreadMetadataRow]:
+            rows = session.execute(
+                select(
+                    ChatThreadRow.id,
+                    ChatThreadRow.tenant_id,
+                    ChatThreadRow.title,
+                    ChatThreadRow.archived,
+                    ChatThreadRow.pinned,
+                    ChatThreadRow.folder_id,
+                    ChatThreadRow.matter_id,
+                    ChatThreadRow.disposition_state,
+                    ChatThreadRow.disposition_pending_since,
+                )
+                .where(ChatThreadRow.id > after_id)
+                .order_by(ChatThreadRow.id)
+                .limit(limit)
+            )
+            return [ChatThreadMetadataRow(*row) for row in rows]
+
+        return self.run_transaction(operation)
+
+    def chat_thread_governance(
+        self, thread_ids: Iterable[str] | None
+    ) -> dict[str, ChatThreadGovernance]:
+        """Tags and active holds per thread; ``None`` reads every thread that has any."""
+
+        selected = None if thread_ids is None else list(dict.fromkeys(thread_ids))
+
+        def operation(session: Session) -> dict[str, ChatThreadGovernance]:
+            tags: dict[str, list[ChatThreadTag]] = {}
+            holds: dict[str, list[tuple[str, str]]] = {}
+            chunks: list[list[str] | None] = (
+                [None]
+                if selected is None
+                else [
+                    selected[start : start + _IN_CLAUSE_CHUNK]
+                    for start in range(0, len(selected), _IN_CLAUSE_CHUNK)
+                ]
+            )
+            for chunk in chunks:
+                tag_filter = [] if chunk is None else [ChatThreadTagRow.thread_id.in_(chunk)]
+                hold_filter = (
+                    [] if chunk is None else [RetentionHoldThreadRow.thread_id.in_(chunk)]
+                )
+                for tag in session.scalars(
+                    select(ChatThreadTagRow)
+                    .where(*tag_filter)
+                    .order_by(
+                        ChatThreadTagRow.thread_id,
+                        ChatThreadTagRow.namespace,
+                        ChatThreadTagRow.key,
+                    )
+                ):
+                    tags.setdefault(tag.thread_id, []).append(tag.to_model())
+                for thread_id, hold_id, hold_name in session.execute(
+                    select(
+                        RetentionHoldThreadRow.thread_id,
+                        RetentionHoldRow.id,
+                        RetentionHoldRow.name,
+                    )
+                    .join(RetentionHoldRow, RetentionHoldRow.id == RetentionHoldThreadRow.hold_id)
+                    .where(*hold_filter, RetentionHoldRow.released_at.is_(None))
+                    .order_by(RetentionHoldRow.id)
+                ):
+                    holds.setdefault(thread_id, []).append((hold_id, hold_name))
+            thread_keys = selected if selected is not None else list(dict.fromkeys([*tags, *holds]))
+            return {
+                thread_id: ChatThreadGovernance(
+                    tags=tuple(tags.get(thread_id, ())),
+                    holds=tuple(holds.get(thread_id, ())),
+                )
+                for thread_id in thread_keys
+            }
+
+        return self.run_transaction(operation)
+
+    def matter_names(self, matter_ids: Iterable[str]) -> dict[str, str]:
+        selected = [matter_id for matter_id in dict.fromkeys(matter_ids) if matter_id]
+        if not selected:
+            return {}
+
+        def operation(session: Session) -> dict[str, str]:
+            names: dict[str, str] = {}
+            for start in range(0, len(selected), _IN_CLAUSE_CHUNK):
+                chunk = selected[start : start + _IN_CLAUSE_CHUNK]
+                names.update(
+                    session.execute(
+                        select(MatterRow.id, MatterRow.name).where(MatterRow.id.in_(chunk))
+                    ).tuples()
+                )
+            return names
+
+        return self.run_transaction(operation)
+
+    def count_chat_threads_after_sequence(self, after: int) -> int:
+        return self.run_transaction(
+            lambda session: session.scalar(
+                select(func.count())
+                .select_from(ChatThreadRow)
+                .where(ChatThreadRow.sequence > after)
+            )
+            or 0
+        )
+
+    def usage_after_sequence(self, after: int, *, limit: int) -> list[tuple[int, UsageRecord]]:
+        _validate_limit(limit)
+
+        def operation(session: Session) -> list[tuple[int, UsageRecord]]:
+            rows = session.scalars(
+                select(UsageRecordRow)
+                .where(UsageRecordRow.sequence > after)
+                .order_by(UsageRecordRow.sequence)
+                .limit(limit)
+            )
+            return [(row.sequence, _freeze_usage(row.to_model())) for row in rows]
+
+        return self.run_transaction(operation)
+
+    def count_usage_after_sequence(self, after: int) -> int:
+        return self.run_transaction(
+            lambda session: session.scalar(
+                select(func.count())
+                .select_from(UsageRecordRow)
+                .where(UsageRecordRow.sequence > after)
+            )
+            or 0
+        )
+
+    def chat_attachments_by_id(self, attachment_ids: Iterable[str]) -> dict[str, ChatAttachment]:
+        selected = list(dict.fromkeys(attachment_ids))
+        if not selected:
+            return {}
+
+        def operation(session: Session) -> dict[str, ChatAttachment]:
+            rows = session.scalars(
+                select(ChatAttachmentRow).where(ChatAttachmentRow.id.in_(selected))
+            )
+            return {row.id: _freeze_chat_attachment(row.to_model()) for row in rows}
 
         return self.run_transaction(operation)
 

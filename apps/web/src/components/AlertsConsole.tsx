@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Send,
   ShieldAlert,
+  ShieldX,
   Trash2,
 } from "lucide-react";
 import { Panel, Pill } from "./Primitives";
@@ -67,7 +68,33 @@ const SEVERITY_OPTIONS = [
 const ACTION_PATTERN_HINT =
   "Exact actions or prefixes: security.*, admin.*, auth.*, chat.*, platform.*, agent.*, automation.*, knowledge.*, tool.*, scim.*, hermes.*";
 
-const SUSPICIOUS_TEMPLATE = {
+// Mirrors DLP_RULES in services/api/app/core/dlp.py. The API rejects any id
+// outside that list, so drift surfaces as a save error, never a dead rule.
+const PROMPT_DETECTIONS = [
+  { id: "prompt-injection", label: "Prompt injection", hint: "Ignore or override previous instructions" },
+  { id: "system-prompt-probe", label: "System-prompt extraction", hint: "Reveal or repeat hidden instructions" },
+  { id: "credential-probe", label: "Credential extraction", hint: "Asks for API keys, secrets, or .env values" },
+  { id: "api-credential", label: "API key or token shared", hint: "A live-looking key pasted into a prompt" },
+  { id: "private-key", label: "Private key shared", hint: "PEM private key material" },
+  { id: "password-disclosure", label: "Password shared", hint: "\"password is …\" style disclosures" },
+  { id: "ssn", label: "US Social Security number", hint: "Formatted SSNs" },
+  { id: "credit-card", label: "Payment card number", hint: "Card numbers that pass the Luhn check" },
+] as const;
+
+const DETECTION_LABELS = new Map<string, string>(PROMPT_DETECTIONS.map((item) => [item.id, item.label]));
+
+type RuleTemplate = {
+  name: string;
+  description: string;
+  actionPatterns: string;
+  detectorIds?: string[];
+  minSeverity: string;
+  thresholdCount: string;
+  windowMinutes: string;
+  cooldownMinutes: string;
+};
+
+const SUSPICIOUS_TEMPLATE: RuleTemplate = {
   name: "Suspicious activity",
   description: "Security flags, content-filter hits, and elevated-severity governance events.",
   actionPatterns: "security.*",
@@ -75,12 +102,24 @@ const SUSPICIOUS_TEMPLATE = {
   thresholdCount: "1",
   windowMinutes: "60",
   cooldownMinutes: "15",
-} as const;
+};
+
+const PROMPT_INJECTION_TEMPLATE: RuleTemplate = {
+  name: "Prompt injection",
+  description: "Prompts that try to override instructions, extract the system prompt, or pull platform credentials.",
+  actionPatterns: "security.prompt_flagged",
+  detectorIds: ["prompt-injection", "system-prompt-probe", "credential-probe"],
+  minSeverity: "warning",
+  thresholdCount: "1",
+  windowMinutes: "60",
+  cooldownMinutes: "10",
+};
 
 type RuleDraft = {
   name: string;
   description: string;
   actionPatterns: string;
+  detectorIds: string[];
   minSeverity: string;
   actorId: string;
   thresholdCount: string;
@@ -94,6 +133,7 @@ const EMPTY_DRAFT: RuleDraft = {
   name: "",
   description: "",
   actionPatterns: "",
+  detectorIds: [],
   minSeverity: "warning",
   actorId: "any",
   thresholdCount: "1",
@@ -120,6 +160,7 @@ function draftFromRule(rule: AlertRule): RuleDraft {
     name: rule.name,
     description: rule.description,
     actionPatterns: rule.action_patterns.join(", "),
+    detectorIds: rule.detector_ids ?? [],
     minSeverity: rule.min_severity,
     actorId: rule.actor_ids[0] ?? "any",
     thresholdCount: String(rule.threshold_count),
@@ -136,6 +177,7 @@ function payloadFromDraft(draft: RuleDraft): AlertRuleCreateRequest {
     description: draft.description.trim(),
     enabled: draft.enabled,
     action_patterns: splitList(draft.actionPatterns),
+    detector_ids: draft.detectorIds,
     min_severity: draft.minSeverity,
     actor_ids: draft.actorId === "any" ? [] : [draft.actorId],
     threshold_count: Math.max(1, Number.parseInt(draft.thresholdCount, 10) || 1),
@@ -147,13 +189,15 @@ function payloadFromDraft(draft: RuleDraft): AlertRuleCreateRequest {
 
 function ruleCriteriaSummary(rule: AlertRule): string {
   const patterns = rule.action_patterns.length ? rule.action_patterns.join(", ") : "any action";
+  const detections = (rule.detector_ids ?? []).map((id) => DETECTION_LABELS.get(id) ?? id);
   const severity = `≥ ${rule.min_severity}`;
   const actors = rule.actor_ids.length
     ? `${rule.actor_ids.length} watched user${rule.actor_ids.length === 1 ? "" : "s"}`
     : "any actor";
   const threshold =
     rule.threshold_count > 1 ? `≥ ${rule.threshold_count} in ${rule.window_minutes}m` : "every match";
-  return `${patterns} · ${severity} · ${actors} · ${threshold}`;
+  const criteria = [patterns, ...(detections.length ? [`only ${detections.join(", ")}`] : [])];
+  return `${criteria.join(" · ")} · ${severity} · ${actors} · ${threshold}`;
 }
 
 function notificationPillTone(
@@ -373,7 +417,7 @@ export function AlertsConsole({
     [actorOptions],
   );
 
-  const openCreateForm = (template?: typeof SUSPICIOUS_TEMPLATE) => {
+  const openCreateForm = (template?: RuleTemplate) => {
     setEditingRuleId(null);
     setDraft(
       template
@@ -382,6 +426,7 @@ export function AlertsConsole({
             name: template.name,
             description: template.description,
             actionPatterns: template.actionPatterns,
+            detectorIds: template.detectorIds ?? [],
             minSeverity: template.minSeverity,
             thresholdCount: template.thresholdCount,
             windowMinutes: template.windowMinutes,
@@ -399,6 +444,14 @@ export function AlertsConsole({
     setFormError(null);
     setFormOpen(true);
   };
+
+  const toggleDetection = (detectorId: string, checked: boolean) =>
+    setDraft((current) => ({
+      ...current,
+      detectorIds: checked
+        ? [...current.detectorIds.filter((id) => id !== detectorId), detectorId]
+        : current.detectorIds.filter((id) => id !== detectorId),
+    }));
 
   const closeForm = () => {
     setFormOpen(false);
@@ -496,6 +549,19 @@ export function AlertsConsole({
       setPendingAction(null);
     }
   };
+
+  // The test send uses the saved settings, so testing unsaved edits would
+  // report on a configuration the owner is not looking at.
+  const settingsDirty = Boolean(
+    settingsDraft &&
+      emailSettings &&
+      (settingsDraft.password !== "" ||
+        settingsDraft.host.trim() !== emailSettings.host ||
+        (Number.parseInt(settingsDraft.port, 10) || 0) !== emailSettings.port ||
+        settingsDraft.security !== emailSettings.security ||
+        settingsDraft.username.trim() !== emailSettings.username ||
+        settingsDraft.fromAddress.trim() !== emailSettings.from_address),
+  );
 
   const ruleRows = rules ?? [];
   const notificationRows = notifications ?? [];
@@ -651,6 +717,11 @@ export function AlertsConsole({
                   }
                 />
               </label>
+              <small className="field-hint alert-email-hint">
+                Use your email provider&apos;s SMTP relay, for example SendGrid, Amazon SES, Mailgun, or Postmark:
+                STARTTLS on port 587 or SSL/TLS on 465. The server&apos;s TLS certificate is verified, so a relay with
+                a self-signed certificate is refused.
+              </small>
             </div>
             <div className="alert-email-actions">
               <button
@@ -674,14 +745,21 @@ export function AlertsConsole({
               <button
                 className="secondary-button compact"
                 type="button"
-                disabled={pendingAction === "email:test" || !testRecipient.trim()}
-                data-tooltip="Send a real test email through the saved SMTP settings"
+                disabled={pendingAction === "email:test" || !testRecipient.trim() || settingsDirty}
+                data-tooltip={
+                  settingsDirty
+                    ? "Save the SMTP settings first; the test uses the saved settings"
+                    : "Send a real test email through the saved SMTP settings"
+                }
                 onClick={() => void sendTestEmail()}
               >
                 <Send size={14} /> {pendingAction === "email:test" ? "Sending…" : "Send test email"}
               </button>
               {testResult ? (
                 <Pill tone={testResult.status === "sent" ? "success" : "danger"}>{testResult.detail}</Pill>
+              ) : null}
+              {settingsDirty ? (
+                <small className="field-hint">Unsaved changes. Save them before sending a test.</small>
               ) : null}
             </div>
             {emailSettings?.last_test_status ? (
@@ -706,6 +784,14 @@ export function AlertsConsole({
         }
         actions={
           <>
+            <button
+              className="secondary-button compact"
+              type="button"
+              data-tooltip="Prefill a rule that emails on prompt-injection, system-prompt, and credential-extraction attempts"
+              onClick={() => openCreateForm(PROMPT_INJECTION_TEMPLATE)}
+            >
+              <ShieldX size={14} /> Prompt-injection template
+            </button>
             <button
               className="secondary-button compact"
               type="button"
@@ -830,6 +916,29 @@ export function AlertsConsole({
                 </small>
               </label>
             </div>
+            <fieldset className="alert-detection-field">
+              <legend className="connector-field-label">Only these detections</legend>
+              <small className="field-hint">
+                Narrows the rule to prompts flagged by the chosen detectors. Leave all unchecked to match every event
+                the patterns above allow.
+              </small>
+              <div className="model-group-check-grid">
+                {PROMPT_DETECTIONS.map((detection) => (
+                  <label className="model-group-check" key={detection.id}>
+                    <input
+                      type="checkbox"
+                      checked={draft.detectorIds.includes(detection.id)}
+                      aria-label={`Only alert on ${detection.label}`}
+                      onChange={(event) => toggleDetection(detection.id, event.target.checked)}
+                    />
+                    <span>
+                      <strong>{detection.label}</strong>
+                      <small>{detection.hint}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
             {formError ? <Pill tone="danger">{formError}</Pill> : null}
             <div className="alert-email-actions">
               <button
@@ -880,8 +989,8 @@ export function AlertsConsole({
             <span>
               <strong>No alert rules yet</strong>
               <small>
-                Create a rule — or start from the suspicious-activity template — to get alerted when matching audit
-                events occur.
+                Create a rule, or start from the prompt-injection or suspicious-activity template, to get alerted
+                when matching audit events occur.
               </small>
             </span>
           </div>

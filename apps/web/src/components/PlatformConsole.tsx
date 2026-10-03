@@ -50,7 +50,11 @@ import type {
   AuditEvent,
   BootstrapData,
   Connector,
+  ElasticConnectionTestRequest,
+  ElasticConnectionTestResult,
+  ElasticExportSettingsUpdateRequest,
   ElasticStatus,
+  ElasticStreamId,
   ModelConfig,
   PlatformProviderKeyCreateRequest,
   PlatformSettings,
@@ -120,7 +124,24 @@ import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPreviewText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
-import { AuditSummaryCard, type AuditSummaryItem } from "./AuditSummaryCard";
+import { AuditSummaryBoard, type AuditSummaryGroup, type AuditSummaryItem } from "./AuditSummaryCard";
+import { AuditInsights } from "./AuditInsights";
+import {
+  AUDIT_ALERT_PAGE_SIZE,
+  AUDIT_EVENT_PAGE_SIZE,
+  accessRequestsSignal,
+  afterHoursSignal,
+  alertResponseSignal,
+  automationFailuresSignal,
+  credentialChangesSignal,
+  expiringKeysSignal,
+  failedOperationsSignal,
+  failedValidationsSignal,
+  neverSignedInSignal,
+  passwordAdminsSignal,
+  roleChangesSignal,
+  warningEventsSignal,
+} from "./auditSignals";
 
 type ActionStatus = {
   tone: "success" | "warning" | "info";
@@ -655,6 +676,9 @@ export type PlatformConsoleActions = ConnectorsPanelApi & {
   updatePlatformSettings?: (patch: PlatformSettingsUpdateRequest) => Promise<PlatformSettings | void> | PlatformSettings | void;
   updateTenantBranding?: (tenantId: string, patch: TenantBrandingUpdateRequest) => Promise<Tenant | void> | Tenant | void;
   getElasticStatus?: () => Promise<ElasticStatus | void> | ElasticStatus | void;
+  updateElasticSettings?: ElasticPanelApi["updateElasticSettings"];
+  testElasticConnection?: ElasticPanelApi["testElasticConnection"];
+  syncElastic?: ElasticPanelApi["syncElastic"];
 };
 
 export function PlatformConsole({
@@ -3494,7 +3518,15 @@ export function PlatformConsole({
               onStatus={setActionStatus}
               defaultCollapsed
             />
-            <ElasticPanel elasticStatus={elasticStatus} />
+            <ElasticPanel
+              elasticStatus={elasticStatus}
+              onStatusChange={setElasticStatus}
+              api={{
+                updateElasticSettings: platformActions?.updateElasticSettings,
+                testElasticConnection: platformActions?.testElasticConnection,
+                syncElastic: platformActions?.syncElastic,
+              }}
+            />
 
           </div>
         </Tabs.Content>
@@ -4148,11 +4180,26 @@ export function PlatformConsole({
         <Tabs.Content value="audit" className="tab-content">
           <div className="audit-console-grid">
             <Panel title="Owner Audit" subtitle="Security and governance signals for provider, model, key, prompt, connector, and agent activity.">
-              <div className="audit-summary-grid">
-                {auditSummary.map((item) => (
-                  <AuditSummaryCard item={item} key={item.label} />
-                ))}
-              </div>
+              <AuditSummaryBoard items={auditSummary} groups={PLATFORM_AUDIT_GROUPS} />
+            </Panel>
+
+            <Panel
+              title={
+                <>
+                  <BarChart3 size={18} /> Audit Insights
+                </>
+              }
+              subtitle="Trends behind the signals above: severity by day, security alerts, who is acting, which areas are changing, and when."
+            >
+              <AuditInsights
+                events={auditTrail ?? []}
+                alerts={securityAlerts ?? []}
+                formatTimestamp={formatAuditTimestamp}
+                formatRole={formatAuditRole}
+                modelName={(modelId) => data.models.find((model) => model.id === modelId)?.name ?? modelId}
+                eventLimit={AUDIT_EVENT_PAGE_SIZE}
+                alertLimit={AUDIT_ALERT_PAGE_SIZE}
+              />
             </Panel>
 
             <Panel
@@ -5626,42 +5673,589 @@ function TenantPolicyPanel({
   );
 }
 
-function ElasticPanel({ elasticStatus }: { elasticStatus: ElasticStatus | null }) {
-  const configured = Boolean(elasticStatus?.configured);
+type ElasticPanelApi = {
+  updateElasticSettings?: (
+    patch: ElasticExportSettingsUpdateRequest,
+  ) => Promise<ElasticStatus | void> | ElasticStatus | void;
+  testElasticConnection?: (
+    payload: ElasticConnectionTestRequest,
+  ) => Promise<ElasticConnectionTestResult | void> | ElasticConnectionTestResult | void;
+  syncElastic?: (payload: { full?: boolean }) => Promise<ElasticStatus | void> | ElasticStatus | void;
+};
+
+const ELASTIC_STREAM_OPTIONS: { id: ElasticStreamId; title: string; detail: string }[] = [
+  {
+    id: "audit",
+    title: "Audit trail",
+    detail: "Sign-ins, admin and policy changes, uploads, deletions, security flags, and every other audited action.",
+  },
+  {
+    id: "usage",
+    title: "Model usage",
+    detail: "One record per model response: user, model, provider, surface, and provider-reported tokens.",
+  },
+  {
+    id: "chats",
+    title: "Chats",
+    detail:
+      "Every conversation and message: who, when, which model, attachments, citations, tokens, retention tags, and legal holds.",
+  },
+  {
+    id: "documents",
+    title: "Documents",
+    detail: "Chat uploads and knowledge-library documents: name, type, size, owner, and status.",
+  },
+  {
+    id: "users",
+    title: "Users",
+    detail: "The user directory: role, groups, sign-in method, and whether each account is active.",
+  },
+];
+
+const ELASTIC_ALL_STREAMS = ELASTIC_STREAM_OPTIONS.map((option) => option.id);
+
+// Kibana saved objects for one-step setup: Stack Management → Saved objects →
+// Import. Users have no meaningful event time, so their view has no time field.
+const ELASTIC_KIBANA_VIEWS: { suffix: string; name: string; timeField: boolean }[] = [
+  { suffix: "*", name: "Aperture: everything", timeField: true },
+  { suffix: "audit", name: "Aperture: audit trail", timeField: true },
+  { suffix: "usage", name: "Aperture: model usage", timeField: true },
+  { suffix: "chats", name: "Aperture: chats", timeField: true },
+  { suffix: "chat-messages", name: "Aperture: chat messages", timeField: true },
+  { suffix: "documents", name: "Aperture: documents", timeField: true },
+  { suffix: "users", name: "Aperture: users", timeField: false },
+];
+
+function elasticKibanaDataViews(prefix: string): string {
+  return ELASTIC_KIBANA_VIEWS.map((view) =>
+    JSON.stringify({
+      id: `${prefix}-${view.suffix === "*" ? "all" : view.suffix}`,
+      type: "index-pattern",
+      attributes: {
+        title: `${prefix}-${view.suffix}`,
+        name: view.name,
+        ...(view.timeField ? { timeFieldName: "@timestamp" } : {}),
+      },
+      references: [],
+    }),
+  ).join("\n") + "\n";
+}
+
+function downloadElasticKibanaDataViews(prefix: string) {
+  const url = URL.createObjectURL(new Blob([elasticKibanaDataViews(prefix)], { type: "application/x-ndjson" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${prefix}-kibana-data-views.ndjson`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+const ELASTIC_API_KEY_REQUEST = `POST /_security/api_key
+{
+  "name": "aperture-export",
+  "role_descriptors": {
+    "aperture_export": {
+      "cluster": ["monitor"],
+      "indices": [
+        { "names": ["aperture-*"], "privileges": ["create_index", "index", "read"] }
+      ]
+    }
+  }
+}`;
+
+type ElasticDraft = {
+  endpoint: string;
+  apiKey: string;
+  indexPrefix: string;
+  streams: ElasticStreamId[];
+  includeContent: boolean;
+  enabled: boolean;
+};
+
+function elasticDraftFromStatus(status: ElasticStatus): ElasticDraft {
+  const settings = status.settings;
+  // Nothing configured anywhere yet: suggest the full export. Every choice
+  // stays visible and nothing is sent until the owner saves.
+  const firstSetup = !status.configured && !settings?.endpoint && !settings?.api_key_set;
+  return {
+    endpoint: settings?.endpoint ?? "",
+    apiKey: "",
+    indexPrefix: settings?.index_prefix ?? "aperture",
+    streams: firstSetup ? ELASTIC_ALL_STREAMS : (settings?.streams ?? ["audit"]),
+    includeContent: firstSetup ? true : Boolean(settings?.include_content),
+    enabled: settings?.enabled ?? true,
+  };
+}
+
+function elasticDraftChanged(draft: ElasticDraft, status: ElasticStatus): boolean {
+  const saved = status.settings;
+  if (!saved) return true;
+  return (
+    draft.apiKey.trim() !== "" ||
+    draft.endpoint.trim() !== saved.endpoint ||
+    draft.indexPrefix.trim().toLowerCase() !== saved.index_prefix ||
+    draft.includeContent !== saved.include_content ||
+    draft.enabled !== saved.enabled ||
+    ELASTIC_ALL_STREAMS.some((id) => draft.streams.includes(id) !== saved.streams.includes(id))
+  );
+}
+
+function elasticHeadline(status: ElasticStatus | null): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
+  if (!status) return { label: "Status unavailable", tone: "neutral" };
+  if (status.configError) return { label: "Needs attention", tone: "danger" };
+  if (!status.configured) return { label: "Not connected", tone: "neutral" };
+  if (status.enabled === false) return { label: "Paused", tone: "warning" };
+  if (status.lastDeliveryError) return { label: "Delivery failing", tone: "danger" };
+  if (status.connected) return { label: "Connected", tone: "success" };
+  return { label: "Configured, waiting for first delivery", tone: "warning" };
+}
+
+function ElasticPanel({
+  elasticStatus,
+  onStatusChange,
+  api,
+}: {
+  elasticStatus: ElasticStatus | null;
+  onStatusChange: (status: ElasticStatus) => void;
+  api: ElasticPanelApi;
+}) {
+  const [draft, setDraft] = useState<ElasticDraft | null>(null);
+  const [pending, setPending] = useState<"save" | "test" | "sync" | "resend" | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "danger" | "info"; text: string } | null>(null);
+  const [testResult, setTestResult] = useState<ElasticConnectionTestResult | null>(null);
+
+  useEffect(() => {
+    if (elasticStatus && draft === null) setDraft(elasticDraftFromStatus(elasticStatus));
+  }, [elasticStatus, draft]);
+
+  const headline = elasticHeadline(elasticStatus);
+  const prefix = (draft?.indexPrefix.trim() || elasticStatus?.settings?.index_prefix || "aperture").toLowerCase();
+  const settings = elasticStatus?.settings;
+  const environment = elasticStatus?.environment;
+  const dirty = Boolean(draft && elasticStatus && elasticDraftChanged(draft, elasticStatus));
+  const canEdit = Boolean(api.updateElasticSettings);
+
+  const applyStatus = (status: ElasticStatus | void) => {
+    if (!status) return;
+    onStatusChange(status);
+    setDraft(elasticDraftFromStatus(status));
+  };
+
+  const runTest = async (payload: ElasticConnectionTestRequest) => {
+    if (!api.testElasticConnection) return;
+    const result = await api.testElasticConnection(payload);
+    if (result) setTestResult(result);
+    return result;
+  };
+
+  const save = async () => {
+    if (!draft || !api.updateElasticSettings) return;
+    if (draft.streams.length === 0 && draft.enabled) {
+      setNotice({ tone: "danger", text: "Choose at least one kind of data to send, or turn export off." });
+      return;
+    }
+    setPending("save");
+    setNotice(null);
+    setTestResult(null);
+    try {
+      const saved = await api.updateElasticSettings({
+        endpoint: draft.endpoint.trim(),
+        index_prefix: draft.indexPrefix.trim(),
+        streams: draft.streams,
+        include_content: draft.includeContent,
+        enabled: draft.enabled,
+        ...(draft.apiKey.trim() ? { api_key: draft.apiKey.trim() } : {}),
+      });
+      applyStatus(saved);
+      if (saved && saved.configured && api.testElasticConnection) {
+        const result = await runTest({});
+        setNotice(
+          result?.ok
+            ? { tone: "success", text: "Saved and verified. New activity is sent about every 30 seconds; use Sync now to send it immediately." }
+            : { tone: "danger", text: "Saved, but the connection check failed. See the details below." },
+        );
+      } else {
+        setNotice({ tone: "success", text: "Elastic settings saved." });
+      }
+    } catch (error) {
+      setNotice({ tone: "danger", text: `Could not save: ${formatActionError(error)}` });
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const testDraft = async () => {
+    if (!draft) return;
+    setPending("test");
+    setNotice(null);
+    try {
+      const result = await runTest({
+        ...(draft.endpoint.trim() && draft.endpoint.trim() !== settings?.endpoint ? { endpoint: draft.endpoint.trim() } : {}),
+        ...(draft.apiKey.trim() ? { api_key: draft.apiKey.trim() } : {}),
+        ...(draft.indexPrefix.trim() && draft.indexPrefix.trim().toLowerCase() !== settings?.index_prefix
+          ? { index_prefix: draft.indexPrefix.trim() }
+          : {}),
+      });
+      if (result) {
+        setNotice(
+          result.ok
+            ? { tone: "success", text: dirty ? "Connection works. Save to start sending data." : "Connection works." }
+            : { tone: "danger", text: "The connection check failed. See the details below." },
+        );
+      }
+    } catch (error) {
+      setNotice({ tone: "danger", text: formatActionError(error) });
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const sync = async (full: boolean) => {
+    if (!api.syncElastic) return;
+    if (
+      full &&
+      !window.confirm(
+        "Re-send everything? All chats, documents, usage, users, and stored audit history are sent to Elastic again. Existing documents are overwritten, not duplicated.",
+      )
+    ) {
+      return;
+    }
+    setPending(full ? "resend" : "sync");
+    setNotice(null);
+    try {
+      const status = await api.syncElastic({ full });
+      if (status) {
+        onStatusChange(status);
+        const run = status.sync;
+        const sent = Object.values(run?.delivered ?? {}).reduce((total, value) => total + (value ?? 0), 0);
+        const errors = Object.values(run?.errors ?? {}).filter(Boolean);
+        if (run?.busy) {
+          setNotice({ tone: "info", text: "A delivery pass is already running. Check back in a moment." });
+        } else if (errors.length) {
+          setNotice({ tone: "danger", text: `Sent ${sent.toLocaleString()} documents, then Elastic reported: ${errors[0]}` });
+        } else {
+          const waiting = (status.streams ?? []).filter((stream) => stream.enabled).reduce((total, stream) => total + (stream.pending ?? 0), 0);
+          setNotice({
+            tone: "success",
+            text:
+              waiting > 0
+                ? `Sent ${sent.toLocaleString()} documents. More is still queued and keeps sending in the background.`
+                : `Sent ${sent.toLocaleString()} documents. Everything is up to date.`,
+          });
+        }
+      }
+    } catch (error) {
+      setNotice({ tone: "danger", text: formatActionError(error) });
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const toggleStream = (id: ElasticStreamId, next: boolean) =>
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            streams: ELASTIC_ALL_STREAMS.filter((stream) => (stream === id ? next : current.streams.includes(stream))),
+          }
+        : current,
+    );
+
   return (
     <Panel
       className="elastic-settings-panel"
       title={<><DatabaseZap size={18} /> Elastic Analytics</>}
-      subtitle="Optional export of platform analytics and audit events to your Elastic cluster."
+      subtitle="Send chats, documents, users, usage, and the audit trail to your Elastic cluster to search and monitor them in Kibana."
       defaultCollapsed
     >
       <div className="elastic-card">
         <DatabaseZap size={26} />
         <div>
-          <strong>{configured ? "Configured from backend environment" : "Not configured"}</strong>
+          <strong>{headline.label}</strong>
           <span>
-            {elasticStatus?.message ??
-              "Elastic analytics export is not configured. Set APERTURE_ELASTIC_URL and APERTURE_ELASTIC_API_KEY to enable it."}
+            {elasticStatus?.message ?? "Elastic export status could not be loaded from the platform API."}
           </span>
         </div>
+        <Pill tone={headline.tone}>{elasticStatus?.configured ? (elasticStatus.enabled === false ? "Paused" : "Export on") : "Export off"}</Pill>
       </div>
-      <p className="muted-note">
-        Export is configured from the backend environment so the API key never
-        passes through a browser. Set <code>APERTURE_ELASTIC_URL</code> (or
-        <code>APERTURE_ELASTIC_CLOUD_ID</code>) and{" "}
-        <code>APERTURE_ELASTIC_API_KEY</code>, then restart the API. Buffered
-        events below are delivered once the cluster is reachable.
-      </p>
-      <dl className="meta-list">
-        <div>
-          <dt>Buffered events</dt>
-          <dd>{elasticStatus?.eventsBuffered ?? 0}</dd>
+
+      {!draft ? (
+        <p className="muted-note">Loading the Elastic connection…</p>
+      ) : (
+        <div className="elastic-setup">
+          <section className="elastic-section" aria-labelledby="elastic-connection-heading">
+            <h4 id="elastic-connection-heading">Connection</h4>
+            <div className="connector-config-grid elastic-connection-grid">
+              <label className="elastic-endpoint-field">
+                <span className="connector-field-label">Elasticsearch endpoint or Cloud ID</span>
+                <input
+                  value={draft.endpoint}
+                  aria-label="Elasticsearch endpoint or Cloud ID"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!canEdit}
+                  placeholder={
+                    environment?.endpoint
+                      ? "Using the server's APERTURE_ELASTIC_URL"
+                      : "https://my-deployment.es.us-east-1.aws.elastic.cloud"
+                  }
+                  onChange={(event) => setDraft((current) => (current ? { ...current, endpoint: event.target.value } : current))}
+                />
+              </label>
+              <label>
+                <span className="connector-field-label">API key</span>
+                <input
+                  type="password"
+                  value={draft.apiKey}
+                  aria-label="Elastic API key"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  disabled={!canEdit}
+                  placeholder={
+                    settings?.api_key_set
+                      ? `Stored key ${settings.masked_api_key || "(vaulted)"}`
+                      : environment?.apiKey
+                        ? "Using the server's APERTURE_ELASTIC_API_KEY"
+                        : "Paste the encoded API key"
+                  }
+                  onChange={(event) => setDraft((current) => (current ? { ...current, apiKey: event.target.value } : current))}
+                />
+              </label>
+              <label>
+                <span className="connector-field-label">Index prefix</span>
+                <input
+                  value={draft.indexPrefix}
+                  aria-label="Elastic index prefix"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!canEdit}
+                  placeholder="aperture"
+                  onChange={(event) => setDraft((current) => (current ? { ...current, indexPrefix: event.target.value } : current))}
+                />
+              </label>
+            </div>
+            <p className="muted-note">
+              In Elastic Cloud, open your deployment and copy its Elasticsearch endpoint or Cloud ID. The API key is stored
+              in the encrypted vault and never shown again.
+              {elasticStatus?.endpoint ? (
+                <>
+                  {" "}Sending to <code>{elasticStatus.endpoint}</code>
+                  {elasticStatus.endpointSource === "environment" ? " (from the server environment)." : "."}
+                </>
+              ) : null}
+            </p>
+            <details className="elastic-key-help">
+              <summary>How do I create an API key?</summary>
+              <p>
+                In Kibana, open <strong>Dev Tools</strong> and run the request below, or create the key under{" "}
+                <strong>Stack Management → API keys</strong> with the <code>create_index</code>, <code>index</code>, and{" "}
+                <code>read</code> privileges on <code>{prefix}-*</code>. Paste the whole response, or just its <code>encoded</code> value, into
+                the API key field.
+              </p>
+              <pre>{ELASTIC_API_KEY_REQUEST.replace("aperture-*", `${prefix}-*`)}</pre>
+              <button
+                className="secondary-button compact"
+                type="button"
+                data-tooltip="Copy the API key request for Kibana Dev Tools"
+                onClick={() => {
+                  navigator.clipboard?.writeText(ELASTIC_API_KEY_REQUEST.replace("aperture-*", `${prefix}-*`)).catch(() => {
+                    // Clipboard access can be refused; the request stays selectable above.
+                  });
+                }}
+              >
+                <Copy size={14} /> Copy request
+              </button>
+            </details>
+          </section>
+
+          <section className="elastic-section" aria-labelledby="elastic-data-heading">
+            <h4 id="elastic-data-heading">What to send</h4>
+            <div className="elastic-toggle-list">
+              {ELASTIC_STREAM_OPTIONS.map((option) => (
+                <div className="permission-row policy-toggle-row" key={option.id}>
+                  <span>
+                    <strong>{option.title}</strong>
+                    <small>
+                      {option.detail}{" "}
+                      <code>
+                        {option.id === "chats" ? `${prefix}-chats, ${prefix}-chat-messages` : `${prefix}-${option.id}`}
+                      </code>
+                    </small>
+                  </span>
+                  <Toggle
+                    checked={draft.streams.includes(option.id)}
+                    disabled={!canEdit}
+                    label={`Send ${option.title.toLowerCase()} to Elastic`}
+                    tooltip={`${draft.streams.includes(option.id) ? "Stop sending" : "Send"} ${option.title.toLowerCase()} to Elastic`}
+                    onChange={(next) => toggleStream(option.id, next)}
+                  />
+                </div>
+              ))}
+              <div className="permission-row policy-toggle-row elastic-content-row">
+                <span>
+                  <strong>Include message and document text</strong>
+                  <small>
+                    {draft.includeContent
+                      ? "Prompt and response text and upload previews are copied into Elastic so they can be searched and reviewed there."
+                      : "Only activity details are sent: who, when, which model, file names, and sizes. Message and document text stays in Aperture."}
+                  </small>
+                </span>
+                <Toggle
+                  checked={draft.includeContent}
+                  disabled={!canEdit}
+                  label="Include message and document text"
+                  tooltip={`${draft.includeContent ? "Stop copying" : "Copy"} message and document text into Elastic`}
+                  onChange={(next) => setDraft((current) => (current ? { ...current, includeContent: next } : current))}
+                />
+              </div>
+              <div className="permission-row policy-toggle-row">
+                <span>
+                  <strong>Export on</strong>
+                  <small>
+                    {draft.enabled
+                      ? "Data is sent in the background about every 30 seconds."
+                      : "Paused. Audit events keep queueing and are sent when you turn export back on."}
+                  </small>
+                </span>
+                <Toggle
+                  checked={draft.enabled}
+                  disabled={!canEdit}
+                  label="Elastic export on"
+                  tooltip={draft.enabled ? "Pause sending data to Elastic" : "Resume sending data to Elastic"}
+                  onChange={(next) => setDraft((current) => (current ? { ...current, enabled: next } : current))}
+                />
+              </div>
+            </div>
+          </section>
+
+          <div className="alert-email-actions elastic-actions">
+            <button
+              className="primary-button compact"
+              type="button"
+              disabled={!canEdit || pending !== null || !dirty}
+              data-tooltip="Save the Elastic connection and check that it works"
+              onClick={() => void save()}
+            >
+              <Save size={14} /> {pending === "save" ? "Saving…" : "Save and check"}
+            </button>
+            <button
+              className="secondary-button compact"
+              type="button"
+              disabled={!api.testElasticConnection || pending !== null}
+              data-tooltip="Check the endpoint, API key, and write permission without saving"
+              onClick={() => void testDraft()}
+            >
+              <ShieldCheck size={14} /> {pending === "test" ? "Checking…" : "Check connection"}
+            </button>
+            <button
+              className="secondary-button compact"
+              type="button"
+              disabled={!api.syncElastic || pending !== null || dirty || !elasticStatus?.configured || elasticStatus.enabled === false}
+              data-tooltip={dirty ? "Save your changes before syncing" : "Send everything queued to Elastic now"}
+              onClick={() => void sync(false)}
+            >
+              <RotateCcw size={14} /> {pending === "sync" ? "Syncing…" : "Sync now"}
+            </button>
+            <button
+              className="secondary-button compact"
+              type="button"
+              disabled={!api.syncElastic || pending !== null || dirty || !elasticStatus?.configured || elasticStatus.enabled === false}
+              data-tooltip="Send all history again, for example after switching clusters"
+              onClick={() => void sync(true)}
+            >
+              <Upload size={14} /> {pending === "resend" ? "Re-sending…" : "Re-send everything"}
+            </button>
+            
+          </div>
+
+          {notice ? (
+            <p className={`elastic-notice is-${notice.tone}`} role="status">
+              {notice.text}
+            </p>
+          ) : null}
+
+          {testResult ? (
+            <ul className="elastic-check-list" aria-label="Elastic connection checks">
+              {testResult.checks.map((check) => (
+                <li key={check.id} className={`elastic-check is-${check.status}`}>
+                  {check.status === "pass" ? <ShieldCheck size={15} /> : <ShieldAlert size={15} />}
+                  <span>
+                    <strong>{check.label}</strong>
+                    <small>{check.detail}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : settings?.last_test_status ? (
+            <p className="muted-note">
+              Last connection check {settings.last_test_at ? formatAuditTimestamp(settings.last_test_at) : ""}:{" "}
+              {settings.last_test_status === "passed" ? "passed" : "failed"}.
+            </p>
+          ) : null}
+
+          {elasticStatus?.streams?.length ? (
+            <section className="elastic-section" aria-labelledby="elastic-delivery-heading">
+              <h4 id="elastic-delivery-heading">Delivery</h4>
+              <div className="elastic-stream-table" role="table" aria-label="Elastic delivery by data type">
+                <div className="elastic-stream-row is-head" role="row">
+                  <span role="columnheader">Data</span>
+                  <span role="columnheader">Index</span>
+                  <span role="columnheader">Waiting</span>
+                  <span role="columnheader">Sent</span>
+                  <span role="columnheader">Status</span>
+                </div>
+                {elasticStatus.streams.map((stream) => (
+                  <div className={`elastic-stream-row${stream.enabled ? "" : " is-off"}`} role="row" key={stream.id}>
+                    <span role="cell"><strong>{stream.label}</strong></span>
+                    <span role="cell"><code>{stream.indices.join(", ")}</code></span>
+                    <span role="cell">{stream.pending === null ? "—" : stream.pending.toLocaleString()}</span>
+                    <span role="cell">{stream.delivered.toLocaleString()}</span>
+                    <span role="cell" className={stream.lastError ? "elastic-stream-error" : undefined}>
+                      {!stream.enabled
+                        ? "Not sent"
+                        : stream.lastError
+                          ? stream.lastError
+                          : stream.lastDeliveryAt
+                            ? `Last sent ${formatAuditTimestamp(stream.lastDeliveryAt)}`
+                            : stream.pending
+                              ? "Queued"
+                              : "Up to date"}
+                      {stream.rejected ? ` · ${stream.rejected.toLocaleString()} rejected (${stream.lastRejection ?? "invalid document"})` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="muted-note">
+                Sent counts reset when the API restarts. Waiting counts conversations for chats and documents. Tag, hold,
+                archive, and matter changes follow within about a minute. Deleted chats, users, and documents stay in
+                Elastic marked <code>deleted</code> (messages: <code>thread_deleted</code>), so the record survives.
+              </p>
+              <div className="elastic-kibana-row">
+                <p className="muted-note">
+                  Set up Kibana in one step: download the data views and import them under{" "}
+                  <strong>Stack Management → Saved objects → Import</strong>. They cover{" "}
+                  <code>{elasticStatus.indexPattern ?? `${prefix}-*`}</code> and each index on its own.
+                </p>
+                <button
+                  className="secondary-button compact"
+                  type="button"
+                  data-tooltip="Download Kibana data views for these indices"
+                  onClick={() => downloadElasticKibanaDataViews(prefix)}
+                >
+                  <Download size={14} /> Kibana data views
+                </button>
+              </div>
+              {Object.entries(elasticStatus.indexNotes ?? {}).map(([index, note]) => (
+                <p className="muted-note" key={index}>
+                  <code>{index}</code>: {note}
+                </p>
+              ))}
+            </section>
+          ) : null}
         </div>
-        <div>
-          <dt>Export status</dt>
-          <dd>{elasticStatus ? (configured ? "Ready to export" : "Not connected") : "Status unavailable"}</dd>
-        </div>
-      </dl>
+      )}
     </Panel>
   );
 }
@@ -5720,6 +6314,13 @@ function modelEditDraftFromModel(model: ModelConfig): ModelEditDraftState {
   };
 }
 
+const PLATFORM_AUDIT_GROUPS: AuditSummaryGroup[] = [
+  { id: "security", label: "Security signals" },
+  { id: "identity", label: "Identity & access" },
+  { id: "providers", label: "Providers & secrets" },
+  { id: "operations", label: "Models, connectors & automations" },
+];
+
 function platformAuditSummary(
   data: BootstrapData,
   securityAlerts: SecurityAlert[],
@@ -5757,6 +6358,7 @@ function platformAuditSummary(
   const promptWatchlist = promptWatchlistRecords.length;
   return [
     {
+      group: "security",
       label: "Critical events",
       value: String(criticalEventRecords.length),
       detail: "high-severity audit events",
@@ -5774,6 +6376,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "providers",
       label: "Provider posture",
       value: `${connectedProviders}/${data.providers.length}`,
       detail: "provider connections active",
@@ -5799,6 +6402,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "operations",
       label: "Model ceiling",
       value: `${enabledModels}/${data.models.length}`,
       detail: "models enabled for tenant access",
@@ -5824,6 +6428,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "providers",
       label: "Vault metadata",
       value: String(data.providerKeys.length),
       detail: "masked provider keys tracked",
@@ -5849,6 +6454,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "operations",
       label: "Approvals",
       value: String(pendingApprovals),
       detail: "agent actions awaiting review",
@@ -5866,6 +6472,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "operations",
       label: "Connectors",
       value: `${enabledConnectors}/${data.connectors.length}`,
       detail: "platform-enabled connectors",
@@ -5891,6 +6498,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "providers",
       label: "Expired keys",
       value: String(expiredKeys),
       detail: "provider secrets needing replacement",
@@ -5908,6 +6516,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "operations",
       label: "Connector issues",
       value: String(connectorIssues),
       detail: "connectors reporting auth errors",
@@ -5925,6 +6534,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "operations",
       label: "Unscoped models",
       value: String(unscopedModels),
       detail: "enabled models without group limits",
@@ -5942,6 +6552,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "identity",
       label: "Privileged owners",
       value: String(privilegedOwners),
       detail: "active platform-owner accounts",
@@ -5959,6 +6570,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "providers",
       label: "Stale syncs",
       value: String(staleProviders),
       detail: "connected providers not synced yet",
@@ -5976,6 +6588,7 @@ function platformAuditSummary(
       ],
     },
     {
+      group: "security",
       label: "Prompt watchlist",
       value: String(promptWatchlist),
       detail: "active DLP or misuse alerts",
@@ -5992,6 +6605,18 @@ function platformAuditSummary(
         },
       ],
     },
+    warningEventsSignal(auditTrailRows, formatAuditTimestamp),
+    alertResponseSignal(securityAlerts, data.users, formatAuditTimestamp),
+    afterHoursSignal(auditTrailRows, formatAuditTimestamp),
+    failedOperationsSignal(auditTrailRows, formatAuditTimestamp),
+    accessRequestsSignal(data.users, formatAuditTimestamp),
+    roleChangesSignal(auditTrailRows, formatAuditTimestamp, formatAuditRole),
+    credentialChangesSignal(auditTrailRows, formatAuditTimestamp),
+    passwordAdminsSignal(data.users, Boolean(data.platformSettings?.require_sso_for_admins)),
+    neverSignedInSignal(data.users, formatAuditRole),
+    expiringKeysSignal(data.providerKeys),
+    failedValidationsSignal(data.providers, formatAuditTimestamp),
+    automationFailuresSignal(data.automations, formatAuditTimestamp),
   ];
 }
 

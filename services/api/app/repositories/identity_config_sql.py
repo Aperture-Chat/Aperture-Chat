@@ -92,9 +92,11 @@ from app.db.orm import (
     UserMemorySettingsRow,
 )
 from app.models.schemas import (
+    AlertRule,
     DEFAULT_GROUP_PERMISSIONS,
     EmailSettings,
     Group,
+    ElasticExportSettings,
     PlatformSettings,
     Provider,
     TenantRetentionPolicy,
@@ -1395,7 +1397,10 @@ def _prepare_secret(
         if owner is None:
             raise IdentityConfigImportConflict("Configuration secret references an unknown owner.")
         tenant_id = owner.tenant_id
-    elif parsed.resource_kind is not ConfigurationSecretResourceKind.PLATFORM_EMAIL:
+    elif parsed.resource_kind not in (
+        ConfigurationSecretResourceKind.PLATFORM_EMAIL,
+        ConfigurationSecretResourceKind.PLATFORM_ELASTIC,
+    ):
         raise IdentityConfigImportConflict("Configuration secret has an unsupported owner type.")
 
     if parsed.subject_user_id is not None:
@@ -2007,6 +2012,13 @@ def _model_from_payload(
         # person's tenant scope plus the policy reason, never prompts or
         # secrets, and the owner can switch it off in Org Settings.
         canonical_payload["users_can_browse_model_catalog"] = True
+    if model_type is PlatformSettings and "elastic_export" not in canonical_payload:
+        # Console Elastic export settings shipped after the identity/config
+        # SQL authority. Accept only this exact legacy omission. The default
+        # is audit-only with no message text and no console endpoint, which is
+        # exactly what an environment-configured export already sent, so the
+        # backfill cannot widen what leaves the deployment.
+        canonical_payload["elastic_export"] = ElasticExportSettings().model_dump(mode="json")
     if model_type is Provider:
         # Validation and sync timestamps shipped after the SQL authority; rows
         # written before them carry only the display strings. Backfill the
@@ -2031,6 +2043,11 @@ def _model_from_payload(
         ):
             canonical_payload.setdefault(tagging_field, False)
         canonical_payload.setdefault("sources", [])
+    if model_type is AlertRule and "detector_ids" not in canonical_payload:
+        # Detection-scoped alert rules shipped after the identity/config SQL
+        # authority. Accept only this exact legacy omission; an empty list
+        # keeps the rule matching exactly what it matched before.
+        canonical_payload["detector_ids"] = []
     if model_type is ToolConfig and "owner_user_id" not in canonical_payload:
         # User-authored tool ownership shipped after the identity/config SQL
         # authority. Rows written before the field existed are admin-created
