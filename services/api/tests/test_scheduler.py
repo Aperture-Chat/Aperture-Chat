@@ -304,8 +304,12 @@ def test_elastic_flush_delivers_and_clears_buffer() -> None:
     assert list(store.elastic_events) == []
     assert store.elastic_last_delivery_at is not None
     assert store.elastic_last_delivery_error is None
-    assert seen[0].url.path == "/_bulk"
-    assert seen[0].headers["authorization"] == "ApiKey test-key"
+    # The index is created with explicit mappings once, before the first bulk.
+    assert [(request.method, request.url.path) for request in seen] == [
+        ("PUT", "/aperture-audit"),
+        ("POST", "/_bulk"),
+    ]
+    assert all(request.headers["authorization"] == "ApiKey test-key" for request in seen)
 
 
 def test_elastic_flush_keeps_buffer_on_failure() -> None:

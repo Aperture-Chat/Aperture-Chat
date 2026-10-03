@@ -219,6 +219,62 @@ class TenantBrandingUpdateRequest(BaseModel):
         return candidate
 
 
+# Data families the Elastic export can mirror, in delivery order. Each maps to
+# its own index (``<prefix>-<name>``; chats also writes ``<prefix>-chat-messages``).
+ELASTIC_EXPORT_STREAMS: tuple[str, ...] = ("audit", "usage", "chats", "documents", "users")
+
+
+class ElasticExportSettings(BaseModel):
+    """Non-secret Elastic export configuration; the API key lives in the vault.
+
+    ``endpoint`` accepts an Elasticsearch URL or an Elastic Cloud ID. Empty
+    values fall back to the operator environment (APERTURE_ELASTIC_*).
+    The defaults match what an environment-configured export sent before this
+    model existed (audit events only, no message text), so an upgrade never
+    widens what leaves the platform; the owner opts into more streams.
+    """
+
+    endpoint: str = ""
+    index_prefix: str = "aperture"
+    enabled: bool = True
+    streams: list[str] = Field(default_factory=lambda: ["audit"])
+    include_content: bool = False
+    api_key_set: bool = False
+    masked_api_key: str = ""
+    updated_at: str | None = None
+    last_test_at: str | None = None
+    last_test_status: str | None = None
+
+    @field_validator("streams")
+    @classmethod
+    def _known_streams(cls, value: list[str]) -> list[str]:
+        # Lenient on read: a stored name from a newer build is dropped, never fatal.
+        return [stream for stream in ELASTIC_EXPORT_STREAMS if stream in set(value)]
+
+
+class ElasticExportSettingsUpdateRequest(BaseModel):
+    endpoint: str | None = Field(default=None, max_length=2048)
+    # Write-only; never echoed. An empty string clears the vaulted key.
+    api_key: str | None = Field(default=None, max_length=4096)
+    index_prefix: str | None = Field(default=None, max_length=64)
+    enabled: bool | None = None
+    streams: list[str] | None = Field(default=None, max_length=len(ELASTIC_EXPORT_STREAMS))
+    include_content: bool | None = None
+
+
+class ElasticConnectionTestRequest(BaseModel):
+    """Optional unsaved values to test; omitted fields use the saved configuration."""
+
+    endpoint: str | None = Field(default=None, max_length=2048)
+    api_key: str | None = Field(default=None, max_length=4096)
+    index_prefix: str | None = Field(default=None, max_length=64)
+
+
+class ElasticSyncRequest(BaseModel):
+    # Re-send every chat, document, usage record, and user from the beginning.
+    full: bool = False
+
+
 class PlatformSettings(BaseModel):
     downstream_api_enabled: bool = False
     require_sso_for_admins: bool = False
@@ -238,6 +294,8 @@ class PlatformSettings(BaseModel):
     # Owner kill switch for the "Why can't I use this model?" catalog. When off,
     # users see only the models they can already use, exactly as before.
     users_can_browse_model_catalog: bool = True
+    # Changed only through /api/platform/elastic/settings, never the generic PATCH.
+    elastic_export: ElasticExportSettings = Field(default_factory=ElasticExportSettings)
 
 
 class PlatformSettingsUpdateRequest(BaseModel):
@@ -1770,6 +1828,9 @@ class AlertRule(BaseModel):
     action_patterns: list[str] = Field(default_factory=list)
     min_severity: str = "info"
     actor_ids: list[str] = Field(default_factory=list)  # empty = any actor
+    # Prompt-security detections (app/core/dlp.py rule ids) the rule narrows
+    # to; empty = every detection. Non-empty matches only prompt flags.
+    detector_ids: list[str] = Field(default_factory=list)
     threshold_count: int = 1  # 1 = fire per matching event
     window_minutes: int = 60
     cooldown_minutes: int = 60
@@ -1788,6 +1849,7 @@ class AlertRuleCreateRequest(BaseModel):
     action_patterns: list[str] = Field(default_factory=list, max_length=20)
     min_severity: str = "info"
     actor_ids: list[str] = Field(default_factory=list, max_length=50)
+    detector_ids: list[str] = Field(default_factory=list, max_length=20)
     threshold_count: int = Field(default=1, ge=1, le=1000)
     window_minutes: int = Field(default=60, ge=1, le=1440)
     cooldown_minutes: int = Field(default=60, ge=0, le=10080)
@@ -1801,6 +1863,7 @@ class AlertRuleUpdateRequest(BaseModel):
     action_patterns: list[str] | None = Field(default=None, max_length=20)
     min_severity: str | None = None
     actor_ids: list[str] | None = Field(default=None, max_length=50)
+    detector_ids: list[str] | None = Field(default=None, max_length=20)
     threshold_count: int | None = Field(default=None, ge=1, le=1000)
     window_minutes: int | None = Field(default=None, ge=1, le=1440)
     cooldown_minutes: int | None = Field(default=None, ge=0, le=10080)

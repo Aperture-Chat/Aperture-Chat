@@ -8,7 +8,7 @@ server-side; the client keeps the result on the user's device.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
@@ -28,6 +28,10 @@ _ZIP_MAGIC = b"PK\x03\x04"
 @router.post("/parse")
 async def parse_brand_template(
     file: UploadFile = File(...),
+    content: bool = Query(
+        False,
+        description="Also return slide paragraphs, notes, and pictures for opening the deck.",
+    ),
     actor: User = Depends(current_user),
 ) -> DeckTemplateParseResponse:
     del actor  # Auth is the gate; parsing is per-user stateless work.
@@ -59,7 +63,9 @@ async def parse_brand_template(
             detail="The file is not a PowerPoint package.",
         )
     try:
-        return await run_in_threadpool(parse_deck_template, filename, payload_bytes)
+        return await run_in_threadpool(
+            parse_deck_template, filename, payload_bytes, include_content=content
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)

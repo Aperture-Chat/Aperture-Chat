@@ -12,6 +12,7 @@ from fastapi.responses import RedirectResponse
 from app.core import clock, connector_auth, hermes, oidc
 from app.core.alerting import (
     normalize_action_patterns,
+    validate_detector_ids,
     validate_min_severity,
     validate_recipients,
 )
@@ -3164,36 +3165,51 @@ def _apply_alert_rule_payload(
     *,
     visible_user_ids: set[str] | None,
 ) -> AlertRule:
-    """Copy validated request fields onto ``rule``; raises 400 on bad values."""
+    """Copy validated request fields onto ``rule``; raises 400 on bad values.
+
+    Validation runs on a copy so a rejected request leaves the rule untouched.
+    """
+    candidate = rule.model_copy(deep=True)
     try:
         if payload.name is not None:
-            rule.name = payload.name.strip() or rule.name
+            candidate.name = payload.name.strip() or candidate.name
         if payload.description is not None:
-            rule.description = payload.description.strip()
+            candidate.description = payload.description.strip()
         if payload.enabled is not None:
-            rule.enabled = payload.enabled
+            candidate.enabled = payload.enabled
         if payload.action_patterns is not None:
-            rule.action_patterns = normalize_action_patterns(payload.action_patterns)
+            candidate.action_patterns = normalize_action_patterns(payload.action_patterns)
         if payload.min_severity is not None:
-            rule.min_severity = validate_min_severity(payload.min_severity)
+            candidate.min_severity = validate_min_severity(payload.min_severity)
         if payload.actor_ids is not None:
             actor_ids = [value.strip() for value in payload.actor_ids if value.strip()]
             if visible_user_ids is not None:
                 hidden = [value for value in actor_ids if value not in visible_user_ids]
                 if hidden:
                     raise ValueError("Alert rules can only watch users visible to this admin.")
-            rule.actor_ids = actor_ids
+            candidate.actor_ids = actor_ids
         if payload.threshold_count is not None:
-            rule.threshold_count = payload.threshold_count
+            candidate.threshold_count = payload.threshold_count
         if payload.window_minutes is not None:
-            rule.window_minutes = payload.window_minutes
+            candidate.window_minutes = payload.window_minutes
         if payload.cooldown_minutes is not None:
-            rule.cooldown_minutes = payload.cooldown_minutes
+            candidate.cooldown_minutes = payload.cooldown_minutes
         if payload.recipients is not None:
-            rule.recipients = validate_recipients(payload.recipients)
+            candidate.recipients = validate_recipients(payload.recipients)
+        # Re-checked on every save: new patterns or severity can strand
+        # previously valid detections.
+        candidate.detector_ids = validate_detector_ids(
+            payload.detector_ids if payload.detector_ids is not None else candidate.detector_ids,
+            action_patterns=candidate.action_patterns,
+            min_severity=candidate.min_severity,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    rule.updated_at = now_utc()
+    candidate.updated_at = now_utc()
+    for field_name in AlertRule.model_fields:
+        # last_triggered_at belongs to alert evaluation, not to this request.
+        if field_name != "last_triggered_at":
+            setattr(rule, field_name, getattr(candidate, field_name))
     return rule
 
 
@@ -3204,6 +3220,7 @@ def _alert_rule_audit_payload(rule: AlertRule) -> dict[str, object]:
         "tenant_id": rule.tenant_id,
         "enabled": rule.enabled,
         "action_patterns": list(rule.action_patterns),
+        "detector_ids": list(rule.detector_ids),
         "min_severity": rule.min_severity,
         "threshold_count": rule.threshold_count,
         "recipient_count": len(rule.recipients),

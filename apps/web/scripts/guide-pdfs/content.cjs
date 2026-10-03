@@ -451,6 +451,15 @@ const SECTIONS = [
         "The assistant writes the document directly into the editor. You can also send any chat response here with Transfer to Drafts.",
         "Use the model selector in the toolbar area to choose which approved model writes and edits this draft.",
       ]),
+      sub("Opening a file from this device"),
+      p(
+        "Click the paperclip in the assistant's message box. Under From this device are two choices. Attach to chat gives files to the assistant to read with your next request; they become sources, not the document. Open in editor opens one file as the document itself, so you can edit it directly or select text and use Ask AI.",
+      ),
+      list([
+        "Open in editor accepts Word (.docx, .dotx, .doc), Markdown (.md), plain text (.txt), and web page (.html) files. Word and web pages keep their formatting, and Markdown keeps its headings, lists, and emphasis. When something could not be carried over, an import note in the assistant rail says what.",
+        "The file opens as a new draft and is saved to your account as one. The draft you had open stays in Document history; if it has unsaved changes, the unsaved-changes dialog asks first.",
+        "Open in editor is unavailable while the assistant is still working on a request. In deck mode the same choice opens a PowerPoint file; see “Building a slide deck”.",
+      ]),
       sub("Editing like a document"),
       p(
         "The main toolbar keeps undo and redo, block style, bold, italic, underline, and inline AI editing close at hand. Text opens font, size, advanced styles, color, highlighting, and Clear formatting. Paragraph opens alignment, lists, and quotes. More opens Copy document and the AI edit trail. Select the intended text before opening a panel; Escape returns to the editor.",
@@ -535,6 +544,12 @@ const SECTIONS = [
         "Edit slide with AI (the AI pen in the deck toolbar, or Ctrl+J / ⌘J) reworks the whole slide: Improve this slide, Make it punchier, Cut the text in half, Write speaker notes, Pick a better layout, Split into two slides, Fix spelling & grammar, a tone or language, or your own instruction.",
         "The review shows the slide before and after, plus any new speaker notes. Choose Apply to slide, Try again, or Discard; undo restores the previous slide.",
         "To rewrite only part of a slide, highlight the text and choose Ask AI, then review the suggestion before replacing it.",
+      ]),
+      sub("Opening a PowerPoint file"),
+      list([
+        "In deck mode, click the paperclip in the assistant's message box and choose Open in editor (Edit slides directly) to open a .pptx file as the deck itself.",
+        "Each slide keeps its title, subtitle, bullets with their indent levels, two-column text, speaker notes, one picture, and its layout artwork as the background. Text with no place in the chosen layout moves into that slide's speaker notes instead of disappearing.",
+        "If the presentation is larger than the deck limit, pictures are left out first and then layout artwork, and the assistant rail says so. The opened deck is a new deck; the deck you had open stays in Document history.",
       ]),
       sub("Starter templates and your brand template"),
       list([
@@ -1154,21 +1169,36 @@ const SECTIONS = [
     part: "admin",
     minRole: "admin",
     title: "Audit",
-    summary: "Governance signals, prompt monitoring, security alerts, and the tenant trail.",
+    summary: "Grouped signals, Audit Insights trends, prompt monitoring, security alerts, and the tenant trail.",
     blocks: [
       p(
-        "The Audit tab is the tenant's governance station. It opens on the Admin Audit posture dashboard while the sections below start collapsed — click a section header to expand it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing a person picker with a date range, so one section's scope never narrows another. The CSV export buttons produce files of exactly the filtered rows — including actor_id and actor_name columns, so every exported row names who acted.",
+        "The Audit tab is the tenant's governance station. It opens on Admin Audit and Audit Insights, while the sections below start collapsed; click a section header to expand it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing a person picker with a date range, so one section's scope never narrows another. The CSV export buttons produce files of exactly the filtered rows, including actor_id and actor_name columns, so every exported row names who acted.",
       ),
+      sub("Admin Audit signals"),
       list([
-        "Admin Audit — summary cards for tenant security and governance signals: audit events, the prompt watchlist of active DLP or misuse alerts, prompt volume, active admins, active users, connector issues, and ungrouped models. Cards that need attention are highlighted; hover one to see what it counts.",
-        "Recent Governance Activity — the current tenant snapshot for identity, user, model, and connector posture: how many SSO configurations are enforced, how many users are active, and how many connectors are enabled.",
-        "User Prompt Activity — drill into saved prompts from this organization's admins and users and their model responses by person, thread, model, and timestamp, scoped by the section's own user and date filter.",
-        "Security Alerts — DLP and malicious-behavior flags raised from admin and user prompts, shown with redacted snippets for review. Click Acknowledge once an alert is handled, or Reopen if it needs another look.",
-        "Audit Trail — the tenant's append-only transaction log, newest first. Its toolbar has a severity select, an action-category select, and a search box (Search actions, people, targets…) that narrow the rows together; the trail's CSV exports exactly the rows you are looking at. Click Refresh to reload it straight from the admin audit API.",
+        "The banner at the top reads, for example, “7 of 18 signals need attention”. Expand all and Collapse all open or fold every group. List shows one compact row per signal; Cards shows each signal with its description. The layout you choose is remembered in this browser.",
+        "Security signals: audit events, critical events, the prompt watchlist of active DLP or misuse alerts, alert response (the median time to acknowledge an alert), after-hours changes (outside 7 AM–7 PM or on weekends), and failed operations.",
+        "Identity & access: active admins, active users, access requests awaiting review, accounts that have never signed in, role changes, and credential changes such as MFA, password, session, and API key events.",
+        "Models & workspace: prompt volume, connector issues, ungrouped models, unassigned users (active users in no group), agent approvals waiting for review, and automation failures.",
+        "Groups that need attention open automatically and all-clear groups fold to one summary line. Red rows need attention. Select any signal to open an investigation listing every record behind it, with a filter box to narrow the records.",
+      ]),
+      sub("Audit Insights"),
+      list([
+        "Audit Insights charts the trends behind the signals for your organization. Choose a 7 days, 14 days, or 30 days range; the summary line counts the audit events and security alerts in range.",
+        "Audit events by day stacks info, warning, and critical events. Security alerts by day draws DLP and behavior alerts as two lines, and Alert breakdown ranks alerts By rule or By person with their open and acknowledged counts.",
+        "Most active people ranks who is acting, Activity by area groups events into areas such as Chat, Sign-in & identity, and Administration, and Activity by hour shades the hours outside 7 AM–7 PM in your local time.",
+        "Select any bar, point, or row to open the same investigation view with the records behind it. If the loaded history reaches its page limit, a note says earlier days may be incomplete.",
+      ]),
+      sub("Sections below the dashboard"),
+      list([
+        "Recent Governance Activity: the current tenant snapshot for identity, user, model, and connector posture: how many SSO configurations are enforced, how many users are active, and how many connectors are enabled.",
+        "User Prompt Activity: drill into saved prompts from this organization's admins and users and their model responses by person, thread, model, and timestamp, scoped by the section's own user and date filter.",
+        "Security Alerts: DLP and malicious-behavior flags raised from admin and user prompts, shown with redacted snippets for review. Click Acknowledge once an alert is handled, or Reopen if it needs another look.",
+        "Audit Trail: the tenant's append-only transaction log, newest first. Its toolbar has a severity select, an action-category select, and a search box (Search actions, people, targets…) that narrow the rows together; the trail's CSV exports exactly the rows you are looking at. Click Refresh to reload it straight from the admin audit API.",
       ]),
       note(
         "info",
-        "Security alerts fire on real prompt content — payment card numbers, shared credentials, prompt-injection attempts — but show only redacted snippets, so reviewing an alert never re-exposes the sensitive value itself.",
+        "Security alerts fire on real prompt content, such as payment card numbers, shared credentials, and prompt-injection attempts, but show only redacted snippets, so reviewing an alert never re-exposes the sensitive value itself.",
       ),
     ],
   },
@@ -1188,8 +1218,10 @@ const SECTIONS = [
       ),
       sub("Alert Rules"),
       list([
-        "Click Suspicious-activity template to start from a sensible security rule, or New rule to build one from scratch.",
+        "Click Prompt-injection template to start from a rule that watches prompt-injection, system-prompt extraction, and credential-extraction attempts; Suspicious-activity template for security flags and elevated-severity events; or New rule to build one from scratch. A template only fills in the form; nothing is saved until you click Create Rule.",
         "A rule has: a name; Action patterns — exact audit actions or prefixes such as security.* or admin.user_deleted; a Minimum severity; an optional Watched user; a threshold — how many matches within a time window before it fires; a cooldown between alerts; and email recipients. Leave recipients empty and the alert is in-app only.",
+        "Only these detections narrows a rule to prompts flagged by specific detectors: Prompt injection, System-prompt extraction, Credential extraction, API key or token shared, Private key shared, Password shared, US Social Security number, and Payment card number. Leave all unchecked to match every event the action patterns allow. A rule that could never fire is refused with an explanation when you save it.",
+        "Alert emails name the rule and the detection but never include the flagged prompt text.",
         "Rules you create here watch this organization's admin and user audit activity.",
       ]),
       sub("Alert Deliveries"),
@@ -1451,7 +1483,18 @@ const SECTIONS = [
       ]),
       sub("Elastic Analytics"),
       p(
-        "The Elastic Analytics panel reports whether backend audit export is configured, its status, and buffered events. Configure APERTURE_ELASTIC_URL or APERTURE_ELASTIC_CLOUD_ID, together with APERTURE_ELASTIC_API_KEY, in the backend environment and restart the API. The browser never receives this API key. Buffered events are delivered once the configured cluster is reachable; the panel has no connection form to save.",
+        "The Elastic Analytics panel sends platform activity to your Elastic cluster so it can be searched and monitored in Kibana. Its status line says whether export is connected, paused, or off.",
+      ),
+      steps([
+        "Paste the Elasticsearch endpoint or Cloud ID and an API key. How do I create an API key? shows the exact Kibana Dev Tools request, with the create_index, index, and read privileges on aperture-* (and the optional monitor privilege for cluster details); Copy request copies it. Aperture stores the key in its encrypted vault and never shows it again.",
+        "Under What to send, choose the audit trail, model usage, chats (with their messages), documents, and users; each row names its index. Include message and document text is off by default, so only activity details are sent. Export on pauses or resumes delivery.",
+        "Click Save and check. The connection check reports each step on its own: Reach the cluster, API key accepted, Cluster details, and Can write Aperture indices, with Elastic's own error when a step fails. Check connection runs the same test without saving.",
+        "Data is delivered in the background about every 30 seconds. Sync now sends what is queued immediately, and Re-send everything sends all history again, for example after switching clusters; existing documents are overwritten, not duplicated.",
+        "Read the Delivery table: each kind of data with its index, how much is waiting, how much was sent, and when it last went out, or the error Elastic reported.",
+        "To set up Kibana, click Kibana data views and import the file under Stack Management, Saved objects. It adds a data view for each index and one covering all of them.",
+      ]),
+      p(
+        "Chat records carry their retention tags and legal holds, and tag, hold, archive, and matter changes follow within about a minute. Deleted chats, users, and documents stay in Elastic flagged as deleted. Operators can instead set APERTURE_ELASTIC_URL or APERTURE_ELASTIC_CLOUD_ID with APERTURE_ELASTIC_API_KEY on the server.",
       ),
     ],
   },
@@ -1587,13 +1630,33 @@ const SECTIONS = [
     part: "owner",
     minRole: "owner",
     title: "Audit: owner governance signals",
-    summary: "Posture tiles, prompt monitoring, security alerts, and the platform trail.",
+    summary: "Grouped signals, Audit Insights trends, prompt monitoring, security alerts, and the platform trail.",
     blocks: [
       p(
-        "The Audit tab opens on the Owner Audit posture dashboard; the sections below it start collapsed — click a section header to expand it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing a user picker with a date range, so one section's scope never narrows another. The CSV export buttons produce files of exactly the filtered rows — with actor columns, so every exported row names who acted.",
+        "The Audit tab opens on Owner Audit and Audit Insights; the sections below start collapsed, and clicking a section header expands it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing a user picker with a date range, so one section's scope never narrows another. The CSV export buttons produce files of exactly the filtered rows, with actor columns, so every exported row names who acted.",
       ),
+      sub("Owner Audit signals"),
+      p(
+        "The banner reads, for example, “8 of 24 signals need attention”. Expand all, Collapse all, and the List and Cards switch work as described in the Administrator Guide. The owner board has four groups:",
+      ),
+      table(
+        ["Group", "Signals"],
+        [
+          ["Security signals", "Critical events, warning events, after-hours changes, the prompt watchlist, alert response (median time to acknowledge), and failed operations."],
+          ["Identity & access", "Privileged owners, role changes, password-only admins (tenant admins not using SSO), access requests, credential changes, and accounts that never signed in."],
+          ["Providers & secrets", "Provider posture, expired keys, keys expiring soon, vault metadata, stale syncs, and providers failing their live validation."],
+          ["Models, connectors & automations", "The model ceiling, Connectors, unscoped models, agent approvals awaiting review, connector issues, and automation failures."],
+        ],
+      ),
+      p(
+        "Groups with issues open automatically and red rows need attention. Select any signal to open an investigation with every record behind it.",
+      ),
+      sub("Audit Insights"),
+      p(
+        "Audit Insights charts platform-wide trends over 7, 14, or 30 days: audit events by day and severity, security alerts by day, an alert breakdown by rule or by person, the most active people, activity by area, and activity by hour with after-hours time shaded. Selecting any bar, point, or row opens the investigation view with the matching records and a filter box.",
+      ),
+      sub("Sections below the dashboard"),
       list([
-        "Owner Audit condenses governance posture into tiles: Critical events, provider posture, the model ceiling, vault metadata, approvals awaiting review, Connectors, expired keys, connector issues, unscoped models, privileged owners, stale syncs, and the prompt watchlist of active DLP or misuse alerts. Hover a tile to see exactly what it counts.",
         "Recent Governance Activity lists the latest owner-relevant events from the current snapshot — model availability reviews, provider catalog status, vault metadata, Connector availability, and Agent approval activity — so exceptions become follow-ups instead of surprises.",
         "User Prompt Activity drills into saved user prompts by person, thread, model, and timestamp — the owner-scope view of what is actually being asked across the platform, narrowed by its own user and date filter.",
         "Security Alerts lists DLP and malicious-behavior flags raised from actual prompts, with redacted snippets for review and Acknowledge / Reopen actions, scoped by its own filter row.",
@@ -1601,7 +1664,7 @@ const SECTIONS = [
       ]),
       note(
         "tip",
-        "Read the tiles first. Anything unexpected — an expired key, an unscoped model — has a matching tab in this console where you can fix it, and this guide's matching section tells you how.",
+        "Start with the groups that open on their own. Anything unexpected, such as an expired key or an unscoped model, has a matching tab in this console where you can fix it, and this guide's matching section tells you how.",
       ),
     ],
   },
@@ -1617,14 +1680,18 @@ const SECTIONS = [
       ),
       sub("Email Delivery: configuring SMTP"),
       steps([
-        "Fill in the SMTP host and Port, and pick the security mode — STARTTLS, SSL/TLS, or unencrypted.",
+        "Fill in the SMTP host and Port, and pick the security mode — STARTTLS, SSL/TLS, or unencrypted. Use your email provider's SMTP relay, for example SendGrid, Amazon SES, Mailgun, or Postmark: STARTTLS on port 587 or SSL/TLS on 465.",
         "Enter the username and password. The password is stored in the encrypted vault and never shown again; the field's placeholder confirms when one is stored.",
         "Set the From address alert emails will come from, then click Save Email Settings.",
-        "Prove it works: enter a test recipient and click Send test email. It sends a real message through the saved settings and reports the genuine result — including the SMTP error if it fails.",
+        "Prove it works: enter a test recipient and click Send test email. It sends a real message through the saved settings and reports the genuine result — including the SMTP error if it fails. While the form has unsaved changes the button is disabled, because the test always uses the saved settings.",
       ]),
+      note(
+        "info",
+        "The relay's TLS certificate is verified, so a relay presenting a self-signed or mismatched certificate is refused rather than trusted. Failed sends are retried with growing delays instead of every scheduler pass.",
+      ),
       sub("Alert Rules"),
       list([
-        "Rules work exactly as described in the Administrator Guide — Suspicious-activity template or New rule, with action patterns, a Minimum severity, an optional Watched user, a threshold within a window, a cooldown, and email recipients (empty recipients means in-app only).",
+        "Rules work exactly as described in the Administrator Guide — Prompt-injection template, Suspicious-activity template, or New rule, with action patterns, a Minimum severity, an optional Watched user, a threshold within a window, a cooldown, email recipients (empty recipients means in-app only), and Only these detections to narrow a rule to specific prompt detectors.",
         "Owner rules are platform-wide: they watch audit activity across the whole organization, including owner actions. Tenant rules created by admins appear in the same list, each labeled with its scope, so you always see the full alerting picture.",
       ]),
       sub("Alert Deliveries"),
@@ -1657,7 +1724,7 @@ const GUIDES = {
     docTitle: "Platform Owner Guide",
     badge: "For platform owners",
     subtitle:
-      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, releases, analytics, audit, and alerts. No prior knowledge assumed.",
+      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, audit, and alerts. No prior knowledge assumed.",
   },
 };
 

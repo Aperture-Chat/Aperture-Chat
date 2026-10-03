@@ -3505,7 +3505,8 @@ test("exposes chat connector sources from the draft attach menu", () => {
   fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
 
   expect(screen.getByRole("menu", { name: "Add draft attachment" })).toBeInTheDocument();
-  expect(screen.getByRole("menuitem", { name: /Upload from computer/ })).toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: /Attach to chat/ })).toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: /Open in editor/ })).toBeInTheDocument();
   expect(screen.getByRole("menuitem", { name: /Google Drive/ })).toBeInTheDocument();
   expect(screen.getByRole("menuitem", { name: /OneDrive/ })).toBeInTheDocument();
   expect(screen.getByRole("menuitem", { name: /SharePoint/ })).toBeInTheDocument();
@@ -3517,6 +3518,192 @@ test("exposes chat connector sources from the draft attach menu", () => {
   expectRailNotice(/Box source added to this draft context/);
   expect(screen.getByLabelText("Workspace sources for this draft")).toBeInTheDocument();
   expect(screen.getByLabelText(/Box Matter Knowledge/)).toBeChecked();
+});
+
+test("opens a Word file as the draft itself instead of attaching it", async () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Open in editor/ }));
+  expect(screen.queryByRole("menu", { name: "Add draft attachment" })).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [sampleDocxFile("Services Agreement v2.docx")] },
+  });
+
+  await waitFor(() => expect(documentText()).toContain("SAMPLE SERVICES AGREEMENT"));
+  expect(screen.getByLabelText("Document title")).toHaveValue("Services Agreement v2");
+  expect(documentBody().innerHTML.match(/class="document-page"/g)?.length).toBe(2);
+  // The file is the document, not an assistant source.
+  expect(screen.queryByRole("list", { name: "Attached draft sources" })).not.toBeInTheDocument();
+  expectRailNotice(/Services Agreement v2\.docx opened in the editor/);
+  await waitFor(() =>
+    expect(storedDraftHistory()[0]).toMatchObject({
+      title: "Services Agreement v2",
+      summary: "Opened from Services Agreement v2.docx",
+    }),
+  );
+});
+
+test("opening a file keeps Markdown structure and guards unsaved edits", async () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  documentBody().innerHTML = "<p>Unsaved notes worth keeping.</p>";
+  fireEvent.input(documentBody());
+
+  const markdownFile = new File(
+    ["# Board Memo\n\nQuarterly summary.\n\n- Revenue up\n- Costs flat"],
+    "board-memo.md",
+    { type: "text/markdown" },
+  );
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [markdownFile] },
+  });
+  const dialog = await screen.findByRole("dialog", { name: "Unsaved draft edits" });
+  expect(dialog).toHaveTextContent("Before you open board-memo.md");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+  expect(documentText()).toContain("Unsaved notes worth keeping.");
+
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [markdownFile] },
+  });
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "Unsaved draft edits" })).getByRole("button", {
+      name: "Save copy and continue",
+    }),
+  );
+  expect(documentBody().querySelector("h1")).toHaveTextContent("Board Memo");
+  expect(documentBody().querySelectorAll("li")).toHaveLength(2);
+  expect(screen.getByLabelText("Document title")).toHaveValue("board-memo");
+  expect(
+    storedDraftHistory().find((item) => item.title?.includes("unsaved copy"))?.content,
+  ).toContain("Unsaved notes worth keeping.");
+});
+
+test("the attach menu closes on an outside press or Escape in document and deck modes", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  const paperclip = screen.getByRole("button", { name: "Attach file" });
+
+  fireEvent.click(paperclip);
+  fireEvent.pointerDown(screen.getByRole("menuitem", { name: /Google Drive/ }));
+  expect(screen.getByRole("menu", { name: "Add draft attachment" })).toBeInTheDocument();
+  fireEvent.pointerDown(documentBody());
+  expect(screen.queryByRole("menu", { name: "Add draft attachment" })).not.toBeInTheDocument();
+
+  fireEvent.click(paperclip);
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  expect(screen.queryByRole("menu", { name: "Add draft attachment" })).not.toBeInTheDocument();
+  expect(paperclip).toHaveFocus();
+
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+  expect(screen.getByRole("menuitem", { name: /Open in editor.*Edit slides directly/ })).toBeInTheDocument();
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole("menu", { name: "Add draft attachment" })).not.toBeInTheDocument();
+});
+
+const TINY_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+function installDeckOpenFetchMock() {
+  const requests: string[] = [];
+  const agendaBullets = Array.from({ length: 10 }, (_, index) => ({
+    text: `Agenda point ${index + 1}`,
+    level: index === 1 ? 1 : 0,
+  }));
+  const fetchMock = globalThis.fetch as unknown as {
+    mockImplementation: (implementation: typeof fetch) => void;
+  };
+  fetchMock.mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requests.push(url);
+    if (url.includes("/api/drafts/deck-template/parse")) {
+      return new Response(
+        JSON.stringify({
+          filename: "Q3 Review.pptx",
+          slide_count: 4,
+          theme: { colors: { accent1: "#aa3300" }, major_font: "Georgia", minor_font: null },
+          logo_candidates: [],
+          background_candidates: [],
+          designs: [],
+          slides: [
+            { index: 0, title: "Q3 Review", blocks: ["Board update"], layout_name: "Title Slide", design_index: null, is_title_slide: true, subtitle: "Board update", bodies: [], notes: "", picture: null },
+            { index: 1, title: "Agenda", blocks: [], layout_name: "Title and Content", design_index: null, is_title_slide: false, subtitle: null, bodies: [agendaBullets], notes: "Mention the hiring freeze.", picture: null },
+            { index: 2, title: "Revenue chart", blocks: [], layout_name: "Title Only", design_index: null, is_title_slide: false, subtitle: null, bodies: [[{ text: "Quarterly revenue by region", level: 0 }]], notes: "", picture: { data_url: TINY_PNG_DATA_URL, width_px: 1, height_px: 1, alt: "Bar chart" } },
+            { index: 3, title: "Compare", blocks: [], layout_name: "Two Content", design_index: null, is_title_slide: false, subtitle: null, bodies: [[{ text: "Left side", level: 0 }], [{ text: "Right side", level: 0 }]], notes: "", picture: null },
+          ],
+          warnings: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify({ error: "offline" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  return requests;
+}
+
+test("deck mode opens a PowerPoint file into the slide layout area", async () => {
+  const requests = installDeckOpenFetchMock();
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+
+  fireEvent.change(screen.getByLabelText("Open a presentation in the deck editor"), {
+    target: { files: [new File(["PK"], "Q3 Review.pptx", { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" })] },
+  });
+
+  await waitFor(() => expect(screen.getByText("Slide 1 of 4")).toBeInTheDocument());
+  expect(requests.some((url) => url.includes("/api/drafts/deck-template/parse?content=true"))).toBe(true);
+  expect(screen.getByLabelText("Document title")).toHaveValue("Q3 Review");
+  expectRailNotice(/Q3 Review\.pptx opened in the deck editor/);
+  expect(screen.queryByRole("list", { name: "Attached draft sources" })).not.toBeInTheDocument();
+
+  const stored = storedDraftHistory().find((item) => item.title === "Q3 Review");
+  const deck = JSON.parse(stored?.content ?? "{}") as {
+    theme: { fonts: { major: string } };
+    slides: Array<{ layout: string; notes: string; bullets?: Array<{ level: number }>; image?: { alt: string }; left?: unknown[]; right?: unknown[] }>;
+  };
+  expect(deck.slides.map((slide) => slide.layout)).toEqual(["title", "title-bullets", "image-caption", "two-column"]);
+  expect(deck.theme.fonts.major).toBe("Georgia");
+  expect(deck.slides[1].bullets).toHaveLength(8);
+  expect(deck.slides[1].bullets?.[1].level).toBe(1);
+  expect(deck.slides[1].notes).toContain("Mention the hiring freeze.");
+  expect(deck.slides[1].notes).toContain("- Agenda point 10");
+  expect(deck.slides[2].image?.alt).toBe("Bar chart");
+  expect(deck.slides[3].left).toHaveLength(1);
+  expect(deck.slides[3].right).toHaveLength(1);
+  // The cover's subtitle is not repeated in its notes.
+  expect(deck.slides[0].notes).toBe("");
+  expect(screen.getByText(/on 1 slide was moved into the speaker notes/)).toBeInTheDocument();
+});
+
+test("deck open rejects non-PowerPoint files without touching the deck", async () => {
+  const requests = installDeckOpenFetchMock();
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+
+  fireEvent.change(screen.getByLabelText("Open a presentation in the deck editor"), {
+    target: { files: [new File(["text"], "notes.txt", { type: "text/plain" })] },
+  });
+
+  await waitFor(() => expectRailNotice(/Could not open notes\.txt/));
+  expect(requests.some((url) => url.includes("deck-template"))).toBe(false);
+  expect(screen.getByText("Slide 1 of 1")).toBeInTheDocument();
+});
+
+test("open in editor rejects files it cannot read and leaves the draft alone", async () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  documentBody().innerHTML = "<p>Current draft stays.</p>";
+  fireEvent.input(documentBody());
+
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [new File(["%PDF-1.7"], "scan.pdf", { type: "application/pdf" })] },
+  });
+
+  await waitFor(() => expectRailNotice(/Could not open scan\.pdf/));
+  expect(documentText()).toContain("Current draft stays.");
+  expect(screen.queryByRole("dialog", { name: "Unsaved draft edits" })).not.toBeInTheDocument();
 });
 
 test("uploaded draft sources reach the model and strict citations tighten the request", async () => {
