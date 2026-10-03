@@ -333,8 +333,12 @@ export function ssoAuthorizeUrl(providerId: string): string {
 }
 
 /** Redirect URI that admins must register with their identity provider. */
+/** The callback an identity provider must allow, as an absolute URL. With the
+ * default same-origin deployment apiBase is empty, and a relative path is not
+ * something an identity provider will accept as a redirect URI. */
 export function ssoRedirectUri(): string {
-  return `${apiBase}/api/auth/sso/callback`;
+  const base = apiBase || (typeof window !== "undefined" ? window.location.origin : "");
+  return `${base}/api/auth/sso/callback`;
 }
 
 /** Resume a session from a stored signed token (used after the SSO redirect). */
