@@ -1,0 +1,24 @@
+name: Question
+description: Ask how something works or how to set it up
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: The [documentation](https://aperturechat.com/guide.html) may already answer this. Do not include secrets, personal data, or private hostnames.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to do, and where are you stuck?
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you've tried
+      description: Documentation you read, commands you ran, or messages you saw.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag or commit SHA, if relevant.
