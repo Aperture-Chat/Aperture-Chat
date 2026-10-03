@@ -97,7 +97,7 @@ policies appropriate for your organization's data.
 | ![Document editor with a project brief, compact formatting toolbar, status bar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with the project brief converted into a deck, layout and theme choices, and slide thumbnails](docs/images/deck-dark.png) |
 
 - **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
-- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail.
+- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word, Markdown, or text file as the document, or a PowerPoint file as the deck.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, table and picture tools, and, for decks, layouts and themes, a slide sorter, snapping guides, and presenter view.
 - **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
@@ -143,13 +143,13 @@ policies appropriate for your organization's data.
 
 | Role | Responsibilities |
 | --- | --- |
-| **Platform Owner** | Providers and credentials, organization-wide model availability, shared connectors, organizations, branding, platform audit, and release updates. |
+| **Platform Owner** | Providers and credentials, organization-wide model availability, shared connectors, organizations, branding, platform audit, alert email, Elastic export, and release updates. |
 | **Tenant Admin** | Users, groups, access requests, SSO, model restrictions, knowledge, tools, policies, retention, and tenant analytics. |
 | **User** | Granted chat, drafting, agent, knowledge, and tool workflows. |
 
 - **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
 - **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing them requires platform-owner authorization.
-- **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Tenant administrators see prompt activity only for the users they administer.
+- **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Audit dashboards group signals by what needs attention and chart trends, and every number opens its records. Alert rules can email on matching activity, including chosen prompt detections such as prompt injection. Owners can send audit, usage, chats, documents, and users to Elastic for Kibana. Tenant administrators see prompt activity only for the users they administer.
 - **Training.** Role-specific Help includes narrated walkthroughs and downloadable guides, with fullscreen playback on desktop and mobile.
 
 ## Get started

@@ -153,6 +153,7 @@ def test_empty_database_migrates_to_head_with_sqlite_safety_settings(tmp_path: P
             "cutover_vector_source_journal",
             "draft_documents",
             "draft_revisions",
+            "elastic_export_cursors",
             "email_settings",
             "identity_cleanup_job_users",
             "identity_cleanup_jobs",

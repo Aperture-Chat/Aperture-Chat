@@ -162,7 +162,12 @@ class Settings(BaseSettings):
     # Embed new chunks on a background worker so uploads return as soon as text
     # is extracted and keyword-searchable; semantic vectors fill in behind them.
     knowledge_dense_background: bool = True
+    # Operator-level Elastic export target. The platform console can also save
+    # an endpoint and vaulted API key; console values take precedence field by
+    # field. ``elastic_cloud_id`` is the Elastic Cloud deployment ID, decoded
+    # to its Elasticsearch URL when no explicit URL is set.
     elastic_url: str | None = None
+    elastic_cloud_id: str | None = None
     elastic_api_key: str | None = None
     scim_bearer_token: str | None = None
     # In-process background scheduler: fires enabled automation schedules and

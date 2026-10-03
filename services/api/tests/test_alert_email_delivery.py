@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import ssl
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -68,17 +70,20 @@ class FakeSMTP:
     instances: list["FakeSMTP"] = []
     fail_with: Exception | None = None
 
-    def __init__(self, host, port, timeout=None):
+    def __init__(self, host, port, timeout=None, context=None):
         self.host = host
         self.port = port
         self.timeout = timeout
+        self.context = context
         self.started_tls = False
+        self.starttls_context = None
         self.login_args = None
         self.sent_messages = []
         FakeSMTP.instances.append(self)
 
-    def starttls(self):
+    def starttls(self, context=None):
         self.started_tls = True
+        self.starttls_context = context
 
     def login(self, username, password):
         self.login_args = (username, password)
@@ -116,32 +121,93 @@ def test_delivery_sends_and_marks_sent(monkeypatch) -> None:
     smtp = FakeSMTP.instances[-1]
     assert smtp.started_tls is True
     assert smtp.login_args == ("mailer@example.com", "smtp-secret-value")
+    # STARTTLS verifies the server certificate and hostname instead of
+    # smtplib's unverified default, so the vaulted password cannot be
+    # intercepted.
+    assert smtp.starttls_context.verify_mode == ssl.CERT_REQUIRED
+    assert smtp.starttls_context.check_hostname is True
     message = smtp.sent_messages[0]
     assert message["To"] == "soc@example.com"
     assert message["From"] == "alerts@example.com"
     assert "Suspicious activity" in message["Subject"]
+    assert message["Date"]
+    assert message["Message-ID"].endswith("@example.com>")
 
 
 def test_delivery_failure_retries_then_fails_with_real_error(monkeypatch) -> None:
     monkeypatch.setattr("app.core.mailer.smtplib.SMTP", FakeSMTP)
     monkeypatch.setattr(scheduler, "MAX_DELIVERY_ATTEMPTS", 3)
     FakeSMTP.fail_with = ConnectionRefusedError("Connection refused by smtp.example.com")
+    current = {"now": scheduler.clock.now()}
+    monkeypatch.setattr(scheduler.clock, "now", lambda: current["now"])
     store = get_store()
     _configure_email(store)
     notification = _queue_notification(store)
 
-    for expected_attempts in (1, 2):
+    for expected_attempts, backoff_minutes in ((1, 1), (2, 5)):
         scheduler.deliver_alert_notifications(store)
         notification = store.alert_notifications[notification.id]
         assert notification.status == "queued"
         assert notification.attempts == expected_attempts
         assert "Connection refused" in notification.status_detail
+        assert f"retrying in {backoff_minutes} min" in notification.status_detail
+
+        # Inside the backoff window the scheduler leaves it alone.
+        current["now"] += timedelta(minutes=backoff_minutes) - timedelta(seconds=1)
+        scheduler.deliver_alert_notifications(store)
+        assert store.alert_notifications[notification.id].attempts == expected_attempts
+        current["now"] += timedelta(seconds=1)
 
     scheduler.deliver_alert_notifications(store)
     notification = store.alert_notifications[notification.id]
     assert notification.status == "failed"
     assert notification.attempts == 3
-    assert "Connection refused" in notification.status_detail
+    assert notification.status_detail == "Connection refused by smtp.example.com"
+
+
+def test_delivery_recovers_after_a_short_outage(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.mailer.smtplib.SMTP", FakeSMTP)
+    FakeSMTP.fail_with = ConnectionRefusedError("Connection refused")
+    current = {"now": scheduler.clock.now()}
+    monkeypatch.setattr(scheduler.clock, "now", lambda: current["now"])
+    store = get_store()
+    _configure_email(store)
+    notification = _queue_notification(store)
+
+    scheduler.deliver_alert_notifications(store)
+    # Twenty scheduler passes (30s apart) inside the outage must not burn
+    # through the retry budget.
+    for _ in range(20):
+        current["now"] += timedelta(seconds=30)
+        scheduler.deliver_alert_notifications(store)
+    assert store.alert_notifications[notification.id].status == "queued"
+    assert store.alert_notifications[notification.id].attempts <= 3
+
+    FakeSMTP.fail_with = None
+    current["now"] += timedelta(minutes=30)
+    assert scheduler.deliver_alert_notifications(store) == 1
+    assert store.alert_notifications[notification.id].status == "sent"
+
+
+def test_prompt_flag_email_names_the_detection_and_omits_the_prompt(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.mailer.smtplib.SMTP", FakeSMTP)
+    store = get_store()
+    _configure_email(store)
+    notification = _queue_notification(store)
+    store.alert_notifications[notification.id] = notification.model_copy(
+        update={"summary": "Prompt-injection attempt · medium detector · via chat · model gpt-4o"}
+    )
+
+    assert scheduler.deliver_alert_notifications(store) == 1
+
+    message = FakeSMTP.instances[-1].sent_messages[0]
+    assert message["Subject"].endswith("Suspicious activity: Prompt-injection attempt")
+    body = message.get_content()
+    assert "What happened: Prompt-injection attempt · medium detector · via chat" in body
+    assert "Who: Jane Counsel" in body
+    assert "Organization rule (" in body
+    assert "flagged text is not included" in body
+    assert "Admin console → Audit → Security Alerts" in body
 
 
 def test_unconfigured_email_marks_not_configured_honestly() -> None:
@@ -274,6 +340,8 @@ def test_ssl_mode_uses_smtp_ssl(monkeypatch) -> None:
 
     smtp = FakeSMTP.instances[-1]
     assert smtp.started_tls is False
+    assert smtp.context.verify_mode == ssl.CERT_REQUIRED
+    assert smtp.context.check_hostname is True
     assert smtp.sent_messages
 
 

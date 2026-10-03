@@ -228,12 +228,16 @@ def test_alert_delivery_retries_and_persists_terminal_failure(
             raise mailer.MailerError("SMTP refused the connection")
 
         monkeypatch.setattr(mailer, "send_email", _fail)
+        current = {"now": datetime(2026, 7, 20, 12, 0, tzinfo=UTC)}
+        monkeypatch.setattr(scheduler.clock, "now", lambda: current["now"])
         assert scheduler.deliver_alert_notifications(store) == 0
         retrying = repository.get_alert_notification("alertnotif-test")
         assert retrying is not None
         assert retrying.status == "queued"
         assert retrying.attempts == 1
 
+        # The retry waits out its backoff instead of firing on the next pass.
+        current["now"] += timedelta(minutes=scheduler.ALERT_RETRY_BACKOFF_MINUTES[0])
         assert scheduler.deliver_alert_notifications(store) == 0
         failed = repository.get_alert_notification("alertnotif-test")
         assert failed is not None
@@ -270,8 +274,15 @@ def test_elastic_flush_marks_ordered_outbox_only_after_success(tmp_path: Path) -
         assert delivered == 2
         assert repository.count_pending_outbox() == 0
         assert repository.count_outbox(pending_only=False) == 2
-        body_lines = requests[0].content.decode().splitlines()
+        bulk_requests = [request for request in requests if request.url.path == "/_bulk"]
+        assert len(bulk_requests) == 1
+        body_lines = bulk_requests[0].content.decode().splitlines()
         assert [json.loads(body_lines[index])["id"] for index in (1, 3)] == [
+            "audit-one",
+            "audit-two",
+        ]
+        # Stable document ids make redelivery overwrite instead of duplicate.
+        assert [json.loads(body_lines[index])["index"]["_id"] for index in (0, 2)] == [
             "audit-one",
             "audit-two",
         ]

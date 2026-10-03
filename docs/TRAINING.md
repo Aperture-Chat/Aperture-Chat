@@ -4,14 +4,14 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **49 lessons, 233 scenes, 49 MP3 tracks, and 4,119 seconds of narration timelines (68 minutes 39 seconds)**. Its 229 measured focus-map entries comprise 106 user targets and 123 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **50 lessons, 250 scenes, 50 MP3 tracks, and 4,495 seconds of narration timelines (74 minutes 55 seconds)**. Its 246 measured focus-map entries comprise 108 user targets and 138 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 22 | 112 | 106 | 22 | 1923 | 26 |
-| Administrator | 13 | 57 | 58 | 13 | 1096 | 40 |
-| Platform owner | 14 | 64 | 65 | 14 | 1100 | 58 |
-| Total | 49 | 233 | 229 | 49 | 4119 | — |
+| User | 22 | 114 | 108 | 22 | 1968 | 26 |
+| Administrator | 13 | 60 | 61 | 13 | 1155 | 40 |
+| Platform owner | 15 | 76 | 77 | 15 | 1372 | 58 |
+| Total | 50 | 250 | 246 | 50 | 4495 | — |
 
 All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/58 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
@@ -43,7 +43,7 @@ Seconds are the sum of each lesson's source scene durations.
 | User | Build a slide deck | `deck-basics` | 12 | 199 |
 | User | Choose models and request access | `model-access` | 4 | 79 |
 | User | Dictation, images, and diagrams | `dictation-images` | 4 | 52 |
-| User | Draft documents | `drafts` | 9 | 196 |
+| User | Draft documents | `drafts` | 11 | 241 |
 | User | Follow the work trace | `work-traces` | 4 | 50 |
 | User | Knowledge bases | `knowledge` | 3 | 40 |
 | User | Knowledge, Web, Agent, and reply settings | `send-options` | 6 | 73 |
@@ -60,7 +60,7 @@ Seconds are the sum of each lesson's source scene durations.
 | User | Start chatting | `chat-basics` | 4 | 55 |
 | User | Symbol shortcuts: / @ # $ > | `composer-commands` | 7 | 95 |
 | User | Tools and the Library | `tools-automations` | 3 | 48 |
-| Administrator | Alerts and delivery | `admin-alerts` | 4 | 67 |
+| Administrator | Alerts and delivery | `admin-alerts` | 5 | 90 |
 | Administrator | Approve access and finish sign-in | `admin-access-onboarding` | 5 | 96 |
 | Administrator | Data retention and tagging | `admin-retention` | 10 | 208 |
 | Administrator | Groups and permissions | `admin-groups` | 4 | 63 |
@@ -69,16 +69,17 @@ Seconds are the sum of each lesson's source scene durations.
 | Administrator | Review feedback and reported issues | `admin-feedback-issues` | 4 | 78 |
 | Administrator | Review model requests and explain access | `admin-model-requests` | 4 | 83 |
 | Administrator | Tenant analytics | `admin-analytics` | 4 | 74 |
-| Administrator | Tenant audit | `admin-audit` | 3 | 62 |
+| Administrator | Tenant audit | `admin-audit` | 5 | 98 |
 | Administrator | Tenant model access | `admin-model-access` | 3 | 49 |
 | Administrator | Tenant SSO and provisioning | `admin-sso` | 4 | 70 |
 | Administrator | Users and accounts | `admin-users` | 4 | 79 |
-| Platform owner | Alerts and email delivery | `owner-alerts` | 4 | 61 |
+| Platform owner | Alerts and email delivery | `owner-alerts` | 6 | 129 |
 | Platform owner | Analytics: runtime, activity, and usage | `runtime-analytics` | 6 | 88 |
 | Platform owner | API Key Vault and replacement | `api-key-vault` | 3 | 39 |
 | Platform owner | Data retention and tagging | `owner-retention` | 10 | 208 |
+| Platform owner | Elastic Analytics export | `elastic-analytics` | 7 | 135 |
 | Platform owner | Organization model availability | `model-availability` | 3 | 36 |
-| Platform owner | Owner audit signals | `owner-audit` | 5 | 74 |
+| Platform owner | Owner audit signals | `owner-audit` | 8 | 143 |
 | Platform owner | Platform branding | `branding` | 4 | 57 |
 | Platform owner | Policies, budget, and connectors | `policies-connectors` | 6 | 120 |
 | Platform owner | Providers and connections | `provider-setup` | 4 | 67 |
@@ -110,6 +111,10 @@ Run from the repository root with the intended synthetic role session. Read each
 | Deck editor, slide AI edit, uploaded background, presenter view, and brand template | `capture-deck-frames.cjs` |
 | Document editor, Edit with AI review, slash menu, find and outline, settings, and history | `capture-training-refresh.cjs drafts` |
 | Session details, its Symbol shortcuts list, and the five composer symbol menus | `capture-training-refresh.cjs symbols` |
+| Admin and owner audit signals, Audit Insights, a chart drill-down, security alerts or prompts, and the trail | `capture-training-refresh.cjs audit` |
+| Admin and owner alert email, both rule templates, the Only these detections form, and real deliveries | `capture-training-refresh.cjs alerts` |
+| Owner Elastic Analytics connection, data streams, connection checks, and delivery | `capture-training-refresh.cjs elastic` |
+| Drafts paperclip From this device menu and a synthetic file opened in the editor | `capture-training-refresh.cjs open` |
 | Administrator console, policies, analytics, and audit | `capture-admin-frames.cjs`, `capture-admin-analytics-frames.cjs` |
 | Owner configuration, connectors, usage, audit, and retention | `capture-owner-frames.cjs` |
 | Account, Help, and mobile installation UI | `capture-user-support-frames.cjs` |
@@ -236,3 +241,13 @@ The sidebar now lists Search, Drafts, Agents, and Library below New chat. Chat h
 - **Narration:** six tracks were regenerated (`tools-automations`, `scheduled-automations`, `organize`, `account-mobile-help`, `admin-users`, `admin-tools`). Each was transcribed with speech recognition and compared with its script.
 - **Focus and layout:** 220 focus regions were imported against the exact published PNG bytes. All 224 scenes were rendered through the training composition, measured for overlap between title cards, captions, and highlighted controls, and reviewed visually. Four scenes received explicit callout placement: both Search palette scenes, the problem-report form, and the temporary-password dialog. The Connections scenes highlight the Chat output actions header. Review corrected two owner frames: Policy Controls is now scrolled into view, and the retention tags frame shows a filtered scan with a suggested label.
 - **Guides:** the three PDFs were regenerated (28, 42, and 58 pages), every page was rendered with Poppler and inspected, and each pair of copies is byte-identical.
+
+## Audit, alerts, Elastic, and Drafts refresh
+
+The October 2026 interface changes refreshed five lessons and added one. `owner-audit` and `admin-audit` now teach the grouped signal board (the attention banner, Expand all, List and Cards), Audit Insights trends, and the investigation that opens from any chart mark or signal row. `owner-alerts` and `admin-alerts` cover the Prompt-injection template, the Only these detections filter, the SMTP relay guidance with verified TLS, and the rule that Send test email uses saved settings. The new owner lesson `elastic-analytics` walks through the Elastic Analytics connection, data streams, Save and check, the connection checks, delivery, and Kibana data views. `drafts` gained two scenes for the paperclip's From this device menu: Attach to chat versus Open in editor, and a file opened as a new draft. All six lessons were narrated with the same Kokoro voice, and the user, administrator, and owner guides describe the same controls.
+
+Frames came from an isolated copy of the synthetic training fixture. Two weeks of back-dated synthetic audit events and security alerts were added so the trend charts have data; alert snippets came from the real DLP scanner run on synthetic prompts. Today's flagged prompts were real chats with the local training model, and their alert emails were really delivered over verified STARTTLS to a local SMTP relay trusted only through a private test CA. The Elastic frames show a real single-node Elastic cluster the panel was saved against, with an API key minted from the panel's own recommended request; the delivery counts are its actual sends. The opened document is a generated synthetic Markdown file.
+
+- **Narration:** six tracks were regenerated (`owner-audit`, `owner-alerts`, `elastic-analytics`, `admin-audit`, `admin-alerts`, and `drafts`). Each was transcribed with speech recognition and compared with its script.
+- **Focus and layout:** 33 focus regions were imported against the exact published PNG bytes. All 42 scenes of the changed lessons were rendered through the training composition, measured for overlap between title cards, captions, and highlighted controls, and reviewed visually. Eight scenes received explicit callout or caption placement so the card does not cover the control it describes.
+- **Guides:** the three PDFs were regenerated (30, 45, and 62 pages), the changed pages were rendered with Poppler and inspected, and each pair of copies is byte-identical.

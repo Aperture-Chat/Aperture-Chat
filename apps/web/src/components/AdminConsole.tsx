@@ -56,7 +56,21 @@ import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPreviewText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
-import { AuditSummaryCard, type AuditSummaryItem } from "./AuditSummaryCard";
+import { AuditSummaryBoard, type AuditSummaryGroup, type AuditSummaryItem } from "./AuditSummaryCard";
+import { AuditInsights } from "./AuditInsights";
+import {
+  AUDIT_ALERT_PAGE_SIZE,
+  AUDIT_EVENT_PAGE_SIZE,
+  accessRequestsSignal,
+  afterHoursSignal,
+  alertResponseSignal,
+  automationFailuresSignal,
+  credentialChangesSignal,
+  failedOperationsSignal,
+  neverSignedInSignal,
+  pendingApprovalsSignal,
+  roleChangesSignal,
+} from "./auditSignals";
 import { ModelFilterDialog, type ModelFilterDialogApi } from "./ModelFilterDialog";
 import { CustomToolBuilder, type CustomToolBuilderApi } from "./CustomToolBuilder";
 
@@ -4113,11 +4127,26 @@ export function AdminConsole({
               title="Admin Audit"
               subtitle="Tenant security and governance signals for admin-visible users, prompts, connectors, SSO, models, and audit events."
             >
-              <div className="audit-summary-grid">
-                {adminAuditSummary.map((item) => (
-                  <AuditSummaryCard item={item} key={item.label} />
-                ))}
-              </div>
+              <AuditSummaryBoard items={adminAuditSummary} groups={ADMIN_AUDIT_GROUPS} />
+            </Panel>
+
+            <Panel
+              title={
+                <>
+                  <BarChart3 size={18} /> Audit Insights
+                </>
+              }
+              subtitle="Trends behind the signals above for this organization: severity by day, security alerts, who is acting, which areas are changing, and when."
+            >
+              <AuditInsights
+                events={adminVisibleAuditTrailRows}
+                alerts={securityAlertRows}
+                formatTimestamp={formatAdminAuditTimestamp}
+                formatRole={formatAdminAuditRole}
+                modelName={(modelId) => data.models.find((model) => model.id === modelId)?.name ?? modelId}
+                eventLimit={AUDIT_EVENT_PAGE_SIZE}
+                alertLimit={AUDIT_ALERT_PAGE_SIZE}
+              />
             </Panel>
 
             <Panel
@@ -5060,6 +5089,12 @@ function adminRuntimeAuditRows(events: AuditEvent[]): RuntimeAuditRow[] {
     .filter((item): item is RuntimeAuditRow => item !== null);
 }
 
+const ADMIN_AUDIT_GROUPS: AuditSummaryGroup[] = [
+  { id: "security", label: "Security signals" },
+  { id: "identity", label: "Identity & access" },
+  { id: "operations", label: "Models & workspace" },
+];
+
 function adminAuditSummaryCards(
   data: BootstrapData,
   securityAlerts: SecurityAlert[],
@@ -5073,9 +5108,12 @@ function adminAuditSummaryCards(
   const ungroupedModelRecords = data.models.filter((model) => model.platform_enabled && model.group_ids.length === 0);
   const activePromptAlerts = securityAlerts.filter((alert) => !alert.acknowledged);
   const criticalEvents = auditTrailRows.filter((event) => auditEventSeverity(event) === "critical");
+  const tenantUsers = data.visibleUsers.filter((user) => user.role !== "PLATFORM_OWNER");
+  const unassignedUserRecords = activeVisibleUsers.filter((user) => user.group_ids.length === 0);
 
   return [
     {
+      group: "security",
       label: "Audit events",
       value: String(auditTrailRows.length),
       detail: "tenant events in range",
@@ -5093,6 +5131,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "security",
       label: "Critical events",
       value: String(criticalEvents.length),
       detail: "high-severity audit events",
@@ -5110,6 +5149,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "security",
       label: "Prompt watchlist",
       value: String(activePromptAlerts.length),
       detail: "active DLP or misuse alerts",
@@ -5127,6 +5167,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "operations",
       label: "Prompt volume",
       value: String(promptRows.length),
       detail: "saved prompts in scope",
@@ -5144,6 +5185,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "identity",
       label: "Active admins",
       value: String(adminUsers.length),
       detail: "tenant admin accounts",
@@ -5161,6 +5203,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "identity",
       label: "Active users",
       value: String(regularUsers.length),
       detail: "non-owner user accounts",
@@ -5178,6 +5221,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "operations",
       label: "Connector issues",
       value: String(connectorIssueRecords.length),
       detail: "tenant connectors in error",
@@ -5195,6 +5239,7 @@ function adminAuditSummaryCards(
       ],
     },
     {
+      group: "operations",
       label: "Ungrouped models",
       value: String(ungroupedModelRecords.length),
       detail: "enabled models without groups",
@@ -5211,6 +5256,34 @@ function adminAuditSummaryCards(
         },
       ],
     },
+    alertResponseSignal(securityAlerts, tenantUsers, formatAdminAuditTimestamp),
+    afterHoursSignal(auditTrailRows, formatAdminAuditTimestamp),
+    failedOperationsSignal(auditTrailRows, formatAdminAuditTimestamp),
+    accessRequestsSignal(tenantUsers, formatAdminAuditTimestamp),
+    neverSignedInSignal(tenantUsers, formatAdminAuditRole),
+    roleChangesSignal(auditTrailRows, formatAdminAuditTimestamp, formatAdminAuditRole),
+    credentialChangesSignal(auditTrailRows, formatAdminAuditTimestamp),
+    {
+      group: "operations",
+      label: "Unassigned users",
+      value: String(unassignedUserRecords.length),
+      detail: "active users without a group",
+      issue: false,
+      description:
+        "Active users who belong to no group, so they cannot reach group-granted models until an administrator assigns one.",
+      sections: [
+        {
+          label: "Active users without a group",
+          emptyText: "Every active user belongs to at least one group.",
+          items: unassignedUserRecords.map((user) => ({
+            label: user.display_name || user.email,
+            detail: `${user.email} · ${formatAdminAuditRole(user.role)} · last active ${user.last_active}`,
+          })),
+        },
+      ],
+    },
+    pendingApprovalsSignal(data.agentRuns, formatAdminAuditTimestamp),
+    automationFailuresSignal(data.automations, formatAdminAuditTimestamp),
   ];
 }
 

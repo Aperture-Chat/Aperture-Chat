@@ -7,6 +7,9 @@ import type {
   AlertRuleUpdateRequest,
   AuditEvent,
   Connector,
+  ElasticConnectionTestRequest,
+  ElasticConnectionTestResult,
+  ElasticExportSettingsUpdateRequest,
   ElasticStatus,
   EmailSettings,
   EmailSettingsUpdateRequest,
@@ -621,6 +624,42 @@ export function updatePlatformTenantBranding(
 
 export function getPlatformElasticStatus(userId: string, options: ApiMutationOptions = {}): Promise<ElasticStatus> {
   return apiRequest<ElasticStatus>(userId, "/api/platform/elastic/status", {
+    signal: options.signal,
+  });
+}
+
+export function updatePlatformElasticSettings(
+  userId: string,
+  payload: ElasticExportSettingsUpdateRequest,
+  options: ApiMutationOptions = {},
+): Promise<ElasticStatus> {
+  return apiRequest<ElasticStatus>(userId, "/api/platform/elastic/settings", {
+    method: "PUT",
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function testPlatformElasticConnection(
+  userId: string,
+  payload: ElasticConnectionTestRequest = {},
+  options: ApiMutationOptions = {},
+): Promise<ElasticConnectionTestResult> {
+  return apiRequest<ElasticConnectionTestResult>(userId, "/api/platform/elastic/test", {
+    method: "POST",
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function syncPlatformElastic(
+  userId: string,
+  payload: { full?: boolean } = {},
+  options: ApiMutationOptions = {},
+): Promise<ElasticStatus> {
+  return apiRequest<ElasticStatus>(userId, "/api/platform/elastic/sync", {
+    method: "POST",
+    body: payload,
     signal: options.signal,
   });
 }

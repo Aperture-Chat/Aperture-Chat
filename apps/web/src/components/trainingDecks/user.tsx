@@ -64,6 +64,8 @@ type UserFocus =
   | "draftAiEdit"
   | "draftSlashMenu"
   | "draftStatusBar"
+  | "draftOpenFromDevice"
+  | "draftOpenedDocument"
   | "draftSettings"
   | "draftVersions"
   | "deckModeToggle"
@@ -188,6 +190,8 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   draftAiEdit: { frame: "training/user/draft-ai-edit.png", rect: { x: 551.640625, y: 259.296875, w: 460, h: 320.453125 } },
   draftSlashMenu: { frame: "training/user/draft-slash.png", rect: { x: 555.640625, y: 390.8125, w: 292, h: 380 } },
   draftStatusBar: { frame: "training/user/draft-find.png", rect: { x: 456, y: 821, w: 729, h: 34 } },
+  draftOpenFromDevice: { frame: "training/user/draft-open-menu.png", rect: { x: 111, y: 413.96875, w: 294, h: 104.171875 } },
+  draftOpenedDocument: { frame: "training/user/draft-opened-file.png", rect: { x: 500.390625, y: 276, w: 640.21875, h: 579 } },
   draftSettings: { frame: "training/user/draft-settings.png", rect: { x: 103, y: 400.96875, w: 325, h: 265.03125 } },
   draftVersions: { frame: "training/user/drafts.png", rect: { x: 456, y: 0, w: 729, h: 177 } },
   deckModeToggle: { frame: "training/user/deck-editor.png", rect: { x: 481, y: 11, w: 240, h: 50 } },
@@ -738,7 +742,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     id: "drafts",
     audioSrc: "training/user/drafts.mp3",
     title: "Draft documents",
-    description: "Write manually or with an available model, edit with AI, save versions, and export documents.",
+    description: "Write manually, open a file, or draft with an available model, then edit with AI, save versions, and export.",
     icon: "drafts",
     outcomes: ["Document prepared", "AI edit reviewed", "Version saved", "Export ready"],
     scenes: [
@@ -764,6 +768,24 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         narration: "Choose an approved model for AI drafting and editing. If No models connected appears, AI actions are unavailable. You can still edit manually, import, save, use document history, and export. Follow the setup guidance for your role or ask your administrator for model access.",
         durationSeconds: 20,
         focus: "draftModel",
+      },
+      {
+        title: "Open a file from this device",
+        caption: "Paperclip → From this device: Attach to chat for the assistant, or Open in editor to edit the file itself.",
+        narration:
+          "The paperclip in the assistant's message box offers two ways to use a file from this device. Attach to chat gives the file to the assistant to read with your next request. Open in editor opens a Word, Markdown, text, or web page file as the document itself. In a deck, Open in editor turns a PowerPoint file into editable slides.",
+        durationSeconds: 23,
+        focus: "draftOpenFromDevice",
+      },
+      {
+        title: "Edit the opened file",
+        caption: "The file opens as a new draft with its headings and lists. The previous draft stays in history.",
+        narration:
+          "The file opens as a new draft that keeps its headings, lists, and formatting, and the assistant confirms it opened. Edit it directly, or select text and use Ask AI. It is saved to your account as a new draft, and the draft you had open stays in Document history. If that draft has unsaved changes, you are asked first.",
+        durationSeconds: 22,
+        focus: "draftOpenedDocument",
+        calloutPlacement: "lower-left",
+        captionPlacement: "top",
       },
       {
         title: "Format like a document",

@@ -12,7 +12,9 @@ callers can record honest delivery status; nothing here fakes success.
 from __future__ import annotations
 
 import smtplib
+import ssl
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 
 from app.models.schemas import EmailSettings
 
@@ -25,6 +27,18 @@ class MailerError(Exception):
 
 def email_configured(settings: EmailSettings) -> bool:
     return bool(settings.host.strip() and settings.from_address.strip())
+
+
+def _tls_context() -> ssl.SSLContext:
+    # smtplib's own default context skips certificate and hostname checks,
+    # which would hand the vaulted SMTP password to anyone able to intercept
+    # the connection. Verify against the system trust store instead.
+    return ssl.create_default_context()
+
+
+def _message_id_domain(from_address: str) -> str | None:
+    _, _, domain = from_address.rpartition("@")
+    return domain.strip() or None
 
 
 def send_email(
@@ -45,16 +59,22 @@ def send_email(
     message["From"] = from_address
     message["To"] = ", ".join(recipients)
     message["Subject"] = subject
+    # smtplib adds neither header; relays and spam filters penalize mail
+    # that arrives without them.
+    message["Date"] = formatdate(localtime=False, usegmt=True)
+    message["Message-ID"] = make_msgid(domain=_message_id_domain(from_address))
     message.set_content(body_text)
 
     try:
         if security == "ssl":
-            smtp: smtplib.SMTP = smtplib.SMTP_SSL(host, port, timeout=SMTP_TIMEOUT_SECONDS)
+            smtp: smtplib.SMTP = smtplib.SMTP_SSL(
+                host, port, timeout=SMTP_TIMEOUT_SECONDS, context=_tls_context()
+            )
         else:
             smtp = smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT_SECONDS)
         try:
             if security == "starttls":
-                smtp.starttls()
+                smtp.starttls(context=_tls_context())
             if username:
                 smtp.login(username, password or "")
             smtp.send_message(message)

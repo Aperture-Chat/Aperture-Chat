@@ -3,6 +3,7 @@ import { useThemeSchedule } from "./lib/useThemeSchedule";
 import { AppShell, type ViewKey } from "./components/AppShell";
 import { AdminConsole, type AdminConsoleApi } from "./components/AdminConsole";
 import { AgentWorkspaceConsole } from "./components/AgentWorkspaceConsole";
+import { AUDIT_ALERT_PAGE_SIZE, AUDIT_EVENT_PAGE_SIZE } from "./components/auditSignals";
 import { AuthScreen, ForcedPasswordScreen } from "./components/AuthScreen";
 import { ChatWorkspace } from "./components/ChatWorkspace";
 import type { MemoryManagerApi } from "./components/MemoryManager";
@@ -74,6 +75,9 @@ import {
   updatePlatformEmailSettings,
   sendPlatformEmailTest,
   getPlatformElasticStatus,
+  updatePlatformElasticSettings,
+  testPlatformElasticConnection,
+  syncPlatformElastic,
   getPlatformSettings,
   updatePlatformSecurityAlert,
   updateAdminSecurityAlert,
@@ -952,7 +956,7 @@ export function App() {
         await deleteAdminSsoConfig(actorUserId, configId);
       },
       testSsoConfig: (actorUserId, configId) => testAdminSsoConfig(actorUserId, configId),
-      listAuditEvents: (actorUserId) => listAdminAuditEvents(actorUserId),
+      listAuditEvents: (actorUserId) => listAdminAuditEvents(actorUserId, { limit: AUDIT_EVENT_PAGE_SIZE }),
       listPromptActivity: (actorUserId, targetUserId) =>
         listAdminPromptActivity(actorUserId, { targetUserId, limit: 150 }),
       // Fetches one thread's full conversation for the audit preview; 500 is
@@ -963,7 +967,7 @@ export function App() {
         listAdminSecurityAlerts(actorUserId, {
           targetUserId,
           includeAcknowledged: true,
-          limit: 150,
+          limit: AUDIT_ALERT_PAGE_SIZE,
         }),
       acknowledgeSecurityAlert: (actorUserId, alertId, acknowledged) =>
         updateAdminSecurityAlert(actorUserId, alertId, { acknowledged }),
@@ -1127,7 +1131,7 @@ export function App() {
       resetUserPassword: async (userId, payload) => {
         await resetAdminUserPassword(data.me.id, userId, payload);
       },
-      listAuditEvents: () => listPlatformAuditEvents(data.me.id),
+      listAuditEvents: () => listPlatformAuditEvents(data.me.id, { limit: AUDIT_EVENT_PAGE_SIZE }),
       listPromptActivity: (targetUserId) =>
         listPlatformPromptActivity(data.me.id, { targetUserId, limit: 150 }),
       // Fetches one thread's full conversation for the audit preview; 500 is
@@ -1148,7 +1152,7 @@ export function App() {
         listPlatformSecurityAlerts(data.me.id, {
           targetUserId,
           includeAcknowledged: true,
-          limit: 150,
+          limit: AUDIT_ALERT_PAGE_SIZE,
         }),
       acknowledgeSecurityAlert: (alertId, acknowledged) =>
         updatePlatformSecurityAlert(data.me.id, alertId, { acknowledged }),
@@ -1179,6 +1183,9 @@ export function App() {
       updateTenantBranding: (tenantId, patch) =>
         updatePlatformTenantBranding(data.me.id, tenantId, patch),
       getElasticStatus: () => getPlatformElasticStatus(data.me.id),
+      updateElasticSettings: (patch) => updatePlatformElasticSettings(data.me.id, patch),
+      testElasticConnection: (payload) => testPlatformElasticConnection(data.me.id, payload),
+      syncElastic: (payload) => syncPlatformElastic(data.me.id, payload),
     }),
     [data.me.id],
   );

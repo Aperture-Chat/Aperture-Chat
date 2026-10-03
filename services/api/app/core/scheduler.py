@@ -4,8 +4,8 @@ Runs as an asyncio task inside the API process: runtime state is a
 single-process, file-backed store, so a separate worker container cannot
 safely share it. Every pass fires due automation schedules through the same
 execution path as the "Run now" route, delivers each scheduled run's output
-into a chat thread owned by the automation's creator, and flushes buffered
-audit events to Elastic when configured.
+into a chat thread owned by the automation's creator, and exports audit
+events, usage, chats, documents, and users to Elastic when configured.
 
 Schedule times are wall-clock times in each automation's time zone (UTC when
 none is set); the math lives in app/core/automation_schedule.py.
@@ -30,7 +30,7 @@ from app.core.automation_runner import (
     record_run_success,
 )
 from app.core.config import Settings, get_settings
-from app.core.elastic_export import flush_elastic_events
+from app.core.elastic_export import run_elastic_export
 from app.core.search_index import search_index_pass
 from app.core.model_gateway import ModelGatewayError, get_model_gateway_client
 from app.core.platform_updates import reconcile_updater_outcome, refresh_platform_update_check
@@ -42,13 +42,16 @@ from app.repositories.seed import SeedStore
 logger = logging.getLogger("aperture.scheduler")
 
 ALERT_DELIVERY_BATCH_LIMIT = 50
+# Minutes to wait after failed attempt 1, 2, 3, 4 before the next try, so a
+# short SMTP outage (about 50 minutes in total) does not exhaust the retries.
+ALERT_RETRY_BACKOFF_MINUTES = (1, 5, 15, 30)
 REVOKED_SESSION_PURGE_BATCH_LIMIT = 500
 MFA_STATE_PURGE_BATCH_LIMIT = 500
 RETENTION_PURGE_BATCH_LIMIT = 500
 MAX_DELIVERY_ATTEMPTS = 5
 NOT_CONFIGURED_DETAIL = (
     "Email delivery is not configured. This alert stays logged in-app; a platform "
-    "owner can configure SMTP in the Owner portal → Alerts tab."
+    "owner can configure SMTP in the Platform console → Alerts tab."
 )
 
 WEEKDAY_INDEX = automation_schedule.WEEKDAY_INDEX
@@ -171,18 +174,92 @@ def _record_scheduled_run_failure_without_masking(
         )
 
 
+def _retry_not_before(store: SeedStore) -> dict[str, datetime]:
+    # Process-local on purpose: a restart only makes the next retry earlier.
+    retry_map = getattr(store, "_alert_retry_not_before", None)
+    if retry_map is None:
+        retry_map = {}
+        store._alert_retry_not_before = retry_map
+    return retry_map
+
+
+_PROMPT_FLAG_ACTION = "security.prompt_flagged"
+
+
+def _utc_text(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _alert_email(store: SeedStore, notification) -> tuple[str, str]:
+    """Subject and plain-text body for one alert notification.
+
+    Only the already-redacted notification fields are used; a prompt flag
+    names the detection but never carries the flagged text.
+    """
+
+    brand = store.brand_name(notification.tenant_id)
+    is_prompt_flag = notification.event_action == _PROMPT_FLAG_ACTION
+    headline = notification.event_action
+    if is_prompt_flag and notification.summary:
+        headline = notification.summary.split(" · ", 1)[0]
+    if notification.scope == "tenant":
+        tenant = getattr(store, "tenants", {}).get(notification.tenant_id or "")
+        scope_line = f"Organization rule ({tenant.name if tenant else notification.tenant_id})"
+        console = "Admin console"
+    else:
+        scope_line = "Platform-wide rule"
+        console = "Platform console"
+    lines = [
+        f"Alert rule: {notification.rule_name}",
+        f"Scope: {scope_line}",
+        f"What happened: {notification.summary or notification.event_action}",
+        f"Event: {notification.event_action} (severity: {notification.event_severity})",
+        f"Who: {notification.actor_name or notification.actor_id or 'unknown'}",
+        f"When: {_utc_text(notification.created_at)}",
+    ]
+    if notification.matched_count > 1:
+        lines.append(f"Matched events in window: {notification.matched_count}")
+    lines.append("")
+    if is_prompt_flag:
+        lines.append(
+            "The flagged text is not included in this email. To review the redacted "
+            f"snippet and the conversation, open the {brand} {console} → Audit → "
+            "Security Alerts, then acknowledge the alert there."
+        )
+    else:
+        lines.append(
+            f"To review the full event, open the {brand} {console} → Audit. "
+            "Delivery history for this alert is under Alerts → Alert Deliveries."
+        )
+    lines.append("")
+    lines.append(
+        "You received this because you are a recipient of this alert rule. "
+        f"Rule recipients are managed in the {console} → Alerts."
+    )
+    subject = f"[{brand} alert] {notification.rule_name}: {headline}"
+    return subject, "\n".join(lines)
+
+
 def deliver_alert_notifications(store: SeedStore) -> int:
     """Deliver queued alert emails with retry; returns how many were sent.
 
     Runs on the scheduler thread (blocking SMTP is fine here). Honest status
     transitions only: unconfigured SMTP marks notifications
     ``not_configured`` (terminal — no silent infinite queue), a send failure
-    keeps ``queued`` with the real error text until MAX_DELIVERY_ATTEMPTS,
-    then ``failed``.
+    keeps ``queued`` with the real error text and backs off before the next
+    try, until MAX_DELIVERY_ATTEMPTS, then ``failed``.
     """
 
     repository = _application_state_repository(store)
-    queued = repository.queued_alert_notifications(limit=ALERT_DELIVERY_BATCH_LIMIT)
+    now = clock.now()
+    retry_not_before = _retry_not_before(store)
+    queued = [
+        notification
+        for notification in repository.queued_alert_notifications()
+        if retry_not_before.get(notification.id, now) <= now
+    ][:ALERT_DELIVERY_BATCH_LIMIT]
     if not queued:
         return 0
 
@@ -203,6 +280,7 @@ def deliver_alert_notifications(store: SeedStore) -> int:
     sent = 0
     for notification in queued:
         notification = notification.model_copy(update={"attempts": notification.attempts + 1})
+        subject, body_text = _alert_email(store, notification)
         try:
             mailer.send_email(
                 host=settings.host,
@@ -212,22 +290,10 @@ def deliver_alert_notifications(store: SeedStore) -> int:
                 password=password,
                 from_address=settings.from_address,
                 recipients=notification.recipients,
-                subject=(
-                    f"[{store.brand_name(notification.tenant_id)} alert] "
-                    f"{notification.rule_name}: {notification.event_action}"
-                ),
-                body_text=(
-                    f"Alert rule: {notification.rule_name}\n"
-                    f"Event: {notification.event_action} (severity: {notification.event_severity})\n"
-                    f"Actor: {notification.actor_name or notification.actor_id}\n"
-                    f"Summary: {notification.summary}\n"
-                    f"Matched events in window: {notification.matched_count}\n"
-                    f"Recorded at: {notification.created_at.isoformat()}\n\n"
-                    f"Review the delivery log and audit trail in the "
-                    f"{store.brand_name(notification.tenant_id)} console "
-                    "for full context."
-                ),
+                subject=subject,
+                body_text=body_text,
             )
+            retry_not_before.pop(notification.id, None)
             repository.update_alert_notification(
                 notification.model_copy(
                     update={
@@ -240,16 +306,27 @@ def deliver_alert_notifications(store: SeedStore) -> int:
             sent += 1
         except mailer.MailerError as exc:
             status = notification.status
+            detail = str(exc)
             if notification.attempts >= MAX_DELIVERY_ATTEMPTS:
                 status = "failed"
+                retry_not_before.pop(notification.id, None)
                 logger.warning(
                     "Alert email %s failed permanently after %d attempts: %s",
                     notification.id,
                     notification.attempts,
                     exc,
                 )
+            else:
+                backoff = ALERT_RETRY_BACKOFF_MINUTES[
+                    min(notification.attempts, len(ALERT_RETRY_BACKOFF_MINUTES)) - 1
+                ]
+                retry_not_before[notification.id] = now + timedelta(minutes=backoff)
+                detail = (
+                    f"{detail} (attempt {notification.attempts} of "
+                    f"{MAX_DELIVERY_ATTEMPTS}; retrying in {backoff} min)"
+                )
             repository.update_alert_notification(
-                notification.model_copy(update={"status": status, "status_detail": str(exc)})
+                notification.model_copy(update={"status": status, "status_detail": detail})
             )
     return sent
 
@@ -350,9 +427,9 @@ def scheduler_pass(store: SeedStore, settings: Settings) -> None:
         except Exception:  # noqa: BLE001 - one bad automation must not stall the rest
             logger.exception("Scheduler failed while processing automation %s", automation.id)
     try:
-        flush_elastic_events(store, settings)
+        run_elastic_export(store, settings)
     except Exception:  # noqa: BLE001
-        logger.exception("Elastic flush failed")
+        logger.exception("Elastic export failed")
     try:
         deliver_alert_notifications(store)
     except Exception:  # noqa: BLE001

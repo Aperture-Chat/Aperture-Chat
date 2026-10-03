@@ -56,6 +56,9 @@ _WARNING_ACTIONS: dict[str, str] = {
     "admin.model_content_filters_updated": "Model content-filter assignments were changed.",
     "platform.settings_updated": "Platform settings were changed.",
     "platform.email_settings_updated": "Alert email (SMTP) settings were changed.",
+    "platform.elastic_settings_updated": (
+        "Elastic export settings were changed; they control where platform data is copied."
+    ),
     "auth.api_key_created": "A personal API key was created.",
     "auth.api_key_rotated": "A personal API key was rotated.",
     "auth.api_key_revoked": "A personal API key was revoked.",

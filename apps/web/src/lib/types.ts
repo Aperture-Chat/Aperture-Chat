@@ -466,13 +466,89 @@ export type TenantBrandingUpdateRequest = {
   text_color?: string | null;
 };
 
+export type ElasticStreamId = "audit" | "usage" | "chats" | "documents" | "users";
+
+/** Non-secret Elastic export settings; the API key stays in the server vault. */
+export type ElasticExportSettings = {
+  endpoint: string;
+  index_prefix: string;
+  enabled: boolean;
+  streams: ElasticStreamId[];
+  include_content: boolean;
+  api_key_set: boolean;
+  masked_api_key: string;
+  updated_at?: string | null;
+  last_test_at?: string | null;
+  last_test_status?: "passed" | "failed" | null;
+};
+
+export type ElasticExportSettingsUpdateRequest = Partial<
+  Pick<ElasticExportSettings, "endpoint" | "index_prefix" | "enabled" | "streams" | "include_content">
+> & {
+  /** Write-only. An empty string clears the vaulted key. */
+  api_key?: string;
+};
+
+export type ElasticStreamStatus = {
+  id: ElasticStreamId;
+  label: string;
+  enabled: boolean;
+  indices: string[];
+  pending: number | null;
+  delivered: number;
+  rejected: number;
+  lastDeliveryAt?: string | null;
+  lastError?: string | null;
+  lastRejection?: string | null;
+};
+
 export type ElasticStatus = {
   configured: boolean;
   connected: boolean;
+  enabled?: boolean;
   endpoint?: string | null;
+  endpointSource?: "console" | "environment" | null;
+  apiKeySource?: "console" | "environment" | null;
   lastSync?: string;
+  lastPassAt?: string | null;
   eventsBuffered: number;
+  lastDeliveryError?: string | null;
+  configError?: string | null;
   message?: string;
+  indexPattern?: string;
+  indexNotes?: Record<string, string>;
+  environment?: { endpoint: boolean; apiKey: boolean };
+  settings?: ElasticExportSettings;
+  streams?: ElasticStreamStatus[];
+  sync?: {
+    busy: boolean;
+    full: boolean;
+    delivered: Partial<Record<ElasticStreamId, number>>;
+    errors: Partial<Record<ElasticStreamId, string>>;
+    auditRequeued: number;
+  };
+};
+
+export type ElasticConnectionTestRequest = {
+  endpoint?: string;
+  api_key?: string;
+  index_prefix?: string;
+};
+
+export type ElasticConnectionCheck = {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  detail: string;
+};
+
+export type ElasticConnectionTestResult = {
+  ok: boolean;
+  endpoint: string;
+  endpointSource: "console" | "environment";
+  indexPattern: string;
+  cluster?: { name?: string | null; version?: string | null; flavor?: string | null } | null;
+  checks: ElasticConnectionCheck[];
 };
 
 export type AuditEvent = {
@@ -617,6 +693,8 @@ export type AlertRule = {
   action_patterns: string[];
   min_severity: "info" | "warning" | "critical" | string;
   actor_ids: string[];
+  /** Prompt-security detector ids the rule narrows to; empty = any. */
+  detector_ids?: string[];
   threshold_count: number;
   window_minutes: number;
   cooldown_minutes: number;
@@ -635,6 +713,7 @@ export type AlertRuleCreateRequest = {
   action_patterns?: string[];
   min_severity?: string;
   actor_ids?: string[];
+  detector_ids?: string[];
   threshold_count?: number;
   window_minutes?: number;
   cooldown_minutes?: number;
