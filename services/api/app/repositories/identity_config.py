@@ -216,6 +216,7 @@ class ConfigurationSecretNamespace(StrEnum):
     TOOL = "tool"
     TOOL_OAUTH_TOKEN = "tool-oauth-token"
     SMTP = "smtp"
+    ELASTIC = "elastic"
 
 
 class ConfigurationSecretResourceKind(StrEnum):
@@ -224,6 +225,7 @@ class ConfigurationSecretResourceKind(StrEnum):
     KNOWLEDGE_CONFIG = "knowledge_config"
     TOOL_CONFIG = "tool_config"
     PLATFORM_EMAIL = "platform_email"
+    PLATFORM_ELASTIC = "platform_elastic"
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,6 +382,18 @@ def parse_configuration_secret_key(
             storage_key=storage_key,
             namespace=namespace,
             resource_kind=ConfigurationSecretResourceKind.PLATFORM_EMAIL,
+            resource_id="primary",
+        )
+
+    if namespace is ConfigurationSecretNamespace.ELASTIC:
+        if record_id != "primary":
+            raise ConfigurationSecretKeyError(
+                "The Elastic configuration-secret key must reference the primary export record."
+            )
+        return ParsedConfigurationSecretKey(
+            storage_key=storage_key,
+            namespace=namespace,
+            resource_kind=ConfigurationSecretResourceKind.PLATFORM_ELASTIC,
             resource_id="primary",
         )
 

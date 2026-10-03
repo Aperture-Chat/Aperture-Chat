@@ -29,6 +29,23 @@ class DeckTemplateImageCandidate(BaseModel):
     is_dark: bool = False
 
 
+class DeckTemplateParagraph(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str
+    #: Bullet indent, clamped to the deck editor's three levels (0..2).
+    level: int = 0
+
+
+class DeckTemplateSlidePicture(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    data_url: str
+    width_px: int
+    height_px: int
+    alt: str = ""
+
+
 class DeckTemplateSlideText(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -39,6 +56,14 @@ class DeckTemplateSlideText(BaseModel):
     #: Index into DeckTemplateParseResponse.designs — the flattened artwork of
     #: this slide's layout. None when the layout had nothing to render.
     design_index: int | None = None
+    #: Content mode only (opening a deck rather than lifting a brand): the
+    #: structure the flattened blocks lose. Each body is one text frame's
+    #: paragraphs with their indent levels.
+    is_title_slide: bool = False
+    subtitle: str | None = None
+    bodies: list[list[DeckTemplateParagraph]] = Field(default_factory=list)
+    notes: str = ""
+    picture: DeckTemplateSlidePicture | None = None
 
 
 class DeckTemplateParseResponse(BaseModel):

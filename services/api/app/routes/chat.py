@@ -1364,6 +1364,7 @@ def openai_responses(
     assert_model_access(actor, model)
     assert_api_access(actor, store.groups, store.platform_settings)
     assert_group_permission(actor, store.groups, "chat_access", "Chat access")
+    _record_prompt_security_findings(store, actor, request, model)
     _enforce_input_content_filters(store, actor, request, model)
     runtime_context = _resolve_runtime_context(store, actor, request, model)
     route = _resolve_gateway_route(

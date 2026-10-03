@@ -343,7 +343,10 @@ def test_elastic_status_reports_configuration_reality(monkeypatch: pytest.Monkey
     configured = client.get("/api/platform/elastic/status", headers=headers("user-owner"))
     assert configured.status_code == 200
     assert configured.json()["configured"] is True
-    assert configured.json()["connected"] is True
+    # Configuration alone proves nothing: "connected" waits for a real
+    # exchange with the cluster (a delivery or a passing connection test).
+    assert configured.json()["connected"] is False
+    assert configured.json()["endpointSource"] == "environment"
 
     admin_blocked = client.get("/api/platform/elastic/status", headers=headers("user-admin"))
     assert admin_blocked.status_code == 403

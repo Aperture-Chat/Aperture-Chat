@@ -1,4 +1,4 @@
-import { BellRing, Clock3, DatabaseZap, Edit3, KeyRound, Lock, Mail, Palette, QrCode, ShieldAlert, UserPlus } from "lucide-react";
+import { BarChart3, BellRing, Clock3, DatabaseZap, Edit3, KeyRound, Lock, Mail, Palette, QrCode, ShieldAlert, UserPlus } from "lucide-react";
 import { TrainingDocumentationModal, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
@@ -43,8 +43,11 @@ export type OwnerFocus =
   | "usageScorecards"
   | "usageCharts"
   | "usageByUser"
-  | "auditCriticalTile"
-  | "auditTileGrid"
+  | "auditAttention"
+  | "auditSignalBoard"
+  | "auditInsightsTrends"
+  | "auditInsightsPeople"
+  | "auditInvestigation"
   | "auditSecurityAlerts"
   | "trailFilters"
   | "trailRows"
@@ -52,6 +55,15 @@ export type OwnerFocus =
   | "alertRules"
   | "alertTemplates"
   | "alertDeliveries"
+  | "alertRuleForm"
+  | "alertDetections"
+  | "elasticStatus"
+  | "elasticConnection"
+  | "elasticStreams"
+  | "elasticActions"
+  | "elasticChecks"
+  | "elasticDelivery"
+  | "elasticKibana"
   | "retentionNavigation"
   | "retentionWorkspace"
   | "retentionSources"
@@ -122,15 +134,29 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   usageScorecards: { frame: "training/owner/analytics-usage.png", rect: { x: 262, y: 264, w: 887, h: 156 } },
   usageCharts: { frame: "training/owner/analytics-usage.png", rect: { x: 262, y: 427, w: 887, h: 277 } },
   usageByUser: { frame: "training/owner/analytics-usage-users.png", rect: { x: 262, y: 638, w: 887, h: 190 } },
-  auditCriticalTile: { frame: "training/owner/audit.png", rect: { x: 282, y: 342, w: 166, h: 139 } },
-  auditTileGrid: { frame: "training/owner/audit.png", rect: { x: 262, y: 322, w: 887, h: 467 } },
-  auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 276, y: 419, w: 859, h: 154 } },
-  trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 262, y: 224, w: 887, h: 85 } },
-  trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 895, y: 0, w: 81, h: 45 } },
-  alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 261, y: 234, w: 889, h: 459 } },
-  alertRules: { frame: "training/owner/alerts-deliveries.png", rect: { x: 261, y: 315, w: 889, h: 231 } },
-  alertTemplates: { frame: "training/owner/alerts-deliveries.png", rect: { x: 726, y: 350, w: 403, h: 45 } },
-  alertDeliveries: { frame: "training/owner/alerts-deliveries.png", rect: { x: 262, y: 663, w: 887, h: 165 } },
+  auditAttention: { frame: "training/owner/audit.png", rect: { x: 282.90625, y: 342.75, w: 845.1875, h: 52 } },
+  auditSignalBoard: { frame: "training/owner/audit.png", rect: { x: 262.90625, y: 322.75, w: 885.1875, h: 532.25 } },
+  auditInsightsTrends: { frame: "training/owner/audit-insights.png", rect: { x: 282.90625, y: 104.75, w: 845.1875, h: 304.59375 } },
+  auditInsightsPeople: { frame: "training/owner/audit-insights-activity.png", rect: { x: 282.90625, y: 13.34375, w: 845.1875, h: 657.59375 } },
+  auditInvestigation: { frame: "training/owner/audit-investigation.png", rect: { x: 229.5, y: 17, w: 726, h: 821 } },
+  auditSecurityAlerts: { frame: "training/owner/audit-alerts.png", rect: { x: 262.90625, y: 98.9375, w: 885.1875, h: 745 } },
+  trailFilters: { frame: "training/owner/audit-trail.png", rect: { x: 262.90625, y: 245.9375, w: 885.1875, h: 84 } },
+  trailRows: { frame: "training/owner/audit-trail.png", rect: { x: 895.625, y: 21.9375, w: 79.421875, h: 44 } },
+  alertSmtp: { frame: "training/owner/alerts.png", rect: { x: 261.90625, y: 234.75, w: 887.1875, h: 519.78125 } },
+  alertRules: { frame: "training/owner/alerts-deliveries.png", rect: { x: 261.90625, y: 0, w: 887.1875, h: 442.671875 } },
+  alertTemplates: { frame: "training/owner/alerts-deliveries.png", rect: { x: 282.90625, y: 79.53125, w: 632.015625, h: 44 } },
+  alertDeliveries: { frame: "training/owner/alerts-deliveries.png", rect: { x: 262.90625, y: 560.671875, w: 885.1875, h: 294.328125 } },
+  alertRuleForm: { frame: "training/owner/alerts-rule-form.png", rect: { x: 262.90625, y: 86.53125, w: 885.1875, h: 645.125 } },
+  alertDetections: { frame: "training/owner/alerts-rule-form.png", rect: { x: 283.90625, y: 455.265625, w: 843.1875, h: 193.390625 } },
+  // Elastic frames come from a real single-node synthetic cluster the panel
+  // was saved against; the delivery counts are its actual sends.
+  elasticStatus: { frame: "training/owner/elastic-connection.png", rect: { x: 262.90625, y: 84.75, w: 885.1875, h: 79 } },
+  elasticConnection: { frame: "training/owner/elastic-connection.png", rect: { x: 282.90625, y: 189.75, w: 845.1875, h: 583.0625 } },
+  elasticStreams: { frame: "training/owner/elastic-streams.png", rect: { x: 282.90625, y: 46.75, w: 845.1875, h: 383.03125 } },
+  elasticActions: { frame: "training/owner/elastic-streams.png", rect: { x: 282.90625, y: 439.78125, w: 845.1875, h: 44 } },
+  elasticChecks: { frame: "training/owner/elastic-checks.png", rect: { x: 282.90625, y: 380.78125, w: 845.1875, h: 287.3125 } },
+  elasticDelivery: { frame: "training/owner/elastic-delivery.png", rect: { x: 282.90625, y: 462.09375, w: 845.1875, h: 218 } },
+  elasticKibana: { frame: "training/owner/elastic-delivery.png", rect: { x: 282.90625, y: 730.09375, w: 845.1875, h: 66 } },
   retentionNavigation: { frame: "training/owner/retention-navigation.png", rect: { x: 645.469, y: 160.75, w: 69.516, h: 58 } },
   retentionWorkspace: { frame: "training/owner/retention-workspace.png", rect: { x: 257.906, y: 382.75, w: 895.188, h: 90 } },
   retentionSources: { frame: "training/owner/retention-sources.png", rect: { x: 277.906, y: 413.062, w: 855.188, h: 308.875 } },
@@ -162,6 +188,7 @@ type OwnerGuideIcon =
   | "clock"
   | "audit"
   | "alerts"
+  | "elastic"
   | "retention";
 
 export type OwnerTrainingVideo = TrainingVideoBase & { icon: OwnerGuideIcon };
@@ -708,39 +735,69 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "owner-audit",
     audioSrc: "training/owner/owner-audit.mp3",
     title: "Owner audit signals",
-    description: "Posture tiles, security alerts, and the filtered, exportable append-only trail.",
+    description: "Grouped signals, Audit Insights trends, drill-down records, security alerts, and the exportable trail.",
     icon: "audit",
-    outcomes: ["Posture reviewed", "Trail filtered", "Rows exported"],
+    outcomes: ["Signals triaged", "Trends reviewed", "Records inspected", "Trail exported"],
     scenes: [
       {
-        title: "Critical events lead",
-        caption: "The posture dashboard stays open on top; the sections below it start collapsed.",
+        title: "Start with what needs attention",
+        caption: "The banner counts signals that need attention. Expand all, List, and Cards change the view.",
         narration:
-          "The Audit tab opens on the posture dashboard while the sections below start collapsed. The grid leads with Critical events — high-severity audit events surfaced before anything else, so incidents come first. Data Retention sits below Recent Governance Activity and groups schedules, tags, and legal holds.",
-        durationSeconds: 21,
-        focus: "auditCriticalTile",
+          "The Audit tab opens on Owner Audit. The banner at the top counts the signals that need attention right now. Expand all or Collapse all opens or folds every group, and List or Cards switches between compact rows and full cards. Your layout choice is remembered in this browser.",
+        durationSeconds: 20,
+        focus: "auditAttention",
+        calloutPlacement: "left-rail",
       },
       {
-        title: "The full posture grid",
-        caption: "Provider posture, model ceiling, vault, approvals, connectors, keys, owners, syncs, and the watchlist.",
+        title: "Signals in four groups",
+        caption: "Security, identity, providers and secrets, and models, connectors, and automations. Select a row for its records.",
         narration:
-          "The rest of the grid covers provider posture, the model ceiling, vault metadata, pending approvals, connectors, expired keys, connector issues, unscoped models, privileged owners, stale syncs, and the prompt watchlist.",
-        durationSeconds: 16,
-        focus: "auditTileGrid",
+          "Signals are grouped into Security signals, Identity and access, Providers and secrets, and Models, connectors, and automations. Groups that need attention open automatically, and clear groups fold to one line. Red rows flag problems such as critical events, after-hours changes, slow alert response, or credential changes. Select any row to review every record behind it.",
+        durationSeconds: 26,
+        focus: "auditSignalBoard",
+      },
+      {
+        title: "Audit Insights trends",
+        caption: "Choose 7, 14, or 30 days. Events by day stack info, warning, and critical severity.",
+        narration:
+          "Below the signals, Audit Insights charts the trends behind them. Choose a 7, 14, or 30 day range. Audit events by day stacks info, warning, and critical events, and the charts below show security alerts by day and break them down by rule or by person.",
+        durationSeconds: 19,
+        focus: "auditInsightsTrends",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Who, what, and when",
+        caption: "Most active people, activity by area, and activity by hour, with after-hours shaded.",
+        narration:
+          "Further down, Most active people ranks who is acting, and Activity by area shows which parts of the platform are changing. Activity by hour shades the hours outside seven AM to seven PM in your local time, so after-hours work stands out.",
+        durationSeconds: 17,
+        focus: "auditInsightsPeople",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+      },
+      {
+        title: "Every number opens its records",
+        caption: "Select a bar, point, or signal row to list its records, then filter them by person, status, or model.",
+        narration:
+          "Select any bar, point, or signal row to open an audit investigation. It lists the exact records behind that number, grouped by severity, and the filter box narrows them by person, status, or model. Press Escape or the close button to return to the dashboard.",
+        durationSeconds: 19,
+        focus: "auditInvestigation",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Security alerts",
-        caption: "Expand Security Alerts for DLP and misuse flags, scoped by the section's own user and date filter.",
+        caption: "Expand Security Alerts: redacted snippets, Acknowledge or Reopen, scoped by its own filter.",
         narration:
-          "Expand Security Alerts for DLP and misuse flags raised from actual prompts, each with a redacted snippet you can review and acknowledge — scoped by the section's own user and date filter.",
-        durationSeconds: 15,
+          "Expand Security Alerts for DLP and misuse flags raised from actual prompts. Each alert shows a redacted snippet, so the sensitive value is never shown again. Acknowledge an alert once it is handled, or reopen it, all scoped by the section's own user and date filter.",
+        durationSeconds: 20,
         focus: "auditSecurityAlerts",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Filter the trail",
         caption: "Severity, category, and text search stack on top of the trail's own user and date filter.",
         narration:
-          "Expand Audit Trail and filter by severity, by category, or by text search — all three stack on top of the section's own user and date filter.",
+          "Expand Audit Trail and filter by severity, by category, or by text search. All three stack on top of the section's own user and date filter.",
         durationSeconds: 11,
         focus: "trailFilters",
       },
@@ -748,7 +805,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Export what you see",
         caption: "The CSV exports exactly the visible rows, with actor id, name, and role on every event.",
         narration:
-          "The CSV export takes exactly the rows you can see — nothing hidden is added back — and every event carries the actor's id, name, and role.",
+          "The CSV export takes exactly the rows you can see, and nothing hidden is added back. Every event carries the actor's id, name, and role.",
         durationSeconds: 11,
         focus: "trailRows",
         calloutPlacement: "upper-right",
@@ -759,16 +816,16 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "owner-alerts",
     audioSrc: "training/owner/owner-alerts.mp3",
     title: "Alerts and email delivery",
-    description: "Configure real SMTP, define alert rules, and read every delivery's true status.",
+    description: "Configure real SMTP, define alert rules and prompt detections, and read every delivery's true status.",
     icon: "alerts",
-    outcomes: ["SMTP configured", "Rules defined", "Deliveries verified"],
+    outcomes: ["SMTP configured", "Rules defined", "Detections chosen", "Deliveries verified"],
     scenes: [
       {
         title: "Email delivery",
-        caption: "Real SMTP: host, port, STARTTLS, SSL, or none, and a from address; the password vaults once.",
+        caption: "Use a provider relay: STARTTLS on 587 or SSL/TLS on 465. Save before Send test email.",
         narration:
-          "Email Delivery holds real SMTP settings — host, port, STARTTLS, SSL, or none, and the from address. The password is stored in the encrypted vault and never shown again, and alerts are always logged in-app even without email.",
-        durationSeconds: 18,
+          "Email Delivery holds real SMTP settings: host, port, security mode, username, and the from address. Use your email provider's relay, with STARTTLS on port 587 or SSL on 465. The relay's certificate is verified, so a self-signed relay is refused. The password is stored in the encrypted vault, and Send test email uses the saved settings, so save your changes first. Alerts are always logged in-app, even without email.",
+        durationSeconds: 30,
         focus: "alertSmtp",
         calloutPlacement: "left-rail",
       },
@@ -776,27 +833,121 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Rules and their scope",
         caption: "Owner rules are platform-wide; tenant rules created by admins list here with their scope label.",
         narration:
-          "Alert rules watch audit activity. Rules you create here are platform-wide, and tenant rules created by admins are listed alongside them, each labeled with its scope.",
-        durationSeconds: 13,
+          "Alert rules watch audit activity. Rules you create here are platform-wide, and tenant rules created by admins are listed alongside them, each labeled with its scope. Each row summarizes what the rule watches, including any detections it is limited to.",
+        durationSeconds: 18,
         calloutPlacement: "left-rail",
         focus: "alertRules",
       },
       {
         title: "Start from a template",
-        caption: "The Suspicious-activity template prefills a security watch; New rule starts from scratch.",
+        caption: "Prompt-injection and Suspicious-activity templates prefill a rule; New rule starts from scratch.",
         narration:
-          "The Suspicious-activity template prefills a rule that watches security flags and elevated-severity events, and New rule starts a custom one from scratch.",
-        durationSeconds: 11,
+          "The Prompt-injection template prefills a rule for prompt-injection, system-prompt, and credential-extraction attempts. The Suspicious-activity template watches security flags and elevated-severity events, and New rule starts a custom rule from scratch.",
+        durationSeconds: 17,
         calloutPlacement: "left-rail",
         focus: "alertTemplates",
+      },
+      {
+        title: "Anatomy of a rule",
+        caption: "Action patterns, minimum severity, watched user, fire-when threshold, cooldown, and recipients.",
+        narration:
+          "A rule combines action patterns, a minimum severity, an optional watched user, a fire-when threshold within a time window, and a cooldown. Email recipients are comma-separated; leave them empty and the rule logs in-app only. Nothing is saved until you choose Create Rule.",
+        durationSeconds: 20,
+        focus: "alertRuleForm",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Only these detections",
+        caption: "Check the prompt detections a rule should watch, or leave all unchecked to match every event.",
+        narration:
+          "Under Only these detections, choose which prompt detectors the rule watches: prompt injection, system-prompt or credential extraction, shared API keys, private keys, or passwords, Social Security numbers, or payment cards. Leave them all unchecked to match every event the action patterns allow. Alert emails name the detection but never include the flagged text.",
+        durationSeconds: 25,
+        focus: "alertDetections",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
       },
       {
         title: "Deliveries tell the truth",
         caption: "Real statuses plus Archive: clear a delivery from the view without deleting its history.",
         narration:
-          "Alert Deliveries records every trigger with its real status — sent, queued, failed with the actual SMTP error, not configured, or logged in-app when no recipients are set. Archive a delivery to clear the view — its history is kept, and Show archived brings it back.",
+          "Alert Deliveries records every trigger with its real status: sent, queued, failed with the actual SMTP error, not configured, or logged in-app when no recipients are set. Archive a delivery to clear the view. Its history is kept, and Show archived brings it back.",
         durationSeconds: 19,
         focus: "alertDeliveries",
+      },
+    ],
+  },
+  {
+    id: "elastic-analytics",
+    audioSrc: "training/owner/elastic-analytics.mp3",
+    title: "Elastic Analytics export",
+    description: "Connect an Elastic cluster, choose what to send, check the connection, and follow delivery into Kibana.",
+    icon: "elastic",
+    outcomes: ["Cluster connected", "Data chosen", "Delivery verified", "Kibana ready"],
+    scenes: [
+      {
+        title: "Where Elastic export lives",
+        caption: "Org Settings → Elastic Analytics. The status line says whether export is on, paused, or off.",
+        narration:
+          "Open Org Settings and expand Elastic Analytics. It sends chats, documents, users, model usage, and the audit trail to your Elastic cluster, so your team can search and monitor them in Kibana. The status line at the top says whether export is connected, paused, or off.",
+        durationSeconds: 20,
+        focus: "elasticStatus",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Connect your cluster",
+        caption: "Paste the endpoint or Cloud ID and an API key. How do I create an API key? shows the exact request.",
+        narration:
+          "Paste your Elasticsearch endpoint or Cloud ID and an API key. How do I create an API key opens the exact request to run in Kibana Dev Tools, with the create index, index, and read privileges on the Aperture indices, and Copy request copies it. The key is stored in the encrypted vault and never shown again.",
+        durationSeconds: 22,
+        focus: "elasticConnection",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+      },
+      {
+        title: "Choose what to send",
+        caption: "Toggle the audit trail, model usage, chats, documents, and users. Message text stays out unless included.",
+        narration:
+          "Under What to send, choose each kind of data: the audit trail, model usage, chats with their messages, documents, and users. Each row names the index it writes to. Message and document text stays in Aperture unless you turn on Include message and document text, and Export on pauses or resumes delivery.",
+        durationSeconds: 22,
+        focus: "elasticStreams",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Save, check, and sync",
+        caption: "Save and check stores and tests the settings. Check connection tests without saving.",
+        narration:
+          "Save and check stores your settings and immediately tests them. Check connection runs the same test without saving. Sync now sends everything queued right away, and Re-send everything sends all history again, for example after switching clusters.",
+        durationSeconds: 17,
+        focus: "elasticActions",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Read the connection checks",
+        caption: "Each step passes or fails on its own: reach the cluster, accept the key, read details, write indices.",
+        narration:
+          "The connection check reports each step on its own: whether the cluster answered, whether the API key was accepted, the cluster's details, and whether the key can write the Aperture indices. A failed step shows the error Elastic returned.",
+        durationSeconds: 17,
+        focus: "elasticChecks",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Follow delivery",
+        caption: "Delivery lists waiting and sent counts per index. New activity goes out about every 30 seconds.",
+        narration:
+          "The Delivery table lists each kind of data with its index, how much is waiting, how much was sent, and when it last went out, or the error Elastic reported. New activity is sent about every thirty seconds. Tag, hold, and archive changes follow within a minute, and deleted chats, users, and documents stay in Elastic marked deleted.",
+        durationSeconds: 22,
+        focus: "elasticDelivery",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Set up Kibana",
+        caption: "Kibana data views downloads ready-made data views to import under Stack Management → Saved objects.",
+        narration:
+          "To start searching, choose Kibana data views and import the downloaded file in Kibana under Stack Management, Saved objects. It adds a data view for each Aperture index and one that covers them all.",
+        durationSeconds: 15,
+        focus: "elasticKibana",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
       },
     ],
   },
@@ -904,6 +1055,7 @@ const VIDEO_ICONS = {
   clock: Clock3,
   audit: ShieldAlert,
   alerts: BellRing,
+  elastic: BarChart3,
   retention: DatabaseZap,
 } satisfies Record<OwnerGuideIcon, typeof KeyRound>;
 
@@ -977,7 +1129,7 @@ export function OwnerDocumentationModal({
       docTitleId="owner-doc-title"
       videoTitleId="owner-video-title"
       title="Platform owner documentation"
-      description="Narrated walkthroughs of the current console: providers, keys, models, roles, SSO, branding, policies and budgets, search, analytics, audit, and alerts."
+      description="Narrated walkthroughs of the current console: providers, keys, models, roles, SSO, branding, policies and budgets, search, analytics, audit, alerts, and Elastic export."
       backTooltip="Return to the full list of training videos"
       headerLinks={headerLinks}
       onClose={onClose}

@@ -14,6 +14,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from app.core.audit_severity import SEVERITY_LEVELS, classify_audit_event, severity_at_least
+from app.core.dlp import DLP_RULES
 from app.models.schemas import AlertNotification, AlertRule, AuditEvent
 from app.repositories.application_state import ApplicationStateRepository
 
@@ -56,7 +57,61 @@ def normalize_action_patterns(patterns: list[str]) -> list[str]:
             cleaned.append(value)
     return cleaned
 
-# An honest, user-visible template the consoles offer as a one-click prefill —
+PROMPT_FLAG_ACTION = "security.prompt_flagged"
+
+# Prompt-security detections an alert rule can narrow to. Every id is a rule in
+# app/core/dlp.py, so a rule can only target a detector that actually runs.
+PROMPT_DETECTORS: dict[str, str] = {rule.id: rule.label for rule in DLP_RULES}
+_PROMPT_DETECTOR_SEVERITY: dict[str, str] = {rule.id: rule.severity for rule in DLP_RULES}
+
+
+def validate_detector_ids(
+    detector_ids: list[str],
+    *,
+    action_patterns: list[str],
+    min_severity: str,
+) -> list[str]:
+    """Reject detections that do not exist or that the rule could never see.
+
+    A rule that narrows to detections but whose patterns exclude the prompt
+    flag, or whose minimum severity sits above every chosen detector, would be
+    saved as an alert that can never fire.
+    """
+
+    cleaned: list[str] = []
+    for value in detector_ids:
+        detector_id = value.strip()
+        if not detector_id:
+            continue
+        if detector_id not in PROMPT_DETECTORS:
+            raise ValueError(
+                f"'{detector_id}' is not a prompt-security detection. "
+                f"Choose from: {', '.join(PROMPT_DETECTORS)}."
+            )
+        if detector_id not in cleaned:
+            cleaned.append(detector_id)
+    if not cleaned:
+        return cleaned
+    if not matches_action_patterns(PROMPT_FLAG_ACTION, action_patterns):
+        raise ValueError(
+            f"Detections only apply to {PROMPT_FLAG_ACTION} events. Add "
+            f"{PROMPT_FLAG_ACTION} or security.* to the action patterns, or clear the detections."
+        )
+    reachable = [
+        classify_audit_event(
+            PROMPT_FLAG_ACTION, {"severity": _PROMPT_DETECTOR_SEVERITY[detector_id]}
+        )[0]
+        for detector_id in cleaned
+    ]
+    if not any(severity_at_least(severity, min_severity) for severity in reachable):
+        raise ValueError(
+            "None of the chosen detections can reach the minimum severity "
+            f"'{min_severity}'. Lower the minimum severity or choose other detections."
+        )
+    return cleaned
+
+
+# Honest, user-visible templates the consoles offer as a one-click prefill —
 # never auto-created server-side.
 SUSPICIOUS_ACTIVITY_TEMPLATE = {
     "name": "Suspicious activity",
@@ -66,6 +121,20 @@ SUSPICIOUS_ACTIVITY_TEMPLATE = {
     "threshold_count": 1,
     "window_minutes": 60,
     "cooldown_minutes": 15,
+}
+
+PROMPT_INJECTION_TEMPLATE = {
+    "name": "Prompt injection",
+    "description": (
+        "Prompts that try to override instructions, extract the system prompt, "
+        "or pull platform credentials."
+    ),
+    "action_patterns": [PROMPT_FLAG_ACTION],
+    "detector_ids": ["prompt-injection", "system-prompt-probe", "credential-probe"],
+    "min_severity": "warning",
+    "threshold_count": 1,
+    "window_minutes": 60,
+    "cooldown_minutes": 10,
 }
 
 
@@ -108,6 +177,11 @@ def _event_matches_rule(rule: AlertRule, event: AuditEvent, severity: str) -> bo
         return False
     if rule.actor_ids and event.actor_id not in rule.actor_ids:
         return False
+    if rule.detector_ids and (
+        event.action != PROMPT_FLAG_ACTION
+        or event.metadata.get("rule_id") not in rule.detector_ids
+    ):
+        return False
     return True
 
 
@@ -139,14 +213,41 @@ def _count_matching_in_window(
     return count
 
 
-def _notification_summary(event: AuditEvent) -> str:
-    parts = [event.action_type or event.action]
-    target = event.target_name or event.target
-    if target:
-        parts.append(target)
-    if event.detail:
-        # detail is already redacted and capped at 200 chars by record_audit.
-        parts.append(event.detail)
+def _metadata_text(event: AuditEvent, key: str) -> str:
+    value = event.metadata.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _notification_summary(store, rule: AlertRule, event: AuditEvent) -> str:
+    """Readable one-line context for the delivery log and the alert email.
+
+    Built only from already-redacted audit fields. Prompt flags name the
+    detection, surface, and model, never the flagged text itself.
+    """
+
+    if event.action == PROMPT_FLAG_ACTION and _metadata_text(event, "rule_label"):
+        parts = [_metadata_text(event, "rule_label")]
+        detector_severity = _metadata_text(event, "severity")
+        if detector_severity:
+            parts.append(f"{detector_severity} detector")
+        surface = _metadata_text(event, "surface")
+        if surface:
+            parts.append(f"via {surface}")
+        model_id = _metadata_text(event, "model_id")
+        if model_id:
+            parts.append(f"model {model_id}")
+    else:
+        parts = [event.action_type or event.action]
+        target = event.target_name or event.target
+        if target:
+            parts.append(target)
+        if event.detail:
+            # detail is already redacted and capped at 200 chars by record_audit.
+            parts.append(event.detail)
+    if rule.scope == "platform" and event.tenant_id:
+        # Owners watch every organization; name the one the event came from.
+        tenant = getattr(store, "tenants", {}).get(event.tenant_id)
+        parts.append(f"org {getattr(tenant, 'name', None) or event.tenant_id}")
     return " · ".join(parts)
 
 
@@ -192,7 +293,7 @@ def evaluate_audit_event(store, event: AuditEvent) -> list[AlertNotification]:
                 event_severity=severity,
                 actor_id=event.actor_id,
                 actor_name=event.actor_name,
-                summary=_notification_summary(event),
+                summary=_notification_summary(store, rule, event),
                 matched_count=matched_count,
                 recipients=list(rule.recipients),
                 status="queued" if rule.recipients else "logged",

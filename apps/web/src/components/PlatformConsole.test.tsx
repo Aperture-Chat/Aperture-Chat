@@ -6,6 +6,11 @@ import { CHAT_FEEDBACK_STORAGE_KEY, type ChatFeedbackEvent } from "../lib/chatFe
 import type {
   BootstrapData,
   Connector,
+  ElasticConnectionTestRequest,
+  ElasticExportSettingsUpdateRequest,
+  ElasticStatus,
+  ElasticStreamId,
+  ElasticStreamStatus,
   ModelConfig,
   PlatformProviderKeyCreateRequest,
   Provider,
@@ -678,6 +683,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "Analytics: runtime, activity, and usage",
     "Owner audit signals",
     "Alerts and email delivery",
+    "Elastic Analytics export",
     "Data retention and tagging",
   ];
   for (const title of videoTitles) {
@@ -1057,16 +1063,29 @@ test("audit issue cards, prompt CSV export, and model activity charts follow pro
     expandPanel("User Prompt Activity");
     await screen.findByText("Review DLP boundaries");
 
-    const expiredKeysCard = screen.getByText("Expired keys").closest(".audit-summary-card");
-    const promptWatchlistCard = screen.getByText("Prompt watchlist").closest(".audit-summary-card");
-    const unscopedModelsCard = screen.getByText("Unscoped models").closest(".audit-summary-card");
-    const ownerSummaryCards = document.querySelectorAll(".audit-summary-card");
-    expect(ownerSummaryCards).toHaveLength(12);
-    ownerSummaryCards.forEach((card) => {
-      expect(card.tagName).toBe("BUTTON");
-      expect(card).toHaveAttribute("aria-haspopup", "dialog");
-      expect(card).toHaveAttribute("data-tooltip", expect.stringContaining("review every record"));
+    for (const group of ["Security signals", "Identity & access", "Providers & secrets", "Models, connectors & automations"]) {
+      expect(screen.getByRole("region", { name: group })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/signals need attention/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Audit events by day" })).toBeInTheDocument();
+    // Groups with issues open on load; expanding the rest shows every signal as a compact row.
+    const expandAll = screen.queryByRole("button", { name: "Expand all" });
+    if (expandAll) fireEvent.click(expandAll);
+    const ownerSignalRows = document.querySelectorAll(".audit-signal-row");
+    expect(ownerSignalRows).toHaveLength(24);
+    ownerSignalRows.forEach((row) => {
+      expect(row.tagName).toBe("BUTTON");
+      expect(row).toHaveAttribute("aria-haspopup", "dialog");
+      expect(row).toHaveAttribute("data-tooltip", expect.stringContaining("review every record"));
     });
+    fireEvent.click(screen.getByRole("radio", { name: "Cards" }));
+    expect(document.querySelectorAll(".audit-signal-row")).toHaveLength(0);
+    expect(document.querySelectorAll(".audit-summary-card")).toHaveLength(24);
+    fireEvent.click(screen.getByRole("radio", { name: "List" }));
+
+    const expiredKeysCard = screen.getByText("Expired keys").closest(".audit-signal-row");
+    const promptWatchlistCard = screen.getByText("Prompt watchlist").closest(".audit-signal-row");
+    const unscopedModelsCard = screen.getByText("Unscoped models").closest(".audit-signal-row");
     expect(expiredKeysCard).toHaveClass("is-issue");
     expect(promptWatchlistCard).toHaveClass("is-issue");
     expect(unscopedModelsCard).toHaveClass("is-issue");
@@ -1588,16 +1607,121 @@ test("platform owner side panels manage users, policies, branding, and elastic s
   expect(screen.getByLabelText("Browser icon URL")).toHaveValue("");
   expect(screen.getByLabelText("Platform domain")).toHaveValue("chat.example.com");
 
-  // Elastic is configured from the backend environment. The panel reports that
-  // state read-only rather than offering inputs and a Save that persist nothing.
+  // Without save/test/sync actions the Elastic panel still reports the real
+  // status, and its fields are read-only rather than a Save that persists nothing.
   await waitFor(() => expect(getElasticStatus).toHaveBeenCalled());
-  expect(screen.getByText("Not configured")).toBeInTheDocument();
-  expect(screen.queryByLabelText("Elastic Cloud ID")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("API key secret")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Save connection/ })).not.toBeInTheDocument();
-  // The panel names the environment variables that actually configure export.
-  expect(screen.getByText("APERTURE_ELASTIC_API_KEY", { selector: "code" })).toBeInTheDocument();
+  expandPanel("Elastic Analytics");
+  expect(await screen.findByText("Not connected")).toBeInTheDocument();
+  expect(screen.getByLabelText("Elasticsearch endpoint or Cloud ID")).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Save and check/ })).toBeDisabled();
 }, 10_000);
+
+test("owner connects Elastic from the console, verifies it, and syncs", async () => {
+  const data = platformOwnerData();
+  const savedSettings = {
+    endpoint: "",
+    index_prefix: "aperture",
+    enabled: true,
+    streams: ["audit"] as ElasticStreamId[],
+    include_content: false,
+    api_key_set: false,
+    masked_api_key: "",
+  };
+  const streams = (pending: number, delivered: number): ElasticStreamStatus[] =>
+    (["audit", "usage", "chats", "documents", "users"] as ElasticStreamId[]).map((id) => ({
+      id,
+      label: id === "audit" ? "Audit trail" : id[0].toUpperCase() + id.slice(1),
+      enabled: true,
+      indices: id === "chats" ? ["aperture-chats", "aperture-chat-messages"] : [`aperture-${id}`],
+      pending,
+      delivered,
+      rejected: 0,
+    }));
+  const unconfigured: ElasticStatus = {
+    configured: false,
+    connected: false,
+    endpoint: null,
+    eventsBuffered: 4,
+    message: "Elastic analytics export is not configured.",
+    environment: { endpoint: false, apiKey: false },
+    settings: savedSettings,
+    streams: streams(4, 0),
+  };
+  const configured: ElasticStatus = {
+    ...unconfigured,
+    configured: true,
+    endpoint: "https://synthetic.es.example.test",
+    endpointSource: "console",
+    message: "Elastic export is configured.",
+    settings: {
+      ...savedSettings,
+      endpoint: "https://synthetic.es.example.test",
+      streams: ["audit", "usage", "chats", "documents", "users"],
+      include_content: true,
+      api_key_set: true,
+      masked_api_key: "c3lu...ZXQ=",
+      last_test_status: "passed",
+    },
+  };
+  const getElasticStatus = vi.fn(async () => unconfigured);
+  const updateElasticSettings = vi.fn(async (_patch: ElasticExportSettingsUpdateRequest) => configured);
+  const testElasticConnection = vi.fn(async (_payload: ElasticConnectionTestRequest) => ({
+    ok: true,
+    endpoint: "https://synthetic.es.example.test",
+    endpointSource: "console" as const,
+    indexPattern: "aperture-*",
+    cluster: { name: "synthetic", version: "9.1.0" },
+    checks: [
+      { id: "reach", label: "Reach the cluster", status: "pass" as const, detail: "synthetic answered." },
+      { id: "write", label: "Can write Aperture indices", status: "pass" as const, detail: "The key can create and write 'aperture-*' indices." },
+    ],
+  }));
+  const syncElastic = vi.fn(async (_payload: { full?: boolean }) => ({
+    ...configured,
+    connected: true,
+    streams: streams(0, 3),
+    sync: { busy: false, full: false, delivered: { audit: 4, chats: 9 }, errors: {}, auditRequeued: 0 },
+  }));
+
+  renderPlatform(data, { getElasticStatus, updateElasticSettings, testElasticConnection, syncElastic });
+  selectTab("Org Settings");
+  await waitFor(() => expect(getElasticStatus).toHaveBeenCalled());
+  expandPanel("Elastic Analytics");
+
+  // First-time setup suggests the full export, visibly, before anything is saved.
+  const endpoint = await screen.findByLabelText("Elasticsearch endpoint or Cloud ID");
+  for (const name of ["Send audit trail to Elastic", "Send chats to Elastic", "Send users to Elastic"]) {
+    expect(screen.getByRole("switch", { name })).toHaveAttribute("aria-checked", "true");
+  }
+  expect(screen.getByRole("switch", { name: "Include message and document text" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("button", { name: /Sync now/ })).toBeDisabled();
+
+  fireEvent.change(endpoint, { target: { value: "https://synthetic.es.example.test" } });
+  fireEvent.change(screen.getByLabelText("Elastic API key"), { target: { value: "synthetic-id:synthetic-secret" } });
+  fireEvent.click(screen.getByRole("button", { name: /Save and check/ }));
+
+  await waitFor(() => expect(testElasticConnection).toHaveBeenCalledWith({}));
+  expect(updateElasticSettings).toHaveBeenCalledWith({
+    endpoint: "https://synthetic.es.example.test",
+    index_prefix: "aperture",
+    streams: ["audit", "usage", "chats", "documents", "users"],
+    include_content: true,
+    enabled: true,
+    api_key: "synthetic-id:synthetic-secret",
+  });
+  expect(await screen.findByText(/Saved and verified/)).toBeInTheDocument();
+  expect(screen.getByText("Can write Aperture indices")).toBeInTheDocument();
+  // The key is never kept in the form once the vault has it.
+  expect(screen.getByLabelText("Elastic API key")).toHaveValue("");
+  expect(screen.getByLabelText("Elastic API key")).toHaveAttribute("placeholder", expect.stringContaining("Stored"));
+
+  fireEvent.click(screen.getByRole("button", { name: /Sync now/ }));
+  await waitFor(() => expect(syncElastic).toHaveBeenCalledWith({ full: false }));
+  expect(await screen.findByText(/Sent 13 documents\. Everything is up to date\./)).toBeInTheDocument();
+  const delivery = screen.getByRole("table", { name: "Elastic delivery by data type" });
+  expect(within(delivery).getByText("aperture-chats, aperture-chat-messages")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Kibana data views/ })).toBeEnabled();
+});
 
 test("owner directory exposes profile context for owner-visible accounts", async () => {
   const data = platformOwnerData();

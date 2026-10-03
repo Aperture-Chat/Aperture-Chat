@@ -63,11 +63,12 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.8](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.8)**:
-> Session details now lists the five symbol shortcuts (/ @ # $ >), Chat
-> Feedback previews read as plain text, and the symbol shortcut and Session
-> details lessons and guides are refreshed.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v057) and
+> **Current release: [v0.5.9](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.9)**:
+> owners configure Elastic Analytics in the console and export audit, usage,
+> chats, documents, and users; alert rules can email on chosen prompt
+> detections such as prompt injection; audit dashboards add Audit Insights
+> trends; and Drafts can open a local file in the editor.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v058) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -97,7 +98,7 @@ policies appropriate for your organization's data.
 | ![Document editor with a project brief, compact formatting toolbar, status bar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with the project brief converted into a deck, layout and theme choices, and slide thumbnails](docs/images/deck-dark.png) |
 
 - **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
-- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail.
+- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word, Markdown, or text file as the document, or a PowerPoint file as the deck.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, table and picture tools, and, for decks, layouts and themes, a slide sorter, snapping guides, and presenter view.
 - **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
@@ -143,13 +144,13 @@ policies appropriate for your organization's data.
 
 | Role | Responsibilities |
 | --- | --- |
-| **Platform Owner** | Providers and credentials, organization-wide model availability, shared connectors, organizations, branding, platform audit, and release updates. |
+| **Platform Owner** | Providers and credentials, organization-wide model availability, shared connectors, organizations, branding, platform audit, alert email, Elastic export, and release updates. |
 | **Tenant Admin** | Users, groups, access requests, SSO, model restrictions, knowledge, tools, policies, retention, and tenant analytics. |
 | **User** | Granted chat, drafting, agent, knowledge, and tool workflows. |
 
 - **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
 - **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing them requires platform-owner authorization.
-- **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Tenant administrators see prompt activity only for the users they administer.
+- **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Audit dashboards group signals by what needs attention and chart trends, and every number opens its records. Alert rules can email on matching activity, including chosen prompt detections such as prompt injection. Owners can send audit, usage, chats, documents, and users to Elastic for Kibana. Tenant administrators see prompt activity only for the users they administer.
 - **Training.** Role-specific Help includes narrated walkthroughs and downloadable guides, with fullscreen playback on desktop and mobile.
 
 ## Get started
@@ -163,7 +164,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.8
+#   APERTURE_IMAGE_TAG=v0.5.9
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -184,7 +185,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.8 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.9 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -219,10 +220,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.8` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.9` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.8-dev`, `v0.5.8-test`, `v0.5.8-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.9-dev`, `v0.5.9-test`, `v0.5.9-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

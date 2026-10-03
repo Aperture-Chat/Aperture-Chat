@@ -838,6 +838,24 @@ class AuditOutboxRow(Base):
         )
 
 
+class ElasticExportCursorRow(Base):
+    """How far each cursor-driven Elastic export stream has delivered.
+
+    ``position`` is the highest source ``sequence`` (chat thread or usage row)
+    Elastic has acknowledged. ``target_signature`` fingerprints the cluster
+    endpoint and index prefix, so pointing the export at a new cluster
+    restarts every stream from the beginning instead of skipping history.
+    """
+
+    __tablename__ = "elastic_export_cursors"
+    __table_args__ = (CheckConstraint("position >= 0", name="position_nonnegative"),)
+
+    stream: Mapped[str] = mapped_column(String(64), primary_key=True)
+    target_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    position: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class RuntimeStateImportRow(Base):
     """Receipt for one completed, transactional runtime-state import."""
 

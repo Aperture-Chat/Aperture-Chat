@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
@@ -23,11 +24,22 @@ from app.core import clock
 from app.core.alerting import (
     EMAIL_PATTERN,
     normalize_action_patterns,
+    validate_detector_ids,
     validate_min_severity,
     validate_recipients,
 )
 from app.core.audit_severity import decorate_audit_events
+from app.core import elastic_export
+from app.core.elastic_export import (
+    ElasticConfigError,
+    check_elastic_connection,
+    check_target_egress,
+    reset_elastic_export,
+    resolve_elastic_target,
+    run_elastic_export,
+)
 from app.core.mailer import MailerError, email_configured, send_email
+from app.core.net_guard import EgressBlocked, validate_public_url
 from app.core.policy import hermes_companion_allowed, model_access_allowed, require_platform_owner
 from app.core.provider_credential_expiry import parse_provider_credential_expiry
 from app.core.search_index import backfill_tenant
@@ -49,6 +61,10 @@ from app.models.schemas import (
     AuditEvent,
     Connector,
     ConnectorUpdateRequest,
+    ELASTIC_EXPORT_STREAMS,
+    ElasticConnectionTestRequest,
+    ElasticExportSettingsUpdateRequest,
+    ElasticSyncRequest,
     EmailSettings,
     EmailSettingsUpdateRequest,
     EmailTestRequest,
@@ -1510,30 +1526,43 @@ def _apply_platform_alert_rule_payload(
     rule: AlertRule,
     payload: AlertRuleCreateRequest | AlertRuleUpdateRequest,
 ) -> AlertRule:
+    # Validate on a copy so a rejected request leaves the stored rule untouched.
+    candidate = rule.model_copy(deep=True)
     try:
         if payload.name is not None:
-            rule.name = payload.name.strip() or rule.name
+            candidate.name = payload.name.strip() or candidate.name
         if payload.description is not None:
-            rule.description = payload.description.strip()
+            candidate.description = payload.description.strip()
         if payload.enabled is not None:
-            rule.enabled = payload.enabled
+            candidate.enabled = payload.enabled
         if payload.action_patterns is not None:
-            rule.action_patterns = normalize_action_patterns(payload.action_patterns)
+            candidate.action_patterns = normalize_action_patterns(payload.action_patterns)
         if payload.min_severity is not None:
-            rule.min_severity = validate_min_severity(payload.min_severity)
+            candidate.min_severity = validate_min_severity(payload.min_severity)
         if payload.actor_ids is not None:
-            rule.actor_ids = [value.strip() for value in payload.actor_ids if value.strip()]
+            candidate.actor_ids = [value.strip() for value in payload.actor_ids if value.strip()]
         if payload.threshold_count is not None:
-            rule.threshold_count = payload.threshold_count
+            candidate.threshold_count = payload.threshold_count
         if payload.window_minutes is not None:
-            rule.window_minutes = payload.window_minutes
+            candidate.window_minutes = payload.window_minutes
         if payload.cooldown_minutes is not None:
-            rule.cooldown_minutes = payload.cooldown_minutes
+            candidate.cooldown_minutes = payload.cooldown_minutes
         if payload.recipients is not None:
-            rule.recipients = validate_recipients(payload.recipients)
+            candidate.recipients = validate_recipients(payload.recipients)
+        # Re-checked on every save: new patterns or severity can strand
+        # previously valid detections.
+        candidate.detector_ids = validate_detector_ids(
+            payload.detector_ids if payload.detector_ids is not None else candidate.detector_ids,
+            action_patterns=candidate.action_patterns,
+            min_severity=candidate.min_severity,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    rule.updated_at = now_utc()
+    candidate.updated_at = now_utc()
+    for field_name in AlertRule.model_fields:
+        # last_triggered_at belongs to alert evaluation, not to this request.
+        if field_name != "last_triggered_at":
+            setattr(rule, field_name, getattr(candidate, field_name))
     return rule
 
 
@@ -1544,6 +1573,7 @@ def _platform_alert_rule_audit_payload(rule: AlertRule) -> dict[str, object]:
         "tenant_id": rule.tenant_id,
         "enabled": rule.enabled,
         "action_patterns": list(rule.action_patterns),
+        "detector_ids": list(rule.detector_ids),
         "min_severity": rule.min_severity,
         "threshold_count": rule.threshold_count,
         "recipient_count": len(rule.recipients),
@@ -2130,33 +2160,200 @@ def elastic_status(
     actor: User = Depends(current_user), store: SeedStore = Depends(get_store)
 ) -> dict[str, object]:
     require_platform_owner(actor)
+    return elastic_export.elastic_status(store, get_settings())
+
+
+def _elastic_host(value: str) -> str | None:
+    try:
+        return urlsplit(elastic_export.resolve_endpoint(value)).hostname
+    except ElasticConfigError:
+        return None
+
+
+@router.put("/elastic/settings")
+def update_elastic_settings(
+    payload: ElasticExportSettingsUpdateRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, object]:
+    """Save the console Elastic target; the API key is vaulted and never echoed."""
+    require_platform_owner(actor)
+    config = store.platform_settings.elastic_export
+    # Validate every field before applying any, so a rejected request leaves
+    # the saved configuration untouched.
+    endpoint = payload.endpoint.strip() if payload.endpoint is not None else None
+    try:
+        if endpoint:
+            try:
+                validate_public_url(elastic_export.resolve_endpoint(endpoint))
+            except EgressBlocked as exc:
+                raise ElasticConfigError(str(exc)) from exc
+        prefix = (
+            elastic_export.validate_index_prefix(payload.index_prefix)
+            if payload.index_prefix is not None
+            else None
+        )
+        api_key = (
+            elastic_export.normalize_api_key(payload.api_key)
+            if payload.api_key is not None and payload.api_key.strip()
+            else None
+        )
+    except ElasticConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    streams: list[str] | None = None
+    if payload.streams is not None:
+        unknown = sorted(set(payload.streams) - set(ELASTIC_EXPORT_STREAMS))
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown Elastic export stream(s): {', '.join(unknown)}.",
+            )
+        streams = [stream for stream in ELASTIC_EXPORT_STREAMS if stream in payload.streams]
+
+    changed: list[str] = []
+    if endpoint is not None and endpoint != config.endpoint:
+        config.endpoint = endpoint
+        changed.append("endpoint")
+    if prefix is not None and prefix != config.index_prefix:
+        config.index_prefix = prefix
+        changed.append("index_prefix")
+    if streams is not None and streams != config.streams:
+        config.streams = streams
+        changed.append("streams")
+    if payload.enabled is not None and payload.enabled != config.enabled:
+        config.enabled = payload.enabled
+        changed.append("enabled")
+    if payload.include_content is not None and payload.include_content != config.include_content:
+        config.include_content = payload.include_content
+        changed.append("include_content")
+    if api_key is not None:
+        config.masked_api_key = store.set_configuration_secret("elastic", "primary", api_key)
+        config.api_key_set = True
+        changed.append("api_key")
+    elif payload.api_key is not None and config.api_key_set:
+        store.delete_configuration_secret("elastic", "primary")
+        config.api_key_set = False
+        config.masked_api_key = ""
+        changed.append("api_key")
+    if changed:
+        config.updated_at = clock.now_iso()
+        if {"endpoint", "api_key", "index_prefix"} & set(changed):
+            # A test of the previous target says nothing about this one.
+            config.last_test_at = None
+            config.last_test_status = None
+        store.record_audit(
+            actor,
+            "platform.elastic_settings_updated",
+            "elastic-export",
+            # Where data goes and what is sent; the API key never reaches audit.
+            {
+                "changed": changed,
+                "endpoint_host": _elastic_host(config.endpoint) if config.endpoint else None,
+                "index_prefix": config.index_prefix,
+                "streams": list(config.streams),
+                "include_content": config.include_content,
+                "enabled": config.enabled,
+            },
+        )
+    store.save_runtime_state()
+    return elastic_export.elastic_status(store, get_settings())
+
+
+@router.post("/elastic/test")
+def test_elastic_connection(
+    payload: ElasticConnectionTestRequest | None = Body(default=None),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, object]:
+    """Check the endpoint, key, and write privileges without creating anything.
+
+    Unsaved values in the body are tested as typed; omitted values use the
+    saved configuration. Sync route: the blocking HTTP calls run in the
+    threadpool.
+    """
+    require_platform_owner(actor)
+    request = payload or ElasticConnectionTestRequest()
+    try:
+        target = resolve_elastic_target(
+            store,
+            get_settings(),
+            endpoint_override=request.endpoint,
+            api_key_override=request.api_key,
+            index_prefix_override=request.index_prefix,
+        )
+        if target is None:
+            raise ElasticConfigError(
+                "Enter an Elasticsearch endpoint or Cloud ID and an API key before testing."
+            )
+        check_target_egress(target)
+    except ElasticConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    result = check_elastic_connection(target)
+    passed = bool(result["ok"])
+    tested_saved_target = not (
+        (request.endpoint and request.endpoint.strip())
+        or (request.api_key and request.api_key.strip())
+        or (request.index_prefix and request.index_prefix.strip())
+    )
+    if tested_saved_target:
+        config = store.platform_settings.elastic_export
+        config.last_test_at = clock.now_iso()
+        config.last_test_status = "passed" if passed else "failed"
+    store.record_audit(
+        actor,
+        "platform.elastic_test_passed" if passed else "platform.elastic_test_failed",
+        "elastic-export",
+        {"endpoint_host": target.host, "saved_target": tested_saved_target},
+    )
+    store.save_runtime_state()
+    return result
+
+
+@router.post("/elastic/sync")
+def sync_elastic_now(
+    payload: ElasticSyncRequest | None = Body(default=None),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, object]:
+    """Deliver queued data now; ``full`` re-sends all history first."""
+    require_platform_owner(actor)
+    request = payload or ElasticSyncRequest()
     settings = get_settings()
-    configured = bool(settings.elastic_url and settings.elastic_api_key)
-    last_delivery = store.elastic_last_delivery_at
-    delivery_error = store.elastic_last_delivery_error
-    if not configured:
-        message = (
-            "Elastic analytics export is not configured. Set APERTURE_ELASTIC_URL "
-            "and APERTURE_ELASTIC_API_KEY to enable background delivery."
+    if not store.platform_settings.elastic_export.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Elastic export is paused. Resume it before syncing.",
         )
-    elif delivery_error:
-        message = f"Elastic export is configured but the last delivery failed: {delivery_error}"
-    elif last_delivery:
-        message = "Elastic export is active; buffered audit events are delivered in the background."
-    else:
-        message = (
-            "Elastic export is configured; buffered audit events will be delivered "
-            "on the next scheduler pass."
+    try:
+        target = resolve_elastic_target(store, settings)
+    except ElasticConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Save an Elasticsearch endpoint and API key before syncing.",
         )
-    return {
-        "configured": configured,
-        "connected": configured and delivery_error is None,
-        "endpoint": settings.elastic_url,
-        "lastSync": last_delivery or ("Not connected" if not configured else "No delivery yet"),
-        "eventsBuffered": store.elastic_pending_count(),
-        "lastDeliveryError": delivery_error,
-        "message": message,
+    reset: dict[str, int] | None = None
+    if request.full:
+        reset = reset_elastic_export(store)
+    store.record_audit(
+        actor,
+        "platform.elastic_sync_requested",
+        "elastic-export",
+        {"full": request.full, "endpoint_host": target.host},
+    )
+    result = run_elastic_export(
+        store, settings, time_budget=elastic_export.MANUAL_TIME_BUDGET_SECONDS, thorough=True
+    )
+    response = elastic_export.elastic_status(store, settings)
+    response["sync"] = {
+        "busy": bool(result and result.busy),
+        "delivered": dict(result.delivered) if result else {},
+        "errors": dict(result.errors) if result else {},
+        "full": request.full,
+        "auditRequeued": (reset or {}).get("audit_requeued", 0),
     }
+    return response
 
 
 def _get_provider(provider_id: str, store: SeedStore) -> Provider:

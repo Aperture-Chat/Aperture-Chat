@@ -4401,8 +4401,14 @@ a.nav-item {
   flex: 0 0 auto;
 }
 
-.draft-attach-menu {
-  min-width: min(292px, calc(100vw - 40px));
+/* Scoped under the control so it outranks the shared .attach-menu sizing:
+   wide enough that each connector blurb stays on one line, and tall enough
+   that every row shows without scrolling unless the screen is short. */
+.draft-attach-control .draft-attach-menu {
+  width: min(300px, calc(100vw - 40px));
+  min-width: 0;
+  max-width: none;
+  max-height: min(560px, calc(100dvh - 120px));
 }
 
 .draft-command-toolbar button,
@@ -4456,16 +4462,48 @@ a.nav-item {
 .draft-command-toolbar .draft-attach-menu .attach-option {
   width: 100%;
   height: auto;
-  min-height: 42px;
+  min-height: 38px;
   justify-content: flex-start;
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  padding: 6px 10px;
   color: var(--text);
 }
 
 .draft-command-toolbar .draft-attach-menu .attach-option:hover {
   background: var(--surface-soft);
   color: var(--teal);
+}
+
+/* From-this-device pair: equal tiles, so attaching a file for the assistant
+   and opening it as the draft read as two distinct choices. */
+.draft-attach-menu .attach-option-row {
+  display: flex;
+  gap: 6px;
+  padding: 2px 2px 4px;
+}
+
+.draft-command-toolbar .draft-attach-menu .attach-option-tile {
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+}
+
+.draft-command-toolbar .draft-attach-menu .attach-option-tile > svg {
+  margin-top: 0;
+}
+
+.draft-command-toolbar .draft-attach-menu .attach-option-tile:hover {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--border));
+}
+
+.draft-command-toolbar .draft-attach-menu .attach-option-tile:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .draft-command-toolbar .draft-send-button {
@@ -12035,6 +12073,816 @@ dd {
     var(--surface-soft);
 }
 
+/* Audit signal board: collapsible signal groups under one attention bar.
+ * Compact rows are the default; groups that need attention open on load and
+ * all-clear groups fold to a single summary line. The audit console is a size
+ * container, so both layouts follow its real width. */
+.audit-summary-board {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-summary-attention {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--green-border);
+  border-radius: var(--radius-sm);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.audit-summary-attention.is-issue {
+  border-color: var(--red-border);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.audit-summary-attention > svg {
+  flex: none;
+}
+
+.audit-summary-attention > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.audit-summary-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.audit-summary-expand {
+  appearance: none;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--teal);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audit-summary-expand:hover {
+  background: color-mix(in srgb, var(--teal) 9%, transparent);
+}
+
+.audit-summary-controls .audit-chart-toggle {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.audit-summary-group {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.audit-summary-group h3 {
+  margin: 0;
+}
+
+.audit-summary-group-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed) var(--ease);
+}
+
+.audit-summary-group-toggle:hover {
+  background: var(--surface-soft);
+}
+
+.audit-summary-group.is-open .audit-summary-group-toggle {
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-summary-group-toggle > svg {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--speed) var(--ease);
+}
+
+.audit-summary-group.is-open .audit-summary-group-toggle > svg {
+  transform: rotate(90deg);
+}
+
+.audit-summary-group-name {
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.audit-summary-group-count {
+  color: var(--faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.audit-summary-group-status {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.audit-summary-group-status.is-issue {
+  color: var(--red);
+}
+
+.audit-summary-group .audit-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 12px;
+}
+
+@container (min-width: 1180px) {
+  .audit-summary-group .audit-summary-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 560px) {
+  .audit-summary-group .audit-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 340px) {
+  .audit-summary-group .audit-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Compact rows: hairline cells drawn by a 1px gap over the border color. */
+.audit-signal-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border);
+}
+
+@container (min-width: 1180px) {
+  .audit-signal-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 440px) {
+  .audit-signal-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The status already says how many need attention; drop the count so
+   * long group names keep room on phones. */
+  .audit-summary-group-count {
+    display: none;
+  }
+}
+
+.audit-signal-list > div {
+  min-width: 0;
+  background: var(--surface);
+}
+
+.audit-signal-list > div:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.audit-signal-row {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed) var(--ease);
+}
+
+.audit-signal-row:hover {
+  background: color-mix(in srgb, var(--teal) 6%, transparent);
+}
+
+.audit-signal-row:focus-visible,
+.audit-summary-group-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--teal) 70%, #ffffff);
+  outline-offset: -2px;
+}
+
+.audit-signal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.audit-signal-label {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-signal-row strong {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-signal-row > svg {
+  color: var(--faint);
+}
+
+.audit-signal-row.is-issue {
+  background: color-mix(in srgb, var(--red-soft) 70%, transparent);
+}
+
+.audit-signal-row.is-issue:hover {
+  background: var(--red-soft);
+}
+
+.audit-signal-row.is-issue .audit-signal-dot {
+  background: var(--red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent);
+}
+
+.audit-signal-row.is-issue .audit-signal-label,
+.audit-signal-row.is-issue strong {
+  color: #9f2525;
+}
+
+.theme-dark .audit-signal-row.is-issue .audit-signal-label,
+.theme-dark .audit-signal-row.is-issue strong {
+  color: #ffb4b4;
+}
+
+@media (max-width: 640px) {
+  .audit-signal-row,
+  .audit-summary-group-toggle {
+    min-height: 44px;
+  }
+}
+
+/* ---------- Audit Insights charts ----------
+ * Series and severity colors were checked for color-vision separation and
+ * 3:1 contrast against both the light and dark surfaces. */
+.audit-insights {
+  --audit-chart-series-1: #0a8f9e;
+  --audit-chart-series-2: #7c3aed;
+  --audit-chart-info: #0a8f9e;
+  --audit-chart-warning: #c98410;
+  --audit-chart-critical: #cf3030;
+  display: grid;
+  gap: 14px;
+}
+
+.audit-insights-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+.audit-insights-toolbar p {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.audit-insights-toolbar strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.audit-insights-toolbar small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.audit-insights-coverage {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--orange-border);
+  border-radius: var(--radius-sm);
+  background: var(--orange-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.audit-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@container (max-width: 700px) {
+  .audit-insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.audit-chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.audit-chart-card.is-wide {
+  grid-column: 1 / -1;
+}
+
+.audit-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.audit-chart-header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--teal);
+}
+
+.audit-chart-header strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.audit-chart-header > small {
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.audit-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.audit-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-chart-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--audit-chart-series-1);
+}
+
+.audit-chart-key.is-line {
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+}
+
+.audit-chart-key.is-series-2 {
+  background: var(--audit-chart-series-2);
+}
+
+.audit-chart-key.is-info {
+  background: var(--audit-chart-info);
+}
+
+.audit-chart-key.is-warning {
+  background: var(--audit-chart-warning);
+}
+
+.audit-chart-key.is-critical {
+  background: var(--audit-chart-critical);
+}
+
+.audit-chart-key.is-after-hours {
+  width: 16px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+
+/* The plot grows with its card, so a chart beside a taller card fills the
+ * row instead of leaving empty space under the axis. */
+.audit-chart-frame {
+  display: grid;
+  flex: 1;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(132px, 1fr) auto;
+  gap: 6px 8px;
+}
+
+.audit-chart-card.is-wide .audit-chart-frame {
+  grid-template-rows: minmax(150px, 1fr) auto;
+}
+
+.audit-chart-y {
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 18px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
+
+.audit-chart-y span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.audit-chart-y span:nth-child(1) {
+  top: 0;
+}
+
+.audit-chart-y span:nth-child(2) {
+  top: 50%;
+}
+
+.audit-chart-y span:nth-child(3) {
+  top: 100%;
+}
+
+.audit-chart-plot {
+  position: relative;
+  grid-row: 1;
+  grid-column: 2;
+  min-width: 0;
+}
+
+.audit-chart-gridlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.audit-chart-gridlines i {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--border);
+}
+
+.audit-chart-gridlines i:nth-child(1) {
+  top: 0;
+}
+
+.audit-chart-gridlines i:nth-child(2) {
+  top: 50%;
+}
+
+.audit-chart-gridlines i:nth-child(3) {
+  bottom: 0;
+  background: var(--border-strong);
+}
+
+.audit-chart-columns,
+.audit-chart-hits {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--audit-chart-slots), minmax(0, 1fr));
+}
+
+.audit-chart-slot {
+  appearance: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: inherit;
+}
+
+.audit-chart-slot.is-shaded {
+  border-radius: 0;
+  background: color-mix(in srgb, var(--text) 4.5%, transparent);
+}
+
+button.audit-chart-slot {
+  cursor: pointer;
+}
+
+button.audit-chart-slot:hover,
+button.audit-chart-slot:focus-visible {
+  background: color-mix(in srgb, var(--teal) 8%, transparent);
+}
+
+button.audit-chart-slot:focus-visible,
+.audit-chart-hit:focus-visible,
+.audit-bar-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--teal) 70%, #ffffff);
+  outline-offset: -2px;
+}
+
+.audit-chart-column {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: min(24px, 70%);
+  min-height: 3px;
+  overflow: hidden;
+  border-radius: 4px 4px 0 0;
+  transition: filter var(--speed) var(--ease);
+}
+
+button.audit-chart-slot:hover .audit-chart-column {
+  filter: brightness(1.12) saturate(1.05);
+}
+
+.audit-chart-segment {
+  flex-basis: 0;
+  min-height: 2px;
+  background: var(--audit-chart-series-1);
+}
+
+.audit-chart-segment.is-info {
+  background: var(--audit-chart-info);
+}
+
+.audit-chart-segment.is-warning {
+  background: var(--audit-chart-warning);
+}
+
+.audit-chart-segment.is-critical {
+  background: var(--audit-chart-critical);
+}
+
+.audit-chart-hit {
+  position: relative;
+  appearance: none;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.audit-chart-hit.is-empty {
+  cursor: default;
+}
+
+.audit-chart-hit::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--border-strong);
+  content: "";
+  opacity: 0;
+  transition: opacity var(--speed) var(--ease);
+}
+
+.audit-chart-hit:hover::before,
+.audit-chart-hit:focus-visible::before {
+  opacity: 1;
+}
+
+.audit-chart-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.audit-chart-line {
+  fill: none;
+  stroke: var(--audit-chart-series-1);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.audit-chart-line.is-series-2 {
+  stroke: var(--audit-chart-series-2);
+}
+
+.audit-chart-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--audit-chart-series-1);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+
+.audit-chart-dot.is-series-2 {
+  background: var(--audit-chart-series-2);
+}
+
+.audit-chart-x {
+  display: grid;
+  grid-row: 2;
+  grid-column: 2;
+  grid-template-columns: repeat(var(--audit-chart-slots), minmax(0, 1fr));
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.2;
+}
+
+.audit-chart-x span {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.audit-chart-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 520px) {
+  .audit-chart-x span.is-minor {
+    visibility: hidden;
+  }
+}
+
+.audit-chart-toggle {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.audit-chart-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 3px);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audit-chart-toggle button:hover {
+  color: var(--text-strong);
+}
+
+.audit-chart-toggle button.is-selected {
+  background: var(--surface);
+  color: var(--teal);
+  box-shadow: 0 1px 2px rgba(10, 32, 45, 0.12);
+}
+
+.audit-bar-list {
+  display: grid;
+  gap: 2px;
+}
+
+.audit-bar-row {
+  appearance: none;
+  display: grid;
+  grid-template-areas:
+    "text value"
+    "track track";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed) var(--ease);
+}
+
+.audit-bar-row:hover {
+  background: color-mix(in srgb, var(--teal) 7%, transparent);
+}
+
+.audit-bar-text {
+  display: grid;
+  grid-area: text;
+  gap: 1px;
+  min-width: 0;
+}
+
+.audit-bar-text strong,
+.audit-bar-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-bar-text strong {
+  color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.audit-bar-text small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.audit-bar-row > b {
+  grid-area: value;
+  align-self: center;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-bar-track {
+  display: block;
+  grid-area: track;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-sunken);
+}
+
+.audit-bar-fill {
+  display: block;
+  min-width: 4px;
+  height: 100%;
+  border-radius: 0 3px 3px 0;
+  background: var(--audit-chart-series-1);
+}
+
+.audit-chart-empty {
+  margin: 0;
+  padding: 26px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .audit-investigation-modal {
   width: min(720px, 100%);
 }
@@ -12384,6 +13232,40 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.alert-detection-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.alert-detection-field legend {
+  padding: 0;
+  margin-bottom: 2px;
+  font-size: var(--control-label-size);
+  font-weight: 750;
+  color: var(--muted);
+}
+
+.alert-detection-field .model-group-check-grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+/* Detection names are short phrases; let them wrap instead of truncating. */
+.alert-detection-field .model-group-check strong {
+  overflow: visible;
+  white-space: normal;
+}
+
+/* Sits inside the settings grid so it does not pick up the panel's
+   per-section padding. */
+.alert-email-hint {
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+
 .audit-console-grid .alert-rule-row {
   grid-template-columns: 28px minmax(0, 1fr) auto;
 }
@@ -12400,9 +13282,12 @@ dd {
   grid-template-columns: 28px minmax(0, 1fr) auto auto;
 }
 
-@media (max-width: 560px) {
-  .audit-console-grid .alert-rule-row,
-  .audit-console-grid .alert-delivery-row {
+@media (max-width: 680px) {
+  /* .audit-row in the selector outranks the later generic
+     .audit-console-grid .audit-row columns, which otherwise keep the actions
+     column and squeeze the text to one character per line on phones. */
+  .audit-console-grid .audit-row.alert-rule-row,
+  .audit-console-grid .audit-row.alert-delivery-row {
     grid-template-columns: minmax(0, 1fr);
   }
 

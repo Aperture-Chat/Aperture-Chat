@@ -48,7 +48,7 @@ def _store(settings: PlatformSettings) -> tuple[SimpleNamespace, _IdentityReposi
 
 def _silence_other_scheduler_work(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.clock, "now", lambda: NOW)
-    monkeypatch.setattr(scheduler, "flush_elastic_events", lambda *_args: None)
+    monkeypatch.setattr(scheduler, "run_elastic_export", lambda *_args: None)
     monkeypatch.setattr(scheduler, "deliver_alert_notifications", lambda *_args: 0)
     monkeypatch.setattr(scheduler, "purge_expired_revoked_sessions", lambda *_args: 0)
     monkeypatch.setattr(scheduler, "purge_expired_mfa_state", lambda *_args: 0)

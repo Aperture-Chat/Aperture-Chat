@@ -15,6 +15,7 @@
  *        node apps/web/scripts/capture-training-refresh.cjs drafts
  *        node apps/web/scripts/capture-training-refresh.cjs more
  *        node apps/web/scripts/capture-training-refresh.cjs symbols
+ *        node apps/web/scripts/capture-training-refresh.cjs audit,alerts,elastic,open
  *
  * Fixtures: user needs a genuinely requestable catalog model; admin needs that
  * user's pending request and an eligible group. `drafts` needs a usable
@@ -23,7 +24,13 @@
  * drafts pass. `symbols` needs a saved chat titled CAPTURE_SYMBOLS_CHAT_TITLE
  * (default: the synthetic vendor review checklist) and at least one saved
  * prompt, agent profile, knowledge base, skill file, and automation, so every
- * symbol menu shows real items. All roles must already have finished their first-run
+ * symbol menu shows real items. `audit` (admin and owner) needs audit
+ * events across the last two weeks and at least one security alert, so every
+ * Audit Insights chart has records. `alerts` (admin and owner) needs saved
+ * SMTP settings, at least one rule per scope, and real deliveries. `elastic`
+ * needs a reachable synthetic Elastic cluster already saved in the panel, and
+ * runs one connection check. `open` opens a generated synthetic Markdown file
+ * from the Drafts paperclip menu. All roles must already have finished their first-run
  * onboarding. No provider result is simulated. Captures show the real
  * server's state, including unavailable states.
  *
@@ -32,8 +39,10 @@
  * It may withdraw the same user's selected pending request first. `drafts`
  * saves a manually written synthetic document, requests one real inline AI
  * suggestion, and discards it. `admin` changes an unsaved group selection but
- * does not approve or decline requests. `owner`, `more`, and `symbols` are
- * read-only; `symbols` types each symbol into the composer but never sends. No
+ * does not approve or decline requests. `alerts` opens a rule template but
+ * cancels it unsaved. `open` may save the opened synthetic document. `owner`,
+ * `more`, `symbols`, and `audit` are read-only; `symbols` types each symbol into
+ * the composer but never sends. No
  * live-instance or provider mutations are permitted. All PNGs, hashes, and
  * measured rectangles stay in ignored review storage; even a complete batch
  * is never published.
@@ -54,7 +63,28 @@ const EXPECTED = {
   owner: ["search-index", "model-browsing-policy", "provider-catalog", "branding-actions", "retention-tags"],
   more: ["model-favorites", "composer-send-options", "composer-shortcuts-help", "search-palette", "search-recent"],
   symbols: ["chat-session-panel", "session-shortcuts", "composer-slash", "composer-agent", "composer-hash", "composer-skill", "composer-automation"],
+  audit: [
+    "admin/audit", "admin/audit-insights", "admin/audit-investigation", "admin/audit-alerts", "admin/audit-trail",
+    "owner/audit", "owner/audit-insights", "owner/audit-insights-activity", "owner/audit-investigation", "owner/audit-alerts", "owner/audit-trail",
+  ],
+  alerts: ["admin/alerts", "admin/alerts-rule-form", "owner/alerts", "owner/alerts-deliveries", "owner/alerts-rule-form"],
+  elastic: ["owner/elastic-connection", "owner/elastic-streams", "owner/elastic-checks", "owner/elastic-delivery"],
+  open: ["draft-open-menu", "draft-opened-file"],
 };
+// Synthetic content for the `open` mode's "Open in editor" file.
+const OPEN_FILE_NAME = "Synthetic vendor onboarding policy.md";
+const OPEN_FILE_TEXT = [
+  "# Synthetic vendor onboarding policy",
+  "## Purpose",
+  "This synthetic policy explains how a new vendor is reviewed before its first engagement.",
+  "## Review steps",
+  "- Confirm the vendor's security questionnaire is complete.",
+  "- Record the data the vendor will receive and who approved it.",
+  "- Schedule a follow-up review after ninety days.",
+  "## Owners",
+  "The procurement lead owns this checklist, and the security team signs off on access.",
+  "",
+].join("\n");
 let APP, API, OUT, page, role, browser, context, currentMode, offline = false;
 const DRAFT_TITLE = process.env.CAPTURE_DRAFT_TITLE || "Workspace onboarding checklist";
 const SYMBOLS_CHAT_TITLE = process.env.CAPTURE_SYMBOLS_CHAT_TITLE || "Synthetic training — vendor review checklist";
@@ -101,6 +131,10 @@ async function validateSession(audience) {
   return sessions[audience] = { user: actual.user, token: saved.session.token };
 }
 function allowedWrite(method, pathname) {
+  if (currentMode === "elastic") return method === "POST" && pathname === "/api/platform/elastic/test";
+  if (currentMode === "open") {
+    return (method === "POST" && pathname === "/api/drafts") || (method === "PUT" && /^\/api\/drafts\/[^/]+$/.test(pathname));
+  }
   if (currentMode === "drafts") {
     return (method === "POST" && ["/api/drafts", "/api/chat/complete"].includes(pathname))
       || (method === "PUT" && /^\/api\/drafts\/[^/]+$/.test(pathname));
@@ -467,12 +501,185 @@ async function runOwner(){
   await browser.close();
 }
 
+// Every target gets the same small margin so highlight borders never sit on
+// flush-left text.
+function padAll(targets) {
+  return Object.fromEntries(Object.entries(targets).map(([key, target]) => [key, padded(target)]));
+}
+// Scrolls the element's nearest scroller so its top edge sits at `top`.
+async function scrollToY(locator, top = 0) {
+  await locator.evaluate((element, offset) => {
+    let scroller = element.parentElement;
+    while (scroller && !(/(auto|scroll)/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) {
+      scroller = scroller.parentElement;
+    }
+    (scroller || document.scrollingElement).scrollTop += element.getBoundingClientRect().top - offset;
+  }, top);
+  await page.waitForTimeout(300);
+}
+function consolePanel(title) {
+  return page.locator('.panel').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+}
+async function auditFrames() {
+  const owner = role === 'owner';
+  await page.goto(APP + (owner ? '/platform/audit' : '/admin/audit'));
+  const board = page.locator('.audit-summary-board');
+  await board.waitFor();
+  const listLayout = board.getByRole('radio', { name: 'List', exact: true });
+  if (await listLayout.getAttribute('aria-checked') !== 'true') await listLayout.click();
+  await shot("audit", padAll(owner
+    ? { auditAttention: page.locator('.audit-summary-attention'), auditSignalBoard: board }
+    : { auSignals: board }));
+  const insights = page.locator('.audit-insights');
+  const insightsPanel = page.locator('.panel').filter({ has: insights });
+  const byDay = insights.locator('.audit-chart-card[aria-label="Audit events by day"]');
+  if (!await byDay.locator('button.audit-chart-slot').count()) throw new Error('Audit Insights needs synthetic audit events in range.');
+  if (!await insights.locator('.audit-chart-card[aria-label="Alert breakdown"] .audit-bar-row').count()) throw new Error('Audit Insights needs at least one synthetic security alert.');
+  await scrollToY(insightsPanel, 0);
+  const trends = unionTarget(insights.locator('.audit-insights-toolbar'), byDay);
+  await shot("audit-insights", padAll(owner ? { auditInsightsTrends: trends } : { auInsights: trends }));
+  if (owner) {
+    const people = insights.locator('.audit-chart-card[aria-label="Most active people"]');
+    await scrollToY(people, 16);
+    await shot("audit-insights-activity", padAll({ auditInsightsPeople: unionTarget(people, insights.locator('.audit-chart-card[aria-label="Activity by area"]'), insights.locator('.audit-chart-card[aria-label="Activity by hour"]')) }));
+  }
+  // A chart mark opens the same investigation as a signal; today's column
+  // holds the real flagged prompts and sign-ins from this fixture.
+  await scrollToY(insightsPanel, 0);
+  await byDay.locator('button.audit-chart-slot').last().click();
+  const dialog = page.locator('.audit-investigation-modal');
+  await dialog.waitFor();
+  await shot("audit-investigation", padAll(owner ? { auditInvestigation: dialog } : { auInvestigation: dialog }));
+  await dialog.getByRole('button', { name: /^Close .* investigation$/ }).click();
+  if (owner) {
+    const alertsPanel = await expandPanel('Security Alerts');
+    const alertList = alertsPanel.locator('.security-alert-list');
+    await alertList.waitFor();
+    await scrollToY(alertsPanel, 0);
+    await shot("audit-alerts", padAll({ auditSecurityAlerts: unionTarget(alertsPanel.locator("[aria-label='Security alert filter']"), alertList) }));
+  } else {
+    const prompts = await expandPanel('User Prompt Activity');
+    await prompts.locator("[aria-label='Prompt activity filter']").waitFor();
+    await scrollToY(prompts, 0);
+    await shot("audit-alerts", padAll({ auPromptSelect: prompts.locator("[aria-label='Prompt activity filter']") }));
+  }
+  const trail = await expandPanel('Audit Trail');
+  const filters = trail.locator('.audit-filter-toolbar');
+  await filters.waitFor();
+  await scrollToY(trail, 0);
+  await shot("audit-trail", padAll(owner
+    ? { trailFilters: filters, trailRows: trail.locator('[aria-label="Export audit trail CSV"]') }
+    : { auTrailFilters: filters }));
+}
+async function runAudit() {
+  for (const audience of ['admin', 'owner']) {
+    role = audience; await open(audience);
+    await auditFrames();
+    await browser.close();
+  }
+}
+async function alertsFrames() {
+  const owner = role === 'owner';
+  await page.goto(APP + (owner ? '/platform/alerts' : '/admin/alerts'));
+  const email = consolePanel('Email Delivery');
+  const rules = consolePanel('Alert Rules');
+  const deliveries = consolePanel('Alert Deliveries');
+  await deliveries.locator('.alert-notification-row, [role="listitem"]').first().waitFor();
+  if (!await deliveries.getByText('sent', { exact: true }).count()) throw new Error('The alerts fixture needs at least one real sent delivery.');
+  if (owner) {
+    await shot("alerts", padAll({ alertSmtp: email }));
+    await scrollToY(rules, 0);
+    await shot("alerts-deliveries", padAll({
+      alertRules: rules,
+      alertTemplates: rules.locator('.panel-actions'),
+      alertDeliveries: page.locator("[role='list'][aria-label='Alert deliveries']"),
+    }));
+  } else {
+    await shot("alerts", padAll({ alEmail: email, alRules: rules, alDeliveries: deliveries }));
+  }
+  // The template only prefills the form; it is cancelled without saving.
+  await rules.getByRole('button', { name: 'Prompt-injection template', exact: true }).click();
+  const form = page.locator('.alert-rule-form');
+  const detections = form.locator('.alert-detection-field');
+  await detections.waitFor();
+  await scrollToY(form, 90);
+  const box = await detections.boundingBox();
+  if (box.y + box.height > 845) await scrollToY(form, 90 - (box.y + box.height - 845));
+  await shot("alerts-rule-form", padAll(owner
+    ? { alertRuleForm: form, alertDetections: detections }
+    : { alRuleForm: form, alRuleDetections: detections }));
+  await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+}
+async function runAlerts() {
+  for (const audience of ['admin', 'owner']) {
+    role = audience; await open(audience);
+    await alertsFrames();
+    await browser.close();
+  }
+}
+async function runElastic() {
+  role = 'owner'; await open('owner');
+  await page.goto(APP + '/platform/org-settings');
+  const panel = await expandPanel('Elastic Analytics');
+  await panel.locator('.elastic-stream-table').waitFor();
+  if (!await panel.locator('.elastic-card').getByText('Connected', { exact: true }).count()) {
+    throw new Error('Save a reachable synthetic Elastic cluster before capturing.');
+  }
+  const keyHelp = panel.locator('.elastic-key-help');
+  await keyHelp.locator('summary').click();
+  await scrollToY(panel, 0);
+  await shot("elastic-connection", padAll({
+    elasticStatus: panel.locator('.elastic-card'),
+    elasticConnection: panel.locator('.elastic-section').first(),
+  }));
+  await keyHelp.locator('summary').click();
+  await scrollToY(panel.locator('.elastic-section').nth(1), 24);
+  await shot("elastic-streams", padAll({
+    elasticStreams: panel.locator('.elastic-toggle-list'),
+    elasticActions: panel.locator('.elastic-actions'),
+  }));
+  await panel.getByRole('button', { name: 'Check connection', exact: true }).click();
+  const checks = panel.locator('.elastic-check-list');
+  await checks.waitFor({ timeout: 60000 });
+  await scrollToY(panel.locator('.elastic-actions'), 330);
+  await shot("elastic-checks", padAll({ elasticChecks: unionTarget(panel.locator('.elastic-notice'), checks) }));
+  await scrollToY(panel.locator('.elastic-section:has(.elastic-stream-table)'), 120);
+  await shot("elastic-delivery", padAll({
+    elasticDelivery: panel.locator('.elastic-stream-table'),
+    elasticKibana: panel.locator('.elastic-kibana-row'),
+  }));
+  await browser.close();
+}
+async function runOpen() {
+  role = 'user'; await open('user');
+  await page.getByRole('link', { name: 'Drafts', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Document body', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Attach file', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Add draft attachment' });
+  await menu.waitFor();
+  await shot("draft-open-menu", padAll({
+    draftOpenFromDevice: unionTarget(menu.locator('.attach-menu-label').first(), menu.locator('.attach-option-row')),
+  }));
+  const file = path.join(OUT, OPEN_FILE_NAME);
+  fs.writeFileSync(file, OPEN_FILE_TEXT);
+  const chooser = page.waitForEvent('filechooser');
+  await menu.getByRole('menuitem', { name: /Open in editor/ }).click();
+  await (await chooser).setFiles(file);
+  const note = page.locator('.draft-event').filter({ hasText: `Opened ${OPEN_FILE_NAME} in the editor.` });
+  await note.waitFor();
+  const body = page.getByRole('textbox', { name: 'Document body', exact: true });
+  await body.getByText('Review steps', { exact: true }).waitFor();
+  await page.waitForTimeout(1000);
+  await shot("draft-opened-file", padAll({ draftOpenedFile: note, draftOpenedDocument: body }));
+  await browser.close();
+}
+
 async function main() {
   APP = origin("CAPTURE_APP_URL");
   API = origin("CAPTURE_API_URL");
   if (process.env.CAPTURE_MUTATION_ACK !== "isolated-synthetic") throw new Error("CAPTURE_MUTATION_ACK=isolated-synthetic is required.");
   const parts = (process.argv[2] || "user,admin,owner").split(",");
-  if (parts.some(part => !Object.hasOwn(EXPECTED, part)) || new Set(parts).size !== parts.length) throw new Error("Choose user, drafts, admin, owner, more, or symbols, each at most once.");
+  if (parts.some(part => !Object.hasOwn(EXPECTED, part)) || new Set(parts).size !== parts.length) throw new Error("Choose user, drafts, admin, owner, more, symbols, audit, alerts, elastic, or open, each at most once.");
   const work = path.join(__dirname, "../../../tmp/training-captures");
   fs.mkdirSync(work, { recursive: true });
   OUT = fs.mkdtempSync(path.join(work, "capture-training-refresh-"));
@@ -480,9 +687,11 @@ async function main() {
   try {
     for (const part of parts) {
       currentMode = part;
-      await ({ user: runUser, drafts: runDrafts, admin: runAdmin, owner: runOwner, more: runMore, symbols: runSymbols })[part]();
-      const audience = ["more", "drafts", "symbols"].includes(part) ? "user" : part;
-      if (EXPECTED[part].some(name => !manifest.frames[`${audience}/${name}`])) throw new Error(`Incomplete ${part} frame batch.`);
+      await ({ user: runUser, drafts: runDrafts, admin: runAdmin, owner: runOwner, more: runMore, symbols: runSymbols,
+        audit: runAudit, alerts: runAlerts, elastic: runElastic, open: runOpen })[part]();
+      const audience = ["more", "drafts", "symbols", "open"].includes(part) ? "user" : part;
+      // Multi-role modes list role-qualified frame names.
+      if (EXPECTED[part].some(name => !manifest.frames[name.includes("/") ? name : `${audience}/${name}`])) throw new Error(`Incomplete ${part} frame batch.`);
       if (manifest.blockedRequests.length) throw new Error("An unexpected write was blocked.");
       manifest.completedModes.push(part);
       saveManifest();

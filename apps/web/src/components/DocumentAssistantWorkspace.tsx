@@ -89,6 +89,7 @@ import {
   Copy,
   Download,
   FileDiff,
+  FilePen,
   FileText,
   Globe2,
   GraduationCap,
@@ -1566,6 +1567,9 @@ export function DocumentAssistantWorkspace({
   const pageScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const wordTemplateInputRef = useRef<HTMLInputElement | null>(null);
+  const openInEditorInputRef = useRef<HTMLInputElement | null>(null);
+  const openDeckInEditorInputRef = useRef<HTMLInputElement | null>(null);
+  const attachControlRef = useRef<HTMLDivElement | null>(null);
   const exportObjectUrlRef = useRef<string | null>(null);
   const exportInFlightRef = useRef(false);
   const exportImageCacheRef = useRef(new Map<string, Promise<string | null>>());
@@ -6476,6 +6480,33 @@ export function DocumentAssistantWorkspace({
     wordTemplateInputRef.current?.click();
   }
 
+  function triggerOpenInEditor() {
+    setAttachMenuOpen(false);
+    (draftKind === "deck" ? openDeckInEditorInputRef : openInEditorInputRef).current?.click();
+  }
+
+  // The attach menu closes on any press outside it and on Escape. Escape is
+  // taken in the capture phase so it closes only the menu, not the drawer.
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!attachControlRef.current?.contains(event.target as Node)) setAttachMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setAttachMenuOpen(false);
+      attachControlRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [attachMenuOpen]);
+
   function handleAttachFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -6555,6 +6586,159 @@ export function DocumentAssistantWorkspace({
     } finally {
       event.target.value = "";
     }
+  }
+
+  /** Opens a local file as the draft itself rather than attaching it as an
+   * assistant source, so it can be edited directly and with Ask AI. */
+  async function handleOpenInEditor(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (assistantWorking) {
+      notifyRail("Wait for the assistant to finish before opening another document.");
+      return;
+    }
+    setStatus(`Opening ${file.name} in the editor...`);
+    let opened: UploadedWordTemplate;
+    try {
+      opened = await readDocumentFileForEditor(file);
+    } catch {
+      notifyRail(`Could not open ${file.name}. Choose a .docx, .doc, .md, .txt, or .html file.`);
+      return;
+    }
+    let nextContentHtml = paginateTransferredDocumentHtml(opened.html, "", { forceMarkerPages: true });
+    if (!isAutomatedTestMode()) {
+      nextContentHtml = (await repaginateOverfullDocumentPages(nextContentHtml)) ?? nextContentHtml;
+    }
+    requestDraftNavigation(`open ${file.name}`, () => openDocumentInEditor(opened, nextContentHtml));
+  }
+
+  function openDocumentInEditor(opened: UploadedWordTemplate, nextContentHtml: string) {
+    clearDraftTimers();
+    // An opened file is a new document; its first save creates a fresh
+    // server draft and the previous draft stays in history.
+    serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
+    setServerSaveState({ kind: "idle" });
+    const title = opened.filename.replace(/\.[^.]+$/, "").trim() || EMPTY_DOCUMENT_TITLE;
+    const summary = `Opened from ${opened.filename}`;
+    const executedAt = draftNowIso();
+    const version: DraftVersion = {
+      id: "version-1",
+      label: "Version 1",
+      time: draftTimeLabel(executedAt),
+      executedAt,
+      content: nextContentHtml,
+      summary,
+    };
+    setDocumentTitle(title);
+    clearEditHistory();
+    setContent(nextContentHtml);
+    setVersions([version]);
+    setSelectedVersionId(version.id);
+    setPageCount(Math.max(1, countDocumentPages(nextContentHtml)));
+    setCurrentPage(1);
+    setCodeArtifact(null);
+    setShowEdits(false);
+    setActiveAssistantTool(null);
+    setActiveHistoryItemId(null);
+    setRequireCitations(false);
+    setDraftTrace(null);
+    const warnings = opened.warnings.slice(0, 3).join(" | ");
+    const extraWarningCount = opened.warnings.length - 3;
+    setEvents([
+      draftEvent(
+        "assistant",
+        "document-open",
+        `Opened ${opened.filename} in the editor. Edit it directly, or select text and use Ask AI.`,
+        { createdAt: executedAt, executedAt },
+      ),
+      ...(warnings
+        ? [
+            draftEvent(
+              "system",
+              "document-open-warning",
+              `Import note${opened.warnings.length === 1 ? "" : "s"}: ${warnings}${
+                extraWarningCount > 0 ? ` (+${extraWarningCount} more)` : ""
+              }`,
+            ),
+          ]
+        : []),
+    ]);
+    rememberDocumentSnapshot(title, nextContentHtml, summary);
+    notifyRail(`${opened.filename} opened in the editor.`);
+    // On narrow screens the drawer rail would cover the document just opened.
+    setRailOpen(false);
+    setRailPeek(false);
+    window.setTimeout(() => {
+      pageScrollRef.current?.scrollTo?.({ top: 0, behavior: "auto" });
+      editorRef.current?.focus();
+      updatePageMetrics();
+    }, 0);
+  }
+
+  /** Opens a PowerPoint file as the deck itself, so its slides land in the
+   * layout area for direct edits instead of becoming an assistant source. */
+  async function handleOpenDeckInEditor(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (assistantWorking) {
+      notifyRail("Wait for the assistant to finish before opening another deck.");
+      return;
+    }
+    if (!/\.(pptx|potx)$/i.test(file.name)) {
+      notifyRail(`Could not open ${file.name}. Choose a PowerPoint .pptx file.`);
+      return;
+    }
+    setStatus(`Opening ${file.name} in the deck editor...`);
+    let opened: OpenedPresentation;
+    try {
+      const parsed = await parseDeckTemplate(completionUserId, file, { content: true });
+      if (!parsed.slides.length) throw new Error("the presentation has no slides.");
+      const brand = await persistedBrandThemeFromParse(parsed);
+      const title = file.name.replace(/\.(pptx|potx)$/i, "").trim() || EMPTY_DOCUMENT_TITLE;
+      opened = openedPresentationDeck(parsed, brand.theme, title);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "the presentation could not be read.";
+      notifyRail(`Could not open ${file.name}: ${message}`);
+      return;
+    }
+    requestDraftNavigation(`open ${file.name}`, () => openDeckInEditor(opened, file.name));
+  }
+
+  function openDeckInEditor(opened: OpenedPresentation, filename: string) {
+    clearDraftTimers();
+    endDeckEditSession();
+    // An opened presentation is a new deck with its own server draft; the
+    // previous deck stays in history.
+    deckHistoryIdRef.current = createDraftHistoryId();
+    deckServerRef.current = { id: null, revision: null, historyId: deckHistoryIdRef.current };
+    const { deck } = opened;
+    setDeckState(deck);
+    setSelectedSlideId(deck.slides[0]?.id ?? null);
+    setDeckUndoStack([]);
+    setDeckRedoStack([]);
+    deckEditSessionUndoRef.current = null;
+    setDraftKind("deck");
+    setDocumentTitle(deck.title);
+    setActiveAssistantTool(null);
+    setActiveHistoryItemId(null);
+    setDraftTrace(null);
+    const version = appendDeckVersion(deck, `Opened from ${filename}`);
+    rememberDeckSnapshot(deck.title, version.content, version.summary);
+    const executedAt = draftNowIso();
+    setEvents([
+      draftEvent(
+        "assistant",
+        "deck-open",
+        `Opened ${filename} in the deck editor: ${deck.slides.length} slide${deck.slides.length === 1 ? "" : "s"}. Edit the slides directly, or select text and use Ask AI.`,
+        { createdAt: executedAt, executedAt },
+      ),
+      ...opened.notes.map((note) => draftEvent("system", "deck-open-note", `Import note: ${note}`)),
+    ]);
+    notifyRail(`${filename} opened in the deck editor.`);
+    setRailOpen(false);
+    setRailPeek(false);
   }
 
   function rememberUploadedWordTemplate(uploadedTemplate: UploadedWordTemplate) {
@@ -8587,6 +8771,22 @@ export function DocumentAssistantWorkspace({
             onChange={(event) => void handleWordTemplateUpload(event)}
           />
           <input
+            ref={openInEditorInputRef}
+            type="file"
+            className="sr-only"
+            accept={OPEN_IN_EDITOR_ACCEPT}
+            aria-label="Open a file in the editor"
+            onChange={(event) => void handleOpenInEditor(event)}
+          />
+          <input
+            ref={openDeckInEditorInputRef}
+            type="file"
+            className="sr-only"
+            accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            aria-label="Open a presentation in the deck editor"
+            onChange={(event) => void handleOpenDeckInEditor(event)}
+          />
+          <input
             ref={deckBrandInputRef}
             type="file"
             className="sr-only"
@@ -9333,7 +9533,7 @@ export function DocumentAssistantWorkspace({
               }
             />
             <div className="draft-command-toolbar">
-              <div className="draft-attach-control">
+              <div className="draft-attach-control" ref={attachControlRef}>
                 <button
                   type="button"
                   aria-label="Attach file"
@@ -9350,19 +9550,40 @@ export function DocumentAssistantWorkspace({
                     role="menu"
                     aria-label="Add draft attachment"
                   >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="attach-option"
-                      data-tooltip="Pick files from this device to use as draft sources"
-                      onClick={triggerAttachFiles}
-                    >
-                      <Upload size={16} />
-                      <span>
-                        <strong>Upload from computer</strong>
-                        <small>Choose files on this device</small>
-                      </span>
-                    </button>
+                    <span className="attach-menu-label">From this device</span>
+                    <div className="attach-option-row">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="attach-option attach-option-tile"
+                        data-tooltip="Pick files from this device for the assistant to read with your next request"
+                        onClick={triggerAttachFiles}
+                      >
+                        <Upload size={16} />
+                        <span>
+                          <strong>Attach to chat</strong>
+                          <small>Assistant reads it</small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="attach-option attach-option-tile"
+                        data-tooltip={
+                          draftKind === "deck"
+                            ? "Open a PowerPoint file as this deck so you can edit its slides directly"
+                            : "Open a Word, Markdown, or text file as this draft so you can edit it directly"
+                        }
+                        disabled={assistantWorking}
+                        onClick={triggerOpenInEditor}
+                      >
+                        <FilePen size={16} />
+                        <span>
+                          <strong>Open in editor</strong>
+                          <small>{draftKind === "deck" ? "Edit slides directly" : "Edit it directly"}</small>
+                        </span>
+                      </button>
+                    </div>
                     <div className="attach-menu-divider" />
                     <span className="attach-menu-label">Connect a source</span>
                     {DRAFT_ATTACHMENT_CONNECTORS.map((connector) => {
@@ -12763,6 +12984,24 @@ function tagWordParagraphAlignment(element: MammothDocumentElement): MammothDocu
   if (next.type !== "paragraph" || next.styleId || next.styleName) return next;
   const syntheticStyle = WORD_ALIGNMENT_SYNTHETIC_STYLES[next.alignment ?? ""];
   return syntheticStyle ? { ...next, ...syntheticStyle } : next;
+}
+
+const OPEN_IN_EDITOR_EXTENSIONS = new Set(["docx", "dotx", "doc", "md", "markdown", "txt", "html", "htm"]);
+const OPEN_IN_EDITOR_ACCEPT =
+  ".docx,.dotx,.doc,.md,.markdown,.txt,.html,.htm,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/markdown,text/plain,text/html";
+
+/** Reads a local file for "Open in editor": Word and HTML keep their
+ * formatting through the template importer, Markdown keeps its structure. */
+async function readDocumentFileForEditor(file: File): Promise<UploadedWordTemplate> {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!OPEN_IN_EDITOR_EXTENSIONS.has(extension)) {
+    throw new Error(`${file.name} is not a document the editor can open.`);
+  }
+  if (extension !== "md" && extension !== "markdown") return readUploadedWordTemplate(file);
+  const html = documentHtmlFromMarkdown(await readFileAsText(file));
+  const text = documentHtmlToText(html);
+  if (!text.trim()) throw new Error("The file did not contain readable document content.");
+  return { filename: file.name, html, text, title: titleFromUploadedTemplate(file.name, text), warnings: [] };
 }
 
 async function readUploadedWordTemplate(file: File): Promise<UploadedWordTemplate> {
@@ -18039,6 +18278,174 @@ function savePersistedDeckBrandTheme(value: PersistedDeckBrandTheme | null): boo
 }
 
 /** Maps the server's parsed template into a bounded, validated DeckTheme. */
+type OpenedPresentation = { deck: SlideDeck; notes: string[] };
+type OpenedParagraph = { text: string; level: number };
+
+/** Builds an editable deck from a content-mode parse: titles, bullets with
+ * their levels, two-column bodies, speaker notes, slide pictures, and each
+ * layout's artwork as the slide background. Text with no slot in the chosen
+ * layout moves into the speaker notes rather than disappearing. When the
+ * result is over the deck budget it is rebuilt without pictures, then
+ * without layout artwork, before giving up. */
+function openedPresentationDeck(
+  parsed: DeckTemplateParseResponse,
+  theme: DeckTheme,
+  title: string,
+): OpenedPresentation {
+  const attempts = [
+    { pictures: true, designs: true },
+    { pictures: false, designs: true },
+    { pictures: false, designs: false },
+  ];
+  let lastError = "the opened deck could not be validated.";
+  for (const attempt of attempts) {
+    const built = buildOpenedPresentationDeck(parsed, theme, title, attempt);
+    const checked = parseSlideDeck(serializeSlideDeck(built.deck));
+    if (checked.ok) {
+      const notes = [...parsed.warnings, ...built.notes];
+      if (!attempt.pictures) notes.push("Slide pictures were left out to keep the deck within its size limit.");
+      if (!attempt.designs) notes.push("Slide layout artwork was left out to keep the deck within its size limit.");
+      return { deck: checked.deck, notes };
+    }
+    lastError = checked.error;
+  }
+  throw new Error(lastError);
+}
+
+function buildOpenedPresentationDeck(
+  parsed: DeckTemplateParseResponse,
+  theme: DeckTheme,
+  title: string,
+  options: { pictures: boolean; designs: boolean },
+): OpenedPresentation {
+  const library: Record<string, string> = {};
+  const designFor = (designIndex: number | null): Pick<DeckSlide, "backgroundId" | "textColor"> => {
+    const design = options.designs && designIndex !== null ? parsed.designs[designIndex] : undefined;
+    if (
+      !design ||
+      !/^data:image\/(png|jpe?g);/i.test(design.data_url) ||
+      design.data_url.length > MAX_SLIDE_BACKGROUND_CHARS
+    ) {
+      return {};
+    }
+    const key = deckBackgroundKey(design.data_url);
+    library[key] = design.data_url;
+    // Dark artwork gets light type so the words are readable as they land.
+    return { backgroundId: key, ...(design.is_dark ? { textColor: "#ffffff" } : {}) };
+  };
+  const toBullet = (paragraph: OpenedParagraph): DeckBullet => ({
+    runs: [{ text: paragraph.text }],
+    level: Math.max(0, Math.min(2, Math.trunc(paragraph.level) || 0)) as DeckBullet["level"],
+  });
+  let slidesWithMovedText = 0;
+  let droppedPictures = 0;
+  const sourceSlides = parsed.slides.slice(0, MAX_DECK_SLIDES);
+  const slides: DeckSlide[] = sourceSlides.map((slide, index) => {
+    // Flattened blocks are only a fallback for a server without content
+    // mode; they repeat the subtitle, so an empty bodies list stays empty.
+    const bodies: OpenedParagraph[][] = slide.bodies
+      ? slide.bodies
+      : slide.blocks.length
+        ? [slide.blocks.map((text) => ({ text, level: 0 }))]
+        : [];
+    const paragraphs = bodies.flat();
+    const slideTitle = slide.title?.trim() ?? "";
+    const picture = options.pictures ? slide.picture ?? null : null;
+    const overflow: OpenedParagraph[] = [];
+    const bullets = (items: OpenedParagraph[]) => {
+      overflow.push(...items.slice(MAX_DECK_BULLETS_PER_SLIDE));
+      return items.slice(0, MAX_DECK_BULLETS_PER_SLIDE).map(toBullet);
+    };
+    const base = {
+      id: `slide-${index + 1}`,
+      ...designFor(typeof slide.design_index === "number" ? slide.design_index : null),
+    };
+    const content = ((): DeckSlide => {
+      const titleLike = slide.is_title_slide || (index === 0 && paragraphs.length <= 1 && !picture);
+      if (titleLike) {
+        const subtitle = slide.subtitle?.trim() || paragraphs[0]?.text || "";
+        overflow.push(...(slide.subtitle?.trim() ? paragraphs : paragraphs.slice(1)));
+        return {
+          ...base,
+          notes: "",
+          layout: "title",
+          title: deckRichText(slideTitle || (index === 0 ? title : "")),
+          subtitle: deckRichText(subtitle),
+        };
+      }
+      if (picture && paragraphs.length <= 2) {
+        return {
+          ...base,
+          notes: "",
+          layout: "image-caption",
+          title: deckRichText(slideTitle),
+          image: { src: picture.data_url, alt: picture.alt || slideTitle || "Slide picture" },
+          caption: deckRichText(paragraphs.map((paragraph) => paragraph.text).join(" ")),
+        };
+      }
+      if (picture) droppedPictures += 1;
+      if (bodies.length >= 2) {
+        return {
+          ...base,
+          notes: "",
+          layout: "two-column",
+          title: deckRichText(slideTitle),
+          left: bullets(bodies[0]),
+          right: bullets(bodies.slice(1).flat()),
+        };
+      }
+      if (!paragraphs.length && slideTitle) {
+        return { ...base, notes: "", layout: "section", title: deckRichText(slideTitle), subtitle: [] };
+      }
+      const kept = bullets(paragraphs);
+      return {
+        ...base,
+        notes: "",
+        layout: "title-bullets",
+        title: deckRichText(slideTitle),
+        bullets: kept.length ? kept : [{ runs: [{ text: "" }], level: 0 }],
+      };
+    })();
+    if (overflow.length) slidesWithMovedText += 1;
+    const notes = [
+      slide.notes?.trim() ?? "",
+      overflow.length
+        ? `More slide text:\n${overflow
+            .map((paragraph) => `${"  ".repeat(Math.max(0, Math.min(2, paragraph.level)))}- ${paragraph.text}`)
+            .join("\n")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000);
+    return { ...content, notes };
+  });
+  const notes: string[] = [];
+  if (slidesWithMovedText) {
+    notes.push(
+      `Text that did not fit the slide layout on ${slidesWithMovedText} slide${slidesWithMovedText === 1 ? "" : "s"} was moved into the speaker notes.`,
+    );
+  }
+  if (droppedPictures) {
+    notes.push(
+      droppedPictures === 1
+        ? "1 slide kept its text but not its picture, because it had more text than a picture layout holds."
+        : `${droppedPictures} slides kept their text but not their pictures, because they had more text than a picture layout holds.`,
+    );
+  }
+  const skipped = parsed.slides.length - sourceSlides.length;
+  if (skipped > 0) notes.push(`${skipped} slides past the ${MAX_DECK_SLIDES}-slide limit were left out.`);
+  return {
+    deck: {
+      schema: DECK_SCHEMA_VERSION,
+      title,
+      theme: { ...theme, backgroundLibrary: library },
+      slides,
+    },
+    notes,
+  };
+}
+
 async function persistedBrandThemeFromParse(
   parsed: DeckTemplateParseResponse,
 ): Promise<PersistedDeckBrandTheme> {

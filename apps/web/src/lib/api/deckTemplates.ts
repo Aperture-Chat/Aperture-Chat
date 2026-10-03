@@ -38,26 +38,40 @@ export type DeckTemplateParseResponse = {
     blocks: string[];
     layout_name: string | null;
     design_index: number | null;
+    /** Content mode only (opening the deck for editing). */
+    is_title_slide?: boolean;
+    subtitle?: string | null;
+    bodies?: Array<Array<{ text: string; level: number }>>;
+    notes?: string;
+    picture?: { data_url: string; width_px: number; height_px: number; alt: string } | null;
   }>;
   warnings: string[];
 };
 
+/** `content` asks for what opening the deck needs on top of the brand:
+ * subtitles, paragraphs with indent levels, speaker notes, and pictures. */
 export async function parseDeckTemplate(
   userId: string,
   file: File,
+  options: { content?: boolean } = {},
 ): Promise<DeckTemplateParseResponse> {
   const form = new FormData();
   form.append("file", file);
   let response: Response;
   try {
-    response = await fetch(`${apiBase}/api/drafts/deck-template/parse`, {
-      method: "POST",
-      headers: authHeaders(userId),
-      body: form,
-    });
+    response = await fetch(
+      `${apiBase}/api/drafts/deck-template/parse${options.content ? "?content=true" : ""}`,
+      {
+        method: "POST",
+        headers: authHeaders(userId),
+        body: form,
+      },
+    );
   } catch {
     throw new ChatRequestError(
-      "Could not upload the brand template. Check your connection and try again.",
+      options.content
+        ? "Could not upload the presentation. Check your connection and try again."
+        : "Could not upload the brand template. Check your connection and try again.",
     );
   }
   if (!response.ok) {

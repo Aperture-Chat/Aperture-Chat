@@ -34,12 +34,15 @@ export type AdminFocus =
   | "policyDefaults"
   | "policyMemory"
   | "policyCounts"
-  | "auCards"
+  | "auSignals"
+  | "auInsights"
+  | "auInvestigation"
   | "auPromptSelect"
   | "auTrailFilters"
   | "alEmail"
   | "alRules"
   | "alRuleForm"
+  | "alRuleDetections"
   | "alDeliveries"
   | "retentionNavigation"
   | "retentionWorkspace"
@@ -100,13 +103,16 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   policyDefaults: { frame: "training/admin/policies-controls.png", rect: { x: 262, y: 432, w: 887, h: 384 } },
   policyMemory: { frame: "training/admin/policies-memory.png", rect: { x: 261, y: 338, w: 889, h: 440 } },
   policyCounts: { frame: "training/admin/policies-counts.png", rect: { x: 261, y: 442, w: 889, h: 217 } },
-  auCards: { frame: "training/admin/audit.png", rect: { x: 262, y: 322, w: 887, h: 323 } },
-  auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 276, y: 97, w: 859, h: 154 } },
-  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 262, y: 244, w: 887, h: 85 } },
-  alEmail: { frame: "training/admin/alerts.png", rect: { x: 261, y: 234, w: 889, h: 181 } },
-  alRules: { frame: "training/admin/alerts.png", rect: { x: 261, y: 424, w: 889, h: 175 } },
-  alRuleForm: { frame: "training/admin/alerts-rule-form.png", rect: { x: 262, y: 204, w: 887, h: 447 } },
-  alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 261, y: 608, w: 889, h: 195 } },
+  auSignals: { frame: "training/admin/audit.png", rect: { x: 262.90625, y: 322.75, w: 885.1875, h: 532.25 } },
+  auInsights: { frame: "training/admin/audit-insights.png", rect: { x: 282.90625, y: 124.75, w: 845.1875, h: 304.59375 } },
+  auInvestigation: { frame: "training/admin/audit-investigation.png", rect: { x: 229.5, y: 17, w: 726, h: 821 } },
+  auPromptSelect: { frame: "training/admin/audit-alerts.png", rect: { x: 276.90625, y: 118.9375, w: 857.1875, h: 153 } },
+  auTrailFilters: { frame: "training/admin/audit-trail.png", rect: { x: 262.90625, y: 265.9375, w: 885.1875, h: 84 } },
+  alEmail: { frame: "training/admin/alerts.png", rect: { x: 261.90625, y: 234.75, w: 887.1875, h: 203 } },
+  alRules: { frame: "training/admin/alerts.png", rect: { x: 261.90625, y: 447.75, w: 887.1875, h: 263.921875 } },
+  alRuleForm: { frame: "training/admin/alerts-rule-form.png", rect: { x: 262.90625, y: 86.75, w: 885.1875, h: 645.125 } },
+  alRuleDetections: { frame: "training/admin/alerts-rule-form.png", rect: { x: 283.90625, y: 455.484375, w: 843.1875, h: 193.390625 } },
+  alDeliveries: { frame: "training/admin/alerts.png", rect: { x: 261.90625, y: 721.671875, w: 887.1875, h: 133.328125 } },
   // Retention frames are local-stack captures with synthetic chats and tags;
   // rects were measured from the live DOM at capture time.
   retentionNavigation: { frame: "training/admin/retention-navigation.png", rect: { x: 893.469, y: 160.75, w: 69.516, h: 58 } },
@@ -561,23 +567,41 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-audit",
     audioSrc: "training/admin/admin-audit.mp3",
     title: "Tenant audit",
-    description: "Governance signals, prompt monitoring, security alerts, and the tenant trail.",
+    description: "Grouped signals, Audit Insights trends, prompt monitoring, security alerts, and the tenant trail.",
     icon: "audit",
-    outcomes: ["Signals reviewed", "Alerts actioned", "Trail exported"],
+    outcomes: ["Signals triaged", "Trends reviewed", "Alerts actioned", "Trail exported"],
     scenes: [
       {
-        title: "Posture at a glance",
-        caption: "Audit opens with the posture dashboard. Expand the sections below for detailed controls.",
+        title: "Signals that need attention",
+        caption: "Signals sit in three groups. Red rows need attention, and every row opens its records.",
         narration:
-          "The Audit tab opens on the posture dashboard — audit events, critical events, the prompt watchlist, active admins and users, connector issues, and ungrouped models — while the sections below start collapsed. Cards that need attention are highlighted. Data Retention sits below Recent Governance Activity and groups schedules, tags, and legal holds.",
-        durationSeconds: 24,
-        focus: "auCards",
+          "The Audit tab opens on Admin Audit. The banner counts the signals that need attention, and signals are grouped into Security signals, Identity and access, and Models and workspace. Groups with issues open automatically, and clear groups fold to one line. Switch between List and Cards, and select any row to review the records behind it.",
+        durationSeconds: 23,
+        focus: "auSignals",
+      },
+      {
+        title: "Audit Insights trends",
+        caption: "Choose 7, 14, or 30 days to chart severity, alerts, people, areas, and hours.",
+        narration:
+          "Audit Insights charts the trends behind those signals for your organization: audit events by day and severity, security alerts by day, an alert breakdown by rule or person, the most active people, activity by area, and activity by hour, with after-hours time shaded. Choose a 7, 14, or 30 day range.",
+        durationSeconds: 23,
+        focus: "auInsights",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Open the records behind a chart",
+        caption: "Select any bar or point to list its records, then filter them by person, status, or model.",
+        narration:
+          "Select any bar or point to open an audit investigation with the exact records behind it, grouped by severity. Use the filter box to narrow the list, then close it to return to the charts.",
+        durationSeconds: 14,
+        focus: "auInvestigation",
+        calloutPlacement: "left-rail",
       },
       {
         title: "Prompts and security alerts",
         caption: "Expand each section for its own user and date filter; prompts show the model's response too.",
         narration:
-          "Expand User Prompt Activity to drill into saved prompts and their model responses, scoped by the section's own user and date filter. Below it, Security Alerts lists DLP and misuse flags with redacted snippets you can acknowledge or reopen — behind its own filter as well.",
+          "Expand User Prompt Activity to drill into saved prompts and their model responses, scoped by the section's own user and date filter. Below it, Security Alerts lists DLP and misuse flags with redacted snippets you can acknowledge or reopen, behind its own filter as well.",
         durationSeconds: 20,
         focus: "auPromptSelect",
         captionPlacement: "top",
@@ -597,40 +621,49 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-alerts",
     audioSrc: "training/admin/admin-alerts.mp3",
     title: "Alerts and delivery",
-    description: "Watch rules over tenant audit activity with honest email delivery statuses.",
+    description: "Watch rules over tenant audit activity, narrow them to prompt detections, and read honest delivery statuses.",
     icon: "alerts",
-    outcomes: ["Rule created", "Deliveries read honestly"],
+    outcomes: ["Rule created", "Detections chosen", "Deliveries read honestly"],
     scenes: [
       {
         title: "Email delivery status",
         caption: "Admins see a read-only email status; alerts are always logged in-app whether or not email works.",
         narration:
-          "The Alerts tab starts with Email Delivery — for admins this is a read-only status of the platform email configuration. Either way, alerts are always logged in-app, so nothing depends on email being set up.",
+          "The Alerts tab starts with Email Delivery. For admins this is a read-only status of the platform email configuration. Either way, alerts are always logged in-app, so nothing depends on email being set up.",
         durationSeconds: 15,
         focus: "alEmail",
       },
       {
         title: "Tenant alert rules",
-        caption: "Start from the Suspicious-activity template or New rule; matches stay within your administrative scope.",
+        caption: "Start from the Prompt-injection or Suspicious-activity template, or New rule; matches stay in your scope.",
         narration:
-          "Alert rules watch this organization's admin and user audit activity. Start from the Suspicious-activity template or build one with New rule, and every match stays scoped to the people you administer.",
-        durationSeconds: 15,
+          "Alert rules watch this organization's admin and user audit activity. Start from the Prompt-injection or Suspicious-activity template, or build one with New rule. Every match stays scoped to the people you administer.",
+        durationSeconds: 16,
         focus: "alRules",
       },
       {
         title: "Anatomy of a rule",
         caption: "Action patterns like security.*, minimum severity, watched user, fire-when threshold, cooldown, recipients.",
         narration:
-          "A rule combines action patterns like security dot star, a minimum severity, an optional watched user, a fire-when threshold within a window, and a cooldown. Email recipients are comma-separated — leave them empty and the rule logs in-app only.",
+          "A rule combines action patterns like security dot star, a minimum severity, an optional watched user, a fire-when threshold within a window, and a cooldown. Email recipients are comma-separated. Leave them empty and the rule logs in-app only.",
         durationSeconds: 18,
         focus: "alRuleForm",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Only these detections",
+        caption: "Check the prompt detections a rule should watch, or leave all unchecked to match every event.",
+        narration:
+          "Under Only these detections, choose which prompt detectors the rule watches, such as prompt injection, credential extraction, shared passwords, Social Security numbers, or payment cards. Leave them all unchecked to match every event the action patterns allow. Alert emails name the detection but never include the flagged text.",
+        durationSeconds: 22,
+        focus: "alRuleDetections",
         calloutPlacement: "left-rail",
       },
       {
         title: "Honest delivery statuses",
         caption: "Real statuses plus Archive: clear a delivery from the view without deleting its history.",
         narration:
-          "Alert Deliveries records every trigger with its real status — sent, queued, failed with the actual SMTP error, not configured, or logged in-app. Archive a delivery to clear the view — its history is kept, and Show archived brings it back for review or restore.",
+          "Alert Deliveries records every trigger with its real status: sent, queued, failed with the actual SMTP error, not configured, or logged in-app. Archive a delivery to clear the view. Its history is kept, and Show archived brings it back for review or restore.",
         durationSeconds: 19,
         focus: "alDeliveries",
       },

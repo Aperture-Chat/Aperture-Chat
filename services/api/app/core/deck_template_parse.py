@@ -22,7 +22,9 @@ from pptx.util import Emu
 
 from app.models.decks import (
     DeckTemplateImageCandidate,
+    DeckTemplateParagraph,
     DeckTemplateParseResponse,
+    DeckTemplateSlidePicture,
     DeckTemplateSlideText,
     DeckTemplateTheme,
 )
@@ -46,6 +48,16 @@ _DESIGN_HEIGHT = 720
 _DESIGN_JPEG_QUALITY = 72
 _MAX_DESIGN_BYTES = 900_000
 _MAX_DESIGNS = 30
+# Content mode: slide pictures are re-encoded as bounded JPEGs, and the whole
+# deck's pictures share one budget so the opened deck fits its content cap.
+_PICTURE_MAX_SIDE = 1280
+_PICTURE_JPEG_QUALITY = 76
+_MAX_PICTURE_BYTES = 450_000
+_MAX_PICTURES_TOTAL_BYTES = 3_500_000
+_MIN_PICTURE_AREA_RATIO = 0.04
+_MAX_BODIES_PER_SLIDE = 6
+_MAX_PARAGRAPHS_PER_BODY = 40
+_MAX_NOTES_CHARS = 4000
 _FURNITURE_PLACEHOLDERS = {
     PP_PLACEHOLDER.SLIDE_NUMBER,
     PP_PLACEHOLDER.FOOTER,
@@ -389,10 +401,151 @@ def _is_furniture_placeholder(shape: Any) -> bool:
         return False
 
 
-def _slide_texts(presentation: Any, design_indexes: dict[int, int]) -> list[DeckTemplateSlideText]:
+def _placeholder_type(shape: Any) -> Any:
+    try:
+        return shape.placeholder_format.type if shape.is_placeholder else None
+    except Exception:
+        return None
+
+
+def _frame_paragraphs(shape: Any) -> list[DeckTemplateParagraph]:
+    paragraphs: list[DeckTemplateParagraph] = []
+    for paragraph in shape.text_frame.paragraphs:
+        # Soft line breaks arrive as vertical tabs; one bullet is one line.
+        text = " ".join(paragraph.text.split()).strip()
+        if not text:
+            continue
+        level = max(0, min(2, int(paragraph.level or 0)))
+        paragraphs.append(DeckTemplateParagraph(text=text[:_MAX_BLOCK_CHARS], level=level))
+        if len(paragraphs) >= _MAX_PARAGRAPHS_PER_BODY:
+            break
+    return paragraphs
+
+
+def _slide_notes(slide: Any) -> str:
+    try:
+        if not slide.has_notes_slide:
+            return ""
+        frame = slide.notes_slide.notes_text_frame
+        return (frame.text if frame is not None else "").strip()[:_MAX_NOTES_CHARS]
+    except Exception:
+        return ""
+
+
+def _slide_picture_data_url(shape: Any) -> tuple[str, int, int] | None:
+    """Re-encodes a slide picture as a bounded JPEG, flattening transparency
+    onto white. Pictures that stay over budget even when shrunk are skipped."""
+
+    try:
+        image = Image.open(io.BytesIO(shape.image.blob))
+        image.load()
+    except Exception:
+        return None
+    if image.mode in ("RGBA", "LA", "P"):
+        rgba = image.convert("RGBA")
+        flattened = Image.new("RGB", rgba.size, (255, 255, 255))
+        flattened.paste(rgba, mask=rgba.getchannel("A"))
+        image = flattened
+    else:
+        image = image.convert("RGB")
+    for max_side, quality in ((_PICTURE_MAX_SIDE, _PICTURE_JPEG_QUALITY), (960, 68), (720, 62)):
+        candidate = image.copy()
+        candidate.thumbnail((max_side, max_side), Image.LANCZOS)
+        buffer = io.BytesIO()
+        candidate.save(buffer, format="JPEG", quality=quality, optimize=True)
+        if buffer.tell() <= _MAX_PICTURE_BYTES:
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            return f"data:image/jpeg;base64,{encoded}", candidate.width, candidate.height
+    return None
+
+
+def _slide_content(
+    slide: Any,
+    title_shape: Any,
+    slide_area: int,
+    picture_budget: list[int],
+    warnings: list[str],
+) -> dict[str, Any]:
+    """The opened-deck view of one slide: subtitle, every text frame's
+    paragraphs, speaker notes, and its largest picture."""
+
+    title_type = _placeholder_type(title_shape) if title_shape is not None else None
+    content: dict[str, Any] = {
+        "is_title_slide": title_type == PP_PLACEHOLDER.CENTER_TITLE,
+        "subtitle": None,
+        "bodies": [],
+        "notes": _slide_notes(slide),
+        "picture": None,
+    }
+    best_picture: tuple[float, Any] | None = None
+    # python-pptx builds a new proxy per access, so compare the XML elements.
+    title_element = getattr(title_shape, "_element", None)
+    for shape in _iter_shapes(slide.shapes):
+        if (title_element is not None and shape._element is title_element) or _is_furniture_placeholder(shape):
+            continue
+        if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE or (
+            getattr(shape, "image", None) is not None and _placeholder_type(shape) == PP_PLACEHOLDER.PICTURE
+        ):
+            width = int(getattr(shape, "width", 0) or 0)
+            height = int(getattr(shape, "height", 0) or 0)
+            ratio = (width * height) / slide_area if width and height else 0.0
+            if ratio >= _MIN_PICTURE_AREA_RATIO and (best_picture is None or ratio > best_picture[0]):
+                best_picture = (ratio, shape)
+            continue
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        if _placeholder_type(shape) == PP_PLACEHOLDER.SUBTITLE and content["subtitle"] is None:
+            subtitle = " ".join(shape.text_frame.text.split()).strip()
+            if subtitle:
+                content["subtitle"] = subtitle[:_MAX_BLOCK_CHARS]
+                content["is_title_slide"] = True
+            continue
+        paragraphs = _frame_paragraphs(shape)
+        if paragraphs and len(content["bodies"]) < _MAX_BODIES_PER_SLIDE:
+            content["bodies"].append(paragraphs)
+    if best_picture is not None:
+        encoded = _slide_picture_data_url(best_picture[1])
+        if encoded is not None:
+            data_url, width_px, height_px = encoded
+            if len(data_url) <= picture_budget[0]:
+                picture_budget[0] -= len(data_url)
+                alt = ""
+                try:
+                    alt = (best_picture[1]._element.xpath("./p:nvPicPr/p:cNvPr/@descr") or [""])[0]
+                except Exception:
+                    alt = ""
+                content["picture"] = DeckTemplateSlidePicture(
+                    data_url=data_url,
+                    width_px=width_px,
+                    height_px=height_px,
+                    alt=" ".join(str(alt).split())[:300],
+                )
+            elif picture_budget[1] == 0:
+                picture_budget[1] = 1
+                warnings.append(
+                    "Some slide pictures were left out to keep the opened deck within its size limit."
+                )
+    return content
+
+
+def _slide_texts(
+    presentation: Any,
+    design_indexes: dict[int, int],
+    *,
+    include_content: bool = False,
+    warnings: list[str] | None = None,
+) -> list[DeckTemplateSlideText]:
     slides: list[DeckTemplateSlideText] = []
+    slide_area = max(
+        1,
+        int(presentation.slide_width or Emu(12192000)) * int(presentation.slide_height or Emu(6858000)),
+    )
+    # [remaining bytes, warned flag] shared across the deck's slides.
+    picture_budget = [_MAX_PICTURES_TOTAL_BYTES, 0]
     for index, slide in enumerate(presentation.slides):
         if index >= _MAX_SLIDES:
+            if include_content and warnings is not None:
+                warnings.append(f"Only the first {_MAX_SLIDES} slides were opened.")
             break
         title: str | None = None
         blocks: list[str] = []
@@ -424,6 +577,15 @@ def _slide_texts(presentation: Any, design_indexes: dict[int, int]) -> list[Deck
             design_index = design_indexes.get(id(layout._element))
         except Exception:
             layout_name = None
+        content: dict[str, Any] = {}
+        if include_content:
+            try:
+                title_shape = slide.shapes.title
+            except Exception:
+                title_shape = None
+            content = _slide_content(
+                slide, title_shape, slide_area, picture_budget, warnings if warnings is not None else []
+            )
         slides.append(
             DeckTemplateSlideText(
                 index=index,
@@ -431,14 +593,19 @@ def _slide_texts(presentation: Any, design_indexes: dict[int, int]) -> list[Deck
                 blocks=blocks,
                 layout_name=layout_name,
                 design_index=design_index,
+                **content,
             )
         )
     return slides
 
 
-def parse_deck_template(filename: str, payload: bytes) -> DeckTemplateParseResponse:
+def parse_deck_template(
+    filename: str, payload: bytes, *, include_content: bool = False
+) -> DeckTemplateParseResponse:
     """Parses an uploaded template. Raises ValueError when the file is not a
-    readable PowerPoint package; every partial failure becomes a warning."""
+    readable PowerPoint package; every partial failure becomes a warning.
+    include_content adds what opening the deck for editing needs: subtitles,
+    paragraphs with indent levels, speaker notes, and slide pictures."""
 
     try:
         presentation = Presentation(io.BytesIO(payload))
@@ -447,10 +614,13 @@ def parse_deck_template(filename: str, payload: bytes) -> DeckTemplateParseRespo
 
     warnings: list[str] = []
     theme = _extract_theme(presentation, warnings)
-    logos, backgrounds = _picture_candidates(presentation, warnings)
+    # A missing logo matters when lifting a brand, not when opening a deck.
+    logos, backgrounds = _picture_candidates(presentation, [] if include_content else warnings)
     designs, design_indexes = _layout_designs(presentation, warnings)
-    slides = _slide_texts(presentation, design_indexes)
-    if slides and not any(slide.design_index is not None for slide in slides):
+    slides = _slide_texts(
+        presentation, design_indexes, include_content=include_content, warnings=warnings
+    )
+    if slides and not include_content and not any(slide.design_index is not None for slide in slides):
         warnings.append("No slide designs could be rendered; slides use the extracted brand colors.")
     return DeckTemplateParseResponse(
         filename=filename,

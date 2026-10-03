@@ -692,15 +692,21 @@ test("admin audit tab renders tenant audit events from the admin API", async () 
 
   expect(await screen.findByText("Admin Audit")).toBeInTheDocument();
   expect(await screen.findByText("Audit Trail")).toBeInTheDocument();
+  for (const group of ["Security signals", "Identity & access", "Models & workspace"]) {
+    expect(screen.getByRole("region", { name: group })).toBeInTheDocument();
+  }
+  expect(screen.getByRole("region", { name: "Activity by hour" })).toBeInTheDocument();
+  const expandAll = screen.queryByRole("button", { name: "Expand all" });
+  if (expandAll) fireEvent.click(expandAll);
   const auditEventsCard = await screen.findByRole("button", {
     name: "Audit events: 1 tenant events in range. Open investigation.",
   });
-  const adminSummaryCards = document.querySelectorAll(".audit-summary-card");
-  expect(adminSummaryCards).toHaveLength(8);
-  adminSummaryCards.forEach((card) => {
-    expect(card.tagName).toBe("BUTTON");
-    expect(card).toHaveAttribute("aria-haspopup", "dialog");
-    expect(card).toHaveAttribute("data-tooltip", expect.stringContaining("review every record"));
+  const adminSignalRows = document.querySelectorAll(".audit-signal-row");
+  expect(adminSignalRows).toHaveLength(18);
+  adminSignalRows.forEach((row) => {
+    expect(row.tagName).toBe("BUTTON");
+    expect(row).toHaveAttribute("aria-haspopup", "dialog");
+    expect(row).toHaveAttribute("data-tooltip", expect.stringContaining("review every record"));
   });
   fireEvent.click(auditEventsCard);
   const auditEventsDialog = screen.getByRole("dialog", { name: "Audit events" });
