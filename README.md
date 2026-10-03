@@ -63,11 +63,12 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.8](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.8)**:
-> Session details now lists the five symbol shortcuts (/ @ # $ >), Chat
-> Feedback previews read as plain text, and the symbol shortcut and Session
-> details lessons and guides are refreshed.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v057) and
+> **Current release: [v0.5.9](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.9)**:
+> owners configure Elastic Analytics in the console and export audit, usage,
+> chats, documents, and users; alert rules can email on chosen prompt
+> detections such as prompt injection; audit dashboards add Audit Insights
+> trends; and Drafts can open a local file in the editor.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v058) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -163,7 +164,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.8
+#   APERTURE_IMAGE_TAG=v0.5.9
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -184,7 +185,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.8 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.9 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -219,10 +220,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.8` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.9` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.8-dev`, `v0.5.8-test`, `v0.5.8-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.9-dev`, `v0.5.9-test`, `v0.5.9-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
