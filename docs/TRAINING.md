@@ -4,18 +4,61 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **50 lessons, 250 scenes, 50 MP3 tracks, and 4,495 seconds of narration timelines (74 minutes 55 seconds)**. Its 246 measured focus-map entries comprise 108 user targets and 138 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **53 lessons, 545 scenes, 53 MP3 tracks, and 7,662 seconds of narration timelines (127 minutes 42 seconds)**. Its 491 measured focus-map entries comprise 200 user targets and 291 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 22 | 114 | 108 | 22 | 1968 | 26 |
-| Administrator | 13 | 60 | 61 | 13 | 1155 | 40 |
-| Platform owner | 15 | 76 | 77 | 15 | 1372 | 58 |
-| Total | 50 | 250 | 246 | 50 | 4495 | — |
+| User | 22 | 211 | 200 | 22 | 2644 | 26 |
+| Administrator | 13 | 137 | 133 | 13 | 1823 | 40 |
+| Platform owner | 18 | 197 | 158 | 18 | 3195 | 59 |
+| Total | 53 | 545 | 491 | 53 | 7662 | — |
 
-All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/58 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
+All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/59 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
 Lesson counts and timings below are generated from the TypeScript catalog with `--include-drafts`; focus maps, MP3 counts, guide sections, and PDF-copy equality are checked separately. Including drafts inventories proposed content; it never publishes a lesson.
+
+## Training methodology
+
+Every lesson teaches one task as a complete loop: it starts where a person actually starts and ends at a result they can see. A lesson is a narrated video and a written guide built from the same source, so the two cannot drift apart. The same structured guidance also feeds the downloadable PDFs and the website guide.
+
+### Lesson anatomy
+
+Each lesson object in `apps/web/src/components/trainingDecks/{user,admin,owner}.tsx` carries:
+
+| Field | Purpose |
+| --- | --- |
+| `track` | Curriculum heading. Libraries group lessons under their track, in deck order. |
+| `title`, `description` | The task, in the learner's words, and what they will be able to do. |
+| `outcomes` | Two to four observable results, shown as chips under the video. |
+| `prerequisites` | Role or permission, prior setup, and any outside accounts or values. Shown as **Before you begin**. |
+| `setupSteps` | The full numbered procedure for the primary path, one action per step, using exact on-screen labels and ending with verification. Shown as **Step by step**. |
+| `paths` | Alternative routes through the same task (an identity provider, a provider kind, a delivery target, a device), each complete from start to finish. Shown as a path picker inside **Step by step**. |
+| `verify` | What proves the task worked end to end. Shown as **Check it worked**. |
+| `troubleshooting` | Real messages and symptoms, quoted from the product, each with its fix. Shown as **Troubleshooting**. |
+| `scenes` | The video: one idea per scene, each tied to a measured control on a real capture or to an instruction card. |
+
+Scenes follow a consistent arc: an optional opening checklist card, where to find the feature, one scene per step with the exact control highlighted, the verified result, and where useful a real error or refusal the learner may meet.
+
+### Coverage
+
+- **Complete loop.** No scene ends on "then configure it". Setup lessons finish on the evidence: the passing test, the saved item, the delivered email, the signed-in person.
+- **Every path.** When the product offers alternative ways to do a task, each one is taught completely, either as its own lesson (substantial, vendor-specific paths such as Microsoft Entra ID, Okta, and Google Workspace sign-in) or as a `paths` entry with scenes wherever its screens differ.
+- **Real messages.** Troubleshooting entries quote strings that exist in the product source, so a learner can match what they see.
+
+### Evidence rules
+
+- Every screenshot is a real state captured from an isolated instance with synthetic data. Screens are never staged, edited, or composited, and success is never simulated.
+- **Instruction cards** (`card` scenes) are drawn by the video composition and are labeled with where the steps happen (for example "Do this in · Microsoft Entra admin center"). They are used only for steps outside the product, such as a vendor console or a phone's share sheet, and for opening checklists. They never imitate another product's interface.
+- When a path cannot run locally (a paid vendor account, an image model), the lesson shows the real product state that can be produced, teaches the outside steps with a card, and says plainly what the learner will see. For example, the Entra and Okta presets are typed into the real form but not saved as working, while Google's public issuer is genuinely tested.
+- Captures never contain filled password or one-time-code fields, authenticator QR codes, setup secrets, or recovery codes; the walkthrough runner refuses them.
+
+### Narration and captions
+
+Narration is second person, imperative, and present tense, and says each label exactly as it appears. Scenes run 8 to 25 seconds. Acronyms that text-to-speech misreads are spelled out in the narration ("S S O", "I D"), never in captions or guides. Captions summarize the scene in one sentence; the renderer check flags any caption, title card, or highlight that collides.
+
+### Capturing a complete walkthrough
+
+`apps/web/scripts/capture-walkthroughs.cjs` runs modules from `apps/web/scripts/walkthroughs/`. A module performs its task for real against an isolated instance (for SSO: register the application at a local Keycloak, save and test it in the console, sign a synthetic person in, map groups, and enforce), staging a frame at each step. At every `shot()` the runner measures the focus regions the deck declares for that frame from the live DOM, and writes `<role>/measured-rects.json` beside the PNGs for `apply-training-focus.cjs`. External origins such as the identity provider must be declared by the module; every other origin except the app's web font is blocked. `--publish` copies a complete, hash-checked batch into `public/training/<role>/`.
 
 ## Sources
 
@@ -25,6 +68,7 @@ Lesson counts and timings below are generated from the TypeScript catalog with `
 | `apps/web/src/components/TrainingVideoLibrary.tsx` | Role libraries, player, transcript, and guide downloads. |
 | `apps/web/src/components/trainingVideoKit.tsx` | 1185 × 855 composition at 30 fps; image fit, highlights, callouts, and captions. |
 | `apps/web/scripts/training-catalog.cjs` and `audit-training.cjs` | Inventory, media/timing checks, capture contracts, and PDF-copy checks. |
+| `apps/web/scripts/capture-walkthroughs.cjs` and `walkthroughs/*.cjs` | Complete, path-by-path walkthroughs performed for real against an isolated instance, with measured focus regions. |
 | `apps/web/scripts/training-focus-measurement.cjs` and `apply-training-focus.cjs` | DOM measurements and imports verified against the exact public PNG bytes. |
 | `apps/web/scripts/training-frame-aliases.cjs` | Byte-identical onboarding views of reviewed model access, account management, and a genuine user reply. |
 | `apps/web/scripts/generate-training-narration.py` | Per-scene speech, MP3 encoding, timing updates, and private build evidence. |
@@ -34,60 +78,63 @@ Lesson counts and timings below are generated from the TypeScript catalog with `
 
 ## Lesson inventory
 
-Seconds are the sum of each lesson's source scene durations.
+Lessons are listed in each library's curriculum order. Seconds are the sum of each lesson's scene durations; Cards counts instruction-card scenes.
 
-| Audience | Title | Lesson ID | Scenes | Seconds |
-| --- | --- | --- | ---: | ---: |
-| User | Agent profiles | `agents` | 3 | 51 |
-| User | Attach files and sources | `attachments` | 4 | 44 |
-| User | Build a slide deck | `deck-basics` | 12 | 199 |
-| User | Choose models and request access | `model-access` | 4 | 79 |
-| User | Dictation, images, and diagrams | `dictation-images` | 4 | 52 |
-| User | Draft documents | `drafts` | 11 | 241 |
-| User | Follow the work trace | `work-traces` | 4 | 50 |
-| User | Knowledge bases | `knowledge` | 3 | 40 |
-| User | Knowledge, Web, Agent, and reply settings | `send-options` | 6 | 73 |
-| User | Organize and find your work | `organize` | 6 | 89 |
-| User | Personalization memory | `personalization-memory` | 4 | 81 |
-| User | Personalize, use mobile, and get help | `account-mobile-help` | 9 | 172 |
-| User | Preview chats at a glance | `chat-previews` | 1 | 29 |
-| User | Protect your account and recover access | `account-security` | 7 | 154 |
-| User | Request access and enter your workspace | `access-and-sign-in` | 7 | 137 |
-| User | Save, organize, and recover your drafts | `save-and-recover-work` | 4 | 85 |
-| User | Scheduled automations | `scheduled-automations` | 4 | 56 |
-| User | Search, commands, and workspace links | `search-and-commands` | 4 | 79 |
-| User | Session details and context | `session-details` | 3 | 59 |
-| User | Start chatting | `chat-basics` | 4 | 55 |
-| User | Symbol shortcuts: / @ # $ > | `composer-commands` | 7 | 95 |
-| User | Tools and the Library | `tools-automations` | 3 | 48 |
-| Administrator | Alerts and delivery | `admin-alerts` | 5 | 90 |
-| Administrator | Approve access and finish sign-in | `admin-access-onboarding` | 5 | 96 |
-| Administrator | Data retention and tagging | `admin-retention` | 10 | 208 |
-| Administrator | Groups and permissions | `admin-groups` | 4 | 63 |
-| Administrator | Policies and memory governance | `admin-policies` | 5 | 105 |
-| Administrator | Response actions and connector responsibilities | `admin-tools` | 3 | 62 |
-| Administrator | Review feedback and reported issues | `admin-feedback-issues` | 4 | 78 |
-| Administrator | Review model requests and explain access | `admin-model-requests` | 4 | 83 |
-| Administrator | Tenant analytics | `admin-analytics` | 4 | 74 |
-| Administrator | Tenant audit | `admin-audit` | 5 | 98 |
-| Administrator | Tenant model access | `admin-model-access` | 3 | 49 |
-| Administrator | Tenant SSO and provisioning | `admin-sso` | 4 | 70 |
-| Administrator | Users and accounts | `admin-users` | 4 | 79 |
-| Platform owner | Alerts and email delivery | `owner-alerts` | 6 | 129 |
-| Platform owner | Analytics: runtime, activity, and usage | `runtime-analytics` | 6 | 88 |
-| Platform owner | API Key Vault and replacement | `api-key-vault` | 3 | 39 |
-| Platform owner | Data retention and tagging | `owner-retention` | 10 | 208 |
-| Platform owner | Elastic Analytics export | `elastic-analytics` | 7 | 135 |
-| Platform owner | Organization model availability | `model-availability` | 3 | 36 |
-| Platform owner | Owner audit signals | `owner-audit` | 8 | 143 |
-| Platform owner | Platform branding | `branding` | 4 | 57 |
-| Platform owner | Policies, budget, and connectors | `policies-connectors` | 6 | 120 |
-| Platform owner | Providers and connections | `provider-setup` | 4 | 67 |
-| Platform owner | Review workspace search readiness | `search-index` | 2 | 43 |
-| Platform owner | Set up the first workspace | `owner-first-workspace` | 5 | 104 |
-| Platform owner | Single sign-on setup | `sso-setup` | 4 | 58 |
-| Platform owner | SSO provisioning and go-live | `sso-security` | 4 | 87 |
-| Platform owner | Users and role boundaries | `users-roles` | 4 | 58 |
+| Audience | Track | Title | Lesson ID | Scenes | Cards | Seconds |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| User | Get started | Request access and enter your workspace | `access-and-sign-in` | 16 | 2 | 230 |
+| User | Get started | Start chatting | `chat-basics` | 8 | 0 | 98 |
+| User | Get started | Choose models and request access | `model-access` | 8 | 0 | 118 |
+| User | Get started | Protect your account and recover access | `account-security` | 12 | 1 | 171 |
+| User | Chat | Symbol shortcuts: / @ # $ > | `composer-commands` | 11 | 0 | 109 |
+| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 158 |
+| User | Chat | Attach files and sources | `attachments` | 9 | 1 | 128 |
+| User | Chat | Dictation, images, and diagrams | `dictation-images` | 6 | 0 | 87 |
+| User | Chat | Follow the work trace and act on replies | `work-traces` | 8 | 0 | 103 |
+| User | Chat | Session details and context | `session-details` | 4 | 0 | 59 |
+| User | Chat | Preview chats at a glance | `chat-previews` | 2 | 0 | 34 |
+| User | Drafts and decks | Draft documents | `drafts` | 17 | 0 | 214 |
+| User | Drafts and decks | Build a slide deck | `deck-basics` | 15 | 0 | 165 |
+| User | Drafts and decks | Save, organize, and recover your drafts | `save-and-recover-work` | 8 | 0 | 100 |
+| User | Agents, knowledge, and automations | Agent profiles | `agents` | 9 | 0 | 112 |
+| User | Agents, knowledge, and automations | Knowledge bases | `knowledge` | 10 | 0 | 123 |
+| User | Agents, knowledge, and automations | Tools and the Library | `tools-automations` | 6 | 0 | 68 |
+| User | Agents, knowledge, and automations | Scheduled automations | `scheduled-automations` | 15 | 0 | 162 |
+| User | Organize and personalize | Organize and find your work | `organize` | 9 | 0 | 96 |
+| User | Organize and personalize | Search, commands, and workspace links | `search-and-commands` | 7 | 0 | 80 |
+| User | Organize and personalize | Personalization memory | `personalization-memory` | 7 | 0 | 88 |
+| User | Organize and personalize | Personalize, use mobile, and get help | `account-mobile-help` | 12 | 1 | 141 |
+| Administrator | Accounts and access | Approve access and finish sign-in | `admin-access-onboarding` | 17 | 1 | 209 |
+| Administrator | Accounts and access | Users and accounts | `admin-users` | 12 | 0 | 156 |
+| Administrator | Accounts and access | Groups and permissions | `admin-groups` | 10 | 0 | 125 |
+| Administrator | Accounts and access | Tenant model access | `admin-model-access` | 8 | 0 | 111 |
+| Administrator | Accounts and access | Review model requests and explain access | `admin-model-requests` | 8 | 0 | 97 |
+| Administrator | Sign-in | Tenant SSO and provisioning | `admin-sso` | 20 | 2 | 294 |
+| Administrator | Workspace controls | Policies and memory governance | `admin-policies` | 10 | 0 | 149 |
+| Administrator | Workspace controls | Response actions and connector responsibilities | `admin-tools` | 12 | 0 | 150 |
+| Administrator | Oversight and compliance | Tenant analytics | `admin-analytics` | 9 | 0 | 123 |
+| Administrator | Oversight and compliance | Tenant audit | `admin-audit` | 7 | 0 | 93 |
+| Administrator | Oversight and compliance | Alerts and delivery | `admin-alerts` | 8 | 1 | 111 |
+| Administrator | Oversight and compliance | Data retention and tagging | `admin-retention` | 10 | 0 | 136 |
+| Administrator | Oversight and compliance | Review feedback and reported issues | `admin-feedback-issues` | 6 | 0 | 69 |
+| Platform owner | Get started | Set up the first workspace | `owner-first-workspace` | 13 | 1 | 232 |
+| Platform owner | Get started | Providers and connections | `provider-setup` | 23 | 7 | 388 |
+| Platform owner | Get started | API Key Vault and replacement | `api-key-vault` | 7 | 0 | 111 |
+| Platform owner | Get started | Organization model availability | `model-availability` | 8 | 0 | 125 |
+| Platform owner | People and access | Users and role boundaries | `users-roles` | 8 | 0 | 130 |
+| Platform owner | Single sign-on | Single sign-on, start to finish | `sso-setup` | 20 | 1 | 326 |
+| Platform owner | Single sign-on | Single sign-on with Microsoft Entra ID | `sso-entra` | 9 | 4 | 157 |
+| Platform owner | Single sign-on | Single sign-on with Okta | `sso-okta` | 8 | 5 | 125 |
+| Platform owner | Single sign-on | Single sign-on with Google Workspace | `sso-google` | 6 | 4 | 98 |
+| Platform owner | Single sign-on | Go live: groups, MFA, and enforcement | `sso-security` | 7 | 1 | 128 |
+| Platform owner | Policies and branding | Policies, budget, and connectors | `policies-connectors` | 24 | 5 | 394 |
+| Platform owner | Policies and branding | Platform branding | `branding` | 8 | 0 | 118 |
+| Platform owner | Policies and branding | Review workspace search readiness | `search-index` | 4 | 0 | 62 |
+| Platform owner | Monitoring and compliance | Analytics: runtime, activity, and usage | `runtime-analytics` | 9 | 0 | 117 |
+| Platform owner | Monitoring and compliance | Owner audit signals | `owner-audit` | 9 | 0 | 136 |
+| Platform owner | Monitoring and compliance | Alerts and email delivery | `owner-alerts` | 12 | 3 | 209 |
+| Platform owner | Monitoring and compliance | Elastic Analytics export | `elastic-analytics` | 12 | 2 | 184 |
+| Platform owner | Monitoring and compliance | Data retention and tagging | `owner-retention` | 10 | 0 | 155 |
 
 ## Rebuild workflow
 
@@ -107,6 +154,7 @@ Run from the repository root with the intended synthetic role session. Read each
 
 | Capture task | Scripts under `apps/web/scripts/` |
 | --- | --- |
+| Every lesson's complete walkthrough (current library) | `capture-walkthroughs.cjs` with the modules in `walkthroughs/` (one file per role and topic) |
 | User chat and navigation | `capture-training-frames.cjs` |
 | Deck editor, slide AI edit, uploaded background, presenter view, and brand template | `capture-deck-frames.cjs` |
 | Document editor, Edit with AI review, slash menu, find and outline, settings, and history | `capture-training-refresh.cjs drafts` |
@@ -251,3 +299,14 @@ Frames came from an isolated copy of the synthetic training fixture. Two weeks o
 - **Narration:** six tracks were regenerated (`owner-audit`, `owner-alerts`, `elastic-analytics`, `admin-audit`, `admin-alerts`, and `drafts`). Each was transcribed with speech recognition and compared with its script.
 - **Focus and layout:** 33 focus regions were imported against the exact published PNG bytes. All 42 scenes of the changed lessons were rendered through the training composition, measured for overlap between title cards, captions, and highlighted controls, and reviewed visually. Eight scenes received explicit callout or caption placement so the card does not cover the control it describes.
 - **Guides:** the three PDFs were regenerated (30, 45, and 62 pages), the changed pages were rendered with Poppler and inspected, and each pair of copies is byte-identical.
+
+## Complete walkthrough overhaul — October 2026
+
+Every lesson was rebuilt to the methodology above: a complete loop from the first click to a visible result, every path the product offers, and a written guide (Before you begin, Step by step with paths, Check it worked, Troubleshooting) beside the video. The libraries are grouped into curriculum tracks. The downloadable guides embed each lesson's procedure, and the website guide shows the same written guide under every video.
+
+- **Single sign-on** became a five-lesson track. *Single sign-on, start to finish* performs the whole loop against a real Keycloak: realm, confidential client with PKCE, group mapper, groups, and a test person in the identity provider's console; then save, Test connection, a first sign-in that creates the account, and verification in Users. *Microsoft Entra ID*, *Okta*, and *Google Workspace* teach each vendor console with instruction cards checked against current vendor documentation, with the real Aperture Chat presets; Google's public issuer is genuinely tested. *Go live* maps groups and proves they sync, enforces SSO, and records the real refusals for a local password on an enforced domain and for an address outside the allowed domains. The administrator lesson repeats the loop through the Admin console SSO tab with its own realm.
+- **Captures:** about 450 frames were captured by walkthrough modules on four isolated synthetic instances while each task was really performed, including real cloud-provider rejections, a real Kibana import, real SMTP deliveries to a local relay, and real budget refusals. Frames still current from earlier refreshes were kept only after comparison (masked authenticator screens, image-generation frames that need an image model, a few editor frames, and the two portrait phone frames). The 140 superseded frames and the onboarding frame aliases were retired.
+- **Narration:** all 53 tracks were regenerated with the same Kokoro voice and transcribed with Whisper; every track matched its script (the two lowest word-agreement scores came from Whisper repeating text over trailing silence past the end of the audio).
+- **Layout:** all 545 scenes were rendered through the composition and measured for overlap between title cards, captions, and highlights; flagged scenes received explicit placements, with one accepted 8% caption overlap on a full-height phone frame.
+- **Guides:** the PDFs were regenerated (76, 113, and 167 pages) and every page was rasterized and inspected; each pair of copies is byte-identical.
+- **Product fixes found by the walkthroughs:** the SSO panel showed a relative redirect URI in same-origin deployments, and the OIDC token exchange now prefers `client_secret_basic` with a one-time `client_secret_post` fallback, which Okta's per-app authentication method requires. Other defects found while recording are taught as they currently behave and are listed for follow-up rather than hidden.

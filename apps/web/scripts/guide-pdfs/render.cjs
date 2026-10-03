@@ -4,8 +4,49 @@
  */
 
 const { GUIDES, partsForRole, sectionsForRole } = require("./content.cjs");
+const { parseDeck } = require("../training-catalog.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
+
+/* Lesson blocks print the same prerequisites, steps, checks, and fixes that
+ * the narrated walkthrough shows, read from the training decks, so the guide
+ * and the video cannot describe different procedures. */
+const LESSONS = Object.fromEntries(["user", "admin", "owner"].map((role) => {
+  const source = fs.readFileSync(path.join(__dirname, "../../src/components/trainingDecks", `${role}.tsx`), "utf8");
+  return [role, new Map(parseDeck(source, role).map((lesson) => [lesson.id, lesson]))];
+}));
+const WATCH_IN = {
+  user: "Help › Learn",
+  admin: "Admin console › Documentation",
+  owner: "Platform console › Documentation",
+};
+
+function lessonFor(role, id) {
+  const lesson = LESSONS[role]?.get(id);
+  if (!lesson) throw new Error(`Guide references an unknown ${role} walkthrough: ${id}`);
+  return lesson;
+}
+
+function renderLesson(block) {
+  const lesson = lessonFor(block.role, block.id);
+  const seconds = lesson.scenes.reduce((sum, scene) => sum + scene.duration, 0);
+  const minutes = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const list = (items, className = "plain") => `<ul class="${className}">${items.map((item) => `<li>${richText(item)}</li>`).join("")}</ul>`;
+  const steps = (items) => `<ol class="steps">${items.map((item) => `<li>${richText(item)}</li>`).join("")}</ol>`;
+  const parts = [
+    `<div class="lesson-head"><span class="lesson-kicker">Walkthrough · ${minutes} · ${escapeHtml(WATCH_IN[block.role])}</span><strong>${escapeHtml(lesson.title)}</strong><span>${escapeHtml(lesson.description || "")}</span></div>`,
+  ];
+  if (lesson.prerequisites.length) parts.push(`<h4>Before you begin</h4>${list(lesson.prerequisites)}`);
+  if (lesson.setup_steps.length) parts.push(`<h4>Step by step</h4>${steps(lesson.setup_steps)}`);
+  for (const route of lesson.paths) parts.push(`<h4>Path: ${escapeHtml(route.label)}</h4>${steps(route.steps)}`);
+  if (lesson.verify.length) parts.push(`<h4>Check that it worked</h4>${list(lesson.verify, "checks")}`);
+  if (lesson.troubleshooting.length) {
+    parts.push(`<h4>Troubleshooting</h4><table class="ref wrap-first"><thead><tr><th>What you see</th><th>What to do</th></tr></thead><tbody>${lesson.troubleshooting
+      .map((item) => `<tr><td>${richText(item.symptom)}</td><td>${richText(item.fix)}</td></tr>`)
+      .join("")}</tbody></table>`);
+  }
+  return `<div class="lesson-box">${parts.join("")}</div>`;
+}
 
 // Orientation images share the reviewed training assets, so guides cannot
 // silently retain a separate set of screenshots after the interface changes.
@@ -13,9 +54,9 @@ const SECTION_FIGURES = {
   layout: ["user/chat-home.png", "The chat workspace: navigation on the left, model selection above, and the message composer in the main area."],
   drafts: ["user/drafts.png", "Drafts combines the document editor with a separate assistant and document controls."],
   "settings-account": ["user/account-security-overview.png", "Your account includes profile settings, password controls, and two-step verification."],
-  "admin-overview": ["admin/users.png", "The Admin console opens the workspace controls available to your administrator account."],
-  "owner-providers": ["owner/providers.png", "Provider cards show the actual connection and model-catalog state."],
-  "owner-connectors": ["owner/policies-callout-current.png", "Shared connector configuration is in the Platform Owner console under Org Settings."],
+  "admin-overview": ["admin/users-list.png", "The Admin console opens the workspace controls available to your administrator account."],
+  "owner-providers": ["owner/pv-overview.png", "Provider cards show the actual connection and model-catalog state."],
+  "owner-connectors": ["owner/cn-panel.png", "Shared connector configuration is in the Platform Owner console under Org Settings."],
 };
 
 function renderSectionFigure(sectionId) {
@@ -122,6 +163,16 @@ const CSS = `
     break-after: avoid; page-break-after: avoid; }
   .doc-section p { margin: 7px 0; }
   .ui-figure { margin: 12px 0 16px; break-inside: avoid; page-break-inside: avoid; }
+  .lesson-box { margin: 12px 0 14px; padding: 12px 16px 6px; border: 1px solid var(--teal-border); border-radius: 12px;
+    background: linear-gradient(180deg, var(--teal-soft), var(--surface) 64px); }
+  .lesson-head { display: grid; gap: 3px; padding-bottom: 6px; border-bottom: 1px solid var(--teal-border); margin-bottom: 4px; break-inside: avoid; }
+  .lesson-kicker { font-size: 7.8pt; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--teal-strong); }
+  .lesson-head strong { font-size: 11.6pt; color: var(--text-strong); }
+  .lesson-head span:last-child { font-size: 9.4pt; color: var(--muted); }
+  .lesson-box h4 { break-after: avoid; }
+  ul.checks { list-style: none; margin: 6px 0 8px; }
+  ul.checks li { position: relative; padding: 0 0 5px 22px; break-inside: avoid; }
+  ul.checks li::before { content: "✓"; position: absolute; left: 4px; top: 0; color: var(--teal); font-weight: 800; }
   .ui-figure img { display: block; width: 100%; max-height: 3.8in; object-fit: contain;
     border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-sunken); }
   .ui-figure figcaption { margin-top: 6px; font-size: 8.4pt; line-height: 1.45; color: var(--muted); }
@@ -286,8 +337,10 @@ function renderBlock(block) {
         .map((row) => `<tr>${row.map((cell) => `<td>${richText(cell)}</td>`).join("")}</tr>`)
         .join("")}</tbody></table>`;
     }
+    case "lesson":
+      return renderLesson(block);
     default:
-      return "";
+      throw new Error(`Unknown guide block type: ${block.type}`);
   }
 }
 

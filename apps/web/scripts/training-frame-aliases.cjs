@@ -7,12 +7,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
-const FRAME_ALIASES = {
-  "training/admin/access-model-readiness.png": "training/admin/model-access.png",
-  "training/admin/access-first-reply.png": "training/user/chat-response-actions.png",
-  "training/owner/first-workspace-access.png": "training/owner/roles.png",
-  "training/owner/first-workspace-reply.png": "training/user/chat-response-actions.png",
-};
+// Every onboarding lesson now captures its own frames in the complete
+// walkthroughs (capture-walkthroughs.cjs), so no alias is in use. Add an
+// entry here only for a reviewed, byte-identical reuse.
+const FRAME_ALIASES = {};
 
 function publishAliases() {
   const publicRoot = path.join(__dirname, "../public");

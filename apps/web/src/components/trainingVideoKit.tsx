@@ -34,16 +34,38 @@ export type FocusRegion = {
   fit?: "fill" | "contain";
 };
 
+/* Steps the learner performs in another system, such as registering an app in
+ * an identity provider's console. These render as a labeled instruction card,
+ * never as a screenshot: the library only shows captures of this product, so
+ * another vendor's console is described, not imitated. */
+export type TrainingStepCard = {
+  /** Header label; defaults to "Do this in" for steps in another system. A
+   * checklist card uses a label such as "Before you begin". */
+  label?: string;
+  /** Where the steps happen, e.g. "Microsoft Entra admin center". */
+  where: string;
+  steps: string[];
+  /** Values carried between the two systems, shown in a monospace panel. */
+  values?: Array<{ label: string; value: string }>;
+};
+
 export type TrainingScene = {
   title: string;
   caption: string;
   narration: string;
   durationSeconds: number;
-  focus: string;
+  /** Measured region of a real capture. Only instruction-card scenes omit it. */
+  focus?: string;
+  card?: TrainingStepCard;
   calloutPlacement?: CalloutPlacement;
   /** Keep captions clear of controls in densely filled captures. */
   captionPlacement?: "bottom" | "top";
 };
+
+/** One complete route through a lesson's task, such as one identity provider. */
+export type TrainingPath = { label: string; steps: string[] };
+/** A real symptom or on-screen message and what resolves it. */
+export type TrainingTroubleshoot = { symptom: string; fix: string };
 
 export type TrainingVideoBase = {
   id: string;
@@ -53,6 +75,15 @@ export type TrainingVideoBase = {
   scenes: TrainingScene[];
   outcomes: string[];
   setupSteps?: string[];
+  /** Curriculum heading the library groups this lesson under. */
+  track?: string;
+  /** Role, access, outside accounts, and values needed before step one. */
+  prerequisites?: string[];
+  /** Alternative routes through the same task, each complete start to finish. */
+  paths?: TrainingPath[];
+  /** Observable results that prove the task worked end to end. */
+  verify?: string[];
+  troubleshooting?: TrainingTroubleshoot[];
 };
 
 export type TimedScene = TrainingScene & { startSeconds: number; endSeconds: number };
@@ -228,9 +259,9 @@ export function TrainingComposition({
   const activeIndex = timeline.indexOf(activeScene);
   const previousScene = activeIndex > 0 ? timeline[activeIndex - 1] : null;
   const captions = buildCaptions(video);
-  const activeRegion = regions[activeScene.focus];
-  const previousRegion = previousScene ? regions[previousScene.focus] : null;
-  const activeLayout = layoutForRect(activeRegion.rect, activeScene.calloutPlacement);
+  const activeRegion = sceneRegion(activeScene, regions);
+  const previousRegion = previousScene ? sceneRegion(previousScene, regions) : null;
+  const activeLayout = activeRegion ? layoutForRect(activeRegion.rect, activeScene.calloutPlacement) : null;
 
   /* Scene hand-off: when consecutive scenes share a frame the highlight
    * glides between the two rects; when the frame changes the screenshots
@@ -241,11 +272,15 @@ export function TrainingComposition({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const sameImage = previousRegion !== null && previousRegion.frame === activeRegion.frame
+  const sameImage = previousRegion !== null && activeRegion !== null && previousRegion.frame === activeRegion.frame
     && (previousRegion.fit ?? "fill") === (activeRegion.fit ?? "fill");
+  // Leaving a capture for an instruction card keeps the capture underneath
+  // while the card fades in; returning from a card fades the capture in.
   const crossfading = previousRegion !== null && !sameImage && transition < 1;
-  const highlightRect =
-    sameImage && previousRegion && transition < 1
+  const enteringFromCard = Boolean(previousScene?.card) && transition < 1;
+  const highlightRect = !activeRegion
+    ? null
+    : sameImage && previousRegion && transition < 1
       ? lerpRect(previousRegion.rect, activeRegion.rect, transition)
       : activeRegion.rect;
   const highlightOpacity = sameImage ? 1 : transition;
@@ -269,7 +304,7 @@ export function TrainingComposition({
     <AbsoluteFill className="owner-training-composition">
       {video.audioSrc ? <Audio src={staticFile(video.audioSrc)} /> : null}
       <div className="training-recorded-frame">
-        {crossfading && previousRegion ? (
+        {(crossfading || (!activeRegion && previousRegion)) && previousRegion ? (
           <Img
             className="training-recorded-image"
             src={staticFile(previousRegion.frame)}
@@ -282,39 +317,45 @@ export function TrainingComposition({
             alt=""
           />
         ) : null}
-        <Img
-          className="training-recorded-image"
-          src={staticFile(activeRegion.frame)}
-          style={{
-            objectFit: activeRegion.fit ?? "fill",
-            objectPosition: "center",
-            opacity: crossfading ? transition : 1,
-            transform: `scale(${activeRegion.zoom ?? 1})`,
-            transformOrigin: "top left",
-          }}
-          alt=""
-        />
-        <div
-          className="training-highlight-pulse"
-          style={{
-            left: highlightRect.x - pulsePad,
-            top: highlightRect.y - pulsePad,
-            width: highlightRect.w + pulsePad * 2,
-            height: highlightRect.h + pulsePad * 2,
-            opacity: pulseOpacity,
-          }}
-        />
-        <div
-          className="training-highlight"
-          style={{
-            left: highlightRect.x,
-            top: highlightRect.y,
-            width: highlightRect.w,
-            height: highlightRect.h,
-            opacity: highlightOpacity,
-            transform: `scale(${highlightScale})`,
-          }}
-        />
+        {activeRegion ? (
+          <Img
+            className="training-recorded-image"
+            src={staticFile(activeRegion.frame)}
+            style={{
+              objectFit: activeRegion.fit ?? "fill",
+              objectPosition: "center",
+              opacity: crossfading || enteringFromCard ? transition : 1,
+              transform: `scale(${activeRegion.zoom ?? 1})`,
+              transformOrigin: "top left",
+            }}
+            alt=""
+          />
+        ) : null}
+        {highlightRect ? (
+          <>
+            <div
+              className="training-highlight-pulse"
+              style={{
+                left: highlightRect.x - pulsePad,
+                top: highlightRect.y - pulsePad,
+                width: highlightRect.w + pulsePad * 2,
+                height: highlightRect.h + pulsePad * 2,
+                opacity: pulseOpacity,
+              }}
+            />
+            <div
+              className="training-highlight"
+              style={{
+                left: highlightRect.x,
+                top: highlightRect.y,
+                width: highlightRect.w,
+                height: highlightRect.h,
+                opacity: highlightOpacity,
+                transform: `scale(${highlightScale})`,
+              }}
+            />
+          </>
+        ) : null}
       </div>
       {timeline.map((scene) => (
         <Sequence
@@ -323,10 +364,18 @@ export function TrainingComposition({
           durationInFrames={Math.floor((scene.endSeconds - scene.startSeconds) * fps)}
           premountFor={fps}
         >
-          <TrainingSceneCallout scene={scene} regions={regions} badge={badge} />
+          {scene.card ? (
+            <TrainingStepCardView scene={scene} card={scene.card} />
+          ) : (
+            <TrainingSceneCallout scene={scene} regions={regions} badge={badge} />
+          )}
         </Sequence>
       ))}
-      <TrainingCaptionTrack captions={captions} placement={activeScene.captionPlacement ?? activeLayout.caption} />
+      <TrainingCaptionTrack
+        captions={captions}
+        placement={activeScene.captionPlacement ?? activeLayout?.caption ?? "bottom"}
+        centered={Boolean(activeScene.card)}
+      />
     </AbsoluteFill>
   );
 }
@@ -341,8 +390,9 @@ function TrainingSceneCallout({
   badge: string;
 }) {
   const frame = useCurrentFrame();
-  const layout = layoutForRect(regions[scene.focus].rect, scene.calloutPlacement);
-  const railCard = leftRailCardForRect(regions[scene.focus].rect);
+  const region = sceneRegion(scene, regions)!;
+  const layout = layoutForRect(region.rect, scene.calloutPlacement);
+  const railCard = leftRailCardForRect(region.rect);
   const enter = interpolate(frame, [0, 12], [0.92, 1], {
     easing: Easing.bezier(0.16, 1, 0.3, 1),
     extrapolateLeft: "clamp",
@@ -386,6 +436,76 @@ function TrainingSceneCallout({
         <p>{scene.caption}</p>
       </div>
     </>
+  );
+}
+
+/** The measured capture a scene shows, or null for an instruction card. */
+export function sceneRegion(scene: TrainingScene, regions: Record<string, FocusRegion>): FocusRegion | null {
+  if (scene.card) return null;
+  const region = scene.focus ? regions[scene.focus] : undefined;
+  if (!region) throw new Error(`Training scene "${scene.title}" has no measured focus region.`);
+  return region;
+}
+
+/** Index of the step being narrated: steps share the scene in proportion to
+ * their length, and the last one holds through the closing beat. */
+export function activeCardStep(steps: string[], localSeconds: number, durationSeconds: number): number {
+  const weights = steps.map((step) => Math.max(step.length, 24));
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const progress = Math.min(1, Math.max(0, localSeconds / Math.max(1, durationSeconds * 0.94)));
+  let cursor = 0;
+  for (let index = 0; index < steps.length; index += 1) {
+    cursor += weights[index] / total;
+    if (progress < cursor) return index;
+  }
+  return steps.length - 1;
+}
+
+function TrainingStepCardView({ scene, card }: { scene: TimedScene; card: TrainingStepCard }) {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  // A lesson that opens on a card shows it at once, so the poster frame is not blank.
+  const enter = scene.startSeconds === 0 ? 1 : interpolate(frame, [0, 14], [0, 1], {
+    easing: Easing.bezier(0.22, 1, 0.36, 1),
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const active = activeCardStep(card.steps, frame / fps, scene.durationSeconds);
+  return (
+    <div className="training-step-card-layer" style={{ opacity: enter }}>
+      <section
+        className="training-step-card"
+        style={{ transform: `translateY(${interpolate(enter, [0, 1], [10, 0])}px)` }}
+        aria-label={`${scene.title}: ${card.label ?? "Do this in"} ${card.where}`}
+      >
+        <header>
+          <span className="training-step-card-where">{card.label ?? "Do this in"}</span>
+          <strong>{card.where}</strong>
+        </header>
+        <h3>{scene.title}</h3>
+        <ol>
+          {card.steps.map((step, index) => (
+            <li
+              key={step}
+              className={index < active ? "is-done" : index === active ? "is-active" : undefined}
+            >
+              <span className="training-step-number">{index + 1}</span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+        {card.values?.length ? (
+          <dl className="training-step-values">
+            {card.values.map((value) => (
+              <div key={value.label}>
+                <dt>{value.label}</dt>
+                <dd>{value.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </section>
+    </div>
   );
 }
 
@@ -481,9 +601,12 @@ function TrainingSceneArrow({
 export function TrainingCaptionTrack({
   captions,
   placement,
+  centered = false,
 }: {
   captions: Caption[];
   placement: "bottom" | "top";
+  /** Instruction cards have no sidebar to clear, so their caption centers. */
+  centered?: boolean;
 }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -494,7 +617,7 @@ export function TrainingCaptionTrack({
     return null;
   }
 
-  return <div className={`training-caption placement-${placement}`}>{activeCaption.text}</div>;
+  return <div className={`training-caption placement-${placement}${centered ? " is-centered" : ""}`}>{activeCaption.text}</div>;
 }
 
 export function buildCaptions(video: TrainingVideoBase): Caption[] {

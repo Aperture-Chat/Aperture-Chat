@@ -14388,6 +14388,176 @@ button.owner-doc-card:hover {
   line-height: 1.55;
 }
 
+/* Lesson detail: the video and its written guide side by side on wide
+ * screens, stacked (with the modal scrolling) on narrow ones. The guide is
+ * sized to the media column so long procedures scroll inside it. */
+.owner-video-modal:has(.training-lesson-layout) {
+  width: min(1320px, 100%);
+}
+
+.training-lesson-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 16px;
+  min-height: 0;
+}
+
+.training-lesson-media {
+  min-width: 0;
+}
+
+.training-lesson-guide {
+  display: flex;
+  flex-direction: column;
+  height: 0;
+  min-height: 100%;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.training-guide-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.training-guide-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.training-guide-tabs button:hover {
+  color: var(--text-strong);
+  background: var(--surface);
+}
+
+.training-guide-tabs button.is-active {
+  border-color: var(--teal-border);
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
+.training-guide-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px 14px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.training-guide-panel ol,
+.training-guide-panel ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.training-guide-panel li + li {
+  margin-top: 6px;
+}
+
+.training-guide-panel ol + .training-guide-paths {
+  margin-top: 14px;
+}
+
+.training-guide-path-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.training-guide-path-picker .chip-button.is-active {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
+.training-guide-checks {
+  list-style: none;
+  padding-left: 0 !important;
+}
+
+.training-guide-checks li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+}
+
+.training-guide-checks svg {
+  margin-top: 3px;
+  color: var(--teal);
+}
+
+.training-guide-troubleshooting {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.training-guide-troubleshooting dt {
+  color: var(--text-strong);
+  font-weight: 800;
+}
+
+.training-guide-troubleshooting dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+
+.training-track-heading {
+  grid-column: 1 / -1;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.owner-video-grid > .training-track-heading:first-child,
+.user-guide-list > .guide-pdf-download + .training-track-heading {
+  margin-top: 4px;
+}
+
+@media (max-width: 980px) {
+  .owner-video-modal:has(.training-lesson-layout) {
+    overflow-y: auto;
+  }
+
+  .training-lesson-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .training-lesson-guide {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .training-guide-panel {
+    overflow: visible;
+  }
+}
+
 .owner-training-composition {
   overflow: hidden;
   background: #eef5f7;
@@ -14579,6 +14749,151 @@ button.owner-doc-card:hover {
 
 .training-caption.placement-top {
   top: 28px;
+}
+
+.training-caption.is-centered {
+  left: 120px;
+  right: 120px;
+}
+
+/* Instruction cards: steps performed in another system (an identity
+ * provider's console, a mail relay, a device's share sheet). They are drawn
+ * by the composition, never captured, so they read as instructions rather
+ * than as a screenshot of someone else's product. */
+.training-step-card-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: 44px 64px 112px;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(10, 164, 181, 0.12), transparent 42%),
+    linear-gradient(160deg, #f4f9fb 0%, #e6f0f4 100%);
+}
+
+.training-step-card {
+  width: 100%;
+  max-width: 1010px;
+  box-sizing: border-box;
+  border: 1px solid rgba(190, 210, 220, 0.95);
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 26px 32px 28px;
+  box-shadow: 0 26px 60px -30px rgba(4, 16, 24, 0.5);
+}
+
+.training-step-card header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.training-step-card-where {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #0aa4b5;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.training-step-card header strong {
+  color: #087d8b;
+  font-size: 19px;
+  font-weight: 850;
+}
+
+.training-step-card h3 {
+  margin: 12px 0 14px;
+  color: #061722;
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.training-step-card ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.training-step-card li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #33475a;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.38;
+}
+
+.training-step-card li.is-active {
+  border-color: rgba(10, 164, 181, 0.55);
+  background: rgba(10, 164, 181, 0.08);
+  color: #061722;
+}
+
+.training-step-card li.is-done {
+  color: #6b7d8c;
+}
+
+.training-step-number {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e3eef2;
+  color: #33475a;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.training-step-card li.is-active .training-step-number {
+  background: #0aa4b5;
+  color: #ffffff;
+}
+
+.training-step-values {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px dashed rgba(10, 164, 181, 0.6);
+  border-radius: 10px;
+  background: #f4fafb;
+}
+
+.training-step-values > div {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+}
+
+.training-step-values dt {
+  color: #087d8b;
+  font-size: 14px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.training-step-values dd {
+  margin: 0;
+  color: #061722;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 16.5px;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- Tables ---------- */

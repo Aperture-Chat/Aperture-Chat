@@ -1513,7 +1513,7 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   expect(screen.getByRole("dialog", { name: "Tenant SSO and provisioning video" })).toBeInTheDocument();
   expect(screen.getByTestId("remotion-player")).toHaveAttribute("data-audio-src", "training/admin/admin-sso.mp3");
   expect(screen.getByText("Voiceover, captions, and title cards use the same timeline.")).toBeInTheDocument();
-  expect(screen.getByText("Setup checklist")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Step by step" })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
   fireEvent.click(screen.getByRole("button", { name: "Watch Policies and memory governance" }));
