@@ -33,15 +33,13 @@ into this file or into chat.
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md). In summary:
 
-1. External contributors work from a fork and open a pull request to `dev`.
-2. Organization contributors start from `dev` and should use a short-lived
-   branch for anything beyond a very small change.
-3. Keep changes narrow and iterative. A pull request should normally contain
+1. Every pull request targets `dev`. External contributors work from a fork;
+   maintainers may push a short-lived branch to this repository instead.
+2. Keep changes narrow and iterative. A pull request should normally contain
    one feature, one fix, or one cohesive maintenance task.
-4. Promotion follows `dev` -> `test` -> `main`. Do not bypass a stage.
-5. A `test` commit must have inspectable API and web container images before it
-   can be promoted to `main`.
-6. Do not merge while automated or human review is still active.
+3. Promotion from `dev` to `test` to `main` is a maintainer task described in
+   [docs/RELEASING.md](docs/RELEASING.md). Do not bypass a stage.
+4. Do not merge while automated or human review is still active.
 
 ## Change quality
 
@@ -62,13 +60,14 @@ Run checks proportional to the change. At minimum:
 ```bash
 git diff --check
 npm --workspace apps/web run typecheck
-npm --workspace apps/web run test -- --run
+npm run test:web
 npm run build:web
-cd services/api && .venv/bin/python -m pytest -q
+cd services/api && .venv/bin/ruff check . && .venv/bin/python -m pytest -q
 ```
 
-Use the relevant subset for documentation-only changes. Container validation
-and promotion requirements are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+Use the relevant subset for documentation-only changes. Checks for other areas
+are listed in [CONTRIBUTING.md](CONTRIBUTING.md#run-the-checks); container
+validation and promotion requirements are in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Guardrails
 

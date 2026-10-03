@@ -3,6 +3,9 @@ description: Propose one focused improvement
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: Please search existing issues first. For larger changes, agreeing on the approach here before writing code saves rework.
   - type: textarea
     id: problem
     attributes:
@@ -14,7 +17,7 @@ body:
     id: proposal
     attributes:
       label: Proposed change
-      description: Describe a narrow first increment rather than a broad redesign.
+      description: What would you like to happen? A small first step is easier to agree on than a full redesign.
     validations:
       required: true
   - type: textarea
@@ -32,3 +35,11 @@ body:
     attributes:
       label: Risks and alternatives
       description: Note security, privacy, migration, compatibility, and simpler alternatives.
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to work on this?
+      options:
+        - "Yes, I'd like to open a pull request"
+        - Maybe, with some guidance
+        - "No"
