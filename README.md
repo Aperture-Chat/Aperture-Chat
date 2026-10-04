@@ -322,7 +322,8 @@ are a good place to start.
 Never commit populated environment files, credentials, runtime databases,
 production logs, or private deployment details. Screenshots and examples must
 use synthetic data. Report vulnerabilities through [SECURITY.md](SECURITY.md).
-Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md), which is also
+published at [aperturechat.com](https://aperturechat.com/code-of-conduct.html).
 
 ## Documentation
 
