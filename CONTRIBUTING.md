@@ -1,129 +1,188 @@
 # Contributing to Aperture Chat
 
-Thank you for helping improve Aperture Chat. The project favors small,
-inspectable changes that can be tested and reviewed without hiding unrelated
-behavior.
+Thanks for your interest in improving Aperture Chat. Bug reports, ideas,
+documentation fixes, code, and reviews are all welcome, and you don't need to
+be an expert in the whole codebase to help.
 
-By submitting a contribution, you confirm that you have the right to submit it
-and agree that it may be distributed under the [MIT License](LICENSE.md).
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Branch and promotion model
+## Ways to contribute
 
-```text
-external fork ─┐
-               ├─> dev ─> test ─> main
-org branch  ───┘       container     production
-                       inspection
-```
+- **Report a bug.** Use the [bug report form](https://github.com/Aperture-Chat/Aperture-Chat/issues/new?template=bug_report.yml).
+  Steps to reproduce and the version you're running make a report far easier
+  to act on.
+- **Suggest a feature.** Use the [feature request form](https://github.com/Aperture-Chat/Aperture-Chat/issues/new?template=feature_request.yml)
+  and describe the problem before the solution.
+- **Improve the docs.** Typos, unclear steps, and outdated screenshots are
+  worth a pull request on their own.
+- **Fix an issue.** Issues labeled [`good first issue`](https://github.com/Aperture-Chat/Aperture-Chat/labels/good%20first%20issue)
+  or [`help wanted`](https://github.com/Aperture-Chat/Aperture-Chat/labels/help%20wanted)
+  are good places to start.
+- **Review a pull request.** Trying a change locally and reporting what you
+  found is useful even if you're not a maintainer.
 
-- `dev` is the integration branch. External contributors must fork the
-  repository and open a pull request to `dev` from their fork.
-- Organization contributors start from `dev`. A short-lived branch and pull
-  request back to `dev` is preferred; a direct `dev` commit is acceptable only
-  for a very small, authorized change.
-- `test` receives promotion pull requests from `dev`. Each commit on `test`
-  publishes immutable API and web container images for inspection.
-- `main` is the production branch. Only `test` may be promoted to `main`, and
-  the exact `test` commit must have both inspectable container images.
-- Merge `test` into `main` with a merge commit. The release workflow verifies
-  that the merge tree matches the inspected `test` parent, then promotes those
-  exact multi-architecture image manifests without rebuilding them. Squash or
-  rebase merges intentionally fail the release gate.
-- Do not force-push shared branches or bypass a promotion stage.
+Found a security problem? Don't open an issue. Follow [SECURITY.md](SECURITY.md)
+to report it privately.
 
-## Keep changes iterative
+## Before you start
 
-A pull request should normally address one feature, one bug, or one cohesive
-maintenance task. As a guideline, aim for fewer than about 500 net source lines
-when the work can be split cleanly. Generated files, lockfiles, and necessary
-test fixtures do not count toward that guideline.
+- **Search first.** Check [open issues](https://github.com/Aperture-Chat/Aperture-Chat/issues)
+  and [pull requests](https://github.com/Aperture-Chat/Aperture-Chat/pulls) to
+  avoid duplicate work.
+- **Small fixes can go straight to a pull request.** Typos, documentation
+  corrections, and clear bug fixes don't need an issue first.
+- **Discuss larger changes in an issue first.** New features, behavior changes,
+  new dependencies, schema or migration changes, and anything touching
+  authentication, tenant isolation, or permissions should start with an issue
+  so we can agree on the approach before you invest time in it.
+- **Say you're working on it.** Comment on the issue so others know it's taken.
+  If you can no longer finish it, say so and someone else can pick it up.
 
-Split a change when it combines independent behavior, touches unrelated roles
-or subsystems, or would make rollback difficult. Large work can use a sequence
-of draft pull requests so the owner and review agents can vet each piece.
+## Set up your environment
 
-## Required pull-request notes
+You'll need Git, Node.js 24 or newer (see `.nvmrc`), npm, and Python 3.12 or
+newer.
 
-Every pull request must explain:
+1. [Fork the repository](https://github.com/Aperture-Chat/Aperture-Chat/fork)
+   and clone your fork:
 
-1. what changed and why;
-2. the exact scope and what was intentionally left out;
-3. tests and checks that were run;
-4. risks, migration or compatibility concerns, and rollback approach; and
-5. any follow-up work.
+   ```bash
+   git clone https://github.com/<your-username>/Aperture-Chat.git
+   cd Aperture-Chat
+   git remote add upstream https://github.com/Aperture-Chat/Aperture-Chat.git
+   ```
 
-Add code comments for non-obvious intent, security boundaries, or surprising
-tradeoffs. Clear pull-request notes are always required; excessive comments on
-obvious code are not.
+2. Install dependencies:
 
-For visible changes, include before/after screenshots or a short clip when
-practical. Use synthetic accounts and data, redact sensitive information, and
-show both light and dark themes when the change affects both.
+   ```bash
+   cp .env.example .env
+   npm ci
+   python3 -m venv services/api/.venv
+   services/api/.venv/bin/python -m pip install -e './services/api[dev]'
+   ```
 
-## Local validation
+3. Run the web app and the API in separate terminals:
 
-Install the supported Node and Python versions, copy `.env.example` to `.env`,
-and use non-secret local values. Run the checks that cover the changed surface:
+   ```bash
+   npm run dev:web
+   ```
 
-```bash
-npm run check:node-baseline
-npm ci
-npm --workspace apps/web run typecheck
-npm run test:web -- --run
-npm run build:web
+   ```bash
+   cd services/api
+   .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+   ```
 
-cd services/api
-python -m pip install -e ".[dev]"
-ruff check .
-python -m pytest
-```
+A clean local instance lets you create the first owner without a provider key.
+Add and enable a model before testing anything that generates a response. Keep
+`.env` local and use non-secret values; see the [README](README.md#development)
+for more on local and container development.
 
-Also run `git diff --check` before requesting review.
+Maintainers with write access can push branches to this repository instead of
+a fork. Everything else below is the same.
 
-## Branch container inspection
+## Make your change
 
-Every permanent branch publishes multi-architecture API and web images for
-each commit. Moving branch tags are promoted only after both SHA images pass
-architecture and build-digest inspection:
+1. Start a branch from the latest `dev`, the integration branch that every
+   pull request targets:
 
-```text
-ghcr.io/aperture-chat/aperture-chat-api:<dev|test|main>
-ghcr.io/aperture-chat/aperture-chat-web:<dev|test|main>
-```
+   ```bash
+   git fetch upstream
+   git switch -c fix-sso-redirect upstream/dev
+   ```
 
-Immutable tags retain the branch name and full commit SHA:
+2. Keep the change focused on one fix, feature, or cleanup. Smaller pull
+   requests get reviewed faster. If a change grows past roughly 500 lines of
+   hand-written code (lockfiles, generated files, and fixtures don't count),
+   consider splitting it into a series of pull requests.
+3. Add or update tests for behavior you change, and update documentation and
+   `.env.example` when configuration or user-facing behavior changes.
+4. Follow the style of the surrounding code. Comment the non-obvious parts,
+   such as intent, security boundaries, and surprising tradeoffs, rather than
+   narrating what the code already says.
+5. Write commit messages with a short, imperative summary line, for example
+   `Fix SSO redirect URI for OIDC clients`, and use the body to explain why
+   when that isn't obvious.
 
-```text
-ghcr.io/aperture-chat/aperture-chat-api:<branch>-<full-commit-sha>
-ghcr.io/aperture-chat/aperture-chat-web:<branch>-<full-commit-sha>
-```
+### Run the checks
 
-The promotion pull request from `test` to `main` continues to verify that both
-immutable `test-<full-commit-sha>` images exist. Reviewers can deploy the exact
-pair with `docker-compose.release.yml` by setting
-`APERTURE_IMAGE_TAG=test-<full-commit-sha>` in a disposable review environment.
-The release-only `latest` tag is unchanged and is updated only by the Docker
-release workflow. Never use a production data volume for contributor testing.
-Alias updates are not atomic; use the verified SHA pair for deployments and
-retain its digests for exact reproducibility. See the
-[publication recovery runbook](docs/DOCKER_RELEASE.md#branch-images-and-failed-publications)
-before deploying moving tags after a failed or canceled publication.
+CI runs on every pull request. Running the checks for the area you changed
+before you push saves a round trip:
 
-## Review and merge expectations
+| If you changed | Run |
+| --- | --- |
+| Anything | `git diff --check` |
+| Web app (`apps/web`) | `npm --workspace apps/web run typecheck`<br>`npm run test:web`<br>`npm run build:web` |
+| API (`services/api`) | `cd services/api && .venv/bin/ruff check . && .venv/bin/python -m pytest` |
+| Training scripts (`apps/web/scripts`) | `node --test apps/web/scripts/*.test.cjs`<br>`python3 apps/web/scripts/test_training_narration.py` |
+| Release and install scripts (`scripts`) | `node --test scripts/promote-branch-images.test.mjs`<br>`python3 scripts/test_install_release.py`<br>`python3 scripts/test_updater.py` |
+| Node.js version | `npm run check:node-baseline` |
 
-- Open substantial work as a draft pull request early.
-- Do not mark it ready until the required notes and relevant checks are present.
-- New commits after approval require another review of the changed material.
-- Do not merge while automated checks, an assigned agent review, or owner
-  review is still active.
-- Maintainers may hold a change in `dev` or `test` for additional inspection;
-  there is no fixed waiting period when the evidence is already sufficient.
-- The owner or an explicitly delegated maintainer makes the final production
-  promotion decision.
+Documentation-only changes need only `git diff --check` and a read-through of
+the rendered result.
 
-## Security and privacy
+### Using AI tools
 
-Do not include secrets, private infrastructure details, personal data,
-production logs, customer documents, or live credentials in issues, commits,
-screenshots, videos, or pull requests. Use the private reporting path in
-[SECURITY.md](SECURITY.md) for suspected vulnerabilities.
+AI coding assistants are welcome. You're responsible for everything you
+submit: read it, run it, and be ready to explain it in review. Agents working
+in this repository should follow [AGENTS.md](AGENTS.md).
+
+## Open a pull request
+
+1. Push your branch to your fork and open a pull request against **`dev`**:
+
+   ```bash
+   git push -u origin fix-sso-redirect
+   ```
+
+   Pull requests against `test` or `main` fail the promotion checks, which
+   accept only maintainer promotions.
+2. Fill in the pull request template. The most useful parts are why the
+   change is needed, how you tested it, and anything reviewers should look at
+   closely, such as risks, migrations, or compatibility.
+3. Link the issue it resolves (`Closes #123`) so it closes automatically.
+4. For visible changes, add before and after screenshots or a short clip. Use
+   synthetic accounts and data, and show both light and dark themes when the
+   change affects both.
+5. Open a [draft pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests#draft-pull-requests)
+   if you'd like early feedback, and mark it ready when it's complete.
+6. Leave **Allow edits by maintainers** turned on so small fixes, such as a
+   rebase or a typo, don't need a round trip.
+
+## Review
+
+- CI must pass. For a first-time contributor, a maintainer approves the CI
+  run before it starts. If a check fails and the cause isn't clear, ask in the
+  pull request.
+- A maintainer reviews the change and may ask questions or request changes.
+  Reply to each comment, either with a fix or with your reasoning.
+- If `dev` moves ahead, update your branch from `upstream/dev`. Rebase freely
+  before review starts; after that, merge `upstream/dev` and add new commits
+  rather than force-pushing, so reviewers can see what changed since their
+  last look.
+- If a pull request hasn't had a response in a week, a polite comment is
+  welcome.
+- A maintainer merges the pull request once it's approved and CI is green.
+
+## After your change is merged
+
+Merged changes collect on `dev`. Maintainers then promote `dev` to `test`,
+where container images are built and checked, and `test` to `main` for a
+release. You don't need to do anything for this step; the details are in
+[docs/RELEASING.md](docs/RELEASING.md).
+
+When code you contribute is merged, you can claim an Aperture Chat T-shirt or
+cap by leaving a comment on your merged pull request. See
+[contributor gear](https://aperturechat.com/#gear).
+
+## Keep private information out
+
+This is a public repository. Never include credentials, tokens, private
+hostnames or IP addresses, personal data, customer documents, runtime
+databases, or production logs in issues, commits, screenshots, recordings, or
+pull requests. Use placeholders such as `https://your-instance.example` in
+examples.
+
+## License
+
+By contributing, you confirm that you have the right to submit your work and
+agree that it will be distributed under the project's [MIT License](LICENSE.md).

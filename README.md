@@ -299,23 +299,25 @@ To run source-built containers, configure `.env` (including the secret) and run:
 docker compose --profile local up -d --build
 ```
 
-Checks to run before submitting changes:
+Checks to run before submitting changes (see
+[CONTRIBUTING.md](CONTRIBUTING.md#run-the-checks) for checks by area):
 
 ```bash
 git diff --check
 npm --workspace apps/web run typecheck
-npm --workspace apps/web run test -- --run
+npm run test:web
 npm run build:web
 cd services/api && .venv/bin/ruff check . && .venv/bin/python -m pytest -q
 ```
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md). External contributors work from a fork
-and open pull requests to `dev`; organization contributors branch from `dev`.
-Keep changes focused, preserve unrelated work, and include validation and
-screenshots for visible changes. Promotion uses merge commits through `dev`,
-`test`, and `main`.
+Bug reports, ideas, documentation fixes, and code are all welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) to get started. In short: fork the
+repository, branch from `dev`, and open a focused pull request back to `dev`.
+Maintainers review it and promote merged work through `test` to `main`. Issues
+labeled [`good first issue`](https://github.com/Aperture-Chat/Aperture-Chat/labels/good%20first%20issue)
+are a good place to start.
 
 Never commit populated environment files, credentials, runtime databases,
 production logs, or private deployment details. Screenshots and examples must

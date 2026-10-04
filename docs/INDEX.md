@@ -7,6 +7,7 @@ for Aperture Chat.
 
 - [Project overview](../README.md)
 - [Contribution workflow](../CONTRIBUTING.md)
+- [Promotion and releases](RELEASING.md)
 - [Architecture](architecture.md)
 - [Docker deployment](DOCKER_RELEASE.md)
 - [Training coverage and regeneration](TRAINING.md)
@@ -70,11 +71,12 @@ With dependencies installed, run:
 ```bash
 git diff --check
 npm --workspace apps/web run typecheck
-npm --workspace apps/web run test -- --run
+npm run test:web
 npm run build:web
-cd services/api && .venv/bin/python -m pytest -q
+cd services/api && .venv/bin/ruff check . && .venv/bin/python -m pytest -q
 ```
 
-Review [CONTRIBUTING.md](../CONTRIBUTING.md) before opening a pull request. The
-project uses small, staged promotions from `dev` to `test` to `main` so changes
-can be reviewed in source and as inspectable container images.
+Review [CONTRIBUTING.md](../CONTRIBUTING.md) before opening a pull request; it
+lists the checks for each area. Maintainers promote merged work from `dev` to
+`test` to `main` as described in [promotion and releases](RELEASING.md), so
+changes can be reviewed in source and as inspectable container images.
