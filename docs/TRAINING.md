@@ -232,7 +232,7 @@ npm run build:web
 git diff --check
 ```
 
-Exercise every role playlist: start narration, seek through every scene, check image/audio requests, captions and transcripts, use keyboard/back/close controls, and download each PDF. Check desktop and mobile layouts and compare downloaded guide bytes with repository copies. Inventory and unit checks do not certify playback or visual quality. Follow [CONTRIBUTING.md](../CONTRIBUTING.md) for release promotion, then verify deployed assets and playback again.
+Exercise every role playlist: start narration, seek through every scene, check image/audio requests, captions and transcripts, use keyboard/back/close controls, and download each PDF. Check desktop and mobile layouts and compare downloaded guide bytes with repository copies. Inventory and unit checks do not certify playback or visual quality. Follow [promotion and releases](RELEASING.md) for release promotion, then verify deployed assets and playback again.
 
 ## September 2026 coverage refresh
 

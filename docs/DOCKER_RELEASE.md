@@ -617,4 +617,4 @@ traffic.
 Pull requests promoted from `dev` to `test` publish immutable review images.
 The promotion pull request records their exact digests so reviewers can inspect
 the same containers that are later considered for `main`. See
-[CONTRIBUTING.md](../CONTRIBUTING.md) for the full branch and review workflow.
+[promotion and releases](RELEASING.md) for the full branch and review workflow.
