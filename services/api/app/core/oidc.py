@@ -6,6 +6,9 @@ production behaviour is plain httpx against the issuer's published endpoints.
 
 from __future__ import annotations
 
+import base64
+from urllib.parse import quote
+
 import jwt
 import httpx
 from jwt import PyJWKClient
@@ -54,6 +57,7 @@ def exchange_authorization_code(
     code: str,
     redirect_uri: str,
     code_verifier: str | None = None,
+    auth_methods_supported: list[str] | None = None,
 ) -> dict:
     try:
         validate_public_url(token_endpoint)
@@ -63,23 +67,23 @@ def exchange_authorization_code(
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "client_id": client_id,
-        "client_secret": client_secret,
     }
     # PKCE rides alongside the client secret: some providers require it for
     # every authorization-code exchange, and it blocks code substitution.
     if code_verifier:
         data["code_verifier"] = code_verifier
-    try:
-        response = httpx.post(
-            token_endpoint,
-            data=data,
-            headers={"Accept": "application/json"},
-            timeout=TOKEN_TIMEOUT_SECONDS,
-        )
-    except httpx.HTTPError as exc:
-        raise OidcError(f"Token endpoint request failed: {exc}") from exc
-    if response.status_code != 200:
+    methods = client_auth_methods(auth_methods_supported)
+    for index, method in enumerate(methods):
+        response = _post_token_request(token_endpoint, client_id, client_secret, data, method)
+        if response.status_code == 200:
+            break
+        # Some providers pin each application to one client authentication
+        # method (Okta enforces the app's configured method and defaults to
+        # client_secret_basic). They reject the other method with
+        # invalid_client before redeeming the code, so the remaining standard
+        # method is tried once.
+        if index + 1 < len(methods) and _is_invalid_client(response):
+            continue
         detail = _safe_error_detail(response)
         raise OidcError(f"Token endpoint returned {response.status_code}: {detail}")
     try:
@@ -89,6 +93,49 @@ def exchange_authorization_code(
     if not isinstance(payload.get("id_token"), str):
         raise OidcError("Token endpoint response did not include an id_token. Ensure the 'openid' scope is granted.")
     return payload
+
+
+def client_auth_methods(supported: list[str] | None) -> list[str]:
+    """Client-secret methods to try, in order. client_secret_basic is the
+    OpenID Connect default and the one most providers configure for a new
+    confidential app; client_secret_post remains the fallback."""
+    standard = ("client_secret_basic", "client_secret_post")
+    if not isinstance(supported, list):
+        return list(standard)
+    advertised = [method for method in standard if method in supported]
+    return advertised or ["client_secret_post"]
+
+
+def _post_token_request(
+    token_endpoint: str,
+    client_id: str,
+    client_secret: str,
+    data: dict[str, str],
+    method: str,
+) -> httpx.Response:
+    headers = {"Accept": "application/json"}
+    body = dict(data)
+    if method == "client_secret_basic":
+        # RFC 6749 section 2.3.1: form-encode each value before Base64.
+        pair = f"{quote(client_id, safe='')}:{quote(client_secret, safe='')}"
+        headers["Authorization"] = "Basic " + base64.b64encode(pair.encode("utf-8")).decode("ascii")
+    else:
+        body["client_id"] = client_id
+        body["client_secret"] = client_secret
+    try:
+        return httpx.post(token_endpoint, data=body, headers=headers, timeout=TOKEN_TIMEOUT_SECONDS)
+    except httpx.HTTPError as exc:
+        raise OidcError(f"Token endpoint request failed: {exc}") from exc
+
+
+def _is_invalid_client(response: httpx.Response) -> bool:
+    if response.status_code not in (400, 401):
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and payload.get("error") == "invalid_client"
 
 
 def validate_id_token(

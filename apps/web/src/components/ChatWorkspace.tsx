@@ -117,6 +117,7 @@ import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { DictationControl } from "./DictationControl";
 import { isMediaUploadFile } from "../lib/mediaUploads";
 import { Markdown } from "./Markdown";
+import { renderConcealed } from "./ConcealedText";
 import { ApertureMark, Pill } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
 import { PromptImproveIcon, PromptImproveRail } from "./PromptEditorField";
@@ -2923,7 +2924,19 @@ export function ChatWorkspace({
     </form>
   );
 
-  const disclaimer = <p className="disclaimer">Responses may contain mistakes. Verify important information.</p>;
+  const disclaimer = (
+    <p className="disclaimer">
+      Responses may contain mistakes. Verify important information.
+      {data.dataProtection?.privacy_enabled && (
+        <span
+          className="disclaimer-privacy"
+          data-tooltip="Your organization replaces Social Security numbers, account numbers, and other personal data with placeholders before chats are saved."
+        >
+          <Lock size={11} aria-hidden="true" /> Personal data is concealed.
+        </span>
+      )}
+    </p>
+  );
 
   function submitResponseFeedback(
     message: ChatMessage,
@@ -3155,6 +3168,7 @@ export function ChatWorkspace({
                   customTools={customScriptTools}
                   onRunCustomTool={(tool, targetMessage) => void runCustomToolOnMessage(tool, targetMessage)}
                   streamPreviewEnabled={streamResponses}
+                  trainingCaptureEnabled={Boolean(data.dataProtection?.training_capture_enabled)}
                 />
               ))}
               {contextWindowStatus.isFull ? (
@@ -3801,6 +3815,7 @@ function MessageBubble({
   customTools,
   onRunCustomTool,
   streamPreviewEnabled,
+  trainingCaptureEnabled = false,
 }: {
   message: ChatMessage;
   userId: string;
@@ -3826,6 +3841,8 @@ function MessageBubble({
   customTools?: ToolConfig[];
   onRunCustomTool?: (tool: ToolConfig, message: ChatMessage) => void;
   streamPreviewEnabled?: boolean;
+  /** The organization keeps de-identified copies of rated answers for its own model training. */
+  trainingCaptureEnabled?: boolean;
 }) {
   const isUser = message.role === "user";
   const displayMessage = messageWithActiveResponseVersion(message);
@@ -4279,6 +4296,12 @@ function MessageBubble({
                   }}
                   maxLength={2000}
                 />
+                {trainingCaptureEnabled && (
+                  <p className="feedback-note-disclosure">
+                    <Lock size={12} aria-hidden="true" /> Your organization keeps a de-identified copy of rated answers
+                    and notes to improve its own models. It is never sent to a model provider.
+                  </p>
+                )}
                 <div className="feedback-note-actions">
                   <button
                     className="secondary-button compact"
@@ -4525,7 +4548,7 @@ function PlainText({ content }: { content: string }) {
           {paragraph.split("\n").map((line, lineIndex) => (
             <Fragment key={lineIndex}>
               {lineIndex > 0 && <br />}
-              {line}
+              {renderConcealed(line, `l${index}-${lineIndex}`)}
             </Fragment>
           ))}
         </p>

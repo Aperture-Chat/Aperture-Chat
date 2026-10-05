@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.core.personal_data import card_valid, conceal_text, shadow_text, ssn_valid
+
 _SNIPPET_RADIUS = 32
 _MASK = "•••••"
 
@@ -32,18 +34,6 @@ class DlpFinding:
     category: str
     severity: str
     snippet: str
-
-
-def _luhn_valid(digits: str) -> bool:
-    total = 0
-    for index, char in enumerate(reversed(digits)):
-        value = int(char)
-        if index % 2 == 1:
-            value *= 2
-            if value > 9:
-                value -= 9
-        total += value
-    return total % 10 == 0
 
 
 DLP_RULES: tuple[DlpRule, ...] = (
@@ -132,33 +122,46 @@ DLP_RULES: tuple[DlpRule, ...] = (
 
 
 def _redacted_snippet(text: str, start: int, end: int, mask: bool) -> str:
-    before = text[max(0, start - _SNIPPET_RADIUS) : start]
+    # Conceal each side in full before cutting the window, so a value that
+    # straddles the window edge is never left half-visible.
+    before = conceal_text(text[:start])[-_SNIPPET_RADIUS:]
     matched = _MASK if mask else text[start:end]
-    after = text[end : end + _SNIPPET_RADIUS]
+    after = conceal_text(text[end:])[:_SNIPPET_RADIUS]
     snippet = f"{before}{matched}{after}".replace("\n", " ").strip()
     prefix = "…" if start - _SNIPPET_RADIUS > 0 else ""
     suffix = "…" if end + _SNIPPET_RADIUS < len(text) else ""
     return f"{prefix}{snippet}{suffix}"
 
 
+# Range and checksum checks shared with the personal-data engine, so an
+# alert fires on the same values concealment and content filters act on.
+_RULE_VALIDATORS = {"ssn": ssn_valid, "credit-card": card_valid}
+
+
 def scan_prompt(text: str) -> list[DlpFinding]:
-    """Scan one prompt; at most one finding per rule to keep alerts readable."""
+    """Scan one prompt; at most one finding per rule to keep alerts readable.
+
+    Rules run on the engine's shadow copy, so zero-width characters,
+    full-width digits, and Unicode dashes cannot hide a value from review.
+    Snippets come from that normalized copy, with the matched value masked
+    and any other personal data in the surrounding context concealed.
+    """
     findings: list[DlpFinding] = []
     if not text:
         return findings
+    shadow, _index = shadow_text(text)
     for rule in DLP_RULES:
-        for match in rule.pattern.finditer(text):
-            if rule.id == "credit-card":
-                digits = re.sub(r"\D", "", match.group(0))
-                if not 13 <= len(digits) <= 19 or not _luhn_valid(digits):
-                    continue
+        validator = _RULE_VALIDATORS.get(rule.id)
+        for match in rule.pattern.finditer(shadow):
+            if validator is not None and not validator(match.group(0)):
+                continue
             findings.append(
                 DlpFinding(
                     rule_id=rule.id,
                     label=rule.label,
                     category=rule.category,
                     severity=rule.severity,
-                    snippet=_redacted_snippet(text, match.start(), match.end(), rule.mask_match),
+                    snippet=_redacted_snippet(shadow, match.start(), match.end(), rule.mask_match),
                 )
             )
             break

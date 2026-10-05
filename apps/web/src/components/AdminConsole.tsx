@@ -52,9 +52,12 @@ const AdminDocumentationModal = lazyWithReload("admin-documentation", () =>
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { renderConcealed } from "./ConcealedText";
 import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPreviewText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
+import { PersonalDataProtectionPanel } from "./PersonalDataProtectionPanel";
+import { TrainingDatasetsConsole } from "./TrainingDatasetsConsole";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
 import { AuditSummaryBoard, type AuditSummaryGroup, type AuditSummaryItem } from "./AuditSummaryCard";
 import { AuditInsights } from "./AuditInsights";
@@ -994,6 +997,7 @@ export function AdminConsole({
       "SSO",
       "Analytics",
       "Policies",
+      "Datasets",
       "Audit",
       "Alerts",
     ],
@@ -3589,9 +3593,9 @@ export function AdminConsole({
                           <small>
                             {item.thread_title} · {item.model_id} · {item.user_name}
                           </small>
-                          <p>{markdownToPreviewText(item.message_preview)}</p>
+                          <p>{renderConcealed(markdownToPreviewText(item.message_preview), item.id)}</p>
                           {item.comment ? (
-                            <p className="feedback-comment">“{item.comment}”</p>
+                            <p className="feedback-comment">“{renderConcealed(item.comment, `${item.id}-comment`)}”</p>
                           ) : null}
                         </span>
                         <span className="feedback-row-side">
@@ -4095,6 +4099,7 @@ export function AdminConsole({
               pendingAction={pendingAction}
               onDefaultPermissionChange={toggleDefaultGroupPolicyPermission}
             />
+            <PersonalDataProtectionPanel actorUserId={data.me.id} />
             {memoryTabVisible ? (
               <MemoryAdminPanel
                 policy={memoryPolicy}
@@ -4119,6 +4124,12 @@ export function AdminConsole({
             )}
 
           </div>
+        </Tabs.Content>
+
+        <Tabs.Content value="datasets" className="tab-content">
+          {activeSection === "datasets" && (
+            <TrainingDatasetsConsole actorUserId={data.me.id} groups={data.groups} models={data.models} />
+          )}
         </Tabs.Content>
 
         <Tabs.Content value="audit" className="tab-content">
@@ -6528,6 +6539,16 @@ function AdminPolicyOverviewPanel({
   const platformMemoryEnabled = Boolean(settings?.memory_enabled);
   const tenantMemoryEnabled = Boolean(memoryPolicy?.enabled);
   const defaultPermissions = defaultGroup ? permissionsForGroup(defaultGroup) : defaultGroupPermissions();
+  // Service-wide settings admins cannot change here. Only the ones that limit
+  // this organization are worth a line; SSO editability already shows on the
+  // SSO tab, and an unrestricted service needs no note at all.
+  const serviceLimits = [
+    !settings?.tenant_admins_can_create_admins && "Administrator accounts are created by your service team.",
+    settings?.require_sso_for_admins && "Administrators must sign in with SSO.",
+    settings &&
+      !settings.default_user_group_enabled &&
+      "Newly available models start without access until you grant a group in Model Access.",
+  ].filter((limit): limit is string => Boolean(limit));
 
   return (
     <Panel
@@ -6537,60 +6558,8 @@ function AdminPolicyOverviewPanel({
       defaultCollapsed
     >
       <div className="policy-callout">
-        <Lock size={15} />
-        <span>
-          Service policy defines which capabilities are available. The controls below can narrow access for this organization; unavailable capabilities remain locked.
-        </span>
-      </div>
-
-      <div className="policy-toggle-stack">
-        <AdminPolicyStatusRow
-          title="Administrator accounts"
-          detail={
-            settings?.tenant_admins_can_create_admins
-              ? "You may create and manage administrators for this organization."
-              : "New administrator accounts require service approval."
-          }
-          status={settings?.tenant_admins_can_create_admins ? "Available" : "Service managed"}
-          tone={settings?.tenant_admins_can_create_admins ? "success" : "neutral"}
-        />
-        <AdminPolicyStatusRow
-          title="Admin sign-in policy"
-          detail={
-            settings?.require_sso_for_admins
-              ? "SSO is required for administrator accounts by service policy."
-              : "Explicitly provisioned admin accounts may use the platform sign-in path."
-          }
-          status={settings?.require_sso_for_admins ? "SSO required" : "Local allowed"}
-          tone={settings?.require_sso_for_admins ? "warning" : "neutral"}
-        />
-        <AdminPolicyStatusRow
-          title="SSO configuration"
-          detail={
-            settings?.tenant_admins_can_manage_sso
-              ? "You may configure organization SSO mappings; secrets stay vaulted."
-              : "SSO configuration is read-only under the current service policy."
-          }
-          status={settings?.tenant_admins_can_manage_sso ? "Available" : "Read only"}
-          tone={settings?.tenant_admins_can_manage_sso ? "success" : "neutral"}
-        />
-        <AdminPolicyStatusRow
-          title="New model defaults"
-          detail={
-            settings?.default_user_group_enabled
-              ? "Newly available models begin with Default Users; you can narrow each model under Model Access."
-              : "Newly available models require an explicit group grant under Model Access."
-          }
-          status={settings?.default_user_group_enabled ? "Default Users" : "Explicit grants"}
-          tone="info"
-        />
-      </div>
-
-      <div className="policy-callout">
         <ShieldCheck size={15} />
-        <span>
-          Downstream defaults apply to the protected Default Users group. Use Groups for exceptions, Model Access for available models, and Connections for available connectors.
-        </span>
+        <span>These switches apply to everyone in the protected Default Users group. Use Groups for exceptions.</span>
       </div>
 
       <div className="policy-toggle-stack">
@@ -6654,29 +6623,13 @@ function AdminPolicyOverviewPanel({
           onChange={(next) => onDefaultPermissionChange("memory_access", next)}
         />
       </div>
+      {serviceLimits.length > 0 && (
+        <p className="policy-service-note">
+          <Lock size={13} aria-hidden="true" />
+          <span>Service policy: {serviceLimits.join(" ")}</span>
+        </p>
+      )}
     </Panel>
-  );
-}
-
-function AdminPolicyStatusRow({
-  title,
-  detail,
-  status,
-  tone,
-}: {
-  title: string;
-  detail: string;
-  status: string;
-  tone: "neutral" | "success" | "warning" | "danger" | "info";
-}) {
-  return (
-    <div className="permission-row policy-toggle-row">
-      <span>
-        <strong>{title}</strong>
-        <small>{detail}</small>
-      </span>
-      <Pill tone={tone}>{status}</Pill>
-    </div>
   );
 }
 

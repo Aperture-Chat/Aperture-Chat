@@ -1,7 +1,7 @@
 import { Player } from "@remotion/player";
 import type { LucideIcon } from "lucide-react";
 import { BookOpen, CheckCircle2, ChevronLeft, FileVideo, ListChecks, Maximize2, Minimize2, Volume2, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   GuidePdfDownload,
@@ -65,8 +65,8 @@ export function TrainingAccessVideo({ video, deck, onClose }: {
         subtitleRest="walkthrough with narration, captions, and sign-in guidance."
         captionNoteWithAudio="Voiceover, captions, and title cards share the same timeline."
         captionNoteWithoutAudio="The transcript below has the full narration."
-        setupSummary="Access and sign-in steps"
-        setupSummaryTooltip="Show or hide the access and sign-in instructions"
+        setupSummary="Step by step"
+        setupSummaryTooltip="Show the access and sign-in instructions"
         headStart={<button type="button" className="icon-button" aria-label="Close access walkthrough" onClick={onClose}><X size={17} /></button>}
       />
     </dialog>, document.body,
@@ -152,64 +152,202 @@ function TrainingVideoDetail({
         </div>
         {headEnd}
       </div>
-      <div ref={playerCard} className={`owner-video-player-card${expanded ? " is-expanded" : ""}`}>
-        <button type="button" className="secondary-button owner-video-fullscreen-exit" onClick={closeFullscreen}>
-          <Minimize2 size={16} /> Exit fullscreen
-        </button>
-        <Player
+      <div className="training-lesson-layout">
+        <div className="training-lesson-media">
+          <div ref={playerCard} className={`owner-video-player-card${expanded ? " is-expanded" : ""}`}>
+            <button type="button" className="secondary-button owner-video-fullscreen-exit" onClick={closeFullscreen}>
+              <Minimize2 size={16} /> Exit fullscreen
+            </button>
+            <Player
+              key={`${video.id}-${openKey}`}
+              component={TrainingComposition}
+              inputProps={{ video, regions: deck.regions, badge: deck.badge }}
+              durationInFrames={durationInFrames}
+              fps={TRAINING_FPS}
+              compositionWidth={TRAINING_WIDTH}
+              compositionHeight={TRAINING_HEIGHT}
+              controls
+              autoPlay={false}
+              clickToPlay
+              initialFrame={0}
+              initiallyShowControls
+              moveToBeginningWhenEnded
+              acknowledgeRemotionLicense
+              style={{ width: "100%", height: "100%" }}
+            />
+          </div>
+          <div className="owner-video-controls">
+            <button type="button" className="secondary-button" onClick={openFullscreen}>
+              <Maximize2 size={16} /> Fullscreen video
+            </button>
+            <span className="owner-video-caption-note">
+              <Volume2 size={15} />
+              {video.audioSrc ? captionNoteWithAudio : captionNoteWithoutAudio}
+            </span>
+          </div>
+          <div className="owner-video-outcomes" aria-label={`${video.title} outcomes`}>
+            {video.outcomes.map((outcome) => (
+              <span key={outcome}>
+                <CheckCircle2 size={14} /> {outcome}
+              </span>
+            ))}
+          </div>
+        </div>
+        <TrainingLessonGuide
           key={`${video.id}-${openKey}`}
-          component={TrainingComposition}
-          inputProps={{ video, regions: deck.regions, badge: deck.badge }}
-          durationInFrames={durationInFrames}
-          fps={TRAINING_FPS}
-          compositionWidth={TRAINING_WIDTH}
-          compositionHeight={TRAINING_HEIGHT}
-          controls
-          autoPlay={false}
-          clickToPlay
-          initialFrame={0}
-          initiallyShowControls
-          moveToBeginningWhenEnded
-          acknowledgeRemotionLicense
-          style={{ width: "100%", height: "100%" }}
+          video={video}
+          stepsLabel={setupSummary}
+          stepsTooltip={setupSummaryTooltip}
         />
       </div>
-      <div className="owner-video-controls">
-        <button type="button" className="secondary-button" onClick={openFullscreen}>
-          <Maximize2 size={16} /> Fullscreen video
-        </button>
-        <span className="owner-video-caption-note">
-          <Volume2 size={15} />
-          {video.audioSrc ? captionNoteWithAudio : captionNoteWithoutAudio}
-        </span>
-      </div>
-      <div className="owner-video-outcomes" aria-label={`${video.title} outcomes`}>
-        {video.outcomes.map((outcome) => (
-          <span key={outcome}>
-            <CheckCircle2 size={14} /> {outcome}
-          </span>
-        ))}
-      </div>
-      <details className="owner-video-transcript">
-        <summary data-tooltip="Show or hide the full narration text for this walkthrough">Transcript</summary>
-        <ol>
-          {video.scenes.map((scene) => (
-            <li key={scene.title}>{scene.narration}</li>
-          ))}
-        </ol>
-      </details>
-      {video.setupSteps?.length ? (
-        <details className="owner-video-transcript">
-          <summary data-tooltip={setupSummaryTooltip}>{setupSummary}</summary>
-          <ol>
-            {video.setupSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-        </details>
-      ) : null}
     </>
   );
+}
+
+type GuideTab = "steps" | "before" | "verify" | "troubleshoot" | "transcript";
+
+/** The written half of a lesson: the same procedure the video narrates, laid
+ * out to follow at the keyboard. Every tab is optional except the transcript,
+ * so older lessons without structured guidance keep their existing content. */
+export function TrainingLessonGuide({
+  video,
+  stepsLabel,
+  stepsTooltip,
+}: {
+  video: TrainingVideoBase;
+  stepsLabel: ReactNode;
+  stepsTooltip: string;
+}) {
+  const hasSteps = Boolean(video.setupSteps?.length || video.paths?.length);
+  const tabs: Array<{ id: GuideTab; label: ReactNode; tooltip: string }> = [
+    ...(hasSteps ? [{ id: "steps" as const, label: stepsLabel, tooltip: stepsTooltip }] : []),
+    ...(video.prerequisites?.length
+      ? [{ id: "before" as const, label: "Before you begin", tooltip: "What you need in place before the first step" }]
+      : []),
+    ...(video.verify?.length
+      ? [{ id: "verify" as const, label: "Check it worked", tooltip: "How to confirm the result end to end" }]
+      : []),
+    ...(video.troubleshooting?.length
+      ? [{ id: "troubleshoot" as const, label: "Troubleshooting", tooltip: "Messages you may see and how to resolve them" }]
+      : []),
+    { id: "transcript", label: "Transcript", tooltip: "Show the full narration text for this walkthrough" },
+  ];
+  const [tab, setTab] = useState<GuideTab>(tabs[0].id);
+  const [pathIndex, setPathIndex] = useState(0);
+  const path = video.paths?.[pathIndex];
+
+  return (
+    <section className="training-lesson-guide" aria-label={`${video.title} written guide`}>
+      <div className="training-guide-tabs" role="tablist" aria-label="Lesson guide sections">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`training-guide-tab-${item.id}`}
+            aria-selected={tab === item.id}
+            aria-controls="training-guide-panel"
+            data-tooltip={item.tooltip}
+            className={tab === item.id ? "is-active" : undefined}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div
+        className="training-guide-panel"
+        id="training-guide-panel"
+        role="tabpanel"
+        aria-labelledby={`training-guide-tab-${tab}`}
+      >
+        {tab === "steps" ? (
+          <>
+            {video.setupSteps?.length ? (
+              <ol>
+                {video.setupSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            ) : null}
+            {video.paths?.length ? (
+              <div className="training-guide-paths">
+                <div className="training-guide-path-picker" role="group" aria-label="Choose a path">
+                  {video.paths.map((item, index) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      className={index === pathIndex ? "chip-button is-active" : "chip-button"}
+                      aria-pressed={index === pathIndex}
+                      data-tooltip={`Show the steps for ${item.label}`}
+                      onClick={() => setPathIndex(index)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                {path ? (
+                  <ol aria-label={`${path.label} steps`}>
+                    {path.steps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {tab === "before" ? (
+          <ul>
+            {video.prerequisites?.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        ) : null}
+        {tab === "verify" ? (
+          <ul className="training-guide-checks">
+            {video.verify?.map((item) => (
+              <li key={item}>
+                <CheckCircle2 size={14} /> <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {tab === "troubleshoot" ? (
+          <dl className="training-guide-troubleshooting">
+            {video.troubleshooting?.map((item) => (
+              <div key={item.symptom}>
+                <dt>{item.symptom}</dt>
+                <dd>{item.fix}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {tab === "transcript" ? (
+          <ol>
+            {video.scenes.map((scene) => (
+              <li key={scene.title}>
+                <strong>{scene.title}.</strong> {scene.narration}
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** Lessons in their curriculum order, split under track headings when the
+ * deck defines tracks. A track keeps the position of its first lesson. */
+export function groupByTrack<T extends { track?: string }>(videos: T[]): Array<{ track: string | null; videos: T[] }> {
+  const groups: Array<{ track: string | null; videos: T[] }> = [];
+  for (const video of videos) {
+    const track = video.track ?? null;
+    const group = groups.find((item) => item.track === track);
+    if (group) group.videos.push(video);
+    else groups.push({ track, videos: [video] });
+  }
+  return groups;
 }
 
 /** Library screen for the console documentation modals: header, guide PDF,
@@ -259,29 +397,34 @@ function TrainingVideoGridLibrary({
         tooltip={deck.pdf.tooltip}
       />
       <div className="owner-doc-grid owner-video-grid">
-        {deck.videos.map((video) => {
-          const Icon = deck.icons[video.icon];
-          return (
-            <button
-              className="owner-doc-card owner-video-card"
-              type="button"
-              key={video.id}
-              aria-label={`Watch ${video.title}`}
-              data-tooltip={`Play the ${video.title} walkthrough with narration, captions, and callouts`}
-              onClick={() => onOpenVideo(video)}
-            >
-              <Icon size={20} />
-              <span className="owner-video-card-copy">
-                <strong>{video.title}</strong>
-                <span>{video.description}</span>
-                <span className="owner-video-meta">
-                  <FileVideo size={14} />
-                  {formatDuration(getVideoDuration(video))} guided video
-                </span>
-              </span>
-            </button>
-          );
-        })}
+        {groupByTrack(deck.videos).map((group) => (
+          <Fragment key={group.track ?? "untracked"}>
+            {group.track ? <h3 className="training-track-heading">{group.track}</h3> : null}
+            {group.videos.map((video) => {
+              const Icon = deck.icons[video.icon];
+              return (
+                <button
+                  className="owner-doc-card owner-video-card"
+                  type="button"
+                  key={video.id}
+                  aria-label={`Watch ${video.title}`}
+                  data-tooltip={`Play the ${video.title} walkthrough with narration, captions, and callouts`}
+                  onClick={() => onOpenVideo(video)}
+                >
+                  <Icon size={20} />
+                  <span className="owner-video-card-copy">
+                    <strong>{video.title}</strong>
+                    <span>{video.description}</span>
+                    <span className="owner-video-meta">
+                      <FileVideo size={14} />
+                      {formatDuration(getVideoDuration(video))} guided video
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </Fragment>
+        ))}
       </div>
       <div className="modal-foot">
         <ListChecks size={15} />
@@ -339,8 +482,8 @@ export function TrainingDocumentationModal({
             subtitleRest="walkthrough on current platform screens with narration and callouts."
             captionNoteWithAudio="Voiceover, captions, and title cards use the same timeline."
             captionNoteWithoutAudio="Captions and title cards use the same timeline."
-            setupSummary="Setup checklist"
-            setupSummaryTooltip="Show or hide the step-by-step setup instructions for this topic"
+            setupSummary="Step by step"
+            setupSummaryTooltip="Show the step-by-step setup instructions for this topic"
             headStart={
               <button
                 className="icon-button"
@@ -417,28 +560,33 @@ export function TrainingGuidePlaylist({
           description={deck.pdf.description}
           tooltip={deck.pdf.tooltip}
         />
-        {deck.videos.map((video) => {
-          const Icon = deck.icons[video.icon];
-          return (
-            <button
-              className="drawer-row user-guide-row"
-              type="button"
-              key={video.id}
-              data-tooltip={`Play the ${video.title} walkthrough with captions and callouts`}
-              onClick={() => openVideo(video)}
-            >
-              <Icon size={16} />
-              <span>
-                <strong>{video.title}</strong>
-                <small>{video.description}</small>
-              </span>
-              <span className="user-guide-duration">
-                <FileVideo size={13} />
-                {formatDuration(getVideoDuration(video))}
-              </span>
-            </button>
-          );
-        })}
+        {groupByTrack(deck.videos).map((group) => (
+          <Fragment key={group.track ?? "untracked"}>
+            {group.track ? <h3 className="training-track-heading">{group.track}</h3> : null}
+            {group.videos.map((video) => {
+              const Icon = deck.icons[video.icon];
+              return (
+                <button
+                  className="drawer-row user-guide-row"
+                  type="button"
+                  key={video.id}
+                  data-tooltip={`Play the ${video.title} walkthrough with captions and callouts`}
+                  onClick={() => openVideo(video)}
+                >
+                  <Icon size={16} />
+                  <span>
+                    <strong>{video.title}</strong>
+                    <small>{video.description}</small>
+                  </span>
+                  <span className="user-guide-duration">
+                    <FileVideo size={13} />
+                    {formatDuration(getVideoDuration(video))}
+                  </span>
+                </button>
+              );
+            })}
+          </Fragment>
+        ))}
       </div>
       {selectedVideo &&
         /* Portal to the body: the utility drawer animates with a transform,
@@ -463,10 +611,10 @@ export function TrainingGuidePlaylist({
                 captionNoteWithoutAudio="Captions and title cards share the same timeline; the transcript below has the full narration."
                 setupSummary={
                   <>
-                    <ListChecks size={14} /> Quick reference
+                    <ListChecks size={14} /> Step by step
                   </>
                 }
-                setupSummaryTooltip="Show or hide the quick reference steps for this topic"
+                setupSummaryTooltip="Show the step-by-step instructions for this topic"
                 headStart={
                   <button
                     className="icon-button"

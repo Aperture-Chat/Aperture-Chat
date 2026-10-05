@@ -41,6 +41,30 @@ describe("sendChatStream", () => {
     expect(reply.usage).toBeUndefined();
   });
 
+  test("reports the concealed prompt from the privacy event", async () => {
+    const onConcealedPrompt = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            'data: {"privacy":{"concealed_prompt":"SSN \u27e6SSN\u27e7"}}\n\n',
+            'data: {"delta":"Noted."}\n\n',
+            'data: {"done":true,"citations":[],"usage":null}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+
+    const reply = await sendChatStream("user-1", { ...request, onConcealedPrompt });
+
+    expect(onConcealedPrompt).toHaveBeenCalledWith("SSN ⟦SSN⟧");
+    expect(reply.concealedPrompt).toBe("SSN ⟦SSN⟧");
+    expect(reply.content).toBe("Noted.");
+  });
+
   test("throws the real stream error with partial text", async () => {
     vi.stubGlobal(
       "fetch",

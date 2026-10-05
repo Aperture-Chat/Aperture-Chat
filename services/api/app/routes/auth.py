@@ -699,6 +699,7 @@ def sso_callback(
             code_verifier=(
                 str(state_payload.get("pkce")) if state_payload.get("pkce") else None
             ),
+            auth_methods_supported=discovery.get("token_endpoint_auth_methods_supported"),
         )
         claims = oidc.validate_id_token(
             tokens["id_token"],

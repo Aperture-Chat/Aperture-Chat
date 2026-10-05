@@ -32,6 +32,33 @@ function parseDeck(text, role, { includeDrafts = false } = {}) {
     if (!value || !ts.isStringLiteralLike(value)) throw new Error(`Expected literal ${name} in ${role} deck`);
     return value.text;
   };
+  const strings = (object, name) => {
+    const value = property(object, name)?.initializer;
+    if (!value) return undefined;
+    if (!ts.isArrayLiteralExpression(value) || !value.elements.every((item) => ts.isStringLiteralLike(item))) {
+      throw new Error(`Expected a literal string list for ${name} in ${role} deck`);
+    }
+    return value.elements.map((item) => item.text);
+  };
+  const objects = (object, name, read) => {
+    const value = property(object, name)?.initializer;
+    if (!value) return undefined;
+    if (!ts.isArrayLiteralExpression(value)) throw new Error(`Expected a literal list for ${name} in ${role} deck`);
+    return value.elements.map(read);
+  };
+  // Instruction cards stand in for another system's console, so they stay
+  // short enough to read at video speed and to fit the 1185 x 855 card.
+  const card = (scene, id) => {
+    const value = property(scene, "card")?.initializer;
+    if (!value) return undefined;
+    const steps = strings(value, "steps") ?? [];
+    const values = objects(value, "values", (item) => ({ label: string(item, "label"), value: string(item, "value") })) ?? [];
+    const characters = steps.join("").length + values.reduce((sum, item) => sum + item.label.length + item.value.length, 0);
+    if (!steps.length || steps.length > 7 || values.length > 4 || characters > 820) {
+      throw new Error(`Instruction card in ${id} must have 1-7 steps, at most 4 values, and fit the card (${characters} characters)`);
+    }
+    return { label: string(value, "label", false), where: string(value, "where"), steps, values };
+  };
   const regionDeclaration = declarations.find((item) => [`${role.toUpperCase()}_FOCUS_REGIONS`, "FOCUS_REGIONS"].includes(item.name.getText(source)));
   const regions = new Map();
   const regionDeclarations = [regionDeclaration];
@@ -63,6 +90,14 @@ function parseDeck(text, role, { includeDrafts = false } = {}) {
       id,
       publication,
       title: string(lesson, "title"),
+      description: string(lesson, "description", false),
+      track: string(lesson, "track", false),
+      outcomes: strings(lesson, "outcomes") ?? [],
+      setup_steps: strings(lesson, "setupSteps") ?? [],
+      prerequisites: strings(lesson, "prerequisites") ?? [],
+      paths: objects(lesson, "paths", (item) => ({ label: string(item, "label"), steps: strings(item, "steps") ?? [] })) ?? [],
+      verify: strings(lesson, "verify") ?? [],
+      troubleshooting: objects(lesson, "troubleshooting", (item) => ({ symptom: string(item, "symptom"), fix: string(item, "fix") })) ?? [],
       audio_src: audioSrc,
       audio_missing: !existingAudio,
       audio_insert: offset(title.getStart(source)),
@@ -71,13 +106,17 @@ function parseDeck(text, role, { includeDrafts = false } = {}) {
         if (!duration || !ts.isNumericLiteral(duration) || !Number.isInteger(Number(duration.text)) || Number(duration.text) <= 0) {
           throw new Error(`Invalid scene duration in ${id}`);
         }
-        const focus = string(scene, "focus");
-        if (regionDeclaration && !regions.has(focus)) throw new Error(`Unknown focus region ${focus} in ${id}`);
+        const stepCard = card(scene, id);
+        const focus = string(scene, "focus", !stepCard);
+        if (stepCard && focus) throw new Error(`Instruction card in ${id} must not also claim a captured focus region`);
+        if (focus && regionDeclaration && !regions.has(focus)) throw new Error(`Unknown focus region ${focus} in ${id}`);
         return {
           title: string(scene, "title"),
+          caption: string(scene, "caption", false),
           narration: string(scene, "narration"),
-          focus,
-          frame: regions.get(focus),
+          focus: focus ?? null,
+          frame: focus ? regions.get(focus) : null,
+          card: stepCard ?? null,
           duration: Number(duration.text),
           span: [offset(duration.getStart(source)), offset(duration.end)],
         };

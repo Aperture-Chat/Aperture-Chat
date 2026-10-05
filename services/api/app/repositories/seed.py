@@ -46,7 +46,16 @@ from app.core.mfa import (
     pending_seed_aad,
     provisioning_uri,
 )
+from app.core.personal_data import conceal_text
 from app.core.policy import knowledge_access_allowed
+from app.core.privacy import (
+    conceal_alert,
+    conceal_feedback,
+    conceal_tag,
+    conceal_thread,
+    concealed_message_payloads,
+    privacy_policy_for,
+)
 from app.core.provider_credential_expiry import parse_provider_credential_expiry
 from app.core.provider_credential_secrets import (
     ProviderCredentialCipherContext,
@@ -100,6 +109,7 @@ from app.db.import_state import (
     write_runtime_state_atomic,
 )
 from app.models.schemas import (
+    TenantPrivacyPolicy,
     AgentRun,
     AlertNotification,
     AlertRule,
@@ -182,6 +192,7 @@ from app.repositories.identity_cleanup import (
     IdentityCleanupRepository,
 )
 from app.repositories.matters import MatterDraftRepository
+from app.repositories.data_protection import DataProtectionRepository
 from app.repositories.model_access_requests import ModelAccessRequestRepository
 from app.repositories.search_index import SearchIndexRepository
 from app.repositories.usage_budgets import TenantUsageBudgetRepository
@@ -382,6 +393,10 @@ class SeedStore:
         self.identity_cleanup_repository = IdentityCleanupRepository(application_engine)
         self.matter_draft_repository = MatterDraftRepository(application_engine)
         self.model_access_request_repository = ModelAccessRequestRepository(application_engine)
+        self.data_protection_repository = DataProtectionRepository(application_engine)
+        # Last captured shape per thread, so streaming saves of an unchanged
+        # conversation never re-run training capture.
+        self._training_capture_signatures: dict[str, str] = {}
         self.search_index_repository = SearchIndexRepository(application_engine)
         identity_authority = self.identity_config_repository.load_authority_state()
         authority_snapshot = identity_authority.snapshot
@@ -5050,12 +5065,21 @@ class SeedStore:
         # Chat history is personal workspace state. Platform governance access
         # does not imply access to another user's conversation list.
         with self._store_lock:
-            return self.application_state_repository.list_chat_threads_for_owner(
+            threads = self.application_state_repository.list_chat_threads_for_owner(
                 owner_user_id=actor.id,
                 tenant_id=actor.tenant_id,
                 allow_cross_tenant=actor.role == Role.PLATFORM_OWNER,
                 newest_first=True,
             )
+        # History saved before personal-data protection was turned on is
+        # concealed on the way out, so it is never shown again in the clear.
+        policies: dict[str, TenantPrivacyPolicy] = {}
+        concealed: list[ChatThread] = []
+        for thread in threads:
+            if thread.tenant_id not in policies:
+                policies[thread.tenant_id] = privacy_policy_for(self, thread.tenant_id)
+            concealed.append(conceal_thread(thread, policies[thread.tenant_id])[0])
+        return concealed
 
     def chat_folders_for(self, actor: User) -> list[ChatFolder]:
         # Folders follow the same personal ownership boundary as their threads.
@@ -5076,11 +5100,55 @@ class SeedStore:
             return self.application_state_repository.delete_chat_folder(folder_id)
 
     def save_chat_thread(self, thread: ChatThread) -> ChatThread:
+        # Personal-data protection is enforced here, at the persistence
+        # boundary, so every writer (workspace saves, renames, AI titles)
+        # stores the concealed copy and returns it for the client to adopt.
+        privacy = privacy_policy_for(self, thread.tenant_id)
+        thread = conceal_thread(thread, privacy)[0]
         with self._store_lock:
-            saved = self.application_state_repository.upsert_chat_thread(thread)
+            saved = self.application_state_repository.upsert_chat_thread(
+                thread,
+                stored_messages_view=(
+                    (lambda stored: concealed_message_payloads(stored, privacy)) if privacy.enabled else None
+                ),
+            )
             from app.core.retention_governance import scan_thread
             scan_thread(self, saved, self.tenant_retention_policy(saved.tenant_id))
-            return saved
+        self._capture_training_signals(saved)
+        return saved
+
+    _TRAINING_SIGNATURE_LIMIT = 5000
+
+    def _capture_training_signals(self, thread: ChatThread, *, force: bool = False) -> None:
+        """Recapture a thread's training signals when its settled shape changes.
+
+        Streaming saves resend the same finished messages many times; a
+        bounded map of per-thread shape hashes keeps those saves free.
+        """
+        signature = hashlib.sha256(
+            repr(
+                [
+                    (
+                        message.id,
+                        message.role,
+                        message.status,
+                        message.content,
+                        len((message.metadata or {}).get("responseVersions") or []),
+                    )
+                    for message in thread.messages
+                    if message.status != "pending"
+                ]
+            ).encode("utf-8")
+        ).hexdigest()
+        if not force and self._training_capture_signatures.get(thread.id) == signature:
+            return
+        from app.core.training_capture import capture_thread
+
+        capture_thread(self, thread)
+        self._training_capture_signatures.pop(thread.id, None)
+        self._training_capture_signatures[thread.id] = signature
+        while len(self._training_capture_signatures) > self._TRAINING_SIGNATURE_LIMIT:
+            self._training_capture_signatures.pop(next(iter(self._training_capture_signatures)))
 
     def mark_chat_thread_read(self, thread_id: str, message_id: str) -> ChatThread | None:
         with self._store_lock:
@@ -5097,20 +5165,47 @@ class SeedStore:
     def upsert_chat_feedback(
         self, record: ChatFeedbackRecord, *, update_comment: bool
     ) -> ChatFeedbackRecord:
+        record = conceal_feedback(record, privacy_policy_for(self, record.tenant_id))
         with self._store_lock:
-            return self.application_state_repository.upsert_chat_feedback(
+            saved = self.application_state_repository.upsert_chat_feedback(
                 record, update_comment=update_comment
             )
+        thread = self.chat_threads.get(saved.thread_id)
+        if thread is not None:
+            # A rating is a training signal of its own; recapture now.
+            self._capture_training_signals(thread, force=True)
+        return saved
 
     def list_chat_feedback(
         self, *, tenant_id: str | None = None, limit: int | None = 200
     ) -> list[ChatFeedbackRecord]:
         with self._store_lock:
-            return self.application_state_repository.list_chat_feedback(
+            records = self.application_state_repository.list_chat_feedback(
                 tenant_id=tenant_id, limit=limit
+            )
+        policies: dict[str, TenantPrivacyPolicy] = {}
+        concealed: list[ChatFeedbackRecord] = []
+        for record in records:
+            if record.tenant_id not in policies:
+                policies[record.tenant_id] = privacy_policy_for(self, record.tenant_id)
+            concealed.append(conceal_feedback(record, policies[record.tenant_id]))
+        return concealed
+
+    def list_chat_feedback_for_thread(self, thread_id: str) -> list[ChatFeedbackRecord]:
+        with self._store_lock:
+            return self.application_state_repository.list_chat_feedback(
+                thread_id=thread_id, limit=None
             )
 
     def save_issue_report(self, report: IssueReportRecord) -> IssueReportRecord:
+        policy = privacy_policy_for(self, report.tenant_id)
+        if policy.enabled:
+            report = report.model_copy(
+                update={
+                    "subject": conceal_text(report.subject, policy.categories),
+                    "body": conceal_text(report.body, policy.categories),
+                }
+            )
         with self._store_lock:
             return self.application_state_repository.save_issue_report(report)
 
@@ -5127,6 +5222,7 @@ class SeedStore:
             )
 
     def apply_chat_thread_tag(self, tag: ChatThreadTag) -> ChatThreadTag:
+        tag = conceal_tag(tag, privacy_policy_for(self, tag.tenant_id))
         with self._store_lock:
             return self.application_state_repository.apply_chat_thread_tag(tag)
 
@@ -5425,6 +5521,7 @@ class SeedStore:
             and (user_id is None or alert.user_id == user_id)
         )
         records: list[UserPromptRecord] = []
+        policies: dict[str, TenantPrivacyPolicy] = {}
         for thread in self.chat_threads.values():
             if tenant_id is not None and thread.tenant_id != tenant_id:
                 continue
@@ -5436,6 +5533,12 @@ class SeedStore:
             if thread_id is not None and thread.id != thread_id:
                 continue
             owner = self.users.get(thread.owner_user_id)
+            if thread.tenant_id not in policies:
+                policies[thread.tenant_id] = privacy_policy_for(self, thread.tenant_id)
+            # History saved before protection was on is concealed here, in
+            # full and before any preview truncation, so a value cut at the
+            # preview boundary cannot leak its remaining digits.
+            thread = conceal_thread(thread, policies[thread.tenant_id])[0]
             for index, message in enumerate(thread.messages):
                 if message.role.lower() != "user":
                     continue
@@ -5481,6 +5584,7 @@ class SeedStore:
         return records[:limit] if limit is not None else records
 
     def record_security_alert(self, alert: SecurityAlert) -> SecurityAlert:
+        alert = conceal_alert(alert, privacy_policy_for(self, alert.tenant_id))
         self.security_alerts[alert.id] = alert
         return alert
 

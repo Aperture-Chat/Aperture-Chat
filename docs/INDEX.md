@@ -11,6 +11,7 @@ for Aperture Chat.
 - [Architecture](architecture.md)
 - [Docker deployment](DOCKER_RELEASE.md)
 - [Training coverage and regeneration](TRAINING.md)
+- [Personal data protection and training datasets](PRIVACY_AND_TRAINING_DATA.md)
 - [README images and capture maintenance](images/README.md)
 - [Security policy](../SECURITY.md)
 - [License](../LICENSE.md)
