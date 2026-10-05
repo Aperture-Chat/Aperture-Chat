@@ -24,14 +24,19 @@ const roles = ["user", "admin", "owner"].map((role) => {
   const captureSource = captureScripts.map((name) => fs.readFileSync(path.join(__dirname, `capture-${name}-frames.cjs`), "utf8")).join("\n");
   const extraSource = role === "user" ? fs.readFileSync(path.join(__dirname, "capture-report-submission.cjs"), "utf8")
     : role === "owner" ? fs.readFileSync(path.join(__dirname, "capture-owner-provider-readiness.cjs"), "utf8") : "";
-  const refreshSource = fs.readFileSync(path.join(__dirname, "capture-training-refresh.cjs"), "utf8") + (role === "user" ? "" : fs.readFileSync(path.join(__dirname, "capture-retention-governance.cjs"), "utf8"));
+  const refreshSource = fs.readFileSync(path.join(__dirname, "capture-training-refresh.cjs"), "utf8") + (role === "user" ? "" : fs.readFileSync(path.join(__dirname, "capture-retention-governance.cjs"), "utf8"))
+    // Complete walkthrough modules run by capture-walkthroughs.cjs.
+    + fs.readdirSync(path.join(__dirname, "walkthroughs")).filter((file) => file.endsWith(".cjs"))
+      .map((file) => fs.readFileSync(path.join(__dirname, "walkthroughs", file), "utf8")).join("\n");
   const captureFrames = new Set([...`${captureSource}\n${extraSource}\n${refreshSource}`.matchAll(/await shot\((?:\w+,\s*)?"([a-z0-9-]+)"/g)].map((match) => `training/${role}/${match[1]}.png`));
   const sourcePath = path.join(webRoot, "src/components/trainingDecks", `${role}.tsx`);
   const lessons = parseDeck(fs.readFileSync(sourcePath, "utf8"), role, { includeDrafts });
   for (const lesson of lessons) {
     const lessonIssues = lesson.publication === "draft" ? draftIssues : issues;
     lesson.durationSeconds = lesson.scenes.reduce((sum, scene) => sum + scene.duration, 0);
-    lesson.frames = [...new Set(lesson.scenes.map((scene) => scene.frame))];
+    // Instruction cards are drawn by the composition and carry no frame.
+    lesson.frames = [...new Set(lesson.scenes.filter((scene) => !scene.card).map((scene) => scene.frame))];
+    lesson.cards = lesson.scenes.filter((scene) => scene.card).length;
     for (const frame of lesson.frames) {
       if (!frame || !fs.existsSync(path.join(publicRoot, frame))) lessonIssues.push(`${role}/${lesson.id}: missing frame ${frame || "(unmapped)"}`);
       if (frame && !captureFrames.has(frame) && !FRAME_ALIASES[frame]) lessonIssues.push(`${role}/${lesson.id}: no capture step for ${frame}`);
@@ -69,7 +74,7 @@ if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ ro
 else {
   for (const { role, lessons, guideSections } of roles) {
     console.log(`${role}: ${lessons.length} lessons, ${lessons.reduce((sum, lesson) => sum + lesson.scenes.length, 0)} scenes, ${guideSections.length} guide sections`);
-    for (const lesson of lessons) console.log(`  ${lesson.id}: ${lesson.durationSeconds}s, ${lesson.frames.length} frames, ${lesson.audio_missing ? "captions only" : "narration mapped"}${lesson.publication === "draft" ? ", UNPUBLISHED DRAFT" : ""}`);
+    for (const lesson of lessons) console.log(`  ${lesson.id}: ${lesson.durationSeconds}s, ${lesson.frames.length} frames${lesson.cards ? `, ${lesson.cards} instruction cards` : ""}, ${lesson.audio_missing ? "captions only" : "narration mapped"}${lesson.publication === "draft" ? ", UNPUBLISHED DRAFT" : ""}`);
   }
   for (const issue of issues) console.log(`INCOMPLETE: ${issue}`);
   for (const issue of draftIssues) console.log(`DRAFT PENDING: ${issue}`);

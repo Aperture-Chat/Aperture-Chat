@@ -50,6 +50,9 @@ from app.db.orm import (
     AuditOutboxRow,
     ChatAttachmentRow,
     ChatFeedbackRow,
+    TenantDataPolicyRow,
+    TrainingDatasetRow,
+    TrainingExampleRow,
     ChatFolderRow,
     ChatStateImportRow,
     ChatThreadRow,
@@ -1551,8 +1554,18 @@ class ApplicationStateRepository:
     def _chat_thread_row(session: Session, thread_id: str) -> ChatThreadRow | None:
         return session.scalar(select(ChatThreadRow).where(ChatThreadRow.id == thread_id))
 
-    def upsert_chat_thread(self, thread: ChatThread) -> ChatThread:
-        """Save a thread and move it to the newest insertion position."""
+    def upsert_chat_thread(
+        self,
+        thread: ChatThread,
+        *,
+        stored_messages_view: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
+    ) -> ChatThread:
+        """Save a thread and move it to the newest insertion position.
+
+        ``stored_messages_view`` maps the stored messages to the form this
+        save would write (personal-data concealment), so rewriting older
+        history in that form is not mistaken for new activity.
+        """
 
         copied = ChatThread.model_validate(thread.model_dump(mode="python"))
 
@@ -1561,7 +1574,10 @@ class ApplicationStateRepository:
                 raise RetentionDeletedError("This conversation was deleted by retention policy. Start a new chat.")
             existing = self._chat_thread_row(session, copied.id)
             prior_activity = existing.last_activity_at if existing is not None else None
-            content_changed = existing is None or existing.messages != copied.model_dump(mode="json")["messages"]
+            incoming_messages = copied.model_dump(mode="json")["messages"]
+            content_changed = existing is None or existing.messages != incoming_messages
+            if content_changed and existing is not None and stored_messages_view is not None:
+                content_changed = stored_messages_view(existing.messages) != incoming_messages
             # Matter assignment has a separate explicit-membership gate. This
             # general workspace upsert may preserve the authoritative SQL link,
             # but it must neither assign one nor resurrect a stale cached link
@@ -1759,6 +1775,10 @@ class ApplicationStateRepository:
             session.execute(
                 delete(ChatThreadTagRow).where(ChatThreadTagRow.thread_id == thread_id)
             )
+            # Captured training examples follow their source chat.
+            session.execute(
+                delete(TrainingExampleRow).where(TrainingExampleRow.thread_id == thread_id)
+            )
             session.execute(
                 delete(RetentionHoldThreadRow).where(
                     RetentionHoldThreadRow.thread_id == thread_id
@@ -1848,6 +1868,7 @@ class ApplicationStateRepository:
             doomed.extend(self._remove_unshared_chat_attachments(session, row))
             session.execute(delete(ChatFeedbackRow).where(ChatFeedbackRow.thread_id == thread_id, ChatFeedbackRow.tenant_id == policy.tenant_id))
             session.execute(delete(ChatThreadTagRow).where(ChatThreadTagRow.thread_id == thread_id))
+            session.execute(delete(TrainingExampleRow).where(TrainingExampleRow.thread_id == thread_id, TrainingExampleRow.tenant_id == policy.tenant_id))
             session.execute(delete(RetentionHoldThreadRow).where(RetentionHoldThreadRow.thread_id == thread_id))
             session.add(ChatRetentionTombstoneRow(thread_id=thread_id, tenant_id=policy.tenant_id, deleted_at=now, policy_revision=policy.updated_at))
             event = AuditEvent(id=f"audit-{uuid4()}", tenant_id=policy.tenant_id, actor_id="system-retention", actor_name="Retention scheduler", actor_role="SYSTEM", action="retention.chat_deleted", target=thread_id, target_type="chat", created_at=now, metadata={"policy_revision": policy.updated_at, "attachment_count": len(doomed)})
@@ -2159,12 +2180,15 @@ class ApplicationStateRepository:
         self,
         *,
         tenant_id: str | None = None,
+        thread_id: str | None = None,
         limit: int | None = 200,
     ) -> list[ChatFeedbackRecord]:
         _validate_limit(limit)
         filters: list[Any] = []
         if tenant_id is not None:
             filters.append(ChatFeedbackRow.tenant_id == tenant_id)
+        if thread_id is not None:
+            filters.append(ChatFeedbackRow.thread_id == thread_id)
 
         def operation(session: Session) -> list[ChatFeedbackRecord]:
             statement = (
@@ -4257,6 +4281,9 @@ class ApplicationStateRepository:
             session.execute(
                 delete(ChatFeedbackRow).where(ChatFeedbackRow.user_id == user_id)
             )
+            session.execute(
+                delete(TrainingExampleRow).where(TrainingExampleRow.user_id == user_id)
+            )
             removed_threads = (
                 session.execute(
                     delete(ChatThreadRow).where(ChatThreadRow.owner_user_id == user_id)
@@ -4395,6 +4422,13 @@ class ApplicationStateRepository:
                     owned_or_tenant(ChatFeedbackRow.tenant_id, ChatFeedbackRow.user_id)
                 )
             )
+            session.execute(
+                delete(TrainingExampleRow).where(
+                    owned_or_tenant(TrainingExampleRow.tenant_id, TrainingExampleRow.user_id)
+                )
+            )
+            session.execute(delete(TrainingDatasetRow).where(TrainingDatasetRow.tenant_id == tenant_id))
+            session.execute(delete(TenantDataPolicyRow).where(TenantDataPolicyRow.tenant_id == tenant_id))
             doomed_issue_report_ids.extend(
                 session.execute(
                     select(IssueReportRow.id).where(IssueReportRow.tenant_id == tenant_id)

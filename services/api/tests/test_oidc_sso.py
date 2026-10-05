@@ -8,10 +8,12 @@ expiry, and signature checks are all genuinely exercised.
 
 from __future__ import annotations
 
+import base64
 import time
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
+import httpx
 import jwt
 import pyotp
 import pytest
@@ -111,7 +113,7 @@ def _run_callback(
     state: str,
     expected_secret: str = "entra-client-secret-651df904",
 ):
-    def fake_exchange(token_endpoint, client_id, client_secret, code, redirect_uri, code_verifier=None):
+    def fake_exchange(token_endpoint, client_id, client_secret, code, redirect_uri, code_verifier=None, auth_methods_supported=None):
         assert token_endpoint == DISCOVERY["token_endpoint"]
         assert client_id == CLIENT_ID
         assert client_secret == expected_secret
@@ -718,3 +720,66 @@ def test_sso_group_claim_mapping_syncs_managed_groups(monkeypatch: pytest.Monkey
     callback2 = _run_callback(monkeypatch, _sign_id_token("jane.smith@example.com", nonce2), state2)
     assert _fragment(callback2).startswith("sso_session=")
     assert store.users["user-jane"].group_ids == ["group-finance"]
+
+
+class _TokenEndpoint:
+    """Records each token request and answers from a queue of responses."""
+
+    def __init__(self, *responses: tuple[int, dict]) -> None:
+        self.responses = list(responses)
+        self.requests: list[dict] = []
+
+    def __call__(self, url, data=None, headers=None, timeout=None):
+        self.requests.append({"url": url, "data": dict(data or {}), "headers": dict(headers or {})})
+        status_code, payload = self.responses.pop(0)
+        return httpx.Response(status_code, json=payload, request=httpx.Request("POST", url))
+
+
+def _exchange(monkeypatch: pytest.MonkeyPatch, endpoint: _TokenEndpoint, methods):
+    monkeypatch.setattr(oidc.httpx, "post", endpoint)
+    return oidc.exchange_authorization_code(
+        "https://idp.example.test/oauth2/v1/token",
+        "client id/1",
+        "s3cret:+value",
+        "auth-code",
+        "https://chat.example.test/api/auth/sso/callback",
+        code_verifier="v" * 43,
+        auth_methods_supported=methods,
+    )
+
+
+def test_token_exchange_prefers_client_secret_basic_when_advertised(monkeypatch: pytest.MonkeyPatch) -> None:
+    endpoint = _TokenEndpoint((200, {"id_token": "token"}))
+    assert _exchange(monkeypatch, endpoint, ["client_secret_post", "client_secret_basic"]) == {"id_token": "token"}
+    [request] = endpoint.requests
+    # RFC 6749 2.3.1: each value is form-encoded before Base64.
+    expected = base64.b64encode(b"client%20id%2F1:s3cret%3A%2Bvalue").decode()
+    assert request["headers"]["Authorization"] == f"Basic {expected}"
+    assert "client_secret" not in request["data"] and "client_id" not in request["data"]
+    assert request["data"]["code_verifier"] == "v" * 43
+
+
+def test_token_exchange_falls_back_to_post_once_for_a_pinned_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    endpoint = _TokenEndpoint(
+        (401, {"error": "invalid_client", "error_description": "Client authentication failed."}),
+        (200, {"id_token": "token"}),
+    )
+    assert _exchange(monkeypatch, endpoint, None)["id_token"] == "token"
+    basic, post = endpoint.requests
+    assert "Authorization" in basic["headers"]
+    assert "Authorization" not in post["headers"]
+    assert post["data"]["client_id"] == "client id/1" and post["data"]["client_secret"] == "s3cret:+value"
+
+
+def test_token_exchange_uses_only_post_when_that_is_all_the_provider_offers(monkeypatch: pytest.MonkeyPatch) -> None:
+    endpoint = _TokenEndpoint((401, {"error": "invalid_client"}))
+    with pytest.raises(oidc.OidcError, match="401: invalid_client"):
+        _exchange(monkeypatch, endpoint, ["client_secret_post", "private_key_jwt"])
+    assert len(endpoint.requests) == 1 and "Authorization" not in endpoint.requests[0]["headers"]
+
+
+def test_token_exchange_does_not_retry_a_rejected_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    endpoint = _TokenEndpoint((400, {"error": "invalid_grant", "error_description": "The authorization code is invalid."}))
+    with pytest.raises(oidc.OidcError, match="authorization code is invalid"):
+        _exchange(monkeypatch, endpoint, ["client_secret_basic", "client_secret_post"])
+    assert len(endpoint.requests) == 1

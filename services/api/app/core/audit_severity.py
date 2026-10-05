@@ -59,6 +59,11 @@ _WARNING_ACTIONS: dict[str, str] = {
     "platform.elastic_settings_updated": (
         "Elastic export settings were changed; they control where platform data is copied."
     ),
+    "privacy.policy_updated": "Personal-data protection settings were changed.",
+    "training.policy_updated": "Training-data capture settings were changed.",
+    "training.dataset_exported": (
+        "A training dataset was downloaded; de-identified chat content left the platform."
+    ),
     "auth.api_key_created": "A personal API key was created.",
     "auth.api_key_rotated": "A personal API key was rotated.",
     "auth.api_key_revoked": "A personal API key was revoked.",

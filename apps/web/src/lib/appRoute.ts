@@ -18,6 +18,7 @@ export type AdminSection =
   | "sso"
   | "analytics"
   | "policies"
+  | "datasets"
   | "audit"
   | "alerts";
 export type PlatformSection =
@@ -44,6 +45,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   "sso",
   "analytics",
   "policies",
+  "datasets",
   "audit",
   "alerts",
 ];

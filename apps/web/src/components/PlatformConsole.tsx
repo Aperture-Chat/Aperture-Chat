@@ -120,6 +120,7 @@ const OwnerDocumentationModal = lazyWithReload("owner-documentation", () =>
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { renderConcealed } from "./ConcealedText";
 import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPreviewText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
@@ -3689,9 +3690,9 @@ export function PlatformConsole({
                         <span>
                           <strong>{isPositive ? "Positive sentiment" : "Negative sentiment"}</strong>
                           <small>{item.thread_title} · {item.model_id} · {item.user_name}</small>
-                          <p>{markdownToPreviewText(item.message_preview)}</p>
+                          <p>{renderConcealed(markdownToPreviewText(item.message_preview), item.id)}</p>
                           {item.comment ? (
-                            <p className="feedback-comment">“{item.comment}”</p>
+                            <p className="feedback-comment">“{renderConcealed(item.comment, `${item.id}-comment`)}”</p>
                           ) : null}
                         </span>
                         <span className="feedback-row-side">

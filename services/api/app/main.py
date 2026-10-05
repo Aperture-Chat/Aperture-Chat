@@ -26,6 +26,7 @@ from app.routes import (
     bootstrap,
     chat,
     connector_oauth,
+    data_protection,
     deck_templates,
     health,
     issue_reports,
@@ -232,6 +233,7 @@ app.include_router(model_access.router)
 app.include_router(platform.router)
 app.include_router(platform_updates.router)
 app.include_router(admin.router)
+app.include_router(data_protection.router)
 app.include_router(chat.router)
 app.include_router(issue_reports.router)
 app.include_router(memory.router)

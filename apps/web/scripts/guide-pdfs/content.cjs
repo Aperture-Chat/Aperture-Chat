@@ -16,6 +16,9 @@ const list = (items) => ({ type: "list", items });
 const note = (tone, text) => ({ type: "note", tone, text });
 const table = (headers, rows) => ({ type: "table", headers, rows });
 const sub = (text) => ({ type: "sub", text });
+/* The complete procedure from a narrated walkthrough: prerequisites, steps
+ * for each path, checks, and troubleshooting, read from the training deck. */
+const lesson = (role, id) => ({ type: "lesson", role, id });
 
 const PARTS = [
   { id: "basics", minRole: "user", label: "Getting started" },
@@ -42,11 +45,27 @@ const SECTIONS = [
       p(
         "This guide explains where to look and what to choose. Words in bold — like Save version — match the labels on screen. If a step says “hover”, rest your pointer on the item without clicking; controls that offer extra help show it nearby.",
       ),
+      sub("How each task is taught"),
+      p(
+        "Each task appears in three matching forms: a narrated walkthrough video in the product, a written procedure in this guide, and the same procedure on the website guide. They come from one source, so they describe the same steps. Every walkthrough is a complete loop, from where you start to a result you can see, and it covers each way the product offers to do the task.",
+      ),
+      table(
+        ["In each walkthrough box", "What it gives you"],
+        [
+          ["Before you begin", "The role, access, earlier setup, and outside accounts or values you need first."],
+          ["Step by step", "Every action in order, with the exact labels on screen. Where there are several ways to do the task (an identity provider, a delivery target, a device), each path has its own complete list."],
+          ["Check that it worked", "What you should see when the task succeeded."],
+          ["Troubleshooting", "Messages you may meet, quoted as the product shows them, and what to do about each."],
+        ],
+      ),
+      p(
+        "Walkthrough screens are real captures of a running workspace with sample accounts. Steps that happen in another product, such as an identity provider's console, are shown as labeled instruction cards rather than imitation screenshots.",
+      ),
       table(
         ["Guide", "Who it is for", "What it covers"],
         [
           ["User Guide", "Everyone", "Chat, model access requests, personalization memory, documents and decks, account sync, agents, knowledge and tools, search and commands, appearance, and account security."],
-          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, audit, and alerts."],
+          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, personal data protection, training datasets, audit, and alerts."],
           ["Platform Owner Guide", "Platform owners", "Everything in the other guides, plus setup readiness, providers and keys, organization policy, shared connectors, branding, releases, search indexing, and platform governance."],
         ],
       ),
@@ -63,7 +82,7 @@ const SECTIONS = [
     title: "Signing in",
     summary: "Reach the sign-in screen and get into your workspace.",
     blocks: [
-      steps([
+      list([
         "Open the web address your organization gave you for Aperture Chat in a modern browser (Chrome, Edge, Safari, or Firefox).",
         "On the sign-in screen, type your work email address in the field marked you@company.com.",
         "If your organization uses single sign-on (SSO), the screen recognizes your email domain and offers Continue with SSO. Click it — you are sent to your organization's identity provider (for example Microsoft or Google), sign in there as usual, and return to Aperture Chat already signed in.",
@@ -77,6 +96,7 @@ const SECTIONS = [
         "info",
         "See a message you do not expect? The sign-in screen reports real problems plainly (for example, a domain that is not allowed for SSO). Copy the message and send it to your administrator.",
       ),
+      lesson("user", "access-and-sign-in"),
     ],
   },
   {
@@ -105,7 +125,7 @@ const SECTIONS = [
     summary: "Set up an authenticator, complete required verification, and manage recovery codes.",
     blocks: [
       p("To add an authenticator after signing in with a local password, open your account drawer, find Security, choose Manage security, and select Set up authenticator. Confirm your current password, add the QR code or setup key to your authenticator, acknowledge that you added it, and choose Verify authenticator with a current six-digit code. Copy the one-time recovery codes into secure storage, acknowledge that you saved them, and choose Done. Copying alone does not store them for you; finish verification and code storage before leaving the panel."),
-      steps([
+      list([
         "If sign-in asks you to set up an authenticator, choose Begin authenticator setup. Add the displayed QR code or setup secret to your authenticator app.",
         "Confirm that you added the account, enter the current six-digit Authenticator code, and choose Verify and enable MFA before the setup expires.",
         "Use Copy recovery codes and save the codes privately when they are shown. They are not saved to a file automatically. Each recovery code can be used once when your authenticator is unavailable; do not include these codes in screenshots or issue reports.",
@@ -117,6 +137,7 @@ const SECTIONS = [
       p("If you lose both the authenticator and all unused recovery codes, contact your administrator for the organization's verified recovery process. A new password does not remove the authenticator requirement. For identity-provider MFA, use that provider's recovery process."),
       note("tip", "Use the code currently shown for this workspace in your authenticator app. If it expires while you are typing, use the next code. Read the attempts, expiry, and any cooldown shown; wait for a cooldown to finish before trying again. If Security cannot load, choose Retry security settings. Keep setup keys and recovery codes out of shared documents, videos, and support attachments."),
       note("info", "SSO accounts manage voluntary authenticator setup in their identity-provider settings. Your identity provider may also require its own verification during SSO. Follow the provider's screen for that check; these instructions describe Aperture Chat's authenticator screens."),
+      lesson("user", "account-security"),
     ],
   },
   {
@@ -180,7 +201,7 @@ const SECTIONS = [
         "Your chat history is always visible under the CHATS heading: folders first, then a Pinned group when something is pinned, then your recent chats (labeled Recent only when a group sits above them). Click the CHATS heading to hide or show the whole list; this is remembered for your account on this device. While hidden, it shows a count and a dot for unread replies, and Search still finds every chat.",
       ),
       sub("Folders"),
-      steps([
+      list([
         "Click the folder icon with a plus sign next to the CHATS heading.",
         "Type a name for the folder — a client, a matter, a project — and click Create.",
         "To file a chat into a folder, hover or focus its row, click the ⋯ (More actions) button, and choose Move to folder. Pick a folder, choose New folder to create one right there, or choose Remove from folder to take it out.",
@@ -188,7 +209,7 @@ const SECTIONS = [
       ]),
       note("info", "Deleting a folder does not delete its chats — they move back to the Recent list."),
       sub("Pinned chats"),
-      steps([
+      list([
         "Hover or focus any chat row, click ⋯ (More actions), and choose Pin chat.",
         "The chat moves to the Pinned group, just below your folders, where it stays until you choose Unpin chat from the same menu.",
       ]),
@@ -200,6 +221,8 @@ const SECTIONS = [
         "Archiving moves a chat out of the sidebar without deleting it — use it to tidy up. Archived chats are listed in your account drawer, where you can restore or permanently delete them.",
         "Click View all chats at the bottom of the list to browse your full history, including everything that no longer fits in the sidebar.",
       ]),
+      lesson("user", "organize"),
+      lesson("user", "chat-previews"),
     ],
   },
   {
@@ -209,7 +232,7 @@ const SECTIONS = [
     title: "Searching everything",
     summary: "Find saved work, preview a result, or run an available command.",
     blocks: [
-      steps([
+      list([
         "Click Search near the top of the sidebar, just below New chat, or press Ctrl+K (Windows) or ⌘K (Mac) from anywhere.",
         "The Search past work box opens. Type a few words from what you remember: a chat title, message text, an agent or draft name, slide text, or text from an indexed document.",
         "Results are grouped by kind. Chat results lead, matching text is highlighted, and archived conversations are labeled explicitly. Saved documents and decks open in their matching editor.",
@@ -222,6 +245,7 @@ const SECTIONS = [
         "info",
         "Search includes only work your account can access. If the panel says Indexing your workspace, results may be incomplete until indexing finishes; try again after it completes. A missing result is not proof the work was deleted. Unsaved device-only changes may need saving to your account before server search can find them.",
       ),
+      lesson("user", "search-and-commands"),
     ],
   },
 
@@ -233,7 +257,7 @@ const SECTIONS = [
     title: "Your first chat",
     summary: "Send a message, pick a model, and control web search.",
     blocks: [
-      steps([
+      list([
         "Click New chat in the sidebar. A fresh chat greets you by the time of day — “Good morning”, “Good afternoon”, or “Good evening” with your first name (late at night it asks if you are burning the midnight oil) — above the tagline “Your approved models, your sources, your guardrails — ask Aperture Chat anything.” (The name reflects your organization's branding.)",
         "Click into the message box (the composer) — it reads Ask anything... — and type your question.",
         "Explore an idea, Compare options, and Draft a message offer starting points. Selecting one fills an editable prompt; review it before sending.",
@@ -261,6 +285,8 @@ const SECTIONS = [
         "Click the button again — it becomes a stop square — and your words are transcribed and inserted into the composer as editable text. Nothing sends until you press Enter.",
         "If the microphone is blocked or no speech was heard, the composer says so plainly so you can fix the problem and try again. The Drafts workspace has the same dictation button for drafting instructions.",
       ]),
+      lesson("user", "chat-basics"),
+      lesson("user", "dictation-images"),
     ],
   },
   {
@@ -270,13 +296,14 @@ const SECTIONS = [
     title: "Understand model availability and request access",
     summary: "Read the server's reason, ask for a model when permitted, and follow its request status.",
     blocks: [
-      steps([
+      list([
         "Open the chat model selector and choose Why isn't a model listed? If no model is usable, the No models available control opens the same explanation.",
         "Models in your organization separates Usable now from Not available to you. Read the reason on the model row: Locked describes an access restriction; Provider offline means you already have access but the provider needs attention.",
         "Choose Request access only where it is enabled. The request goes to an administrator for review; sending it does not grant immediate access.",
         "While a request is pending, the row shows its date and Withdraw request. Use Refresh model access after your administrator resolves it, then select the usable model in the chat picker.",
       ]),
       note("info", "Your organization may show only models you can already use. Its browsing policy controls whether you can inspect other enabled models and request access. Some restrictions cannot be lifted by a request; ask your administrator about the stated reason. An offline provider needs a platform-owner repair, not another group-access request."),
+      lesson("user", "model-access"),
     ],
   },
   {
@@ -319,6 +346,7 @@ const SECTIONS = [
         "When a reply used the web or your knowledge bases, numbered citations appear with it. Click a citation to open the original source.",
         "A small token count appears under a reply only when the model provider actually reported one — the platform never shows an estimate dressed up as a real number.",
       ]),
+      lesson("user", "work-traces"),
     ],
   },
   {
@@ -341,7 +369,7 @@ const SECTIONS = [
           [">", "Automations, including paused ones. The one you pick runs on your message when you send."],
         ],
       ),
-      steps([
+      list([
         "Type the symbol, then keep typing to filter the list.",
         "Use the ↑ and ↓ arrow keys to move through the menu.",
         "Press Enter to insert the highlighted item, Tab to complete it, or Escape to dismiss the menu.",
@@ -349,6 +377,7 @@ const SECTIONS = [
       sub("Browse resources"),
       p("On the Resources tab, use Find a resource to search by name, or select All, Knowledge bases, Files in knowledge sources, MCP connections, Prompts, Agents, Skill files, or Automations. A selected connection or automation shows a check; choose it again to remove it. Read an empty or failed-loading state before retrying. The Type shortcuts in chat reference explains each symbol below the results."),
       note("tip", "The expanded composer focuses on editing a longer message. Return to the normal composer to browse resources, adjust send options, and send with the visible controls."),
+      lesson("user", "composer-commands"),
     ],
   },
   {
@@ -358,7 +387,7 @@ const SECTIONS = [
     title: "Attaching files, web pages, and connected sources",
     summary: "Upload from your computer, fetch a page by link, or pull from your organization's drives.",
     blocks: [
-      steps([
+      list([
         "Click the paperclip button at the bottom-left of the composer.",
         "Click Upload from computer to attach files from this device. The model reads them as context for your next message.",
         "Or click Web page by link and paste one or more web addresses — the platform fetches up to 3 public pages and attaches them as cited sources for this message.",
@@ -378,6 +407,7 @@ const SECTIONS = [
         "info",
         "If a source needs shared configuration, ask your administrator to coordinate with the service team. Shared connector administration is managed outside tenant administration. Your own Connect action in the attach menu remains separate and grants access only through your source account.",
       ),
+      lesson("user", "attachments"),
     ],
   },
   {
@@ -387,7 +417,7 @@ const SECTIONS = [
     title: "Send options: Knowledge, Web, Agent, and Reasoning",
     summary: "Control what the model may use, one reply at a time.",
     blocks: [
-      steps([
+      list([
         "Click the chevron (˅) beside the paper-plane send button.",
         "The menu opens with Send now at the top — that simply sends with the current settings.",
         "Below it are three switches you can turn on or off for the next reply, and a Reasoning slider at the bottom.",
@@ -408,6 +438,7 @@ const SECTIONS = [
         "Whenever tools are on, the active-tools chip appears next to the paperclip: the single tool's name, or Tools with a count. Click its × to turn off Knowledge, Web, and Agent and clear selected MCP connections and queued automations for the next message.",
       ),
       p("On the Reply settings tab, Stream replies controls whether text appears as the model produces it or only after the reply finishes. The Resources tab opens the searchable resource picker; MCP connections and resources also opens it from Reply settings. These controls change how the next reply is prepared or displayed; they do not supply missing provider or connector access."),
+      lesson("user", "send-options"),
     ],
   },
   {
@@ -417,7 +448,7 @@ const SECTIONS = [
     title: "Session details and sources",
     summary: "Real token usage, active tools, every source this chat gathered, and the symbol shortcuts.",
     blocks: [
-      steps([
+      list([
         "Click the round information button (ⓘ) at the right end of the chat's top bar.",
         "The session details panel opens for the current chat.",
       ]),
@@ -429,6 +460,34 @@ const SECTIONS = [
         "Symbol shortcuts — at the bottom of the panel, the five symbols you can type in the message box and what each one pulls in. See “Symbol shortcuts: / @ # $ >”.",
       ]),
       p("The Context window meter describes how much context this conversation uses. For older conversations without provider counts it can show ≈ and estimated from message length. Treat that as an estimate; Tokens used remains based on actual provider reports. When the context window fills, start a new chat and include the details it needs to continue reliably."),
+      lesson("user", "session-details"),
+    ],
+  },
+
+  {
+    id: "personal-data",
+    part: "chat",
+    minRole: "user",
+    title: "Personal data in your chats",
+    summary: "Locked chips for concealed values, what the model receives, and how rated answers are kept.",
+    blocks: [
+      p(
+        "Your organization can conceal personal data in chats. When it does, the line under the message box ends with Personal data is concealed. As soon as you send a message, values such as Social Security, card, and account numbers, email addresses, phone numbers, health identifiers, and passwords or keys are replaced with a locked chip such as SSN or Email. The original value is not saved anywhere in the workspace, so it cannot be recovered from the chat later.",
+      ),
+      table(
+        ["You see", "What it means"],
+        [
+          ["A locked chip in your message, such as SSN", "The value was concealed before the chat was saved. Reopening the chat shows the chip, not the value."],
+          ["[SSN] or [EMAIL] in a reply", "Your organization keeps values from the model, so the model received a placeholder. Add the real value yourself in the system where it belongs, not in the chat."],
+          ["A locked chip in a reply", "Your organization lets the model read values for work that needs them. A value the model writes is concealed before you see it."],
+          ["A note in the rating box about a de-identified copy", "Your organization captures training examples from rated answers and notes. The copy is de-identified and never sent to a model provider."],
+        ],
+      ),
+      note(
+        "info",
+        "Concealment recognizes values by their format and check digits. It does not recognize names or free-text descriptions of someone's health, and it does not alter drafts or uploaded files. Follow your organization's policy for those.",
+      ),
+      lesson("user", "personal-data"),
     ],
   },
 
@@ -445,7 +504,7 @@ const SECTIONS = [
       ),
       note("info", "If the model selector says No models connected, AI drafting, AI rename, inline AI edits, and AI deck prompts are unavailable. You can still edit manually, import, save, use document history, and export. Follow the setup guidance for your role or ask your administrator for access to a working model."),
       sub("Generating a draft"),
-      steps([
+      list([
         "Look at the Sources, Web, and Templates chips at the top of the assistant rail first: they show which context is on before you generate anything.",
         "In the assistant's message box, describe the document you need: a memo, an engagement letter, a summary. Be specific about audience and tone if it matters. The suggested requests under the heading fill the box for you.",
         "The assistant writes the document directly into the editor. You can also send any chat response here with Transfer to Drafts.",
@@ -473,7 +532,7 @@ const SECTIONS = [
         "Pasting from Word, Google Docs, or a web page keeps headings, lists, tables, links, pictures, and emphasis but drops the source's fonts, sizes, and colors so the text matches your document. Ctrl+Shift+V (⌘⇧V on a Mac) pastes plain text.",
       ]),
       sub("Editing with AI"),
-      steps([
+      list([
         "Select a passage and choose Ask AI in the floating toolbar, or press Ctrl+J (⌘J on a Mac). With nothing selected, the same command writes new text at the cursor.",
         "Pick an action — Improve writing, Fix spelling & grammar, Make shorter, Make longer, Simplify language, Turn into a bulleted list, Turn into a table, Summarize, or Use active voice — or a tone or language, or type your own instruction.",
         "Review the suggestion. Changes marks what was added and removed; Result shows the finished text. Nothing in the document changes yet.",
@@ -510,6 +569,7 @@ const SECTIONS = [
         "tip",
         "On a narrow window, the assistant rail becomes a slide-out drawer so the editor gets the full screen. Open it with the pen tab on the left edge or Ctrl+. (⌘. on a Mac); resting the mouse on that edge previews it. Press Escape or click the dimmed area to close it.",
       ),
+      lesson("user", "drafts"),
     ],
   },
   {
@@ -569,7 +629,7 @@ const SECTIONS = [
         "Every slide has a Speaker notes field below the stage. Notes export with the deck: they land in each slide's notes pane in the PowerPoint file, they appear in the Markdown outline, and they follow you into presentation mode.",
       ),
       sub("Presenting from Aperture"),
-      steps([
+      list([
         "Click Present deck in the deck toolbar (the monitor icon), or press F5 (⌘Enter on a Mac); add Shift to start from the current slide. The deck opens full screen.",
         "Advance by clicking the slide or with the arrow keys or Space; move back with the left arrow. Type a slide number and press Enter to jump to it.",
         "The Notes button (or N) shows your speaker notes under the slide. Presenter view (or P) shows the current slide, the next slide, a timer you can pause or reset, and your notes side by side.",
@@ -582,6 +642,7 @@ const SECTIONS = [
         "Click Export to open the Export deck panel: PowerPoint deck produces an editable .pptx that mirrors the slides on screen — speaker notes included in each slide\u2019s notes pane — and Markdown outline exports slide titles, bullets, and speaker notes as text.",
         "Limits: a deck holds up to 100 slides and 8 MB of content. The editor tells you plainly if a deck exceeds them.",
       ]),
+      lesson("user", "deck-basics"),
     ],
   },
   {
@@ -592,13 +653,14 @@ const SECTIONS = [
     summary: "Distinguish a browser working copy from a completed account save.",
     blocks: [
       p("The sidebar's Only on this device reminder appears when work has changes kept in this browser that have not reached your account. It can include chats whose last save failed, documents or decks with unsent changes, and older history from before account sync."),
-      steps([
+      list([
         "Open the reminder to review the named items. For chats whose last save failed, choose Retry all and check the resulting save state.",
         "For documents and decks, choose Open Drafts, open the item, and save it to your account. Review any load, quota, connection, or conflict error before leaving the browser.",
         "Older browser history remains separate until you explicitly import each item from Drafts → Document history with Import to my account. Confirm the item belongs in this account before importing.",
         "Archive finished drafts when you want them out of the active list. Account archives remain recoverable; archiving a browser-only item does not prove it has been uploaded.",
       ]),
       note("info", "Clear list dismisses these reminders without deleting or uploading work. New edits may appear again. Hide this reminder turns off this account's sidebar notice in this browser; save status remains in Drafts and chats. Downloading an export also leaves pending account saves to be resolved."),
+      lesson("user", "save-and-recover-work"),
     ],
   },
   {
@@ -612,7 +674,7 @@ const SECTIONS = [
         "An agent profile bundles a model route, meta prompts, knowledge bases, and MCP tools into one reusable configuration. A usable profile needs an approved, enabled model backed by a working provider. A saved profile marked not connected is a configuration example, not proof that it can run.",
       ),
       sub("Creating an agent"),
-      steps([
+      list([
         "If your account has agent authoring permission, click Agents in the sidebar, then New Agent.",
         "Give it a name and a short description of what it is for.",
         "Work through the editor tabs: Profile (name, model, and description), Knowledge (assign knowledge bases), Tools (select MCP tools), Prompts & Skills (attach system prompts and skill files), Access (who can use it), and Hermes (the optional learning companion).",
@@ -627,6 +689,7 @@ const SECTIONS = [
       p(
         "From the Agents view you can also open a profile to edit it, jump straight into a chat with it, or delete it. The Automations tab at the top of this view holds your scheduled runs — covered in “Scheduled automations”.",
       ),
+      lesson("user", "agents"),
     ],
   },
 
@@ -641,7 +704,7 @@ const SECTIONS = [
       p(
         "Knowledge lives in the Library: click Library in the sidebar, then the Knowledge tab. The Knowledge Bases panel lists every collection with its status, security posture, and whether it is enabled.",
       ),
-      steps([
+      list([
         "Click Add Knowledge Base and name the collection.",
         "Choose what feeds it. A knowledge base can index documents you upload, a public web page (Add a web link — enter the address and an optional note), or an API (Connect an API — enter the endpoint and its authentication).",
         "Create the base, then check its row in the table: it shows the status, the security posture, and whether the base is enabled.",
@@ -657,6 +720,7 @@ const SECTIONS = [
         "Replies grounded in knowledge return citations that link straight back to the source documents.",
       ]),
       note("info", "The # shortcut menu shows Loading files… while retrieving file choices. If Some files could not be loaded appears, use Retry in that menu. Files from sources that loaded successfully remain usable. If access was removed or a source needs configuration, ask your administrator to resolve it."),
+      lesson("user", "knowledge"),
     ],
   },
   {
@@ -682,6 +746,7 @@ const SECTIONS = [
         "Click any existing card to review or edit it; the trash icon deletes it permanently.",
         "Every tool row shows its real status — draft, approval required, or enabled — so you always know whether a connection is actually live before relying on it.",
       ]),
+      lesson("user", "tools-automations"),
     ],
   },
   {
@@ -695,7 +760,7 @@ const SECTIONS = [
         "Automations are saved workflows that run a chat or drafting task on a schedule. They are useful for recurring digests, weekly status checks, report refreshes, policy reviews, and any workflow where the same model chain should run the same way each time. Enabled schedules run automatically in the background (times are UTC), and each scheduled run delivers its output as a new chat thread in your sidebar.",
       ),
       sub("Creating an automation"),
-      steps([
+      list([
         "Click Agents in the sidebar, then the Automations tab, then New automation.",
         "Name it — for example “Monday client digest”.",
         "Choose what it runs against: chat or draft.",
@@ -723,6 +788,7 @@ const SECTIONS = [
         "tip",
         "Always use Run now once after creating or editing an automation. If the run fails, the card shows the reason so you can fix the model choice, input, or instructions before depending on the saved schedule.",
       ),
+      lesson("user", "scheduled-automations"),
     ],
   },
 
@@ -765,6 +831,7 @@ const SECTIONS = [
         "Archived chats — every chat you have archived, with buttons to restore each one to your sidebar or delete it permanently.",
         "Sign out — ends your session and returns to the sign-in screen.",
       ]),
+      lesson("user", "account-mobile-help"),
     ],
   },
   {
@@ -778,7 +845,7 @@ const SECTIONS = [
         "Personalization memory belongs to your account, not to one conversation. When service policy and your organization administrator allow it, administrators and regular users can each build their own private memory. A saved item can influence a new chat immediately and still be available after you sign out and return in a later session.",
       ),
       sub("Save a memory in ordinary English"),
-      steps([
+      list([
         "In any chat, state what should persist in natural language — for example: “Remember that I prefer a short summary before the detail,” “Please remember that I work in commercial litigation,” or “Remember my project codename is Silver Horizon.”",
         "Send the message. The assistant confirms the memory after it is saved; you do not need a slash command or special syntax.",
         "Start a new chat, or return in a later sign-in session, and ask a natural question such as “What do you remember about me?”, “What are my writing preferences?”, or “What is my project codename?” The same account memory is available across those sessions.",
@@ -788,7 +855,7 @@ const SECTIONS = [
         "Memory is different from the context window shown in Session details. The context window describes how much of the current chat the selected model can hold at once; personalization memory is durable account context that follows you into other chats and sessions.",
       ),
       sub("Open and control the memory manager"),
-      steps([
+      list([
         "Click your account card — your name and role at the bottom-left of the sidebar.",
         "Click Personalization memory. The dialog titled “What the assistant remembers about you” opens.",
         "Use memory in my chats controls whether saved items are applied to answers. Learn from my conversations controls whether the assistant may notice durable preferences automatically. Turning a switch off does not expose or silently erase existing items.",
@@ -807,6 +874,7 @@ const SECTIONS = [
         "warning",
         "Do not use memory as a password or secret vault. Credentials, keys, and sensitive identifiers are rejected on purpose.",
       ),
+      lesson("user", "personalization-memory"),
     ],
   },
   {
@@ -847,11 +915,11 @@ const SECTIONS = [
     part: "admin",
     minRole: "admin",
     title: "Opening the Admin console",
-    summary: "Where the console lives and what its nine tenant-governance tabs control.",
+    summary: "Where the console lives and what its ten tenant-governance tabs control.",
     blocks: [
       steps([
         "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Management section lists it too.)",
-        "The console opens with nine tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Policies, Audit, and Alerts. Policies is always present between Analytics and Audit; service-wide availability determines which organization controls are active inside it.",
+        "The console opens with ten tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Policies, Datasets, Audit, and Alerts. Policies is always present between Analytics and Datasets; service-wide availability determines which organization controls are active inside it.",
       ]),
       p(
         "Everything you change here writes through the admin API immediately — changes persist across refreshes and restarts, and every action lands in the tenant audit trail. Status messages under the header tell you honestly whether an action synced or failed.",
@@ -872,24 +940,10 @@ const SECTIONS = [
       p(
         "The Users tab lists the organization accounts you administer, with each person's role, groups, sign-in method, and status.",
       ),
-      sub("Adding a user"),
-      steps([
-        "Click Add User.",
-        "Enter the person's name and work email, then pick from the roles allowed by current organization policy: User, Power User, Auditor, and Agent Approver, plus Admin when administrator creation is available.",
-        "Optionally pick a starting group, then create the account.",
-      ]),
       sub("Reading and filtering the list"),
       list([
         "Use the group filter to work one team at a time.",
-        "Watch the auth and status columns: users who arrived through SSO stay Pending until you assign them to a group — that is the signal they are waiting on you.",
-      ]),
-      sub("Reviewing access requests"),
-      steps([
-        "Open Users and review the Access requests queue. Check the requester's name, email, and request time before choosing their access level under Approve as.",
-        "Choose User for standard group-based access, Temp User for the restricted Luna-only 30,000-reported-token allowance, or Admin only when that option is permitted and appropriate. Click Approve, or Decline to reject the request.",
-        "After approval, use Finish sign-in setup for the approved person. Share the workspace's sign-in address and confirm the sign-in method. Approval does not send an email.",
-        "For organization SSO, confirm the account exists with the identity provider. For email and password, choose Set temporary password, save a generated or entered password, and share it securely. The person must choose their own password at first sign-in.",
-        "Check the person's group membership and model access, then ask them to sign in and complete a first message. Approval alone does not establish every resource permission.",
+        "Watch the Auth and Status columns: Auth shows sso or local, and Status shows Active, Inactive, or Pending for an approved person who has not signed in yet. When the default group is on, new SSO accounts start in Default Users; otherwise they have no groups until you add them.",
       ]),
       sub("Per-row actions"),
       p("Every row has an Actions column with account controls:"),
@@ -904,6 +958,8 @@ const SECTIONS = [
         "info",
         "Administrative continuity rules are enforced by the service. When an account action would violate them, the console blocks the action and explains that it is restricted by administrative continuity policy.",
       ),
+      lesson("admin", "admin-access-onboarding"),
+      lesson("admin", "admin-users"),
     ],
   },
   {
@@ -914,15 +970,8 @@ const SECTIONS = [
     summary: "Groups carry permissions and model access — everything flows through them.",
     blocks: [
       p(
-        "Groups are how access flows in the tenant: model grants, knowledge access controls, and permissions all attach to groups, not to individual people. New SSO users stay Pending until you put them in one.",
+        "Groups are how access flows in the tenant: model grants, knowledge access controls, and permissions all attach to groups, not to individual people. Someone in no group has no group-based access, and a group that SSO group mapping manages follows the identity provider at every sign-in.",
       ),
-      steps([
-        "Click Add Group and name it for the team or matter it represents.",
-        "Select the group to open its editor. It has three tabs: Users, Permissions, and Import.",
-        "On the Users tab, tick the people who belong in it.",
-        "On the Import tab — headed “Import Users to” the group's name — paste addresses into the User emails box and click Add users to group to bulk-add them.",
-        "On the Permissions tab, switch each capability on or off.",
-      ]),
       sub("Runtime access and authoring permissions"),
       table(
         ["Toggle", "What it grants"],
@@ -940,6 +989,7 @@ const SECTIONS = [
         ],
       ),
       note("warning", "Deleting a group removes its members' access that flowed through it. Check what the group grants before deleting."),
+      lesson("admin", "admin-groups"),
     ],
   },
   {
@@ -952,7 +1002,8 @@ const SECTIONS = [
       p(
         "Model Access starts from the catalog available to your organization. You decide what portion of it your users actually see.",
       ),
-      steps([
+      sub("The catalog at a glance"),
+      list([
         "Click Sync models to refresh the catalog whenever service availability changes.",
         "Read the counters: the All, Enabled, and Disabled status counters carry live totals alongside how many groups are available for scoping.",
         "Use the search box and the funnel filters in the column headers to cut through the catalog: check off providers, check off model labs, or type text to match runtime routes, and Clear filter resets one. The table has seven columns: Model, Provider, User Access, Groups, Filters, Knowledge, and Tools. Everything starts hidden until you decide otherwise.",
@@ -967,6 +1018,7 @@ const SECTIONS = [
         "info",
         "Newly synced models arrive disabled until service availability and organization policy permit them. If a model you expect is missing, it is not currently available to this organization.",
       ),
+      lesson("admin", "admin-model-access"),
     ],
   },
   {
@@ -976,21 +1028,9 @@ const SECTIONS = [
     title: "Resolve model requests and trace access",
     summary: "Review requests through groups and diagnose each user's actual model access.",
     blocks: [
-      sub("Review a pending request"),
-      steps([
-        "Open Model Access and review Access requests. Refresh reloads pending requests for your tenant. Each row names the requester and model and shows the server's access reason.",
-        "Choose Grant through group carefully. An eligible existing group already carries the model. If the option says also grant model to group, approval grants the model to every member of that group as well as adding the requester.",
-        "Choose Approve or Decline, then read the recorded outcome. A permission or provider restriction can still require attention after the request is resolved; a submitted decision is not a successful model response.",
-      ]),
       note("warning", "Approval changes group membership. When the chosen group does not carry the model yet, it can also widen that model's availability for all group members. Review the group's purpose and members before approving."),
-      sub("Trace one person's access"),
-      steps([
-        "Open Users and choose Access in that person's Actions column. On a narrow table, scroll to expose the actions.",
-        "Model access trace lists the person's groups and each enabled model. Expand a model to inspect the policy gates in order and the reason for its result.",
-        "Usable means both access and provider readiness pass. Allowed, provider offline needs a platform-owner connection repair. Blocked requires the indicated account, group, model, or policy issue to be resolved.",
-        "Close the trace, make the authorized correction in Users, Groups, or Model Access, and reopen Access to verify the current server result. Ask the user to refresh model access and try the intended model.",
-      ]),
       note("info", "The trace is read-only and scoped to users you can administer. It explains existing permissions; opening it does not grant access, change a role, or bypass the organization's model ceiling."),
+      lesson("admin", "admin-model-requests"),
     ],
   },
   {
@@ -1012,6 +1052,7 @@ const SECTIONS = [
         "Chat output actions adds admin-approved buttons to assistant responses for export, formatting, or handoff. Choose New response action to create one; existing custom actions offer Edit and Delete. Each row shows Enabled or Draft and an enable switch. Creating these actions does not configure a shared source connector.",
       ),
       p("MCP connections and model-callable tools remain in Library → Tools → Connections. Prompts and Skills also remain in the Tools library. Their authoring and use follow the existing permissions and the shared connector availability set by the service team."),
+      lesson("admin", "admin-tools"),
     ],
   },
   {
@@ -1045,25 +1086,17 @@ const SECTIONS = [
     title: "SSO: single sign-on for your tenant",
     summary: "Connect an identity provider, provision on first sign-in, and map IdP groups.",
     blocks: [
+      p(
+        "The SSO tab lists every identity provider for your tenant as a card. When Policy Controls shows SSO configuration as available, you can add providers for your domains, test them, map identity-provider groups to tenant groups, and enforce SSO. Otherwise the tab is read-only and says so.",
+      ),
+      lesson("admin", "admin-sso"),
       note(
         "info",
-        "If organization policy does not permit SSO management in this console, the tab is read-only and says so plainly.",
+        "The steps inside each identity provider's console (Microsoft Entra ID, Okta, Google Workspace, Keycloak) are spelled out step by step in the Identity provider setup topics of the interactive guide at https://aperturechat.com/guide.html. The redirect URI to register is the one shown in the Add SSO configuration form.",
       ),
-      steps([
-        "Open the SSO tab and click Add SSO configuration.",
-        "Pick a preset — Microsoft Entra ID, Google Workspace, Okta — or choose custom OIDC and enter any issuer. Presets prefill the issuer URL; for Entra, replace the {tenant-id} placeholder with your directory ID.",
-        "Paste the Client ID and Client secret from your identity provider's app registration. The secret is vaulted server-side and never shown again.",
-        "List the email domains allowed to sign in through this provider.",
-        "Decide on just-in-time provisioning: when on, the first sign-in from an allowed domain creates the account automatically with the User role. Remember — they stay Pending until you assign a group.",
-        "Copy the redirect URI shown at the bottom of the form and register it with your identity provider. Sign-ins cannot complete until the provider trusts that exact callback address.",
-        "Click create. Enforcement always starts off, so nothing can lock the tenant out.",
-        "On the new configuration's card, click Test connection — it performs a real discovery and key check against the provider.",
-        "Map identity-provider group values to tenant groups on the card, so JIT users land with the right access.",
-        "After the discovery and key test passes, complete a real sign-in with a permitted test account. Verify the redirect back to this workspace, the resulting account and group access, and any required MFA. Only then consider enforcement.",
-      ]),
       note(
         "warning",
-        "Enforcement blocks password sign-in for the allowed domains. A passing Test connection checks discovery and keys; it does not prove the client-secret exchange, callback, user session, or group mapping. Validate those in a real login before making enforcement the last step.",
+        "Enforcement blocks password sign-in for the allowed domains. A passing Test connection checks discovery and keys; it does not prove the client-secret exchange, callback, user session, or group mapping. Validate those with a real sign-in before you enforce.",
       ),
     ],
   },
@@ -1089,6 +1122,7 @@ const SECTIONS = [
         "info",
         "Every number here comes from saved audit and usage events, and each CSV export button opens its own small date-range popover so a file contains exactly the rows you chose. If a panel has nothing to show, it says so plainly instead of showing sample data.",
       ),
+      lesson("admin", "admin-analytics"),
     ],
   },
   {
@@ -1099,20 +1133,17 @@ const SECTIONS = [
     summary: "Apply downstream tenant defaults, configure memory, and govern by count without reading content.",
     blocks: [
       p(
-        "The Policies tab is always present. Policy Controls starts collapsed. When service policy enables memory, Personalization Memory and Memory by User also appear collapsed. Otherwise, Memory governance explains the restriction; saved organization settings remain intact. Expand the panel you need; administrators can narrow available capabilities, while unavailable settings remain locked.",
+        "The Policies tab is always present. Policy Controls and Personal Data Protection start collapsed. When service policy enables memory, Personalization Memory and Memory by User also appear collapsed. Otherwise, Memory governance explains the restriction; saved organization settings remain intact. Expand the panel you need; administrators can narrow available capabilities, while unavailable settings remain locked. Personal Data Protection has its own section in this guide.",
       ),
-      sub("Policy Controls: read service availability"),
-      list([
-        "Administrator accounts — shows whether this console can create and manage administrators or whether new administrator accounts require service approval.",
-        "Admin sign-in policy — shows whether admins must use SSO or may use an explicitly provisioned local account.",
-        "SSO configuration — shows whether tenant SSO mappings are delegated or read-only.",
-        "New model defaults — shows whether newly available models begin with Default Users or require explicit grants.",
-      ]),
+      sub("Policy Controls"),
       p(
-        "Below those status rows are defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Shared connector availability is managed by the service team outside tenant administration.",
+        "When your service team limits something you cannot change here, a Service policy note at the bottom of Policy Controls says so: administrator accounts created by the service team, administrators required to sign in with SSO, or newly available models starting without access until you grant a group in Model Access. No note means nothing is limited. Whether you can edit SSO is shown on the SSO tab itself.",
       ),
-      sub("Personalization Memory"),
-      steps([
+      p(
+        "Policy Controls sets defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Shared connector availability is managed by the service team outside tenant administration.",
+      ),
+      sub("Personalization Memory settings"),
+      list([
         "When service policy permits memory, expand Personalization Memory and turn on Memory for this organization. This makes the account-level Personalization memory row available to eligible users; existing memories stay saved but are not applied while this switch is off.",
         "Choose whether to allow Learn from conversations automatically. When off, only explicit requests such as “remember that …” and direct additions in the memory manager create memories. Every user can still opt out of automatic learning individually.",
         "Set Retention (days), from 1 through 3650. Older memories retire automatically when they pass this policy.",
@@ -1123,6 +1154,105 @@ const SECTIONS = [
         "warning",
         "Memory administration never grants reading access. Administrators see policy, counts, and purge controls only; the API and the interface do not return another person's memory content.",
       ),
+      lesson("admin", "admin-policies"),
+    ],
+  },
+  {
+    id: "admin-personal-data",
+    part: "admin",
+    minRole: "admin",
+    title: "Personal Data Protection",
+    summary: "Conceal personal data in chats, records, and exports, and decide whether the model may read it.",
+    blocks: [
+      p(
+        "Personal Data Protection is a panel on the Policies tab. It is off until an administrator turns it on, and it applies to everyone in the organization at once. When it is on, each detected value is replaced with a labeled placeholder, such as SSN or Card number, before a chat or record is saved or shown. People see the placeholder as a locked chip, and the line under their message box ends with Personal data is concealed.",
+      ),
+      sub("Controls"),
+      table(
+        ["Control", "What it does"],
+        [
+          ["Conceal personal data", "Turns concealment on or off for the organization. Off: chats are stored and shown exactly as typed; content filters attached to individual models still apply."],
+          ["Hide values from the model too", "On by default. Typed prompts and attached file text reach the model provider as placeholders. Off: the model reads the original value for that turn, and the value is still concealed everywhere it is stored or shown, including the model's reply."],
+          ["What to conceal", "Government and personal IDs (Social Security number, ITIN, passport, driver's license, date of birth, vehicle identification number); Contact details (email, phone, street address); Financial accounts (payment card, card security code, bank account, ABA routing number, IBAN); Health identifiers (medical record number, health plan member or subscriber ID, Medicare beneficiary identifier); Secrets and credentials (private keys, API keys and access tokens, disclosed passwords or PINs); Network identifiers (IP addresses). At least one stays selected."],
+          ["Try it with sample text", "Preview concealment runs the selected kinds on sample text and reports how many values it concealed. The preview is not saved or logged."],
+        ],
+      ),
+      sub("Where it applies"),
+      list([
+        "Chat messages, titles, and regenerated answers, before they are saved and every time they are shown.",
+        "Model replies, including streamed text, before they reach the browser.",
+        "User Prompt Activity, feedback notes, security alert snippets, and retention tags.",
+        "Memories, issue reports, search results, the Elastic export, and training datasets.",
+        "Chats saved before protection was turned on are concealed whenever they are shown or exported, and stored concealed the next time they are saved.",
+      ]),
+      note(
+        "warning",
+        "Concealment is permanent for what it stores. Turning protection off does not bring values back, because the originals were never saved.",
+      ),
+      note(
+        "info",
+        "Detection runs inside your deployment and checks formats and check digits: card numbers must pass the Luhn check, Social Security numbers must fall in issued ranges, and routing numbers, IBANs, and vehicle identification numbers must pass their checks. Look-alike characters, such as full-width digits or hidden spaces, cannot hide a value. It does not recognize names or free-text health details. Drafts are documents of record and are not altered; a draft request that contained personal data is recorded as DRAFT_NOT_CONCEALED. Uploaded files are stored as uploaded; only the text extracted for the model is concealed.",
+      ),
+      sub("Evidence in Audit"),
+      list([
+        "User Prompt Activity shows concealed prompts with the same chips. Choose Refresh monitor to load new activity.",
+        "The Audit Trail records PROMPT_CONCEALED for each concealed message, with the sender, the model, and whether the model saw placeholders, and POLICY_UPDATED for each change to the panel. Search privacy to list them.",
+      ]),
+      lesson("admin", "admin-personal-data"),
+    ],
+  },
+  {
+    id: "admin-training-datasets",
+    part: "admin",
+    minRole: "admin",
+    title: "Training datasets",
+    summary: "Capture de-identified ratings and corrections, route them into datasets, review them, and download them for fine-tuning.",
+    blocks: [
+      p(
+        "The Datasets tab keeps a private, de-identified record of how your people rate and correct answers, so you can fine-tune an open-weight model on your own work later. It is off until you turn it on. Your model providers keep running under zero data retention: captured examples are never sent to a provider. They stay in your deployment until an administrator downloads a dataset, and every download is audited.",
+      ),
+      sub("What is captured"),
+      table(
+        ["Signal", "Captured when", "Becomes"],
+        [
+          ["Rated helpful", "A person gives a reply thumbs up, with or without a note.", "An approved answer."],
+          ["Rated unhelpful", "A person gives a reply thumbs down, with any note.", "A rejected answer, with the note."],
+          ["Corrected", "The person's next message pushes back, such as \u201cThat's wrong, the deadline is 60 days. Please revise.\u201d A regenerated reply counts too.", "The first answer as rejected, and the reply that followed as preferred unless it was rated down or corrected again."],
+        ],
+      ),
+      p(
+        "Corrections are recognized by a transparent rule: factual pushback such as \u201cthat's wrong\u201d, \u201cyou missed\u201d, or \u201cshould be\u201d counts more than a style request such as \u201cshorter\u201d or \u201crewrite\u201d, and an opener such as \u201cNo,\u201d or \u201cActually\u201d adds weight. Ordinary follow-up questions are not captured as corrections.",
+      ),
+      sub("Safeguards"),
+      list([
+        "Every captured text is de-identified with all kinds of personal data, whatever the Personal Data Protection settings are.",
+        "Conceal people and client names (on by default) also replaces the full names of people in your workspace and your configured client and matter names. Other names are not detected.",
+        "Skip sensitive or regulated chats (on by default): chats with a sensitive or regulated retention tag, confirmed or suggested, are never captured.",
+        "Never capture from these groups: members of a selected group are never captured.",
+        "Review before export (on by default): new examples wait for an administrator to approve them, and downloads include approved examples only unless you choose otherwise.",
+        "Examples follow their chat: deleting a chat, a retention purge, or deleting the person or organization removes its examples.",
+      ]),
+      sub("How examples are labeled and routed"),
+      list([
+        "Practice area: from the chat's subject retention tag when subject tagging is on, otherwise from keywords in the person's own words, for example Legal · Litigation or Financial · Tax.",
+        "Kind of work: Drafting, Review & redlining, Research & Q&A, Summarization, Analysis, Extraction, Translation, Coding, or General.",
+        "Department: the person's groups, other than Default Users.",
+        "A dataset is a set of routing rules (signals, practice areas, kinds of work, departments, and models; an empty rule accepts everything) plus a training format. Membership is computed, so editing a rule re-routes every example, and one example can feed several datasets.",
+        "Suggested datasets appear for practice areas and departments with three or more examples and no dataset yet.",
+      ]),
+      sub("Training formats"),
+      table(
+        ["Format", "train.jsonl contains", "Uses"],
+        [
+          ["Supervised fine-tuning", "Chat messages ending in the answer people approved, or the revised answer after a correction.", "Helpful ratings and accepted corrections."],
+          ["Preference pairs (DPO)", "prompt, chosen, and rejected.", "Corrections with an accepted revision."],
+          ["Binary feedback (KTO)", "prompt, completion, and a true or false label.", "Every judged answer; works with thumbs ratings alone."],
+        ],
+      ),
+      p(
+        "A download is a ZIP with a folder named after the dataset, holding train.jsonl in the dataset's format, metadata.jsonl with line-aligned labels and no user identity, and a README.md dataset card. Identical content captured twice, for example from a forked chat, is exported once. The Audit Trail records each capture setting change, scan, dataset change, review, and download; set its category filter to training to list them.",
+      ),
+      lesson("admin", "admin-training-datasets"),
     ],
   },
   {
@@ -1132,7 +1262,9 @@ const SECTIONS = [
     title: "Data retention and conversation tags",
     summary: "Find tagged conversations, inspect their contents, and review batch actions.",
     blocks: [
-      steps([
+      lesson("admin", "admin-retention"),
+      sub("How retention behaves, in detail"),
+      list([
         "Open Audit and expand Data Retention, then choose Schedule and rules. Forever is the default: automatic deletion is off until an administrator previews and saves a schedule. Choose 1, 5, 7, or 10 years, or keep Forever. One year means 365 days.",
         "Choose whether age starts at chat creation or the last message change. Renaming or archiving a chat does not restart its clock. Select a review window of at least 7 days. Saving a changed policy restarts that window for eligible chats.",
         "Add a stable client, matter, or regulated-record source and its aliases. A source can have a longer retention rule or Forever. Choose Apply time limits only to labels with a rule to leave all other chats stored indefinitely. The longest applicable duration wins; a matching Forever rule or active legal hold prevents automatic deletion.",
@@ -1156,12 +1288,7 @@ const SECTIONS = [
     title: "Review feedback and reported issues",
     summary: "Read response ratings, written feedback, and platform reports in Analytics.",
     blocks: [
-      steps([
-        "Open Analytics and expand Chat Feedback. Set its person and date filters; these apply to that feedback panel.",
-        "Select a response rating to preview its feedback and saved conversation. Read any written comment alongside the model output.",
-        "Under Reported platform issues, select a report to review its subject, description, reporter, time, and optional screenshot. If a screenshot cannot load, read the error rather than treating it as an empty attachment.",
-        "Use the report to reproduce the problem with permitted test data, then follow your organization's support process. Viewing a report does not send a reply or mark the problem resolved.",
-      ]),
+      lesson("admin", "admin-feedback-issues"),
     ],
   },
   {
@@ -1200,6 +1327,7 @@ const SECTIONS = [
         "info",
         "Security alerts fire on real prompt content, such as payment card numbers, shared credentials, and prompt-injection attempts, but show only redacted snippets, so reviewing an alert never re-exposes the sensitive value itself.",
       ),
+      lesson("admin", "admin-audit"),
     ],
   },
   {
@@ -1228,6 +1356,7 @@ const SECTIONS = [
       p(
         "Every alert trigger is listed with its real delivery status: sent, queued, failed with the actual SMTP error, email not configured, or logged in-app. The log exports to CSV, archived deliveries included. Click Archive on a delivery to clear it from the default view — its history is kept, and Show archived reveals archived deliveries so you can review or Restore them. Tenant admins can archive their tenant's deliveries only.",
       ),
+      lesson("admin", "admin-alerts"),
     ],
   },
 
@@ -1269,19 +1398,9 @@ const SECTIONS = [
     title: "First-run setup: from owner account to a working team",
     summary: "Create the first owner, connect a model, and verify access before inviting the team.",
     blocks: [
-      steps([
-        "On a new installation with no active owner, complete Create the first platform owner with your display name, work email, and a password of at least 12 characters. Confirm the password and choose Create platform owner.",
-        "The Getting started card offers the setup action for your role. Open owner guide opens this role's documentation. Choose an action or explicitly dismiss the card; merely loading the workspace does not mark it reviewed.",
-        "Choose Platform console near the bottom of the sidebar. Documentation opens the owner guide, narrated lessons, and the Interactive platform guide for step-by-step configuration advice.",
-        "Open Providers, register the intended gateway, and save its real credential in API Keys. A successful save confirms configuration storage; Needs validation still requires a successful runtime check.",
-        "For a provider that supports catalog discovery, choose Sync Models on its card. This refreshes the catalog and tests a small live model request. Read the returned status and correct credential or runtime failures before relying on the connection.",
-        "In Models, review the resulting catalog and enable only the models you intend to offer. Providers with manually managed catalogs need their model configuration checked separately.",
-        "Open Admin console to configure the team's groups, model access, and any permitted knowledge or tools. Approve access requests or create accounts, then complete the sign-in handoff described in Users.",
-        "Verify a real first message with a synthetic standard-user account. Confirm the intended model works, restricted resources stay unavailable, and any temporary password or authenticator requirement completes correctly.",
-        "If you will use SSO, complete discovery testing and a real end-to-end sign-in before enforcing it. Keep an authorized administrative sign-in path available while validating the setup.",
-      ]),
       note("info", "Before inviting a team, verify the intended provider, enabled models, group memberships, and model grants. Test each intended user role; a working owner account does not prove that a standard user has access."),
       p("Use Providers and Models for service configuration, then Admin Console → Model Access and Groups for tenant access. Use Org Settings for SSO, branding, connector availability, policy, and budgets."),
+      lesson("owner", "owner-first-workspace"),
     ],
   },
   {
@@ -1291,21 +1410,13 @@ const SECTIONS = [
     title: "Providers",
     summary: "Register model gateways, read connection health, and sync catalogs.",
     blocks: [
-      steps([
-        "Open the Providers tab and click Add Provider.",
-        "Pick the kind. Eleven are available: openai, anthropic, azure-openai, azure-foundry, gcp, amazon-bedrock, open-webui, openrouter, ollama, openai-compatible, and local. Save the base URL, auth type, region, and the label for its first key.",
-        "Read the provider's card after saving. It shows the provider's brand logo, the kind, region, and a Models counter that reads enabled “of” total — for example “12 of 40” — so you can see the ceiling at a glance.",
-        "Read the status badge separately from the save confirmation: Needs key means no active credential is available; Needs validation means the saved connection and credential still need a successful runtime check; Adapter needed means the required runtime adapter is unavailable; Connected reflects a validated usable route. Saving a provider or key is not a successful model test.",
-        "Click API Keys on the card — the button shows how many keys are stored — to manage that provider's vaulted credentials. The next section covers the vault in detail.",
-        "Click Sync Models to pull the provider's catalog. The button stays disabled until an active key exists, and says so.",
-        "Use Edit Connection whenever a base URL, auth header, or catalog scope needs correction.",
-      ]),
       sub("Kind-driven defaults"),
       list([
         "Picking a kind prefills sensible connection defaults. azure-foundry uses the inference endpoint https://{resource}.services.ai.azure.com/models with api-key authentication; gcp routes through Google's OpenAI-compatibility endpoint for Gemini models.",
         "The Catalog scope row appears only on openrouter providers: choose between the zero-data-retention (ZDR) filtered list and the key-scoped model list.",
       ]),
       note("info", "A provider is not usable until it has an active key in its vault — open API Keys on the card and add the key next."),
+      lesson("owner", "provider-setup"),
     ],
   },
   {
@@ -1318,16 +1429,13 @@ const SECTIONS = [
       p(
         "Each provider's secrets live in a vault attached to its own card — there is no separate keys tab. Open the Providers tab and click API Keys on a card to expand its API Key Vault panel.",
       ),
-      steps([
-        "Click Add Key and enter the key's name, environment, expiry, and the secret itself. The secret is saved to the backend vault — only a masked value ever reaches the browser.",
-        "Read each row's metadata: the key's name, environment, active status, when it was last rotated, and its expiry — stale credentials are visible before they fail.",
-      ]),
       list([
         "Reveal — opens the Vault reveal dialog, which shows the secret with a Copy key button and a Done button to hide it again. Expired keys cannot be revealed.",
         "Replace — swaps in a new provider-generated secret in place.",
         "Delete — removes the key.",
       ]),
       p("Reveals, replacements, and deletes write through the platform API, so the audit trail stays complete."),
+      lesson("owner", "api-key-vault"),
     ],
   },
   {
@@ -1337,17 +1445,11 @@ const SECTIONS = [
     title: "Models: organization availability",
     summary: "The organization ceiling — control which synced models tenants can route to.",
     blocks: [
-      steps([
-        "Open the Models tab. It lists every model synced from your providers.",
-        "Narrow the list three ways: the search box, the All / Enabled / Disabled status filter (each option shows a live count), and per-column filters on the Provider, Model lab, and Runtime route columns — click a column's filter icon to tick specific providers, labs (OpenAI, Anthropic, Google, and so on), or routes.",
-        "Read each row: the provider, the model, the exact runtime route requests will use, and whether the organization has it enabled.",
-        "Flip the org status toggle to enable or disable a model. This is the ceiling: models disabled here never reach tenant admins or users.",
-        "Click Edit details on any row you allow, to record its display name, runtime route, context window, notes, system prompt, and meta prompt.",
-      ]),
       note(
         "info",
         "Newly synced models arrive disabled with no group access. After a sync, switch the filter to Disabled, review the new arrivals, and enable only the routes the organization has actually approved. If the Default group for enabled models policy is on (see “Policies”), enabling a model automatically attaches the protected Default Users group so users see it without a second step.",
       ),
+      lesson("owner", "model-availability"),
     ],
   },
   {
@@ -1360,11 +1462,6 @@ const SECTIONS = [
       p(
         "The Org Settings tab gathers organization-level controls: roles and accounts, single sign-on, branding, policies and budgets, platform connectors, and search index readiness. Most sections start collapsed behind a descriptive header; click a header (or its chevron) to expand it. Search index starts open. Expand Role Boundary for the account tools.",
       ),
-      steps([
-        "In the create form, enter a display name and email, and pick a role: User, Admin, or Platform owner.",
-        "Click Create account. It writes through the platform admin API, so the account survives refresh and restart.",
-        "Manage existing accounts in the list below: change a role from its dropdown, set a password with the key button, or remove an account with the trash button.",
-      ]),
       sub("Setting a password"),
       p(
         "The key button on a row opens the same dialog admins use — “Set a password for” that person. Type a password or click Generate for a strong random one, optionally mark it a Temporary password so they must choose their own at first sign-in, and click Set password. The password is shown only in that dialog — share it over a safe channel.",
@@ -1376,53 +1473,78 @@ const SECTIONS = [
       p(
         "Below the account list, the “Clear separation of duties” callout restates the boundary: platform owners manage provider secrets, owner accounts, admin delegation, SSO baselines, and platform branding.",
       ),
+      lesson("owner", "users-roles"),
     ],
   },
   {
     id: "owner-sso",
     part: "owner",
     minRole: "owner",
-    title: "Org Settings: single sign-on setup",
-    summary: "Choose the protocol, connect a real OIDC provider, and register the redirect URI.",
+    title: "Single sign-on: connect any OpenID Connect provider",
+    summary: "How sign-in through your identity provider works, and the complete setup loop from app registration to the first signed-in person.",
     blocks: [
       p(
-        "The Single Sign-On panel configures live OIDC. Users are redirected to your identity provider, and the returned ID tokens are cryptographically verified before a session is issued.",
+        "Single sign-on sends people to your organization's identity provider to sign in. The provider returns a signed ID token; Aperture Chat verifies its signature, issuer, audience, nonce, and expiry, then opens a session. OpenID Connect (OIDC) is the working sign-in protocol. SAML appears in the Protocol list but is deferred and cannot sign anyone in.",
       ),
-      steps([
-        "In Org Settings, expand the Single Sign-On section by clicking its header.",
-        "Pick the Protocol first. OIDC (supported) is the live sign-in path. SAML appears but is disabled — labeled “SAML — Deferred, not a working sign-in path” — so a stored SAML configuration stays honest without pretending to sign anyone in. SCIM stores a SCIM provisioning base URL and token instead of a sign-in flow.",
-        "Pick a preset — Microsoft Entra ID, Google Workspace, or Okta — or enter any OIDC issuer URL. For Entra, replace the {tenant-id} placeholder in the issuer with your directory ID.",
-        "The issuer drives everything else: the platform fetches the provider's discovery document from {issuer}/.well-known/openid-configuration to learn its endpoints and keys.",
-        "Paste the Client ID and Client secret from your app registration (for SCIM, the secret field doubles as the SCIM token). Secrets are vaulted server-side only — never returned to the browser.",
-        "For SCIM, fill the SCIM base URL; if you document Duo MFA, the Duo API hostname field records it alongside.",
-        "Copy the redirect URI shown in the panel and register it with your identity provider. Sign-ins cannot complete until the provider trusts this exact callback address.",
-        "List the allowed email domains — only accounts on those domains can sign in through this provider.",
-      ]),
+      table(
+        ["Where", "Who", "Use it for"],
+        [
+          ["Platform console › Org Settings › Single Sign-On", "Platform owners", "The organization's main provider: issuer, client, domains, provisioning, the platform authenticator rule, and enforcement."],
+          ["Admin console › SSO", "Owners, and admins when Policy Controls allows", "Every provider for the tenant as a card: Test connection, IdP group mapping, enforcement, and extra providers for other domains."],
+        ],
+      ),
+      p(
+        "Plan the rollout in this order: register the application and copy its credentials, save and test the connection, sign in a test account, map groups, then enforce SSO only after real sign-ins work. The walkthrough below performs the whole loop with Keycloak; the paths cover Microsoft Entra ID, Okta, and Google Workspace step by step.",
+      ),
+      lesson("owner", "sso-setup"),
+      note(
+        "info",
+        "The redirect URI is your instance's public address followed by /api/auth/sso/callback. The server builds it from APERTURE_API_BASE_URL, so that setting must be the address people use. If the panel shows a different host, fix the setting before registering the application.",
+      ),
+    ],
+  },
+  {
+    id: "owner-sso-providers",
+    part: "owner",
+    minRole: "owner",
+    title: "Single sign-on: Microsoft Entra ID, Okta, and Google Workspace",
+    summary: "Provider-specific registration, claims, assignment, and the exact issuer to enter for each preset.",
+    blocks: [
+      p(
+        "Each provider names things differently, so each has its own walkthrough. The steps inside the provider's console are shown as instruction cards; the Aperture Chat steps are shown on real screens. Steps that depend on a provider license are marked.",
+      ),
+      table(
+        ["Provider", "Issuer URL to enter", "Groups in the ID token"],
+        [
+          ["Microsoft Entra ID", "https://login.microsoftonline.com/your-tenant-id/v2.0", "Group object IDs, from Add groups claim (200-group limit)."],
+          ["Okta", "https://your-org.okta.com/oauth2/default (or https://your-org.okta.com)", "Group names, from a groups claim on the default custom authorization server."],
+          ["Google Workspace", "https://accounts.google.com", "None. Manage workspace groups in the Admin console."],
+          ["Keycloak and other OIDC providers", "https://your-host/realms/your-realm (or the provider's issuer)", "Whatever the provider's group mapper sends, such as group names."],
+        ],
+      ),
+      lesson("owner", "sso-entra"),
+      lesson("owner", "sso-okta"),
+      lesson("owner", "sso-google"),
     ],
   },
   {
     id: "owner-sso-security",
     part: "owner",
     minRole: "owner",
-    title: "Org Settings: SSO claims, MFA, and go-live",
-    summary: "Separate identity-provider MFA from the platform authenticator and verify the complete sign-in path.",
+    title: "Single sign-on: groups, MFA, enforcement, and recovery",
+    summary: "Map identity-provider groups, choose the MFA rule, enforce SSO for your domains, and keep a way back in.",
     blocks: [
       list([
-        "Role and group claims — tell the platform which token attributes carry your identity provider's role and group assignments.",
-        "MFA documentation — the Authenticator app select records which app your organization uses (Microsoft Authenticator, Duo Mobile, or Identity provider), alongside the MFA methods the provider enforces, so the sign-in experience is documented where admins look for it.",
-        "Enrollment QR — add an enrollment URI (a standards-based TOTP link or a Duo enrollment URL) and the panel renders it as a scannable QR code for authenticator setup.",
-        "Require the platform authenticator after SSO — off trusts the identity provider's MFA; on also requires users to enroll and verify with Aperture Chat's authenticator. Choose deliberately to avoid an unintended second challenge. Recording an authenticator name or enrollment link alone does not enable this requirement.",
-        "Just-in-time provisioning — creates new accounts automatically the first time someone on an allowed domain signs in. They arrive with the User role until you promote them.",
+        "Provision new users on first sign-in (JIT) creates an account the first time someone on an allowed domain signs in, with the USER role and the default group. Turn it off to admit only accounts an administrator created first.",
+        "Existing accounts on an allowed domain link to the provider the first time that person signs in through SSO. If the provider later presents the same email for a different identity, sign-in stops until an administrator resets the account.",
+        "Group mapping makes SSO the owner of membership in each mapped workspace group: the person's membership follows the token's group claim at every sign-in. Groups that are not mapped stay admin-managed.",
+        "Require the platform authenticator after SSO: off trusts the identity provider's own MFA; on adds the Aperture Chat authenticator after every SSO sign-in. The Authenticator app, MFA methods, and QR enrollment fields only record information for people; they enforce nothing.",
+        "Enforce SSO for these domains refuses local passwords for accounts on the allowed domains. Require SSO for admins under Policy Controls does the same for every tenant admin.",
       ]),
-      steps([
-        "Click Save SSO.",
-        "Click Test connection — it performs a real discovery and key check against the provider. The test requires the OIDC protocol; with SAML or SCIM selected the button is disabled and its tooltip says to switch to OIDC.",
-        "Complete a real sign-in with a permitted test account, including client-secret exchange, redirect back to the workspace, session creation, role/group mapping, and any required authenticator challenge.",
-        "Only after that full sign-in succeeds, consider enforcement and confirm users know which sign-in and recovery path to use.",
-      ]),
-      note(
-        "warning",
-        "Enforce SSO blocks local password sign-in for every allowed domain. Test connection proves discovery and keys, not a completed login. Treat enforcement as the last step after the real login succeeds; a misconfigured provider can lock out administrators on those domains too.",
+      lesson("owner", "sso-security"),
+      sub("Provisioning with SCIM"),
+      p(
+        "SCIM 2.0 user provisioning is served at https://your-instance.example/scim/v2 (Users, plus a read-only Groups list), and it refuses every request until a bearer token exists. There are two ways to create one, neither in the console yet. For any deployment, a platform owner mints a tenant token with POST /api/platform/tenants/{tenant}/scim-tokens; the response shows the token once, and DELETE on the same path revokes it. A single-tenant deployment may instead set APERTURE_SCIM_BEARER_TOKEN and restart the API. Point the identity provider's SCIM app at the base URL with that bearer token. SCIM creates, updates, and deactivates accounts; people still sign in through OIDC.",
       ),
     ],
   },
@@ -1433,18 +1555,11 @@ const SECTIONS = [
     title: "Org Settings: platform branding",
     summary: "Rename the product, swap the logos, and recolor the theme everywhere.",
     blocks: [
-      steps([
-        "In Org Settings, expand Platform Branding. It starts with a live preview of the current name and logo, exactly as users see them.",
-        "Fill in the identity fields: the platform name, the Platform logo URL, and the Browser icon URL (the tab icon).",
-        "Record the Platform domain if you use one. As the note under the field says, it is “Recorded for admins and the API” — you still point DNS and TLS at this deployment separately; saving here does not move traffic.",
-        "Set the Theme colors: Accent color for buttons and highlights, Sidebar gradient start and Sidebar gradient end for the rail (pick darker stops so the light sidebar text stays readable), and Interface text color, which applies to the light theme.",
-        "No image URL handy? Click Upload PNG and the platform hosts the image for you — PNG files up to 4 MB.",
-        "Click Apply branding to roll the change out everywhere the default brand appears, or Reset defaults to restore the original identity in one click.",
-      ]),
       note(
         "info",
         "Branding reaches further than the shell: the same identity feeds the runtime theme colors and the per-tenant install manifest and icons, so the app people add to their phone's home screen carries your name and logo, not a generic one.",
       ),
+      lesson("owner", "branding"),
     ],
   },
   {
@@ -1481,18 +1596,12 @@ const SECTIONS = [
         "Enter the limit and click Save budget policy. A limit of 0 means unlimited. The usage card beside the form shows the live count for the current period, split into provider-reported and unreported completions so the number stays honest.",
         "Once the ceiling is spent, further completions are refused until the period resets. Admins can add per-user and per-group allocations beneath this ceiling from their Analytics tab.",
       ]),
+      lesson("owner", "policies-connectors"),
       sub("Elastic Analytics"),
       p(
         "The Elastic Analytics panel sends platform activity to your Elastic cluster so it can be searched and monitored in Kibana. Its status line says whether export is connected, paused, or off.",
       ),
-      steps([
-        "Paste the Elasticsearch endpoint or Cloud ID and an API key. How do I create an API key? shows the exact Kibana Dev Tools request, with the create_index, index, and read privileges on aperture-* (and the optional monitor privilege for cluster details); Copy request copies it. Aperture stores the key in its encrypted vault and never shows it again.",
-        "Under What to send, choose the audit trail, model usage, chats (with their messages), documents, and users; each row names its index. Include message and document text is off by default, so only activity details are sent. Export on pauses or resumes delivery.",
-        "Click Save and check. The connection check reports each step on its own: Reach the cluster, API key accepted, Cluster details, and Can write Aperture indices, with Elastic's own error when a step fails. Check connection runs the same test without saving.",
-        "Data is delivered in the background about every 30 seconds. Sync now sends what is queued immediately, and Re-send everything sends all history again, for example after switching clusters; existing documents are overwritten, not duplicated.",
-        "Read the Delivery table: each kind of data with its index, how much is waiting, how much was sent, and when it last went out, or the error Elastic reported.",
-        "To set up Kibana, click Kibana data views and import the file under Stack Management, Saved objects. It adds a data view for each index and one covering all of them.",
-      ]),
+      lesson("owner", "elastic-analytics"),
       p(
         "Chat records carry their retention tags and legal holds, and tag, hold, archive, and matter changes follow within about a minute. Deleted chats, users, and documents stay in Elastic flagged as deleted. Operators can instead set APERTURE_ELASTIC_URL or APERTURE_ELASTIC_CLOUD_ID with APERTURE_ELASTIC_API_KEY on the server.",
       ),
@@ -1508,7 +1617,7 @@ const SECTIONS = [
       p("Open Platform owner console → Org Settings and expand Connectors. This owner-only panel controls shared source settings and availability. Turning a connector off removes that capability across chat, source pickers, the command palette, the Tools library, and the API. Tenant administrators do not configure these shared connections."),
       p("Credential-backed sources show Credentials saved, Saved · disabled, or Needs credentials. A saved credential is configuration evidence; read Test connection for the live result. Switch-only capabilities, such as MCP Servers and Prompt Library, have an enable switch without a vendor credential form."),
       sub("Configure and test a source"),
-      steps([
+      list([
         "Choose Configure on the source row. Select Authentication method and fill in the fields shown for that method. Read the source's setup notes for its required permissions and redirect URI.",
         "Choose Save configuration. For an existing saved secret, leave its password field blank to retain it, or enter a new value to replace it. Wait for the save result before testing.",
         "For Google OAuth, save the client ID and secret first, then choose Connect Google Drive to authorize the workspace account used for knowledge sync. Complete the consent flow before checking the connection.",
@@ -1539,13 +1648,8 @@ const SECTIONS = [
     title: "Org Settings: search index readiness",
     summary: "Review index coverage and rebuild from live records when search needs maintenance.",
     blocks: [
-      steps([
-        "Open Org Settings and find Search index, which starts open. This supports Search past work for chats and saved documents and decks; it is separate from knowledge-source ingestion.",
-        "Read the per-organization status: Ready or Backfilling, entry count, index mode, and completion time when available. While backfilling, the user search panel may warn that results are incomplete.",
-        "Use Rebuild index when the stored index needs rebuilding from current records. Wait for the completed result and refreshed entry count. A failure message requires review; a button click is not a completed rebuild.",
-        "Verify representative search terms with an account that is allowed to see the underlying work. Rebuilding does not broaden permissions: every search hit is checked against its live record and the requesting account.",
-      ]),
       note("info", "If indexing is disabled for this deployment, the panel explains that searches scan records on each request and disables Rebuild index. An index entry count is a coverage signal, not a count of items every user may access."),
+      lesson("owner", "search-index"),
     ],
   },
   {
@@ -1575,13 +1679,8 @@ const SECTIONS = [
     summary: "Set the tagging policy and govern conversations within owner access.",
     blocks: [
       p("In Platform owner console, open Audit, expand Data Retention, and choose Schedule and rules. The default is Forever, with automatic deletion off. Use the duration slider, review window, client and matter sources, and Preview effect exactly as described in the administrator retention chapter. Deployment never activates an existing metadata-only policy."),
-      steps([
-        "Open Audit, expand Data Retention, and choose Tags and holds. Search and filter the conversations before selecting rows.",
-        "Preview the saved prompts and model outputs for a conversation. If the data cannot load, resolve the error before deciding on an action.",
-        "Review the selected count and choose Archive selected or Delete selected. Read the confirmation carefully; archival preserves stored conversations, while confirmed deletion permanently removes eligible chats and attachments.",
-        "Inspect the resulting action status and skipped records. Under Legal holds, create a named hold for the selected chats or review active holds. Releasing a hold requires confirmation and starts a new review window before eligible records can be deleted.",
-      ]),
       note("warning", "A suggested client or sensitive-data label is not a confirmed retention source. Automatic cleanup covers saved chats, linked uploads and image previews, search entries, and chat feedback. Draft documents, learned memories, audit and usage records, generated-media storage, backups, external providers, and exported files have separate lifecycles; this control is not a complete client-erasure or regulatory-compliance guarantee."),
+      lesson("owner", "owner-retention"),
     ],
   },
   {
@@ -1600,6 +1699,7 @@ const SECTIONS = [
         "Model Activity — saved prompt volume by model, date, and user for its filter's scope, drawn as “Prompts by model”, “Prompt trend”, and “Users by prompt activity”.",
         "User Usage — durable per-user usage from real completions across chat, drafts, agents, automations, and the API gateway, with provider-reported token counts only. The owner view is the complete one: its user picker reads All owners, admins, and users — unlike the admin console's version, which excludes platform-owner usage. The Usage by user section at the bottom ranks everyone in a contained, scrollable list; pick a person from its selector — or click their row — to focus the whole panel on them.",
       ]),
+      lesson("owner", "runtime-analytics"),
     ],
   },
   {
@@ -1666,6 +1766,7 @@ const SECTIONS = [
         "tip",
         "Start with the groups that open on their own. Anything unexpected, such as an expired key or an unscoped model, has a matching tab in this console where you can fix it, and this guide's matching section tells you how.",
       ),
+      lesson("owner", "owner-audit"),
     ],
   },
   {
@@ -1679,12 +1780,6 @@ const SECTIONS = [
         "The owner Alerts tab is the full version of the alerting station: you own the email configuration, your rules watch platform-wide audit activity, and every rule in the organization is listed with its scope. Alerts are always logged in-app regardless of email.",
       ),
       sub("Email Delivery: configuring SMTP"),
-      steps([
-        "Fill in the SMTP host and Port, and pick the security mode — STARTTLS, SSL/TLS, or unencrypted. Use your email provider's SMTP relay, for example SendGrid, Amazon SES, Mailgun, or Postmark: STARTTLS on port 587 or SSL/TLS on 465.",
-        "Enter the username and password. The password is stored in the encrypted vault and never shown again; the field's placeholder confirms when one is stored.",
-        "Set the From address alert emails will come from, then click Save Email Settings.",
-        "Prove it works: enter a test recipient and click Send test email. It sends a real message through the saved settings and reports the genuine result — including the SMTP error if it fails. While the form has unsaved changes the button is disabled, because the test always uses the saved settings.",
-      ]),
       note(
         "info",
         "The relay's TLS certificate is verified, so a relay presenting a self-signed or mismatched certificate is refused rather than trusted. Failed sends are retried with growing delays instead of every scheduler pass.",
@@ -1698,6 +1793,7 @@ const SECTIONS = [
       p(
         "Every alert trigger is listed with its real delivery status — sent, queued, failed with the actual SMTP error, email not configured, or logged in-app — and the log exports to CSV, archived deliveries included. Click Archive on a delivery to clear it from the default view without deleting its history; Show archived reveals archived deliveries for review or Restore. Owners can archive any delivery, platform-scope ones included.",
       ),
+      lesson("owner", "owner-alerts"),
     ],
   },
 ];
@@ -1717,14 +1813,14 @@ const GUIDES = {
     docTitle: "Administrator Guide",
     badge: "For workspace administrators",
     subtitle:
-      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, response actions, single sign-on, analytics, token budgets, the tenant audit trail, and alerts. No prior knowledge assumed.",
+      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, response actions, single sign-on, analytics, token budgets, personal data protection, training datasets, the tenant audit trail, and alerts. No prior knowledge assumed.",
   },
   owner: {
     file: "aperture-owner-guide",
     docTitle: "Platform Owner Guide",
     badge: "For platform owners",
     subtitle:
-      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, audit, and alerts. No prior knowledge assumed.",
+      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, audit, and alerts. Personal data protection and training datasets are covered in the Administrator part. No prior knowledge assumed.",
   },
 };
 

@@ -231,6 +231,58 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.9
+
+- **Personal Data Protection** (**Admin → Policies**) conceals Social Security
+  numbers, card and bank numbers, contact details, health identifiers, secrets,
+  and other personal data in chats, model replies, User Prompt Activity,
+  feedback, alerts, tags, memories, search, and the Elastic export. Each value
+  becomes a typed placeholder such as `⟦SSN⟧`. **Hide values from the model
+  too** also conceals prompts and attached file text before the provider call.
+  Detection runs inside the deployment and uses checksums (Luhn, SSA ranges,
+  ABA, IBAN, VIN) to reject look-alikes. Off by default.
+- **Training Datasets** (**Admin → Datasets**) captures de-identified ratings
+  and corrections, routes them by practice area, department, and kind of work,
+  and lets administrators review examples and download `sft`, `preference`,
+  or `kto` JSONL bundles for fine-tuning an open-weight model. Sensitive chats
+  and excluded groups are never captured, and examples follow their chat
+  through deletion and retention. Off by default.
+- **Hardening:** the PII/HIPAA content-filter preset adds ITIN, passport,
+  driver's license, Medicare MBI, VIN, address, and IP rules; card and routing
+  rules are checksum-verified; filters match through zero-width and full-width
+  evasion; attached file text is now screened by input filters; streamed
+  `/v1/chat/completions` responses pass output filters; and memory refuses
+  identity, financial, health, and credential data.
+  See `docs/PRIVACY_AND_TRAINING_DATA.md`.
+- **Training** is rebuilt so every one of the 53 lessons runs a complete loop,
+  from the first click to a visible result, and covers every path the product
+  offers. Each lesson now has a written guide beside the video with **Before
+  you begin**, **Step by step**, **Check it worked**, and **Troubleshooting**
+  tabs, instruction cards for steps outside the product, and the libraries are
+  grouped into curriculum tracks. All narration and about 450 frames are new.
+- **Single sign-on** training becomes a five-lesson track: an end-to-end setup
+  against a real identity provider, **Microsoft Entra ID**, **Okta**, and
+  **Google Workspace** with the built-in presets, and a go-live lesson that
+  maps groups, enforces SSO, and shows the expected refusals.
+- Three new lessons teach the privacy features: **Protect personal data** and
+  **Build training datasets from ratings and corrections** for administrators,
+  and **Personal data in your chats** for users (56 lessons in total).
+- The user, administrator, and owner guides are regenerated with each lesson's
+  written procedure (78, 124, and 178 pages). `docs/TRAINING.md` documents the
+  training methodology.
+- **SSO fixes:** the SSO panel now shows an absolute redirect URI in
+  same-origin deployments (it previously showed a relative path that identity
+  providers reject), and the OIDC token exchange prefers
+  `client_secret_basic`, retrying once with `client_secret_post` when the
+  provider answers `invalid_client`. Okta apps configured for basic
+  authentication now complete sign-in.
+- This release adds one database migration (`20261004_0026`, personal data
+  policies, training datasets, and training examples). Back up the complete
+  application data volume before upgrading.
+- API and web images publish as `v0.5.10-dev`, `v0.5.10-test`, and
+  `v0.5.10-main`. Stable `v0.5.10` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.8
 
 - **Elastic Analytics** moves from server-only settings to **Platform → Org

@@ -23,6 +23,7 @@ from typing import Mapping, NamedTuple
 from uuid import uuid4
 
 from app.core import clock
+from app.core.personal_data import concealed_token_labels, contains_personal_data
 from app.core.policy import group_permission_allowed
 from app.models.schemas import (
     MEMORY_CONTENT_MAX_CHARS,
@@ -407,9 +408,24 @@ def _is_expired(memory: UserMemory) -> bool:
     return stamp <= clock.now()
 
 
+# Contact details are allowed ("email drafts to my assistant at …" is a
+# legitimate preference); identifiers that could cause harm are not.
+_SENSITIVE_PERSONAL_DATA_CATEGORIES = ("identity", "financial", "health", "credentials")
+
+
 def looks_sensitive(text: str) -> bool:
-    """Reject candidates that would make memory a liability instead of a feature."""
-    return any(pattern.search(text) for pattern in _SENSITIVE_PATTERNS)
+    """Reject candidates that would make memory a liability instead of a feature.
+
+    Besides the keyword patterns, the shared personal-data engine catches
+    identifiers hidden with zero-width characters or look-alike digits, and a
+    candidate that already carries a concealment token (``⟦SSN⟧``) is useless
+    as a memory, so it is rejected too.
+    """
+    return (
+        any(pattern.search(text) for pattern in _SENSITIVE_PATTERNS)
+        or contains_personal_data(text, _SENSITIVE_PERSONAL_DATA_CATEGORIES)
+        or bool(concealed_token_labels(text))
+    )
 
 
 def normalize_content(text: str) -> str:
