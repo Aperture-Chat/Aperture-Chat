@@ -1213,13 +1213,15 @@ test("policies expose neutral service availability and persist downstream defaul
   selectTab("Policies");
 
   expect(screen.getByRole("heading", { name: "Policy Controls" })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(2);
+  expect(screen.getByRole("heading", { name: "Personal Data Protection" })).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(3);
   expandPanel("Policy Controls");
-  expect(screen.getByText("Service policy defines which capabilities are available.", { exact: false })).toBeInTheDocument();
-  expect(screen.getByText("Administrator accounts")).toBeInTheDocument();
-  expect(screen.getByText("Admin sign-in policy")).toBeInTheDocument();
-  expect(screen.getByText("SSO configuration")).toBeInTheDocument();
-  expect(screen.getByText("New model defaults")).toBeInTheDocument();
+  expect(screen.getByText(/apply to everyone in the protected Default Users group/)).toBeInTheDocument();
+  // Read-only service facts are not listed as rows; only an active limit is noted.
+  expect(screen.queryByText("Admin sign-in policy")).not.toBeInTheDocument();
+  expect(screen.queryByText("New model defaults")).not.toBeInTheDocument();
+  expect(screen.getByText(/Service policy: Administrator accounts are created by your service team\./)).toBeInTheDocument();
+  expect(screen.queryByText(/Administrators must sign in with SSO/)).not.toBeInTheDocument();
 
   const apiDefault = screen.getByRole("switch", { name: "Default users can use downstream API" });
   expect(apiDefault).not.toBeDisabled();
@@ -1261,8 +1263,9 @@ test("every policy panel is collapsed by default when memory is available", () =
   expect(screen.getByRole("heading", { name: "Policy Controls" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Personalization Memory" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Memory by User" })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(3);
-  expect(screen.queryByText("Service policy defines which capabilities are available.", { exact: false })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Personal Data Protection" })).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Expand panel" })).toHaveLength(4);
+  expect(screen.queryByText(/apply to everyone in the protected Default Users group/)).not.toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: "Memory for this organization" })).not.toBeInTheDocument();
   expect(screen.queryByText("No memories stored yet")).not.toBeInTheDocument();
 });
@@ -1497,13 +1500,15 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Tenant SSO and provisioning",
     "Tenant analytics",
     "Policies and memory governance",
+    "Protect personal data",
+    "Build training datasets from ratings and corrections",
     "Tenant audit",
     "Alerts and delivery",
     "Data retention and tagging",
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/guided video$/)).toHaveLength(13);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(15);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "/docs/aperture-admin-guide.pdf");
@@ -2041,4 +2046,18 @@ test("prompt phrase search filters exchanges and finds chats by matter number", 
     target: { value: "acme" },
   });
   expect(screen.getByText("Acme merger diligence")).toBeInTheDocument();
+});
+
+test("policy controls show no service note when nothing is limited", () => {
+  const data = cloneData();
+  data.platformSettings = {
+    ...data.platformSettings!,
+    tenant_admins_can_create_admins: true,
+    require_sso_for_admins: false,
+    default_user_group_enabled: true,
+  };
+  renderAdmin({}, data);
+  selectTab("Policies");
+  expandPanel("Policy Controls");
+  expect(screen.queryByText(/Service policy:/)).not.toBeInTheDocument();
 });

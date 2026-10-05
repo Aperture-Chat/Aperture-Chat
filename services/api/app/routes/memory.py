@@ -21,6 +21,7 @@ from app.core.memory import (
     memory_state_for,
     normalize_content,
 )
+from app.core.privacy import conceal_for_tenant
 from app.models.schemas import (
     MemoryCollectionResponse,
     User,
@@ -106,7 +107,7 @@ def create_memory(
         )
     memory = build_memory(
         actor=actor,
-        content=content,
+        content=conceal_for_tenant(store, actor.tenant_id or state.policy.tenant_id, content),
         kind=payload.kind,
         source="explicit",
         policy=state.policy,
@@ -198,7 +199,7 @@ def update_memory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Memories cannot contain credentials, keys, or sensitive identifiers.",
             )
-        record.content = content
+        record.content = conceal_for_tenant(store, record.tenant_id, content)
         # An edited memory is a stated one, so it earns full confidence.
         record.source = "explicit"
         record.confidence = 1.0

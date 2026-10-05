@@ -29,6 +29,7 @@ from app.core.memory import (
     normalize_content,
 )
 from app.core.model_gateway import ModelGatewayError, ModelGatewayRoute
+from app.core.privacy import conceal_for_tenant
 from app.models.schemas import MemoryKind, TenantMemoryPolicy, User, UserMemory
 from app.core import clock
 
@@ -341,6 +342,9 @@ def _persist_candidates(
     saved: list[UserMemory] = []
 
     for kind, content, confidence in candidates:
+        # Contact details pass looks_sensitive; personal-data protection
+        # still conceals them before anything is stored or recalled.
+        content = conceal_for_tenant(store, actor.tenant_id or policy.tenant_id, content)
         match = consolidate(list(live.values()), content, kind)
         if match is not None:
             stored = store.user_memories.get(match.id)

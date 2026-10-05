@@ -1924,6 +1924,24 @@ export function useChatStore(
               streamRenderer.push(fullText);
               streamPersist.touch();
             },
+            onConcealedPrompt: (concealed) => {
+              // Personal-data protection: show the prompt exactly as it is
+              // stored. The save round-trip converges on the same text; this
+              // just avoids showing the original value in the meantime.
+              setThreads((current) =>
+                current.map((currentThread) =>
+                  currentThread.id !== targetId
+                    ? currentThread
+                    : {
+                        ...currentThread,
+                        title: currentThread.title === derivedTitle ? deriveTitle(concealed) : currentThread.title,
+                        messages: currentThread.messages.map((message) =>
+                          message.id === userMessage.id ? { ...message, content: concealed } : message,
+                        ),
+                      },
+                ),
+              );
+            },
             runtime: {
               ...runtime,
               surface: "chat",

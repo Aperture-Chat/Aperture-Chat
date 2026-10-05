@@ -1563,6 +1563,168 @@ export type BootstrapData = {
   authoringState?: AuthoringState;
   /** Pending per-model access requests the actor may review (admins/owners only). */
   modelAccessRequestCount?: number | null;
+  /** Organization data-protection flags (never content). */
+  dataProtection?: DataProtectionState;
+};
+
+export type DataProtectionState = {
+  privacy_enabled: boolean;
+  privacy_categories: PrivacyCategory[];
+  conceal_from_model: boolean;
+  training_capture_enabled: boolean;
+};
+
+export type PrivacyCategory = "identity" | "contact" | "financial" | "health" | "credentials" | "network";
+
+export type TenantPrivacyPolicy = {
+  tenant_id: string;
+  enabled: boolean;
+  categories: PrivacyCategory[];
+  conceal_from_model: boolean;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type TenantPrivacyPolicyUpdateRequest = {
+  enabled?: boolean;
+  categories?: PrivacyCategory[];
+  conceal_from_model?: boolean;
+};
+
+export type PrivacyDetector = {
+  id: string;
+  label: string;
+  token: string;
+  category: PrivacyCategory;
+  category_label: string;
+  example: string;
+};
+
+export type PrivacyDetectorCatalog = {
+  categories: Array<{ id: PrivacyCategory; label: string }>;
+  detectors: PrivacyDetector[];
+};
+
+export type PrivacyPreviewResponse = {
+  concealed_sample: string;
+  detections: Array<{ id: string; label: string; count: number }>;
+};
+
+export type TrainingSignal = "positive" | "negative" | "correction";
+export type TrainingFormat = "sft" | "preference" | "kto";
+export type TrainingExampleStatus = "pending" | "approved" | "excluded";
+
+export type TrainingCapturePolicy = {
+  tenant_id: string;
+  enabled: boolean;
+  capture_positive: boolean;
+  capture_negative: boolean;
+  capture_corrections: boolean;
+  require_review: boolean;
+  exclude_sensitive_chats: boolean;
+  conceal_names: boolean;
+  excluded_group_ids: string[];
+  context_messages: number;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type TrainingCapturePolicyUpdateRequest = Partial<Omit<TrainingCapturePolicy, "tenant_id" | "updated_at" | "updated_by">>;
+
+export type TrainingDatasetRules = {
+  signals: TrainingSignal[];
+  practice_areas: string[];
+  task_types: string[];
+  group_ids: string[];
+  model_ids: string[];
+};
+
+export type TrainingDataset = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string;
+  format: TrainingFormat;
+  rules: TrainingDatasetRules;
+  system_prompt: string;
+  archived: boolean;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  example_count: number;
+  approved_count: number;
+  pending_count: number;
+};
+
+export type TrainingDatasetWriteRequest = {
+  name: string;
+  description: string;
+  format: TrainingFormat;
+  rules: TrainingDatasetRules;
+  system_prompt: string;
+  archived: boolean;
+};
+
+export type TrainingMessage = { role: "system" | "user" | "assistant"; content: string };
+
+export type TrainingExample = {
+  id: string;
+  thread_id: string;
+  message_id: string;
+  signal: TrainingSignal;
+  status: TrainingExampleStatus;
+  user_id: string;
+  user_name: string;
+  model_id: string;
+  practice_area: string;
+  practice_source: string;
+  task_type: string;
+  group_ids: string[];
+  prompt: TrainingMessage[];
+  completion: string;
+  correction: string;
+  revision: string;
+  revision_accepted: boolean;
+  correction_kind: string;
+  comment: string;
+  redaction_count: number;
+  captured_at: string;
+  updated_at: string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  dataset_ids: string[];
+};
+
+export type TrainingBreakdownItem = { key: string; label: string; count: number };
+
+export type TrainingSuggestion = {
+  key: string;
+  name: string;
+  reason: string;
+  format: TrainingFormat;
+  rules: TrainingDatasetRules;
+};
+
+export type TrainingOverview = {
+  total: number;
+  pending: number;
+  approved: number;
+  excluded: number;
+  redactions: number;
+  unrouted: number;
+  by_signal: Partial<Record<TrainingSignal, number>>;
+  by_practice_area: TrainingBreakdownItem[];
+  by_task_type: TrainingBreakdownItem[];
+  by_group: TrainingBreakdownItem[];
+  suggestions: TrainingSuggestion[];
+  datasets: TrainingDataset[];
+};
+
+export type TrainingTaxonomy = {
+  practice_areas: Array<{ key: string; label: string }>;
+  task_types: Array<{ key: string; label: string }>;
+  signals: Array<{ key: TrainingSignal; label: string }>;
+  formats: Array<{ key: TrainingFormat; label: string }>;
 };
 
 export type AuthoringState = {
