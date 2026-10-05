@@ -4,14 +4,14 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **53 lessons, 545 scenes, 53 MP3 tracks, and 7,662 seconds of narration timelines (127 minutes 42 seconds)**. Its 491 measured focus-map entries comprise 200 user targets and 291 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **56 lessons, 581 scenes, 56 MP3 tracks, and 8,213 seconds of narration timelines (136 minutes 53 seconds)**. Its 527 measured focus-map entries comprise 205 user targets and 322 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 22 | 211 | 200 | 22 | 2644 | 26 |
-| Administrator | 13 | 137 | 133 | 13 | 1823 | 40 |
-| Platform owner | 18 | 197 | 158 | 18 | 3195 | 59 |
-| Total | 53 | 545 | 491 | 53 | 7662 | — |
+| User | 23 | 216 | 205 | 23 | 2719 | 27 |
+| Administrator | 15 | 168 | 164 | 15 | 2299 | 43 |
+| Platform owner | 18 | 197 | 158 | 18 | 3195 | 62 |
+| Total | 56 | 581 | 527 | 56 | 8213 | — |
 
 All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/59 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
@@ -93,6 +93,7 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | User | Chat | Follow the work trace and act on replies | `work-traces` | 8 | 0 | 103 |
 | User | Chat | Session details and context | `session-details` | 4 | 0 | 59 |
 | User | Chat | Preview chats at a glance | `chat-previews` | 2 | 0 | 34 |
+| User | Chat | Personal data in your chats | `personal-data` | 5 | 0 | 75 |
 | User | Drafts and decks | Draft documents | `drafts` | 17 | 0 | 214 |
 | User | Drafts and decks | Build a slide deck | `deck-basics` | 15 | 0 | 165 |
 | User | Drafts and decks | Save, organize, and recover your drafts | `save-and-recover-work` | 8 | 0 | 100 |
@@ -112,6 +113,8 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Administrator | Sign-in | Tenant SSO and provisioning | `admin-sso` | 20 | 2 | 294 |
 | Administrator | Workspace controls | Policies and memory governance | `admin-policies` | 10 | 0 | 149 |
 | Administrator | Workspace controls | Response actions and connector responsibilities | `admin-tools` | 12 | 0 | 150 |
+| Administrator | Privacy and training data | Protect personal data | `admin-personal-data` | 13 | 0 | 200 |
+| Administrator | Privacy and training data | Build training datasets from ratings and corrections | `admin-training-datasets` | 18 | 0 | 276 |
 | Administrator | Oversight and compliance | Tenant analytics | `admin-analytics` | 9 | 0 | 123 |
 | Administrator | Oversight and compliance | Tenant audit | `admin-audit` | 7 | 0 | 93 |
 | Administrator | Oversight and compliance | Alerts and delivery | `admin-alerts` | 8 | 1 | 111 |
@@ -310,3 +313,22 @@ Every lesson was rebuilt to the methodology above: a complete loop from the firs
 - **Layout:** all 545 scenes were rendered through the composition and measured for overlap between title cards, captions, and highlights; flagged scenes received explicit placements, with one accepted 8% caption overlap on a full-height phone frame.
 - **Guides:** the PDFs were regenerated (76, 113, and 167 pages) and every page was rasterized and inspected; each pair of copies is byte-identical.
 - **Product fixes found by the walkthroughs:** the SSO panel showed a relative redirect URI in same-origin deployments, and the OIDC token exchange now prefers `client_secret_basic` with a one-time `client_secret_post` fallback, which Okta's per-app authentication method requires. Other defects found while recording are taught as they currently behave and are listed for follow-up rather than hidden.
+
+## Privacy and training data lessons — October 2026
+
+Personal Data Protection (Admin console › Policies) and Training Datasets (Admin console › Datasets) are taught by three new lessons, each a complete loop performed for real on an isolated synthetic instance with the local training model:
+
+- **Protect personal data** (`admin-personal-data`, new administrator track *Privacy and training data*) turns protection on, reads the categories, previews the panel's synthetic sample, follows a person's real message with a synthetic SSN and email into the chat, User Prompt Activity, and the Audit Trail (`PROMPT_CONCEALED`, `POLICY_UPDATED`), lets the model read values so a reply that writes out a synthetic phone number and email arrives concealed, and turns protection off to show that saved chats stay concealed.
+- **Build training datasets from ratings and corrections** (`admin-training-datasets`) starts from real prior work: three synthetic people chat with the model, rate replies, and correct the assistant while capture is off. On camera the administrator turns capture on, excludes a group, scans the existing chats, watches a live correction and rating be captured, creates the suggested litigation preference dataset, reviews and approves its examples, downloads the ZIP, and finds every step in the Audit Trail. The capture module checks the downloaded `train.jsonl` and confirms no raw name or phone number is in the bundle.
+- **Personal data in your chats** (`personal-data`, user track *Chat*) shows the footer note, a concealed prompt, the placeholders the model received, a concealed value in a reply, and the rating-note disclosure shown when training capture is on.
+
+Capture modules: `walkthroughs/admin-privacy.cjs` (`admin-personal-data`, `admin-training-datasets`) and `walkthroughs/user-privacy.cjs` (`user-personal-data`). Policies and synthetic people are set up through the API and are never captured as if the UI produced them.
+
+Behaviour recorded honestly rather than staged:
+
+- The local model refused to repeat a synthetic card number, so the output-concealment scenes use a signature block with a synthetic phone number and email instead.
+- Regenerate returns 404 against the self-hosted OpenAI-compatible model (a known product bug), so regeneration is taught in the written guides but not shown.
+- A chat containing a Social Security number is tagged *suggested sensitive* and is therefore skipped by capture; the de-identification example uses a configured client name, a workspace person's name, and a phone number instead.
+- The practice-area keyword classifier labels a question about a "contractor" as Legal, because `contract\w*` also matches "contractor". The capture avoids the word; the classifier is reported for follow-up.
+
+The user, administrator, and owner guides gained matching sections (*Personal data in your chats*, *Personal Data Protection*, *Training datasets*), the Admin console overview now lists ten tabs, and the Policies section describes the current Service policy note. The website guide has three matching topics with the rendered videos.

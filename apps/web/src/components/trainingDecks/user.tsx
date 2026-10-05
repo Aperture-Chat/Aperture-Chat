@@ -9,6 +9,7 @@ import {
   FileText,
   FolderPlus,
   Info,
+  Lock,
   MessageSquare,
   Mic,
   Paperclip,
@@ -223,7 +224,12 @@ type UserFocus =
   | "memorySavedList"
   | "profileSaved"
   | "installIpad"
-  | "installAndroid";
+  | "installAndroid"
+  | "privacyFooter"
+  | "privacyPrompt"
+  | "privacyReply"
+  | "privacyRatingNote"
+  | "privacyOutput";
 
 export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   // Captured and measured by the current training refresh pipeline.
@@ -431,6 +437,11 @@ export const USER_FOCUS_REGIONS: Record<UserFocus, FocusRegion> = {
   profileSaved: { frame: "training/user/account-profile-saved.png", rect: { x: 777, y: 130, w: 382, h: 115 } },
   installIpad: { frame: "training/user/install-ipad.png", rect: { x: 389, y: 223, w: 407, h: 409 } },
   installAndroid: { frame: "training/user/install-android.png", rect: { x: 389, y: 231, w: 407, h: 393 } },
+  privacyFooter: { frame: "training/user/privacy-footer.png", rect: { x: 270, y: 630, w: 871, h: 23 } },
+  privacyPrompt: { frame: "training/user/privacy-sent.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
+  privacyReply: { frame: "training/user/privacy-sent.png", rect: { x: 315, y: 312, w: 839, h: 53 } },
+  privacyRatingNote: { frame: "training/user/privacy-rating-note.png", rect: { x: 315, y: 370, w: 839, h: 154 } },
+  privacyOutput: { frame: "training/user/privacy-output.png", rect: { x: 315, y: 312, w: 839, h: 27 } },
 };
 
 type UserGuideIcon =
@@ -449,7 +460,8 @@ type UserGuideIcon =
   | "automation"
   | "preview"
   | "organize"
-  | "memory";
+  | "memory"
+  | "privacy";
 
 export type UserTrainingVideo = TrainingVideoBase & { icon: UserGuideIcon };
 
@@ -1947,6 +1959,105 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         narration: "The same preview works in View all chats, and in Archived chats in your account card, so you can recognize a conversation before you open, restore, or delete it.",
         durationSeconds: 12,
         focus: "previewAllChats",
+      },
+    ],
+  },
+  {
+    id: "personal-data",
+    audioSrc: "training/user/personal-data.mp3",
+    title: "Personal data in your chats",
+    description: "Recognize the personal data your organization conceals, know what the model received, and see how rated answers are kept when your organization captures training examples.",
+    icon: "privacy",
+    track: "Chat",
+    outcomes: ["Concealed values recognized", "What the model received understood", "Rating disclosure read"],
+    prerequisites: [
+      "Your administrator has turned on Personal Data Protection. If not, none of this appears and chats are stored as typed.",
+      "An available model.",
+    ],
+    setupSteps: [
+      "Look under the message box. When your organization protects personal data, the line ends with Personal data is concealed. Point at it for a short explanation.",
+      "Send your message as usual. Social Security, card, and account numbers, contact details, health identifiers, and secrets become locked chips, such as SSN or Email, as soon as the message is sent.",
+      "Read the reply. When your organization keeps values from the model, the model received placeholders only, so its draft shows them, for example [SSN], where a value belongs.",
+      "Add the real values yourself in the system where they belong, not in the chat.",
+      "When you rate a reply with the thumbs buttons, read the note box. If your organization captures training examples, it says so: a de-identified copy of rated answers and notes is kept and never sent to a model provider.",
+    ],
+    paths: [
+      {
+        label: "Values kept from the model (shown)",
+        steps: [
+          "Your sent message shows locked chips.",
+          "The model received placeholders instead of the values, so its reply refers to them, for example [SSN] or [EMAIL].",
+        ],
+      },
+      {
+        label: "Model allowed to read values (shown)",
+        steps: [
+          "Your sent message still shows locked chips.",
+          "The model read the values for that turn, so it can use them, for example in a signature block.",
+          "Any value it writes is replaced with a locked chip before you see the reply and before the chat is saved.",
+        ],
+      },
+      {
+        label: "Rating answers when training capture is on (shown)",
+        steps: [
+          "Choose thumbs up or thumbs down under a reply. The note box says your organization keeps a de-identified copy of rated answers and notes, and that it is never sent to a model provider.",
+          "Type a note and choose Send note, or close the box with ×. The rating counts either way.",
+          "Corrections you type in the chat, such as \"That's wrong, the deadline is 60 days. Please revise.\", can be kept the same way.",
+        ],
+      },
+    ],
+    verify: [
+      "The line under the message box ends with Personal data is concealed.",
+      "Your sent message shows a locked chip where you typed the value.",
+      "Reopening the chat later still shows the chip, not the value.",
+    ],
+    troubleshooting: [
+      { symptom: "Your message shows the value for a moment after you send it", fix: "The concealed copy replaces it within a moment. The original value is not saved." },
+      { symptom: "The reply says [SSN] or similar where you expected a value", fix: "The model never received the value. Fill it in yourself where it belongs; do not paste it back into the chat." },
+      { symptom: "A name or a description of someone's health was not concealed", fix: "Concealment recognizes numbers, codes, and contact details by their format. It does not recognize names or free text about health, so leave them out when your policy requires it." },
+      { symptom: "A draft still contains a value", fix: "Drafts are documents of record and are not altered. Keep personal data out of drafts unless your policy allows it." },
+      { symptom: "You need the original value from an earlier chat", fix: "It was never saved, so the chat cannot give it back. Use the system of record it came from." },
+    ],
+    scenes: [
+      {
+        title: "Personal data is concealed",
+        caption: "The line under the message box: Personal data is concealed.",
+        narration:
+          "When your organization protects personal data, the line under the message box ends with Personal data is concealed. Point at it to read what that means.",
+        durationSeconds: 11,
+        focus: "privacyFooter",
+      },
+      {
+        title: "Values become locked chips",
+        caption: "Sent values show as locked chips, such as SSN and Email.",
+        narration:
+          "Type and send as usual. This message includes a Social Security number and an email address. As soon as it is sent, each value is replaced by a locked chip, S S N and Email. The original value is not saved.",
+        durationSeconds: 16,
+        focus: "privacyPrompt",
+      },
+      {
+        title: "The model received placeholders",
+        caption: "The model saw placeholders, so its draft says [SSN] and [EMAIL].",
+        narration:
+          "Here the organization keeps values from the model, so the model received placeholders only. Its draft says S S N and EMAIL in brackets where the values belong. Add the real values yourself, in the system where they belong.",
+        durationSeconds: 16,
+        focus: "privacyReply",
+      },
+      {
+        title: "Values in replies are concealed too",
+        caption: "A value the model writes appears as a locked chip.",
+        narration:
+          "Some organizations let the model read values for work that needs them, like this signature block. The reply is concealed on its way to you, so the phone number and email appear as locked chips.",
+        durationSeconds: 14,
+        focus: "privacyOutput",
+      },
+      {
+        title: "Rating answers",
+        caption: "The note box says when a de-identified copy of rated answers is kept.",
+        narration:
+          "When you rate a reply with the thumbs buttons, the note box may say that your organization keeps a de-identified copy of rated answers and notes to improve its own models. That copy is never sent to a model provider. Add a note, or close the box.",
+        durationSeconds: 18,
+        focus: "privacyRatingNote",
       },
     ],
   },
@@ -3558,6 +3669,7 @@ const GUIDE_ICONS = {
   preview: Eye,
   organize: FolderPlus,
   memory: Brain,
+  privacy: Lock,
 } satisfies Record<UserGuideIcon, typeof MessageSquare>;
 
 const USER_DECK: TrainingDeck = {

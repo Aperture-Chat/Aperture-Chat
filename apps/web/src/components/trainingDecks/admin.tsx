@@ -1,4 +1,4 @@
-import { BarChart3, BellRing, DatabaseZap, Mail, ShieldCheck, SlidersHorizontal, UserPlus, Users, Wrench } from "lucide-react";
+import { BarChart3, BellRing, Database, DatabaseZap, Lock, Mail, ShieldCheck, SlidersHorizontal, UserPlus, Users, Wrench } from "lucide-react";
 import { TrainingDocumentationModal, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
@@ -141,7 +141,38 @@ export type AdminFocus =
   | "fbOverview"
   | "feedbackConversation"
   | "fbIssues"
-  | "feedbackIssueReport";
+  | "feedbackIssueReport"
+  | "pdpFind"
+  | "pdpToggles"
+  | "pdpCategories"
+  | "pdpPreview"
+  | "pdpCoverage"
+  | "pdpChatPrompt"
+  | "pdpChatReply"
+  | "pdpActivity"
+  | "pdpAuditTrail"
+  | "pdpModelRow"
+  | "pdpOutput"
+  | "pdpOffRow"
+  | "pdpStillConcealed"
+  | "dsCapture"
+  | "dsSignals"
+  | "dsSafeguards"
+  | "dsExcluded"
+  | "dsScan"
+  | "dsUserCorrection"
+  | "dsUserNote"
+  | "dsOverview"
+  | "dsMix"
+  | "dsSuggestions"
+  | "dsEditorFormat"
+  | "dsEditorRules"
+  | "dsCard"
+  | "dsExample"
+  | "dsConcealedExample"
+  | "dsApproved"
+  | "dsDownload"
+  | "dsAudit";
 
 export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   accessRequestForm: { frame: "training/admin/access-request-form.png", rect: { x: 101, y: 357, w: 405, h: 298 } },
@@ -277,9 +308,40 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   feedbackConversation: { frame: "training/admin/fb-conversation.png", rect: { x: 179, y: 123, w: 827, h: 609 } },
   fbIssues: { frame: "training/admin/fb-issues.png", rect: { x: 262, y: 359, w: 887, h: 136 } },
   feedbackIssueReport: { frame: "training/admin/fb-issue-detail.png", rect: { x: 209, y: 302, w: 767, h: 251 } },
+  pdpFind: { frame: "training/admin/pdp-collapsed.png", rect: { x: 262, y: 339, w: 887, h: 113 } },
+  pdpToggles: { frame: "training/admin/pdp-on.png", rect: { x: 262, y: 104, w: 887, h: 143 } },
+  pdpCategories: { frame: "training/admin/pdp-categories.png", rect: { x: 262, y: 273, w: 887, h: 308 } },
+  pdpPreview: { frame: "training/admin/pdp-preview.png", rect: { x: 282, y: 281, w: 847, h: 292 } },
+  pdpCoverage: { frame: "training/admin/pdp-coverage.png", rect: { x: 262, y: 351, w: 887, h: 269 } },
+  pdpChatPrompt: { frame: "training/admin/pdp-chat.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
+  pdpChatReply: { frame: "training/admin/pdp-chat.png", rect: { x: 315, y: 312, w: 839, h: 53 } },
+  pdpActivity: { frame: "training/admin/pdp-activity.png", rect: { x: 283, y: 382, w: 845, h: 90 } },
+  pdpAuditTrail: { frame: "training/admin/pdp-audit.png", rect: { x: 283, y: 600, w: 845, h: 207 } },
+  pdpModelRow: { frame: "training/admin/pdp-model-off.png", rect: { x: 282, y: 176, w: 847, h: 51 } },
+  pdpOutput: { frame: "training/admin/pdp-output.png", rect: { x: 315, y: 312, w: 839, h: 27 } },
+  pdpOffRow: { frame: "training/admin/pdp-off.png", rect: { x: 282, y: 124, w: 847, h: 51 } },
+  pdpStillConcealed: { frame: "training/admin/pdp-after-off.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
+  dsCapture: { frame: "training/admin/ds-off.png", rect: { x: 262, y: 235, w: 887, h: 178 } },
+  dsSignals: { frame: "training/admin/ds-on.png", rect: { x: 282, y: 362, w: 847, h: 139 } },
+  dsSafeguards: { frame: "training/admin/ds-safeguards.png", rect: { x: 282, y: 0, w: 847, h: 151 } },
+  dsExcluded: { frame: "training/admin/ds-safeguards.png", rect: { x: 282, y: 152, w: 847, h: 87 } },
+  dsScan: { frame: "training/admin/ds-scanned.png", rect: { x: 282, y: 0, w: 847, h: 649 } },
+  dsUserCorrection: { frame: "training/admin/ds-user-correction.png", rect: { x: 257, y: 87, w: 897, h: 105 } },
+  dsUserNote: { frame: "training/admin/ds-user-note.png", rect: { x: 315, y: 370, w: 839, h: 155 } },
+  dsOverview: { frame: "training/admin/ds-overview.png", rect: { x: 262, y: 85, w: 887, h: 141 } },
+  dsMix: { frame: "training/admin/ds-mix.png", rect: { x: 262, y: 306, w: 887, h: 244 } },
+  dsSuggestions: { frame: "training/admin/ds-suggestions.png", rect: { x: 262, y: 291, w: 887, h: 273 } },
+  dsEditorFormat: { frame: "training/admin/ds-editor.png", rect: { x: 230, y: 274, w: 725, h: 133 } },
+  dsEditorRules: { frame: "training/admin/ds-editor-rules.png", rect: { x: 230, y: 88, w: 725, h: 540 } },
+  dsCard: { frame: "training/admin/ds-created.png", rect: { x: 282, y: 305, w: 421, h: 246 } },
+  dsExample: { frame: "training/admin/ds-review.png", rect: { x: 282, y: 0, w: 847, h: 735 } },
+  dsConcealedExample: { frame: "training/admin/ds-concealed.png", rect: { x: 282, y: 0, w: 847, h: 697 } },
+  dsApproved: { frame: "training/admin/ds-approved.png", rect: { x: 297, y: 451, w: 391, h: 26 } },
+  dsDownload: { frame: "training/admin/ds-download.png", rect: { x: 319, y: 284, w: 547, h: 287 } },
+  dsAudit: { frame: "training/admin/ds-audit.png", rect: { x: 283, y: 322, w: 845, h: 506 } },
 };
 
-type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analytics" | "policies" | "audit" | "alerts" | "retention";
+type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analytics" | "policies" | "audit" | "alerts" | "retention" | "privacy" | "datasets";
 
 export type AdminTrainingVideo = TrainingVideoBase & { icon: AdminGuideIcon };
 
@@ -340,7 +402,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         label: "Approve as Temp User or Admin",
         steps: [
           "Temp User gives access to the designated Luna model only and stops after 30,000 reported tokens. It needs an enabled Luna model.",
-          "Admin appears in Approve as only when service policy allows it: Policies › Administrator accounts reads Available.",
+          "Admin appears in Approve as only when service policy allows it. Otherwise Policies › Policy Controls notes \"Administrator accounts are created by your service team.\"",
           "Arrange sign-in the same way: a temporary password or organization SSO.",
         ],
       },
@@ -1382,7 +1444,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     icon: "policies",
     track: "Workspace controls",
     outcomes: [
-      "Service limits read",
+      "Service limits understood",
       "Default Users capability granted and confirmed",
       "Memory retention set",
       "Memories purged without reading them",
@@ -1393,7 +1455,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     setupSteps: [
       "Choose Admin console › Policies. Its sections start collapsed; expand Policy Controls.",
-      "Read the four status rows: Administrator accounts, Admin sign-in policy, SSO configuration, and New model defaults.",
+      "If your service team limits anything you cannot change here, a Service policy note at the bottom of Policy Controls says so. No note means nothing is limited.",
       "Switch on the Default users capabilities you want: downstream API, build agents, build knowledge bases, build tools, and use memory. Each saves with \"Default user policy saved.\"",
       "Confirm the change in Groups › Default Users › Permissions.",
       "Expand Personalization Memory. Set Memory for this organization and Learn from conversations automatically.",
@@ -1402,12 +1464,12 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     paths: [
       {
-        label: "What each status row means",
+        label: "What the Service policy note can say",
         steps: [
-          "Administrator accounts: Available lets you create admins; Service managed means your service team does.",
-          "Admin sign-in policy: SSO required or Local allowed for administrator accounts.",
-          "SSO configuration: Available lets you manage SSO on the SSO tab; Read only means your service team manages it.",
-          "New model defaults: Default Users means newly available models start granted to Default Users; Explicit grants means you grant each one.",
+          "\"Administrator accounts are created by your service team.\" Admin is not offered when you add or approve people.",
+          "\"Administrators must sign in with SSO.\" Administrator accounts cannot use email and password.",
+          "\"Newly available models start without access until you grant a group in Model Access.\" Grant each new model yourself.",
+          "Whether you can edit SSO is shown on the SSO tab itself.",
         ],
       },
       {
@@ -1700,6 +1762,460 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         durationSeconds: 23,
         calloutPlacement: "left-rail",
         focus: "toolsSignIn",
+      },
+    ],
+  },
+  {
+    id: "admin-personal-data",
+    audioSrc: "training/admin/admin-personal-data.mp3",
+    title: "Protect personal data",
+    description: "Turn on Personal Data Protection, choose what to conceal and whether the model may read it, test it on sample text, and confirm the result in a real chat and in Audit.",
+    icon: "privacy",
+    track: "Privacy and training data",
+    outcomes: [
+      "Personal data concealed in chats and records",
+      "Model input set to placeholders or values",
+      "Concealment previewed on sample text",
+      "Result confirmed in a chat and in Audit",
+    ],
+    prerequisites: [
+      "An Admin account.",
+      "Your organization's decision on which kinds of personal data must not be stored in chats, and whether the model may read them.",
+      "Synthetic test values, such as the sample already in the panel. Never test with a real person's data.",
+    ],
+    setupSteps: [
+      "Choose Admin console › Policies. Personal Data Protection sits below Policy Controls; its header reads Off or On.",
+      "Expand it and switch on Conceal personal data. It saves at once for everyone in the organization, and the header reads On.",
+      "Leave Hide values from the model too on unless the work needs the model to read the values. When on, typed prompts and attached file text reach the model provider as placeholders.",
+      "Under What to conceal, switch off any kind of personal data you do not want concealed. At least one stays on.",
+      "Under Try it with sample text, keep or edit the synthetic sample and choose Preview concealment. Read the count, the concealed text, and the pill for each detector. The preview is not saved or logged.",
+      "Read Where it applies, and the limits below it.",
+      "Have a person send a message with a synthetic value. It shows a locked chip such as SSN, and the line under their message box ends with Personal data is concealed.",
+      "Choose Audit › User Prompt Activity › Refresh monitor: the prompt shows the same chip.",
+      "In the Audit Trail choose Refresh and search privacy. PROMPT_CONCEALED records each concealed message; POLICY_UPDATED records your change.",
+    ],
+    paths: [
+      {
+        label: "Keep values from the model (default, shown)",
+        steps: [
+          "Hide values from the model too: on.",
+          "The model receives placeholders such as ⟦SSN⟧ instead of the value, so its reply refers to the placeholder, for example [SSN].",
+          "Use this when the model does not need the value to do the work, such as drafting a note or summarizing a record.",
+        ],
+      },
+      {
+        label: "Let the model read the values (shown)",
+        steps: [
+          "Switch off Hide values from the model too. The row reads \"The model reads the original value for that turn. It is still concealed everywhere it is stored or shown.\"",
+          "Use this when the work needs the value, such as filling in a form or a signature block.",
+          "Values the model writes are concealed before the reply reaches the browser and before it is saved.",
+        ],
+      },
+      {
+        label: "Narrow what is concealed",
+        steps: [
+          "Under What to conceal, switch a kind of personal data off or on. Each switch saves at once.",
+          "Each card lists the values it finds. For example, Contact details covers email addresses, phone numbers, and street addresses.",
+          "The last switch that is on cannot be turned off. To stop concealing, switch off Conceal personal data instead.",
+        ],
+      },
+      {
+        label: "Turn protection off (shown)",
+        steps: [
+          "Switch off Conceal personal data. The header reads Off, and new chats are stored and shown exactly as typed.",
+          "Content filters attached to individual models still apply.",
+          "Chats saved while protection was on stay concealed: their values were never stored, so they cannot come back.",
+        ],
+      },
+    ],
+    verify: [
+      "The panel header reads On.",
+      "Preview concealment reports the values concealed, for example \"6 values concealed\", with a pill for each detector.",
+      "A test message shows locked chips in the chat and in Audit › User Prompt Activity.",
+      "The Audit Trail lists PROMPT_CONCEALED for the message and POLICY_UPDATED for your change.",
+    ],
+    troubleshooting: [
+      { symptom: "A kind of personal data cannot be switched off", fix: "At least one stays selected. Switch another one on first, or switch off Conceal personal data." },
+      { symptom: "Hide values from the model too is dimmed", fix: "It applies only while Conceal personal data is on." },
+      { symptom: "\"Nothing detected\"", fix: "The sample has no value the selected kinds recognize. Detection checks formats and checksums, so a look-alike such as a card number that fails its check digit is left alone." },
+      { symptom: "A name or a description of someone's health was not concealed", fix: "Detection does not recognize names or free-text health details. Ask people to leave them out, or add a content filter to the model." },
+      { symptom: "A draft still contains a value", fix: "Drafts are documents of record and are not altered. A draft request that contained personal data is recorded in the Audit Trail as DRAFT_NOT_CONCEALED." },
+      { symptom: "\"Personal data protection settings could not be loaded.\"", fix: "Reload Policies. If it repeats, confirm your account is still an administrator." },
+      { symptom: "\"The setting was not saved.\"", fix: "Nothing changed. Try again; if it repeats, check the Audit Trail and your connection." },
+    ],
+    scenes: [
+      {
+        title: "Find Personal Data Protection",
+        caption: "Admin console › Policies › Personal Data Protection. Here it reads Off.",
+        narration:
+          "Open Admin console, Policies. Personal Data Protection sits below Policy Controls, and its header shows whether it is on. Here it reads Off: chats are stored and shown exactly as typed. Expand it.",
+        durationSeconds: 15,
+        calloutPlacement: "left-rail",
+        focus: "pdpFind",
+      },
+      {
+        title: "Turn on concealment",
+        caption: "Conceal personal data: on. Hide values from the model too is on by default.",
+        narration:
+          "Switch on Conceal personal data. It saves at once for everyone in the organization, and the header reads On. Hide values from the model too is already on, so typed prompts and attached file text reach the model provider as placeholders.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "pdpToggles",
+      },
+      {
+        title: "Choose what to conceal",
+        caption: "Six kinds of personal data, each listing the values it finds.",
+        narration:
+          "What to conceal lists six kinds of personal data and the values each one finds: government and personal I Ds, contact details, financial accounts, health identifiers, secrets and credentials, and network identifiers. Switch off any you do not want concealed. At least one stays on.",
+        durationSeconds: 20,
+        calloutPlacement: "left-rail",
+        focus: "pdpCategories",
+      },
+      {
+        title: "Try it with sample text",
+        caption: "Preview concealment: 6 values concealed, with a pill for each detector.",
+        narration:
+          "Under Try it with sample text, keep the synthetic sample or edit it, and choose Preview concealment. Six values concealed: each one becomes a labeled chip, and a pill counts each detector. The preview is not saved or logged.",
+        durationSeconds: 16,
+        calloutPlacement: "left-rail",
+        focus: "pdpPreview",
+      },
+      {
+        title: "Where it applies, and its limits",
+        caption: "Chats, replies, records, and exports. Names, drafts, and uploads are not altered.",
+        narration:
+          "Where it applies lists every place concealment reaches: chats and titles, model replies as they stream, prompt activity, feedback, alerts, tags, memories, issue reports, search, the Elastic export, and training datasets. Read the limits too. Names and free-text health details are not detected, and drafts and uploaded files are not altered.",
+        durationSeconds: 24,
+        calloutPlacement: "left-rail",
+        focus: "pdpCoverage",
+      },
+      {
+        title: "What people see",
+        caption: "A sent SSN and email show as locked chips.",
+        narration:
+          "Now a person sends a message with a test Social Security number and email address. Once it is sent, each value shows as a locked chip, and the line under their message box says Personal data is concealed.",
+        durationSeconds: 15,
+        focus: "pdpChatPrompt",
+      },
+      {
+        title: "The model received placeholders",
+        caption: "The model saw placeholders, so its draft says [SSN] and [EMAIL].",
+        narration:
+          "The model never saw the values. It received placeholders, so its draft says S S N and EMAIL in brackets where the values belong.",
+        durationSeconds: 10,
+        focus: "pdpChatReply",
+      },
+      {
+        title: "Concealed in User Prompt Activity",
+        caption: "Audit › User Prompt Activity shows the same chip.",
+        narration:
+          "In Audit, expand User Prompt Activity and choose Refresh monitor. The same prompt shows the chip, so reviewing activity never shows the value again.",
+        durationSeconds: 12,
+        calloutPlacement: "left-rail",
+        focus: "pdpActivity",
+      },
+      {
+        title: "Recorded in the Audit Trail",
+        caption: "Search privacy: PROMPT_CONCEALED and POLICY_UPDATED.",
+        narration:
+          "In the Audit Trail, choose Refresh and search privacy. PROMPT_CONCEALED records each concealed message, with who sent it, the model, and whether the model saw placeholders. POLICY_UPDATED records your change.",
+        durationSeconds: 15,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "pdpAuditTrail",
+      },
+      {
+        title: "Let the model read the values",
+        caption: "Hide values from the model too: off. Values stay concealed where stored or shown.",
+        narration:
+          "Some work needs the model to read the value, such as filling in a form. Switch off Hide values from the model too. The model then reads the original value for that turn, and it is still concealed everywhere it is stored or shown.",
+        durationSeconds: 16,
+        calloutPlacement: "left-rail",
+        focus: "pdpModelRow",
+      },
+      {
+        title: "Replies are concealed too",
+        caption: "Values the model writes appear as locked chips.",
+        narration:
+          "Now the model reads a test phone number and email and writes them into a signature. The reply is concealed before it reaches the browser and before it is saved, so both show as chips.",
+        durationSeconds: 13,
+        focus: "pdpOutput",
+      },
+      {
+        title: "Turn protection off",
+        caption: "Conceal personal data: off. New chats are stored as typed.",
+        narration:
+          "To stop concealing, switch off Conceal personal data. The header reads Off, and new chats are stored and shown exactly as typed. Content filters attached to individual models still apply.",
+        durationSeconds: 14,
+        calloutPlacement: "left-rail",
+        focus: "pdpOffRow",
+      },
+      {
+        title: "Saved chats stay concealed",
+        caption: "Chats saved while protection was on keep their chips.",
+        narration:
+          "Chats saved while protection was on stay concealed. Their values were never stored, so turning protection off cannot bring them back. The note under the message box is gone for new messages.",
+        durationSeconds: 13,
+        focus: "pdpStillConcealed",
+      },
+    ],
+  },
+  {
+    id: "admin-training-datasets",
+    audioSrc: "training/admin/admin-training-datasets.mp3",
+    title: "Build training datasets from ratings and corrections",
+    description: "Capture de-identified ratings and corrections, route them into datasets by practice area, department, and kind of work, review them, and download a file for fine-tuning an open-weight model.",
+    icon: "datasets",
+    track: "Privacy and training data",
+    outcomes: [
+      "Capture on, with safeguards set",
+      "Existing chats scanned",
+      "Dataset created from a suggestion",
+      "Examples approved and downloaded",
+    ],
+    prerequisites: [
+      "An Admin account.",
+      "Your organization's approval to keep de-identified copies of rated answers for model training, and a decision on which groups are never captured.",
+      "People who rate replies with the thumbs buttons or correct the assistant in chat.",
+      "For the download: a place inside your organization to keep the file, such as the environment where you will fine-tune an open-weight model.",
+    ],
+    setupSteps: [
+      "Choose Admin console › Datasets. Training Data Capture reads Off, and nothing is collected.",
+      "Switch on Capture training signals. The header reads Capturing.",
+      "Under Capture these signals, keep or clear Helpful ratings, Unhelpful ratings and notes, and Corrections and regenerations.",
+      "Check the safeguards. Review before export, Skip sensitive or regulated chats, and Conceal people and client names are on by default.",
+      "Under Never capture from these groups, choose any group whose work must never be captured.",
+      "Choose Scan existing chats to capture chats saved before capture was on. The notice reads \"Scanned N chats and captured N new examples.\"",
+      "From now on, ratings and corrections are captured as chats are saved. In Captured Signals, choose Refresh to see the counts and the work mix.",
+      "Under Suggested datasets, choose Create on a suggestion, or choose New dataset.",
+      "Check the Name, Training format, and routing rules, then choose Create dataset.",
+      "Choose Review on the dataset card. Read each example as it would be exported, then choose Approve or Exclude, or Approve all shown.",
+      "Choose Download, then Download N examples in the dialog. Keep the ZIP inside your organization.",
+      "Choose Audit › Audit Trail › Refresh and set the category filter to training to see each step recorded.",
+    ],
+    paths: [
+      {
+        label: "Preference pairs (DPO) (shown)",
+        steps: [
+          "Uses corrections whose revised answer was accepted: not rated down and not corrected again.",
+          "train.jsonl holds prompt, chosen (the revised answer), and rejected (the original answer).",
+        ],
+      },
+      {
+        label: "Supervised fine-tuning",
+        steps: [
+          "Uses answers rated helpful and accepted revisions.",
+          "train.jsonl holds chat messages that end in the approved or revised answer.",
+        ],
+      },
+      {
+        label: "Binary feedback (KTO)",
+        steps: [
+          "Uses every judged answer, so it works with thumbs ratings alone.",
+          "train.jsonl holds prompt, completion, and a true or false label.",
+        ],
+      },
+      {
+        label: "Create a dataset from scratch",
+        steps: [
+          "Choose New dataset in the Datasets panel.",
+          "Type a Name and an optional Description, and choose a Training format.",
+          "Choose rule chips under Signals, Practice areas (a broad area includes its specialties), Kinds of work, Departments, and Models. Leave a rule empty to accept everything.",
+          "Optionally type a System prompt for every example, then choose Create dataset.",
+        ],
+      },
+      {
+        label: "Skip review",
+        steps: [
+          "Switch off Review before export. New examples are approved as they are captured, and you can still exclude any of them.",
+          "Or keep review on and switch on Include examples waiting for review in the Download dialog, for one download.",
+        ],
+      },
+      {
+        label: "Edit, archive, or delete a dataset",
+        steps: [
+          "The pencil edits the name, format, and rules. Every example is re-routed at once.",
+          "Archive stops routing examples to the dataset; Restore brings it back.",
+          "Delete removes the dataset definition. Its examples stay captured and keep routing to other datasets.",
+        ],
+      },
+    ],
+    verify: [
+      "Training Data Capture reads Capturing, and Captured Signals counts examples.",
+      "The dataset card shows approved examples and none waiting.",
+      "The download is a ZIP with train.jsonl, metadata.jsonl, and README.md.",
+      "The Audit Trail lists DATASET_CREATED, EXAMPLES_REVIEWED, and DATASET_EXPORTED.",
+    ],
+    troubleshooting: [
+      { symptom: "Scan existing chats is dimmed", fix: "Switch on Capture training signals first." },
+      { symptom: "\"No examples captured yet\"", fix: "Capture is off, or nobody has rated or corrected an answer since it was turned on. Turn capture on and choose Scan existing chats to include earlier work." },
+      { symptom: "A rated chat was not captured", fix: "It may carry a sensitive or regulated retention tag; a chat in which a Social Security or card number was found is usually tagged. Or its owner is in a group under Never capture from these groups. Very short replies are also skipped." },
+      { symptom: "A follow-up was not treated as a correction", fix: "A correction needs clear pushback, such as \"that's wrong\", \"you missed\", or \"should be\". A new question, or a style request such as \"make it shorter\" on its own, is not enough." },
+      { symptom: "An example has the wrong practice area", fix: "Without a subject retention tag, the practice area comes from keywords, and the example says Practice area from keywords. Turn on subject tagging in Data Retention, or route by department instead." },
+      { symptom: "Download is dimmed", fix: "No examples match the dataset yet. Check its rules and format: preference pairs need corrections whose revised answer was accepted." },
+      { symptom: "The dialog says Download 0 examples", fix: "Nothing is approved yet. Approve examples, or switch on Include examples waiting for review." },
+      { symptom: "\"Training data settings could not be loaded.\"", fix: "Reload Datasets. If it repeats, confirm your account is still an administrator." },
+    ],
+    scenes: [
+      {
+        title: "Find Datasets",
+        caption: "Admin console › Datasets. Training Data Capture reads Off.",
+        narration:
+          "Open Admin console, Datasets. Training Data Capture reads Off: nothing is collected, and chats, ratings, and corrections are used only for their normal purpose.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        focus: "dsCapture",
+      },
+      {
+        title: "Turn on capture",
+        caption: "Capture training signals: on. Three signals are captured by default.",
+        narration:
+          "Switch on Capture training signals. The header reads Capturing. Under Capture these signals, all three are on: helpful ratings, unhelpful ratings and notes, and corrections and regenerations. Select a chip to stop capturing that signal.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "dsSignals",
+      },
+      {
+        title: "Safeguards",
+        caption: "Review before export, skip sensitive chats, and conceal names: on by default.",
+        narration:
+          "Three safeguards are on by default. Review before export holds new examples for your approval. Skip sensitive or regulated chats never captures a chat with a sensitive or regulated retention tag. Conceal people and client names replaces workspace names and configured client and matter names. Identifiers such as account numbers are always concealed.",
+        durationSeconds: 25,
+        calloutPlacement: "left-rail",
+        focus: "dsSafeguards",
+      },
+      {
+        title: "Never capture a group",
+        caption: "Never capture from these groups: HR is excluded.",
+        narration:
+          "Under Never capture from these groups, choose any group whose work must stay out. Here HR is excluded, so nothing its members do is captured.",
+        durationSeconds: 10,
+        calloutPlacement: "left-rail",
+        focus: "dsExcluded",
+      },
+      {
+        title: "Scan existing chats",
+        caption: "Scan existing chats captures work saved before capture was on.",
+        narration:
+          "Choose Scan existing chats to include work saved before capture was on. The notice says how many chats were scanned and how many new examples were captured. Your model providers still run under zero data retention: examples stay in this deployment until you download them.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
+        focus: "dsScan",
+      },
+      {
+        title: "A correction, captured as it happens",
+        caption: "A person says the answer was wrong and asks for a revision.",
+        narration:
+          "From now on, capture is automatic. Here a person tells the assistant its answer was wrong and asks it to revise. That pushback marks the first answer as rejected and the revised answer as preferred.",
+        durationSeconds: 15,
+        focus: "dsUserCorrection",
+      },
+      {
+        title: "What people see",
+        caption: "The note box says a de-identified copy of rated answers is kept.",
+        narration:
+          "When they rate the revised answer, the note box tells them that their organization keeps a de-identified copy of rated answers and notes, and never sends it to a model provider.",
+        durationSeconds: 13,
+        focus: "dsUserNote",
+      },
+      {
+        title: "Captured Signals",
+        caption: "Captured, waiting for review, approved, and values de-identified.",
+        narration:
+          "Back in Datasets, choose Refresh. Captured Signals counts what has been captured, what is waiting for review, what is approved, and how many values were de-identified before storage.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        focus: "dsOverview",
+      },
+      {
+        title: "The work mix",
+        caption: "Every example sorted by practice area, kind of work, and department.",
+        narration:
+          "Below the counts, examples are sorted three ways: by practice area, by kind of work, and by department, meaning the person's groups. Practice areas come from a chat's subject tag, or from keywords in the person's own words.",
+        durationSeconds: 16,
+        calloutPlacement: "left-rail",
+        focus: "dsMix",
+      },
+      {
+        title: "Suggested datasets",
+        caption: "Suggestions for practice areas and departments with three or more examples.",
+        narration:
+          "Suggested datasets appear for practice areas and departments with at least three examples. A practice area with enough corrections is suggested as preference pairs. Choose Create on the litigation corrections suggestion.",
+        durationSeconds: 15,
+        calloutPlacement: "left-rail",
+        focus: "dsSuggestions",
+      },
+      {
+        title: "Choose a training format",
+        caption: "Supervised fine-tuning, preference pairs, or binary feedback.",
+        narration:
+          "The dialog is filled in from the suggestion. Training format decides what the file teaches: supervised fine-tuning on approved answers, preference pairs that set the original answer against the revised one, or binary feedback that labels every judged answer good or bad.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
+        focus: "dsEditorFormat",
+      },
+      {
+        title: "Routing rules",
+        caption: "Signals, practice areas, kinds of work, departments, and models. Empty accepts all.",
+        narration:
+          "Rules decide which examples belong: signals, practice areas, kinds of work, departments, and models. Leave a rule empty to accept everything, and a broad practice area includes its specialties. Here only Litigation is chosen. Choose Create dataset.",
+        durationSeconds: 18,
+        calloutPlacement: "left-rail",
+        focus: "dsEditorRules",
+      },
+      {
+        title: "The dataset card",
+        caption: "Format, rules, and how many matching examples are approved and waiting.",
+        narration:
+          "The dataset card shows its format, its rules, and how many matching examples are approved and waiting. One example can feed several datasets, and editing a rule re-routes every example at once.",
+        durationSeconds: 14,
+        calloutPlacement: "left-rail",
+        focus: "dsCard",
+      },
+      {
+        title: "Review an example",
+        caption: "Prompt, original answer, correction, and the revised answer marked Preferred.",
+        narration:
+          "Choose Review. Each example is shown exactly as it would be exported: the prompt, the original answer, the person's correction, and the revised answer, marked Preferred.",
+        durationSeconds: 12,
+        calloutPlacement: "left-rail",
+        focus: "dsExample",
+      },
+      {
+        title: "De-identified before storage",
+        caption: "Names and identifiers became placeholders, though chat protection was off.",
+        narration:
+          "Names and identifiers never reach the training store. In this tax example, the client's name, a coworker's name, and a phone number became placeholders, even though chat protection was off.",
+        durationSeconds: 14,
+        calloutPlacement: "left-rail",
+        focus: "dsConcealedExample",
+      },
+      {
+        title: "Approve",
+        caption: "Approve all shown, or approve and exclude one at a time.",
+        narration:
+          "Filter to Waiting for review and choose Approve all shown, or approve and exclude examples one at a time. The card now shows every matching example approved, with none waiting.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        focus: "dsApproved",
+      },
+      {
+        title: "Download",
+        caption: "A ZIP: train.jsonl, metadata.jsonl, and a dataset card.",
+        narration:
+          "Choose Download. The ZIP holds train dot J S O N L in the dataset's format, line-aligned metadata with no user names or chat I Ds, and a dataset card. Choose Download, and keep the file inside your organization.",
+        durationSeconds: 17,
+        focus: "dsDownload",
+      },
+      {
+        title: "Every step is audited",
+        caption: "Audit Trail, category training: each step recorded.",
+        narration:
+          "In Audit, choose Refresh in the Audit Trail and set the category filter to training. It records each capture setting change, the scan, the new dataset, the review, and the download.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "dsAudit",
       },
     ],
   },
@@ -2351,6 +2867,8 @@ const VIDEO_ICONS = {
   audit: ShieldCheck,
   alerts: BellRing,
   retention: DatabaseZap,
+  privacy: Lock,
+  datasets: Database,
 } satisfies Record<AdminGuideIcon, typeof UserPlus>;
 
 const ADMIN_DECK: TrainingDeck = {

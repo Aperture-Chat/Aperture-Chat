@@ -1033,6 +1033,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   expect(screen.getByText("Tools and the Library")).toBeInTheDocument();
   expect(screen.getByText("Scheduled automations")).toBeInTheDocument();
   expect(screen.getByText("Preview chats at a glance")).toBeInTheDocument();
+  expect(screen.getByText("Personal data in your chats")).toBeInTheDocument();
   expect(screen.getByText("Hover any listed chat to read its prompts and outputs in a compact, scrollable preview.")).toBeInTheDocument();
   expect(screen.getByText("Personalization memory")).toBeInTheDocument();
   expect(

@@ -132,7 +132,7 @@ const CSS = `
   .toc h2 { font-size: 17pt; font-weight: 800; letter-spacing: -0.01em; color: var(--text-strong); margin-bottom: 12px; }
   .toc-part { margin: 12px 0 4px; font-size: 8.5pt; font-weight: 800; letter-spacing: 0.09em;
     text-transform: uppercase; color: var(--teal-strong); break-after: avoid; page-break-after: avoid; }
-  .toc-row { display: flex; align-items: baseline; gap: 8px; padding: 2.4px 0; font-size: 10.2pt;
+  .toc-row { display: flex; align-items: baseline; gap: 8px; padding: 1.8px 0; font-size: 10.2pt;
     break-inside: avoid; page-break-inside: avoid; }
   .toc-row .toc-num { color: var(--faint); min-width: 22px; font-variant-numeric: tabular-nums; }
   .toc-row .toc-title { font-weight: 600; color: var(--text); }
@@ -297,6 +297,13 @@ const UI_LABELS = [
   "Save Email Settings", "Send test email", "Create the first platform owner",
   "Users can browse the model catalog",
   "Require the platform authenticator after SSO", "Search index", "Rebuild index", "Backfilling",
+  /* personal data protection and training datasets */
+  "Personal Data Protection", "Conceal personal data", "Hide values from the model too", "What to conceal",
+  "Try it with sample text", "Preview concealment", "Where it applies", "Refresh monitor", "Datasets",
+  "Training Data Capture", "Capture training signals", "Capture these signals", "Review before export",
+  "Skip sensitive or regulated chats", "Conceal people and client names", "Never capture from these groups",
+  "Scan existing chats", "Captured Signals", "Suggested datasets", "New dataset", "Training format",
+  "Create dataset", "Review Examples", "Approve all shown", "Exclude all shown", "Include examples waiting for review",
 ];
 const LABEL_PATTERN = new RegExp(
   `(?<![\\w>])(${[...UI_LABELS].sort((a, b) => b.length - a.length).map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\w<])`,
@@ -305,13 +312,17 @@ const LABEL_PATTERN = new RegExp(
 const CODE_PATTERN = /\{\{variables\}\}|\{issuer\}\/\.well-known\/openid-configuration|\{tenant-id\}|0 9 \* \* 1|you@company\.com/g;
 
 function richText(text) {
-  /* The product name contains the "Chat" nav label — shield it from bolding. */
+  /* The product name contains the "Chat" nav label, and "Social Security"
+   * contains the "Security" label — shield both from bolding. */
   const BRAND = "BRAND";
+  const SSA = "SSA";
   return escapeHtml(text)
     .replaceAll("Aperture Chat", BRAND)
+    .replaceAll("Social Security", SSA)
     .replace(CODE_PATTERN, (match) => `<code>${match}</code>`)
     .replace(LABEL_PATTERN, "<strong>$1</strong>")
     .replaceAll(BRAND, "Aperture Chat")
+    .replaceAll(SSA, "Social Security")
     .replaceAll("https://aperturechat.com/guide.html", '<a href="https://aperturechat.com/guide.html">https://aperturechat.com/guide.html</a>');
 }
 

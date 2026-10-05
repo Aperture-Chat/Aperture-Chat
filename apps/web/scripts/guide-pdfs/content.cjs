@@ -65,7 +65,7 @@ const SECTIONS = [
         ["Guide", "Who it is for", "What it covers"],
         [
           ["User Guide", "Everyone", "Chat, model access requests, personalization memory, documents and decks, account sync, agents, knowledge and tools, search and commands, appearance, and account security."],
-          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, audit, and alerts."],
+          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, personal data protection, training datasets, audit, and alerts."],
           ["Platform Owner Guide", "Platform owners", "Everything in the other guides, plus setup readiness, providers and keys, organization policy, shared connectors, branding, releases, search indexing, and platform governance."],
         ],
       ),
@@ -461,6 +461,33 @@ const SECTIONS = [
       ]),
       p("The Context window meter describes how much context this conversation uses. For older conversations without provider counts it can show ≈ and estimated from message length. Treat that as an estimate; Tokens used remains based on actual provider reports. When the context window fills, start a new chat and include the details it needs to continue reliably."),
       lesson("user", "session-details"),
+    ],
+  },
+
+  {
+    id: "personal-data",
+    part: "chat",
+    minRole: "user",
+    title: "Personal data in your chats",
+    summary: "Locked chips for concealed values, what the model receives, and how rated answers are kept.",
+    blocks: [
+      p(
+        "Your organization can conceal personal data in chats. When it does, the line under the message box ends with Personal data is concealed. As soon as you send a message, values such as Social Security, card, and account numbers, email addresses, phone numbers, health identifiers, and passwords or keys are replaced with a locked chip such as SSN or Email. The original value is not saved anywhere in the workspace, so it cannot be recovered from the chat later.",
+      ),
+      table(
+        ["You see", "What it means"],
+        [
+          ["A locked chip in your message, such as SSN", "The value was concealed before the chat was saved. Reopening the chat shows the chip, not the value."],
+          ["[SSN] or [EMAIL] in a reply", "Your organization keeps values from the model, so the model received a placeholder. Add the real value yourself in the system where it belongs, not in the chat."],
+          ["A locked chip in a reply", "Your organization lets the model read values for work that needs them. A value the model writes is concealed before you see it."],
+          ["A note in the rating box about a de-identified copy", "Your organization captures training examples from rated answers and notes. The copy is de-identified and never sent to a model provider."],
+        ],
+      ),
+      note(
+        "info",
+        "Concealment recognizes values by their format and check digits. It does not recognize names or free-text descriptions of someone's health, and it does not alter drafts or uploaded files. Follow your organization's policy for those.",
+      ),
+      lesson("user", "personal-data"),
     ],
   },
 
@@ -888,11 +915,11 @@ const SECTIONS = [
     part: "admin",
     minRole: "admin",
     title: "Opening the Admin console",
-    summary: "Where the console lives and what its nine tenant-governance tabs control.",
+    summary: "Where the console lives and what its ten tenant-governance tabs control.",
     blocks: [
       steps([
         "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Management section lists it too.)",
-        "The console opens with nine tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Policies, Audit, and Alerts. Policies is always present between Analytics and Audit; service-wide availability determines which organization controls are active inside it.",
+        "The console opens with ten tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Policies, Datasets, Audit, and Alerts. Policies is always present between Analytics and Datasets; service-wide availability determines which organization controls are active inside it.",
       ]),
       p(
         "Everything you change here writes through the admin API immediately — changes persist across refreshes and restarts, and every action lands in the tenant audit trail. Status messages under the header tell you honestly whether an action synced or failed.",
@@ -1106,17 +1133,14 @@ const SECTIONS = [
     summary: "Apply downstream tenant defaults, configure memory, and govern by count without reading content.",
     blocks: [
       p(
-        "The Policies tab is always present. Policy Controls starts collapsed. When service policy enables memory, Personalization Memory and Memory by User also appear collapsed. Otherwise, Memory governance explains the restriction; saved organization settings remain intact. Expand the panel you need; administrators can narrow available capabilities, while unavailable settings remain locked.",
+        "The Policies tab is always present. Policy Controls and Personal Data Protection start collapsed. When service policy enables memory, Personalization Memory and Memory by User also appear collapsed. Otherwise, Memory governance explains the restriction; saved organization settings remain intact. Expand the panel you need; administrators can narrow available capabilities, while unavailable settings remain locked. Personal Data Protection has its own section in this guide.",
       ),
-      sub("Policy Controls: read service availability"),
-      list([
-        "Administrator accounts — shows whether this console can create and manage administrators or whether new administrator accounts require service approval.",
-        "Admin sign-in policy — shows whether admins must use SSO or may use an explicitly provisioned local account.",
-        "SSO configuration — shows whether tenant SSO mappings are delegated or read-only.",
-        "New model defaults — shows whether newly available models begin with Default Users or require explicit grants.",
-      ]),
+      sub("Policy Controls"),
       p(
-        "Below those status rows are defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Shared connector availability is managed by the service team outside tenant administration.",
+        "When your service team limits something you cannot change here, a Service policy note at the bottom of Policy Controls says so: administrator accounts created by the service team, administrators required to sign in with SSO, or newly available models starting without access until you grant a group in Model Access. No note means nothing is limited. Whether you can edit SSO is shown on the SSO tab itself.",
+      ),
+      p(
+        "Policy Controls sets defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Shared connector availability is managed by the service team outside tenant administration.",
       ),
       sub("Personalization Memory settings"),
       list([
@@ -1131,6 +1155,104 @@ const SECTIONS = [
         "Memory administration never grants reading access. Administrators see policy, counts, and purge controls only; the API and the interface do not return another person's memory content.",
       ),
       lesson("admin", "admin-policies"),
+    ],
+  },
+  {
+    id: "admin-personal-data",
+    part: "admin",
+    minRole: "admin",
+    title: "Personal Data Protection",
+    summary: "Conceal personal data in chats, records, and exports, and decide whether the model may read it.",
+    blocks: [
+      p(
+        "Personal Data Protection is a panel on the Policies tab. It is off until an administrator turns it on, and it applies to everyone in the organization at once. When it is on, each detected value is replaced with a labeled placeholder, such as SSN or Card number, before a chat or record is saved or shown. People see the placeholder as a locked chip, and the line under their message box ends with Personal data is concealed.",
+      ),
+      sub("Controls"),
+      table(
+        ["Control", "What it does"],
+        [
+          ["Conceal personal data", "Turns concealment on or off for the organization. Off: chats are stored and shown exactly as typed; content filters attached to individual models still apply."],
+          ["Hide values from the model too", "On by default. Typed prompts and attached file text reach the model provider as placeholders. Off: the model reads the original value for that turn, and the value is still concealed everywhere it is stored or shown, including the model's reply."],
+          ["What to conceal", "Government and personal IDs (Social Security number, ITIN, passport, driver's license, date of birth, vehicle identification number); Contact details (email, phone, street address); Financial accounts (payment card, card security code, bank account, ABA routing number, IBAN); Health identifiers (medical record number, health plan member or subscriber ID, Medicare beneficiary identifier); Secrets and credentials (private keys, API keys and access tokens, disclosed passwords or PINs); Network identifiers (IP addresses). At least one stays selected."],
+          ["Try it with sample text", "Preview concealment runs the selected kinds on sample text and reports how many values it concealed. The preview is not saved or logged."],
+        ],
+      ),
+      sub("Where it applies"),
+      list([
+        "Chat messages, titles, and regenerated answers, before they are saved and every time they are shown.",
+        "Model replies, including streamed text, before they reach the browser.",
+        "User Prompt Activity, feedback notes, security alert snippets, and retention tags.",
+        "Memories, issue reports, search results, the Elastic export, and training datasets.",
+        "Chats saved before protection was turned on are concealed whenever they are shown or exported, and stored concealed the next time they are saved.",
+      ]),
+      note(
+        "warning",
+        "Concealment is permanent for what it stores. Turning protection off does not bring values back, because the originals were never saved.",
+      ),
+      note(
+        "info",
+        "Detection runs inside your deployment and checks formats and check digits: card numbers must pass the Luhn check, Social Security numbers must fall in issued ranges, and routing numbers, IBANs, and vehicle identification numbers must pass their checks. Look-alike characters, such as full-width digits or hidden spaces, cannot hide a value. It does not recognize names or free-text health details. Drafts are documents of record and are not altered; a draft request that contained personal data is recorded as DRAFT_NOT_CONCEALED. Uploaded files are stored as uploaded; only the text extracted for the model is concealed.",
+      ),
+      sub("Evidence in Audit"),
+      list([
+        "User Prompt Activity shows concealed prompts with the same chips. Choose Refresh monitor to load new activity.",
+        "The Audit Trail records PROMPT_CONCEALED for each concealed message, with the sender, the model, and whether the model saw placeholders, and POLICY_UPDATED for each change to the panel. Search privacy to list them.",
+      ]),
+      lesson("admin", "admin-personal-data"),
+    ],
+  },
+  {
+    id: "admin-training-datasets",
+    part: "admin",
+    minRole: "admin",
+    title: "Training datasets",
+    summary: "Capture de-identified ratings and corrections, route them into datasets, review them, and download them for fine-tuning.",
+    blocks: [
+      p(
+        "The Datasets tab keeps a private, de-identified record of how your people rate and correct answers, so you can fine-tune an open-weight model on your own work later. It is off until you turn it on. Your model providers keep running under zero data retention: captured examples are never sent to a provider. They stay in your deployment until an administrator downloads a dataset, and every download is audited.",
+      ),
+      sub("What is captured"),
+      table(
+        ["Signal", "Captured when", "Becomes"],
+        [
+          ["Rated helpful", "A person gives a reply thumbs up, with or without a note.", "An approved answer."],
+          ["Rated unhelpful", "A person gives a reply thumbs down, with any note.", "A rejected answer, with the note."],
+          ["Corrected", "The person's next message pushes back, such as \u201cThat's wrong, the deadline is 60 days. Please revise.\u201d A regenerated reply counts too.", "The first answer as rejected, and the reply that followed as preferred unless it was rated down or corrected again."],
+        ],
+      ),
+      p(
+        "Corrections are recognized by a transparent rule: factual pushback such as \u201cthat's wrong\u201d, \u201cyou missed\u201d, or \u201cshould be\u201d counts more than a style request such as \u201cshorter\u201d or \u201crewrite\u201d, and an opener such as \u201cNo,\u201d or \u201cActually\u201d adds weight. Ordinary follow-up questions are not captured as corrections.",
+      ),
+      sub("Safeguards"),
+      list([
+        "Every captured text is de-identified with all kinds of personal data, whatever the Personal Data Protection settings are.",
+        "Conceal people and client names (on by default) also replaces the full names of people in your workspace and your configured client and matter names. Other names are not detected.",
+        "Skip sensitive or regulated chats (on by default): chats with a sensitive or regulated retention tag, confirmed or suggested, are never captured.",
+        "Never capture from these groups: members of a selected group are never captured.",
+        "Review before export (on by default): new examples wait for an administrator to approve them, and downloads include approved examples only unless you choose otherwise.",
+        "Examples follow their chat: deleting a chat, a retention purge, or deleting the person or organization removes its examples.",
+      ]),
+      sub("How examples are labeled and routed"),
+      list([
+        "Practice area: from the chat's subject retention tag when subject tagging is on, otherwise from keywords in the person's own words, for example Legal · Litigation or Financial · Tax.",
+        "Kind of work: Drafting, Review & redlining, Research & Q&A, Summarization, Analysis, Extraction, Translation, Coding, or General.",
+        "Department: the person's groups, other than Default Users.",
+        "A dataset is a set of routing rules (signals, practice areas, kinds of work, departments, and models; an empty rule accepts everything) plus a training format. Membership is computed, so editing a rule re-routes every example, and one example can feed several datasets.",
+        "Suggested datasets appear for practice areas and departments with three or more examples and no dataset yet.",
+      ]),
+      sub("Training formats"),
+      table(
+        ["Format", "train.jsonl contains", "Uses"],
+        [
+          ["Supervised fine-tuning", "Chat messages ending in the answer people approved, or the revised answer after a correction.", "Helpful ratings and accepted corrections."],
+          ["Preference pairs (DPO)", "prompt, chosen, and rejected.", "Corrections with an accepted revision."],
+          ["Binary feedback (KTO)", "prompt, completion, and a true or false label.", "Every judged answer; works with thumbs ratings alone."],
+        ],
+      ),
+      p(
+        "A download is a ZIP with a folder named after the dataset, holding train.jsonl in the dataset's format, metadata.jsonl with line-aligned labels and no user identity, and a README.md dataset card. Identical content captured twice, for example from a forked chat, is exported once. The Audit Trail records each capture setting change, scan, dataset change, review, and download; set its category filter to training to list them.",
+      ),
+      lesson("admin", "admin-training-datasets"),
     ],
   },
   {
@@ -1691,14 +1813,14 @@ const GUIDES = {
     docTitle: "Administrator Guide",
     badge: "For workspace administrators",
     subtitle:
-      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, response actions, single sign-on, analytics, token budgets, the tenant audit trail, and alerts. No prior knowledge assumed.",
+      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, response actions, single sign-on, analytics, token budgets, personal data protection, training datasets, the tenant audit trail, and alerts. No prior knowledge assumed.",
   },
   owner: {
     file: "aperture-owner-guide",
     docTitle: "Platform Owner Guide",
     badge: "For platform owners",
     subtitle:
-      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, audit, and alerts. No prior knowledge assumed.",
+      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, audit, and alerts. Personal data protection and training datasets are covered in the Administrator part. No prior knowledge assumed.",
   },
 };
 
