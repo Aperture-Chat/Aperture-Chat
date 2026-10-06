@@ -1,12 +1,15 @@
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { MERMAID_FONT_FAMILY } from "../lib/mermaidRender";
+import { DIAGRAM_FONT_FAMILY } from "../lib/diagramTheme";
 import {
   computeStewardDiagramLayout,
   moveStewardCard,
   removeStewardCard,
   stewardDiagramMarkerDefs,
   stewardFieldValue,
+  stewardMarkerId,
+  stewardRectPath,
+  stewardShadowId,
   stewardTextBlockHeight,
   withStewardFieldValue,
   type StewardDiagramModel,
@@ -35,6 +38,7 @@ export function StewardDiagramCanvas({
   onCommit?: (next: StewardDiagramModel) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const summary = model.tag === "Visual summary";
   const [availableWidth, setAvailableWidth] = useState<number | null>(() => {
     if (!summary || typeof window === "undefined" || window.innerWidth >= 700) return null;
@@ -59,7 +63,8 @@ export function StewardDiagramCanvas({
     const node = containerRef.current;
     if (!node) return;
     const syncSize = () => {
-      setScale(node.clientWidth / layout.width);
+      const rendered = svgRef.current?.getBoundingClientRect().width || node.clientWidth;
+      setScale(rendered / layout.width);
       if (summary) setAvailableWidth(Math.max(320, node.clientWidth));
     };
     syncSize();
@@ -128,36 +133,53 @@ export function StewardDiagramCanvas({
   return (
     <div className={`md-diagram-canvas sdc-canvas${editable ? " is-editable" : ""}`} ref={containerRef}>
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${layout.width} ${layout.height}`}
-        fontFamily={MERMAID_FONT_FAMILY}
+        fontFamily={DIAGRAM_FONT_FAMILY}
         role="img"
         aria-label={model.title ?? "Structure diagram"}
+        // A narrow chart (one card per row) never balloons past ~1.15× its
+        // design size in a wide chat column.
+        style={{ maxWidth: Math.round(layout.width * 1.15) }}
       >
-        <defs dangerouslySetInnerHTML={{ __html: stewardDiagramMarkerDefs() }} />
+        <defs dangerouslySetInnerHTML={{ __html: stewardDiagramMarkerDefs(dark) }} />
         {layout.paths.map((el, index) => (
           <path
             key={index}
             d={el.d}
             stroke={el.color}
-            strokeWidth={1.6}
+            strokeWidth={1.7}
+            strokeLinecap="round"
+            strokeLinejoin="round"
             fill="none"
             strokeDasharray={el.dash}
-            markerEnd={`url(#arrow-${el.markerKind})`}
+            markerEnd={`url(#${stewardMarkerId(el.markerKind, dark)})`}
           />
         ))}
-        {layout.rects.map((el, index) => (
-          <rect
-            key={index}
-            x={el.x}
-            y={el.y}
-            width={el.width}
-            height={el.height}
-            fill={el.fill}
-            stroke={el.stroke}
-            onMouseEnter={el.cardId && editable ? () => hoverCard(el.cardId!) : undefined}
-            onMouseLeave={el.cardId && editable ? () => hoverCard(null) : undefined}
-          />
-        ))}
+        {layout.rects.map((el, index) => {
+          const hover = {
+            onMouseEnter: el.cardId && editable ? () => hoverCard(el.cardId!) : undefined,
+            onMouseLeave: el.cardId && editable ? () => hoverCard(null) : undefined,
+          };
+          const filter = el.shadow ? `url(#${stewardShadowId(dark)})` : undefined;
+          if (el.rx && el.corners && el.corners !== "all") {
+            return <path key={index} d={stewardRectPath(el)} fill={el.fill} stroke={el.stroke} filter={filter} {...hover} />;
+          }
+          return (
+            <rect
+              key={index}
+              x={el.x}
+              y={el.y}
+              width={el.width}
+              height={el.height}
+              rx={el.rx}
+              fill={el.fill}
+              stroke={el.stroke}
+              filter={filter}
+              {...hover}
+            />
+          );
+        })}
         {layout.texts.map((el, index) => {
           const isBeingEdited = editingKey !== null && el.fieldRef && fieldKey(el.fieldRef) === editingKey;
           const clickable = editable && el.fieldRef;
@@ -167,6 +189,7 @@ export function StewardDiagramCanvas({
               fontSize={el.block.size}
               fontWeight={el.block.bold ? 600 : undefined}
               fontStyle={el.italic ? "italic" : undefined}
+              letterSpacing={el.letterSpacing}
               textAnchor={el.anchor}
               visibility={isBeingEdited ? "hidden" : undefined}
               className={clickable ? "sdc-text" : undefined}
@@ -188,7 +211,7 @@ export function StewardDiagramCanvas({
           );
           if (!el.halo) return <Fragment key={index}>{text}</Fragment>;
           return (
-            <g key={index} style={{ paintOrder: "stroke" }} stroke={el.halo} strokeWidth={3}>
+            <g key={index} style={{ paintOrder: "stroke" }} stroke={el.halo} strokeWidth={4} strokeLinejoin="round">
               {text}
             </g>
           );
@@ -200,6 +223,7 @@ export function StewardDiagramCanvas({
             y={hoveredBox.y - 3}
             width={hoveredBox.width + 6}
             height={hoveredBox.height + 6}
+            rx={12}
             fill="none"
             pointerEvents="none"
           />

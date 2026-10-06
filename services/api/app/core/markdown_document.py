@@ -6,12 +6,19 @@ HTML, and the browser normally converts model Markdown with
 no browser, so this mirrors that converter's block mapping for the common
 cases: headings, paragraphs, flat lists, tables, quotes, code, and rules.
 The output still passes through ``sanitize_draft_html`` on save.
+
+Diagram fences (Mermaid, structure charts, Graphviz, PlantUML, and the text
+drawings the browser converts) become pending diagram figures that keep the
+raw source and fence language; the Drafts editor draws them when the draft
+opens, using the same decision chat makes, and turns any fence that is not a
+diagram back into a code block.
 """
 
 from __future__ import annotations
 
 import html
 import re
+from urllib.parse import quote
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
@@ -47,6 +54,67 @@ def _inline(text: str) -> str:
     text = _ITALIC.sub(r"<em>\2</em>", text)
     text = _STRIKE.sub(r"<del>\1</del>", text)
     return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], text)
+
+
+_STRUCTURE_TAGS = frozenset(
+    {
+        "aperture-diagram",
+        "aperture_diagram",
+        "aperturediagram",
+        "steward-diagram",
+        "steward_diagram",
+        "stewarddiagram",
+    }
+)
+_DIAGRAM_TAGS = frozenset(
+    {
+        "mermaid", "mmd", "mermaidjs", "mermaid-js", "timeline", "flowchart", "sequence",
+        "sequencediagram", "classdiagram", "statediagram", "erdiagram", "journey", "gantt", "pie",
+        "gitgraph", "mindmap", "quadrantchart", "sankey", "xychart", "xychart-beta", "kanban",
+        "dot", "graphviz", "gv", "digraph", "plantuml", "puml", "uml",
+    }
+)
+# Tags that carry no rendering intent of their own; the browser sniffs the
+# content (Mermaid grammar, structure JSON/YAML, arrow or box drawings).
+_SNIFFED_TAGS = frozenset(
+    {
+        "", "text", "txt", "plain", "plaintext", "ascii", "asciiart", "ascii-art", "diagram",
+        "drawing", "art", "flow", "json", "json5", "yaml", "yml",
+    }
+)
+_DRAWING_HINT = re.compile(
+    r"^\s*(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|"
+    r"quadrantChart|gitGraph|mindmap|timeline|xychart|block-beta|sankey|digraph|strict|@startuml)\b"
+    r"|[→⟶➔➜⇒┌┐└┘╭╮╰╯]|\+-{2,}\+|\s-{1,2}>\s|^\s*(?:Layer|Level|Tier|Step|Stage|Phase)\s+\d+\s*[:.)]"
+    r"|\brows\b",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _uri_component(value: str) -> str:
+    """Same alphabet as the browser's encodeURIComponent."""
+    return quote(value, safe="-_.!~*'()")
+
+
+def _diagram_figure(language: str, body: str) -> str | None:
+    tag = language.strip().lower()
+    source = body.strip()
+    if not source:
+        return None
+    if tag in _STRUCTURE_TAGS:
+        return (
+            '<figure class="document-media-block document-diagram-figure" data-diagram-kind="structure" '
+            f'data-diagram-source="{_uri_component(source)}">'
+            '<div class="document-diagram-pending">Structure diagram will render on this page.</div></figure>'
+        )
+    if tag in _DIAGRAM_TAGS or (tag in _SNIFFED_TAGS and _DRAWING_HINT.search(source)):
+        safe_tag = re.sub(r"[^a-z0-9_+-]", "", tag)[:32]
+        return (
+            '<figure class="document-media-block document-diagram-figure" '
+            f'data-diagram-language="{safe_tag}" data-diagram-source="{_uri_component(source)}">'
+            '<div class="document-diagram-pending">Diagram will render on this page.</div></figure>'
+        )
+    return None
 
 
 def _table_cells(line: str) -> list[str]:
@@ -97,6 +165,11 @@ def markdown_to_document_html(source: str) -> str:
                 body.append(lines[index])
                 index += 1
             index += 1  # closing fence (or end of input for a truncated reply)
+            language = (fence.group(2) or "").strip().split()[0] if (fence.group(2) or "").strip() else ""
+            figure = _diagram_figure(language, "\n".join(body))
+            if figure:
+                blocks.append(figure)
+                continue
             code = html.escape("\n".join(body), quote=False)
             blocks.append(f'<pre class="document-code-block"><code>{code}</code></pre>')
             continue

@@ -6549,7 +6549,11 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             "box-and-arrow visual, however the user phrases the ask. Use ```mermaid "
             "fenced blocks only for data- or time-scaled visuals it renders better: pie, "
             "xychart-beta (bar/line), gantt, timeline, sequenceDiagram, mindmap, "
-            "quadrantChart, erDiagram, stateDiagram-v2."
+            "quadrantChart, erDiagram, stateDiagram-v2. Never draw a diagram as text: "
+            "no ```text or untagged fences holding arrow chains (A → B → C), layer "
+            "lists, or box drawings, and no Graphviz or PlantUML — every visual is an "
+            "```aperture-diagram or ```mermaid block. Aperture applies its own visual "
+            "theme, so never add %%{init}%% directives or theme settings."
         ),
         (
             "- Diagram delivery contract: every block intended as a diagram must render as a "
@@ -6558,7 +6562,10 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             "visual uses the exact ```aperture-diagram schema with a non-empty rows array, "
             "and that every row contains at least one card with a non-empty id and title. "
             "If the data is only a categorized summary, express those categories as cards in "
-            "that schema; do not leave diagram-shaped data in a code panel."
+            "that schema; do not leave diagram-shaped data in a code panel. Do not append "
+            "JSON or YAML metadata blocks (search dates, review method, evidence "
+            "categories) to a prose answer unless the user asked for structured data; "
+            "state those facts in a sentence instead."
         ),
         (
             "- Structure charts (the default diagram): whenever the user asks for a "
@@ -6605,12 +6612,14 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             "Encode meaning in the arrows: ==> for primary or funded paths, --> for ordinary "
             "flow, and -. \"condition\" .-> with a label for contingent, conditional, or "
             "at-death transfers. Color by meaning with classDef plus :::class — classDef "
-            "principal fill:#123a5c,stroke:#0b2b45,color:#ffffff for the key parties or "
-            "entities, then soft fills for categories: #eef4fa stroke #b9cbdc neutral, "
-            "#e7f2ea stroke #9fc3aa favorable or exempt, #fdf3e0 stroke #e0c48a warnings or "
-            "watch items, #f4f7f9 stroke #c9d4dc supporting detail. Keep node ids short "
-            "uppercase tokens and each label line under roughly 40 characters so boxes stay "
-            "compact and scannable."
+            "principal fill:#12384a,stroke:#0b2a38,color:#ffffff for the key parties or "
+            "entities, then soft fills for categories: #f4f8f9 stroke #c7d7dd neutral, "
+            "#e8f5ec stroke #a8d5b8 favorable or exempt, #fdf4e2 stroke #ebca8c warnings or "
+            "watch items, #e4f3f5 stroke #9fd0d8 highlighted detail (Aperture maps any "
+            "fill to its palette by meaning, so pick the meaning, not a new color). Keep "
+            "node ids short uppercase tokens and each label line under roughly 40 "
+            "characters so boxes stay compact and scannable. Mind maps: one idea per "
+            "indented line in plain words."
         ),
         (
             "- Images: Markdown images (![alt](https URL)) render in chat replies, on their own "

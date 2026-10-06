@@ -20,6 +20,11 @@
   font-family:
     "Plus Jakarta Sans", "SF Pro Display", "Segoe UI", ui-sans-serif, system-ui,
     sans-serif;
+  /* Referenced by code and diagram toolbars; without it they inherited the
+   * monospace face of their panel. */
+  --font-sans:
+    "Plus Jakarta Sans", "SF Pro Display", "Segoe UI", ui-sans-serif, system-ui,
+    sans-serif;
   --font-mono:
     "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
 
@@ -6066,7 +6071,7 @@ a.nav-item {
   overflow: hidden;
 }
 
-.document-media-block img {
+.document-media-block:not(.document-diagram-figure) img {
   display: block;
   width: auto;
   max-width: 100%;
@@ -6191,17 +6196,36 @@ a.nav-item {
   line-height: 1.4;
 }
 
-/* Diagram figures (rasterized Mermaid) scale to fit — never cover-cropped.
- * The DOCX export mirrors this contain geometry (docxExport "diagram" layout). */
+/* Diagram figures (rasterized diagrams) sit on the page like a figure in a
+ * printed report: no frame, centered, at their design size, scaled down to
+ * fit — never cover-cropped. The DOCX export mirrors this contain geometry
+ * (docxExport "diagram" layout). */
+.document-media-block.document-diagram-figure {
+  border-color: transparent;
+  background: transparent;
+  overflow: visible;
+}
+
+/* No CSS width: the width attribute hydration writes is the design size. */
 .document-media-block.document-diagram-figure img {
   display: block;
-  width: auto;
   max-width: 100%;
   height: auto;
-  max-height: 480px;
+  max-height: 600px;
   margin: 0 auto;
   object-fit: contain;
   background: #ffffff;
+}
+
+.document-media-block.document-diagram-figure figcaption {
+  max-width: 62ch;
+  margin: 0 auto;
+  padding: 8px 12px 0;
+  color: #52677a;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .document-diagram-figure .document-code-block,
@@ -8078,28 +8102,108 @@ a.nav-item {
   margin: 10px 11px;
 }
 
+/* Diagram figures read as figures, not code: sans type, a quiet header that
+ * names the diagram, ghost actions, and a canvas with room to breathe. The
+ * Code view inside keeps the monospace face. */
 .md-diagram-panel {
   margin: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--surface);
+  box-shadow: 0 1px 2px rgba(8, 41, 56, 0.04);
   color: var(--text-strong);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12.5px;
   line-height: 1.55;
+}
+
+.md-diagram-panel .md-code-toolbar {
+  padding: 6px 8px 6px 14px;
+  border-bottom-color: color-mix(in srgb, var(--border) 72%, transparent);
+  background: transparent;
+}
+
+.md-diagram-panel .md-code-toolbar-main {
+  gap: 7px;
+}
+
+.md-diagram-panel .md-code-toolbar-main svg {
+  color: var(--teal);
+}
+
+.md-diagram-panel .md-code-toolbar-main strong {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.md-diagram-panel .md-code-actions {
+  gap: 2px;
+}
+
+.md-diagram-panel .md-code-action {
+  height: 28px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.md-diagram-panel .md-code-action:hover,
+.md-diagram-panel .md-code-action:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+}
+
+.md-diagram-panel .md-code-block {
+  font-family: var(--font-mono);
 }
 
 .md-diagram-canvas {
   display: flex;
   justify-content: center;
-  padding: 18px 16px;
+  padding: 20px 18px;
   overflow-x: auto;
 }
 
 .md-diagram-canvas svg {
+  display: block;
   max-width: 100%;
   height: auto;
+  animation: md-diagram-in 220ms var(--ease);
+}
+
+@keyframes md-diagram-in {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-diagram-canvas svg {
+    animation: none;
+  }
+}
+
+/* Prose that came with a drawing Aperture converted (a text sketch with
+ * notes under it) stays with the figure. */
+.md-diagram-notes {
+  display: grid;
+  gap: 4px;
+  margin: -6px 18px 0;
+  padding: 0 0 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.md-diagram-notes p {
+  margin: 0;
 }
 
 .md-diagram-loading {

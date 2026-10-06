@@ -475,6 +475,10 @@ _ALLOWED_TAGS = frozenset(
         "del",
         "div",
         "em",
+        # Diagram figures: a rendered chart image plus its caption, or a
+        # figure the browser still has to draw from data-diagram-source.
+        "figcaption",
+        "figure",
         "h1",
         "h2",
         "h3",
@@ -531,6 +535,15 @@ _DROP_CONTENT_TAGS = frozenset(
 _GLOBAL_ATTRIBUTES = frozenset({"class", "dir", "lang", "style"})
 _TAG_ATTRIBUTES = {
     "a": frozenset({"href", "rel", "target", "title"}),
+    "figure": frozenset(
+        {
+            "data-diagram-kind",
+            "data-diagram-language",
+            "data-diagram-notes",
+            "data-diagram-rendered",
+            "data-diagram-source",
+        }
+    ),
     "img": frozenset({"alt", "height", "src", "title", "width"}),
     "ol": frozenset({"start", "type"}),
     "td": frozenset({"colspan", "rowspan"}),
@@ -564,6 +577,10 @@ _SAFE_STYLE_PROPERTIES = frozenset(
 _SAFE_STYLE_VALUE = re.compile(r"^[a-zA-Z0-9\s#.,%()'\"/+\-]*$")
 _SAFE_CLASS = re.compile(r"^[a-zA-Z0-9_\- ]*$")
 _SAFE_DIMENSION = re.compile(r"^[0-9]{1,5}(?:\.[0-9]{1,3})?(?:px|pt|em|rem|%)?$")
+# Diagram source and notes travel percent-encoded (encodeURIComponent output),
+# so only that alphabet is accepted — never quotes, brackets, or markup.
+_URI_COMPONENT = re.compile(r"^[A-Za-z0-9%\-_.!~*'()]*$")
+_DIAGRAM_ATTRIBUTE_LIMITS = {"data-diagram-source": 60_000, "data-diagram-notes": 8_000}
 
 
 class _DraftHTMLSanitizer(HTMLParser):
@@ -677,6 +694,18 @@ class _DraftHTMLSanitizer(HTMLParser):
             )
         if name == "type" and tag == "ol":
             return value if value in {"1", "A", "a", "I", "i"} else None
+        if name in _DIAGRAM_ATTRIBUTE_LIMITS:
+            return (
+                value
+                if len(value) <= _DIAGRAM_ATTRIBUTE_LIMITS[name] and _URI_COMPONENT.fullmatch(value)
+                else None
+            )
+        if name == "data-diagram-kind":
+            return value if value == "structure" else None
+        if name == "data-diagram-rendered":
+            return value if value in {"true", "failed"} else None
+        if name == "data-diagram-language":
+            return value.lower() if re.fullmatch(r"[A-Za-z0-9_+-]{0,32}", value) else None
         return value[:500]
 
 

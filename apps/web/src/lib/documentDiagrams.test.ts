@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { markdownToDocumentHtml } from "./markdown";
-import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "./documentDiagrams";
+import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures, pngDimensions } from "./documentDiagrams";
+import { renderMermaidPngDataUrl } from "./mermaidRender";
 import { renderStewardDiagramPngDataUrl } from "./stewardDiagram";
 
 vi.mock("./mermaidRender", () => ({
@@ -106,4 +107,35 @@ test("one broken diagram does not prevent later diagrams from rendering", async 
   } finally {
     renderer.mockReset().mockResolvedValue("data:image/png;base64,BBB");
   }
+});
+
+// 4×2 PNG header (IHDR) — enough for pngDimensions.
+const PNG_4X2 =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAEUlEQVR42mP8z8DwnwEJMAIAKAYB/2bsWJMAAAAASUVORK5CYII=";
+
+test("pngDimensions reads the raster size from the PNG header", () => {
+  expect(pngDimensions(PNG_4X2)).toEqual({ width: 4, height: 2 });
+  expect(pngDimensions("data:image/jpeg;base64,AAAA")).toBeNull();
+});
+
+test("server-written figures resolve like chat: drawings render, code goes back to code", async () => {
+  const mermaidRenderer = vi.mocked(renderMermaidPngDataUrl);
+  mermaidRenderer.mockResolvedValueOnce(PNG_4X2);
+  const drawing = encodeURIComponent("Core → Vessel → Pump\n\nHeat moves by convection.");
+  const notDiagram = encodeURIComponent("just some notes");
+  const html =
+    `<figure class="document-media-block document-diagram-figure" data-diagram-language="text" data-diagram-source="${drawing}"><div class="document-diagram-pending">Diagram will render on this page.</div></figure>` +
+    `<figure class="document-media-block document-diagram-figure" data-diagram-language="text" data-diagram-source="${notDiagram}"><div class="document-diagram-pending">Diagram will render on this page.</div></figure>`;
+
+  const hydration = await hydrateDocumentDiagramFigures(html);
+  expect(hydration?.rendered).toBe(1);
+  const call = mermaidRenderer.mock.calls.at(-1)?.[0] ?? "";
+  expect(call).toContain("flowchart LR");
+  expect(call).toContain('"Vessel"');
+  // Rasters are shown at their design size (half the 2× pixel size).
+  expect(hydration?.html).toContain('width="2"');
+  expect(hydration?.html).toContain('height="1"');
+  expect(hydration?.html).toContain("<figcaption>Heat moves by convection.</figcaption>");
+  expect(hydration?.html).not.toContain("data-diagram-language");
+  expect(hydration?.html).toContain('<pre class="document-code-block"><code>just some notes</code></pre>');
 });

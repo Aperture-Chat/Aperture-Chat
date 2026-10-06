@@ -215,7 +215,7 @@ const TAG_ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   colgroup: ["span"],
   time: ["datetime"],
   section: ["data-page-number"],
-  figure: ["data-diagram-source", "data-diagram-kind", "data-diagram-rendered"],
+  figure: ["data-diagram-source", "data-diagram-kind", "data-diagram-rendered", "data-diagram-notes"],
 };
 
 function isSafeUrl(value: string, { allowDataImage }: { allowDataImage: boolean }) {

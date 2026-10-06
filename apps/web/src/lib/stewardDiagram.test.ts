@@ -8,6 +8,7 @@ import {
   removeStewardCard,
   renderStewardDiagramSvg,
   serializeStewardDiagram,
+  stewardCanvasWidth,
   stewardFieldValue,
   withStewardFieldValue,
 } from "./stewardDiagram";
@@ -129,10 +130,10 @@ test("renderStewardDiagramSvg draws cards, bands, notes, legend, and edges", () 
   const svg = renderStewardDiagramSvg(model, false);
   expect(svg).toContain("<svg");
   expect(svg).toContain("Harlan Estate Plan");
-  expect(svg).toContain("ALDEN L. HARLAN REVOCABLE TRUST");
-  expect(svg).toContain('fill="#1b2a4a"'); // navy header bands + banner cards
-  expect(svg).toContain('fill="#e6f1ea"'); // positive status band
-  expect(svg).toContain('fill="#fbf1dd"'); // warning note inset
+  expect(svg).toContain("ALDEN L. HARLAN REVOCABLE"); // long titles wrap inside the header band
+  expect(svg).toContain('fill="#12384a"'); // brand-ink header bands + banner cards
+  expect(svg).toContain('fill="#e8f5ec"'); // positive status band
+  expect(svg).toContain('fill="#fdf4e2"'); // warning note inset
   expect(svg).toContain("Confidential — attorney work product");
   expect(svg).toContain("stroke-dasharray"); // contingent edge + legend sample
   expect(svg).toContain("if disclaimed");
@@ -241,4 +242,30 @@ test("inline edit helpers: field get/set, move, and remove", () => {
   const removed = removeStewardCard(model, "kids");
   expect(removed.rows.length).toBe(2);
   expect(removed.edges.some((edge) => edge.to === "kids")).toBe(false);
+});
+
+test("flat records of readable facts become a summary; config objects stay code", () => {
+  const metadata = parseStructuredSummaryDiagram(
+    JSON.stringify({
+      literature_search_date: "2026-09-29",
+      review_type: "focused narrative review",
+      evidence_categories: ["peer-reviewed research", "clinical-trial records", "preprints"],
+    }),
+  );
+  expect(metadata?.title).toBe("Evidence summary");
+  expect(metadata?.rows.flat().map((card) => card.title)).toContain("Evidence categories");
+
+  expect(parseStructuredSummaryDiagram(JSON.stringify({ host: "localhost", port: 8080, tags: ["a", "b", "c"] }))).toBeNull();
+  expect(
+    parseStructuredSummaryDiagram(
+      JSON.stringify({ name: "app", version: "1.0.0", keywords: ["x", "y"], scripts: { build: "vite build" } }),
+    ),
+  ).toBeNull();
+});
+
+test("canvas width follows the busiest row so cards keep a readable measure", () => {
+  const card = (id: string) => ({ id, title: id });
+  expect(stewardCanvasWidth({ rows: [[card("a")]], edges: [] })).toBe(640);
+  expect(stewardCanvasWidth({ rows: [[card("a"), card("b"), card("c"), card("d")]], edges: [] })).toBe(1038);
+  expect(stewardCanvasWidth({ rows: [Array.from({ length: 7 }, (_, i) => card(`c${i}`))], edges: [] })).toBe(1240);
 });
