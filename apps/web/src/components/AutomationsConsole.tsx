@@ -34,6 +34,7 @@ import {
   type AutomationSavePayload,
 } from "../lib/api";
 import { approvedWorkspaceModels, isAgentProfile, visibleAgentProfiles } from "../lib/modelAccess";
+import { Markdown } from "./Markdown";
 import { StableLabel, Toggle } from "./Primitives";
 import { OverflowMenu } from "./AgentWorkspaceConsole";
 
@@ -826,7 +827,11 @@ function AutomationCard({
                     {entry.knowledge_sources?.length ? ` · ${entry.knowledge_sources.length} knowledge source${entry.knowledge_sources.length === 1 ? "" : "s"}` : ""}
                     {entry.truncated ? " · cut off at its token limit" : ""}
                   </strong>
-                  <p>{entry.output}</p>
+                  {/* Rendered like the chat it is delivered to, so tables,
+                      diagrams, and formatting read the same here. */}
+                  <div className="automation-output-body">
+                    <Markdown content={entry.output} deferDiagrams />
+                  </div>
                 </div>
               ))}
             </div>

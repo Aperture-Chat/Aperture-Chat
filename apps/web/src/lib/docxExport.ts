@@ -22,7 +22,10 @@ export const PREVIEW_CONTENT_WIDTH_PX = 728;
 const PREVIEW_MEDIA_IMAGE_MAX_HEIGHT_PX = 420;
 const PREVIEW_IMAGE_FIGURE_WIDTH_RATIO = 0.82;
 const PREVIEW_FIGURE_IMAGE_MAX_HEIGHT_PX = 360;
-const PREVIEW_DIAGRAM_IMAGE_MAX_HEIGHT_PX = 480;
+const PREVIEW_DIAGRAM_IMAGE_MAX_HEIGHT_PX = 600;
+/** Mirrors documentDiagrams' raster scale (kept local: docxExport stays free
+ * of the diagram rendering chunk). */
+const DIAGRAM_RASTER_SCALE = 2;
 const EXPORT_IMAGE_LOAD_TIMEOUT_MS = 6000;
 const EXPORT_IMAGE_RASTER_MAX_WIDTH_PX = 1400;
 
@@ -88,15 +91,19 @@ function exportImageDisplaySize(
     };
   }
   if (layout === "diagram") {
-    // Diagrams scale to fit (preview object-fit: contain) — never cover-cropped.
+    // Diagram rasters are drawn at 2× for print sharpness; their design size
+    // is half the pixel size, which is also how the editor shows them. They
+    // scale down to fit (preview object-fit: contain) — never cover-cropped.
+    const designWidth = naturalWidth / DIAGRAM_RASTER_SCALE;
+    const designHeight = naturalHeight / DIAGRAM_RASTER_SCALE;
     const fitScale = Math.min(
       1,
-      PREVIEW_CONTENT_WIDTH_PX / naturalWidth,
-      PREVIEW_DIAGRAM_IMAGE_MAX_HEIGHT_PX / naturalHeight,
+      PREVIEW_CONTENT_WIDTH_PX / designWidth,
+      PREVIEW_DIAGRAM_IMAGE_MAX_HEIGHT_PX / designHeight,
     );
     return {
-      width: Math.max(1, Math.round(naturalWidth * fitScale)),
-      height: Math.max(1, Math.round(naturalHeight * fitScale)),
+      width: Math.max(1, Math.round(designWidth * fitScale)),
+      height: Math.max(1, Math.round(designHeight * fitScale)),
       crop: null,
     };
   }

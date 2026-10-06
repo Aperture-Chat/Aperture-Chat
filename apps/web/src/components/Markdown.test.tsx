@@ -480,7 +480,7 @@ test("structure charts support PowerPoint-style inline text editing on the canva
   );
 
   // Arrows from connects render as marker-tipped paths.
-  expect(container.querySelectorAll('path[marker-end="url(#arrow-primary)"]').length).toBeGreaterThan(0);
+  expect(container.querySelectorAll('path[marker-end="url(#aperture-sd-arrow-primary)"]').length).toBeGreaterThan(0);
 
   // Click the bullet text right on the canvas, rewrite it, commit with Enter.
   const bullet = [...container.querySelectorAll("text.sdc-text")].find((el) =>
@@ -542,4 +542,30 @@ test("switching response versions replaces code and closes the previous version'
   expect(screen.queryByRole("textbox", { name: "Editable html code" })).not.toBeInTheDocument();
   expect(screen.getByText("<h1>Second version</h1>")).toBeInTheDocument();
   expect(screen.queryByText("<h1>Local edit</h1>")).not.toBeInTheDocument();
+});
+
+test("a diagram drawn as text renders as a figure with its notes, and Code shows what was written", async () => {
+  const drawing = "Reactor core → Reactor vessel → Heat exchanger → Environment\n\nNo powered pump is required.";
+  render(<Markdown content={`\`\`\`text\n${drawing}\n\`\`\``} />);
+  expect(document.querySelector(".md-code-panel")).toBeNull();
+  expect(document.querySelector('.md-diagram-panel[data-diagram-type="flowchart"]')).toBeInTheDocument();
+  expect(screen.getByText("No powered pump is required.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Code" }));
+  expect(screen.getByText("Reactor core → Reactor vessel → Heat exchanger → Environment")).toBeInTheDocument();
+});
+
+test("a metadata JSON block in a prose answer renders as a summary visual", () => {
+  const body = JSON.stringify(
+    {
+      literature_search_date: "2026-09-29",
+      review_type: "focused narrative review",
+      evidence_categories: ["peer-reviewed research", "clinical-trial records", "preprints"],
+    },
+    null,
+    2,
+  );
+  render(<Markdown content={`Findings follow.\n\n\`\`\`json\n${body}\n\`\`\``} />);
+  expect(document.querySelector('[data-diagram-type="structured-summary"]')).toBeInTheDocument();
+  expect(document.querySelector(".md-code-panel")).toBeNull();
 });

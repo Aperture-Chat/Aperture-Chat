@@ -69,6 +69,7 @@ function summaryTitle(keys: string[], explicit?: string): string {
   if (explicit?.trim()) return explicit.trim();
   const joined = keys.join(" ").toLowerCase();
   if (/research|clinical|trial|organ|patient/.test(joined)) return "Research status summary";
+  if (/literature|review|evidence|source|search|method/.test(joined)) return "Evidence summary";
   if (/timeline|milestone|date|period/.test(joined)) return "Timeline summary";
   if (/risk|control|finding|audit/.test(joined)) return "Risk and findings summary";
   if (/phase|stage|workflow|process/.test(joined)) return "Process status summary";
@@ -113,12 +114,9 @@ export function parseStructuredSummarySource(source: string): StructuredSummaryS
     (entry) => !entry.collection && SUMMARY_STATUS_PATTERN.test(String(entry.values[0] ?? "")),
   );
   const detailCount = entries.reduce((count, entry) => count + entry.values.length, 0);
-  if (
-    detailCount < 4 ||
-    !(collections.length >= 2 || (collections.length >= 1 && statusScalars.length >= 1))
-  ) {
-    return null;
-  }
+  const statusShaped =
+    detailCount >= 4 && (collections.length >= 2 || (collections.length >= 1 && statusScalars.length >= 1));
+  if (!statusShaped && !isDescriptiveRecord(record, entries, collections.length, detailCount)) return null;
 
   return {
     title: summaryTitle(
@@ -129,6 +127,31 @@ export function parseStructuredSummarySource(source: string): StructuredSummaryS
     footnote: typeof record.footnote === "string" ? record.footnote.trim() || undefined : undefined,
     entries,
   };
+}
+
+/** The other presentation shape models append to prose answers: a flat
+ * record of human-readable facts ("review_type": "focused narrative review",
+ * "evidence_categories": [...]). Everything must be flat (no nested objects),
+ * and most values must read as prose or dates — identifiers, versions,
+ * paths, and config values keep the record a code block. */
+function isDescriptiveRecord(
+  record: Record<string, unknown>,
+  entries: StructuredSummaryEntry[],
+  collectionCount: number,
+  detailCount: number,
+) {
+  const flat = Object.values(record).every(
+    (value) =>
+      value === null ||
+      ["string", "number", "boolean"].includes(typeof value) ||
+      (Array.isArray(value) && value.every((item) => ["string", "number", "boolean"].includes(typeof item))),
+  );
+  if (!flat || entries.length < 3 || collectionCount < 1 || detailCount < 5) return false;
+  const keysReadable = Object.keys(record).every((key) => /^[a-z][a-z0-9]*(?:[_ -][a-z0-9]+)+$|^[a-z]{3,}$/i.test(key));
+  const strings = entries.flatMap((entry) => entry.values).filter((value): value is string => typeof value === "string");
+  if (!keysReadable || strings.length < 4) return false;
+  const prose = strings.filter((value) => /\s/.test(value.trim()) || /^\d{4}-\d{2}-\d{2}$/.test(value.trim()));
+  return prose.length / strings.length >= 0.7;
 }
 
 export function looksLikeStructuredSummarySource(source: string): boolean {

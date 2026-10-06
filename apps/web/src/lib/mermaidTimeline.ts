@@ -1,11 +1,13 @@
 /** Timeline-specific Mermaid helpers.
  *
- * Models often emit almost-valid `timeline` fences that Mermaid's lexer
- * rejects (missing space before `:`, extra `: ` inside an event). Chat used
- * to swallow that as a silent code panel. These repairs plus a SVG-text
- * fallback keep a visual on screen even when Mermaid's own renderer throws
- * (lazy chunk load, getBBox, foreignObject sanitization).
+ * Timelines are drawn by Aperture's own renderer (renderTimelineFallbackSvg)
+ * rather than Mermaid's: it stays legible at chat widths, never depends on
+ * the lazy Mermaid chunk, and parses the almost-valid `timeline` fences
+ * models emit (missing space before `:`, extra `: ` inside an event).
  */
+
+import { diagramPalette } from "./diagramTheme";
+import { diagramSvg, measureDiagramText, svgText, wrapDiagramText } from "./diagramText";
 
 const TIMELINE_HEADER = /^\s*timeline(?:\s+(?:LR|TD))?\b/i;
 const TITLE_LINE = /^(title|accTitle|accDescr)\b/i;
@@ -72,7 +74,7 @@ export function parseMermaidTimeline(source: string): TimelineModel | null {
     const trimmed = (lines[index] ?? "").trim();
     if (!trimmed || trimmed.startsWith("%%") || trimmed.startsWith("#")) continue;
     if (/^title\s+/i.test(trimmed)) {
-      title = trimmed.replace(/^title\s+/i, "").trim();
+      title = trimmed.replace(/^title\s+/i, "").trim().replace(/^["']|["']$/g, "");
       continue;
     }
     if (/^accTitle\s*:/i.test(trimmed) || /^accDescr\s*:/i.test(trimmed)) continue;
@@ -102,109 +104,105 @@ export function parseMermaidTimeline(source: string): TimelineModel | null {
   return { title, sections };
 }
 
-/** SVG-text timeline used when Mermaid's renderer cannot draw one. Avoids
- * foreignObject so PNG rasterization (chat download, Drafts) stays untainted. */
+/** Aperture's timeline: a vertical rail with period labels on the left and
+ * event cards on the right, colored per section from the shared palette.
+ * Reads well at chat widths (Mermaid's horizontal timeline shrinks to
+ * unreadable type past five periods) and uses SVG text only, so PNG
+ * rasterization (chat download, Drafts) stays untainted. */
 export function renderTimelineFallbackSvg(source: string, dark: boolean, fontFamily: string): string | null {
   const model = parseMermaidTimeline(source);
   if (!model) return null;
+  const palette = diagramPalette(dark);
 
-  const surface = dark ? "#0d1c27" : "#ffffff";
-  const text = dark ? "#e9f3f7" : "#0c1a26";
-  const muted = dark ? "#9fb1bd" : "#5c6b7a";
-  const line = dark ? "#2c485a" : "#cfdae2";
-  const boxFill = dark ? "#102330" : "#f5f9fa";
-  const boxStroke = dark ? "#2c485a" : "#cfdae2";
-  const accent = dark ? "#3987e5" : "#2a78d6";
-
-  const width = 720;
-  const padX = 28;
-  const axisX = 40;
-  const contentX = 64;
-  const contentWidth = width - contentX - padX;
-  const wrapWidth = 52;
-  let y = 28;
+  const width = 760;
+  const pad = 30;
+  const periodSize = 14;
+  const eventSize = 13.5;
+  const eventLine = 19;
+  const periods = model.sections.flatMap((section) => section.periods);
+  const periodColumn = Math.min(
+    170,
+    Math.max(52, ...periods.map((period) => measureDiagramText(period.period, periodSize, 700))),
+  );
+  const railX = pad + periodColumn + 20;
+  const cardX = railX + 24;
+  const cardWidth = width - cardX - pad;
+  const textWidth = cardWidth - 30;
   const parts: string[] = [];
+  let y = pad;
 
   if (model.title) {
-    parts.push(
-      `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="16" font-weight="700" fill="${text}">${escapeXml(model.title)}</text>`,
-    );
-    y += 28;
+    const titleLines = wrapDiagramText(model.title, width - pad * 2, 18, 700);
+    parts.push(svgText(titleLines, { x: pad, y: y + 16, size: 18, lineHeight: 24, weight: 700, fill: palette.text }));
+    y += 16 + titleLines.length * 24 + 10;
   }
 
-  const axisStart = y;
-  for (const section of model.sections) {
+  const dots: number[] = [];
+  model.sections.forEach((section, sectionIndex) => {
+    const color = palette.series[sectionIndex % palette.series.length]!;
     if (section.name) {
-      y += 8;
+      y += 6;
       parts.push(
-        `<text x="${contentX}" y="${y}" font-size="13" font-weight="700" fill="${accent}">${escapeXml(section.name)}</text>`,
+        svgText([section.name.toUpperCase()], {
+          x: cardX,
+          y: y + 12,
+          size: 11.5,
+          weight: 700,
+          fill: color,
+          extra: 'letter-spacing="0.06em"',
+        }),
       );
-      y += 22;
+      y += 26;
     }
     for (const period of section.periods) {
-      parts.push(`<circle cx="${axisX}" cy="${y - 4}" r="5" fill="${accent}" />`);
-      parts.push(
-        `<text x="${contentX}" y="${y}" font-size="14" font-weight="700" fill="${text}">${escapeXml(period.period)}</text>`,
-      );
-      y += 10;
-      for (const event of period.events) {
-        const eventLines = wrapLabel(event, wrapWidth);
-        const boxHeight = 16 + eventLines.length * 18;
-        y += 8;
-        parts.push(
-          `<rect x="${contentX}" y="${y}" width="${contentWidth}" height="${boxHeight}" rx="6" fill="${boxFill}" stroke="${boxStroke}" />`,
+      const top = y;
+      const periodLines = wrapDiagramText(period.period, periodColumn, periodSize, 700);
+      const events = period.events.length ? period.events : [];
+      let cardY = top;
+      const cards: string[] = [];
+      for (const event of events) {
+        const lines = wrapDiagramText(event, textWidth, eventSize, 400);
+        const height = 18 + lines.length * eventLine;
+        cards.push(
+          `<rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${height}" rx="9" fill="${palette.node.fill}" stroke="${palette.node.border}" />` +
+            `<rect x="${cardX}" y="${cardY + 8}" width="3.5" height="${height - 16}" rx="1.75" fill="${color}" />` +
+            svgText(lines, { x: cardX + 16, y: cardY + 9 + eventSize, size: eventSize, lineHeight: eventLine, fill: palette.node.text }),
         );
-        eventLines.forEach((eventLine, lineIndex) => {
-          parts.push(
-            `<text x="${contentX + 12}" y="${y + 20 + lineIndex * 18}" font-size="13" fill="${text}">${escapeXml(eventLine)}</text>`,
-          );
-        });
-        y += boxHeight;
+        cardY += height + 8;
       }
-      y += 18;
+      const blockBottom = Math.max(cardY - 8, top + periodLines.length * 18 + 4);
+      const anchorY = top + 18;
+      dots.push(anchorY);
+      parts.push(
+        svgText(periodLines, {
+          x: railX - 18,
+          y: anchorY + 5,
+          size: periodSize,
+          lineHeight: 18,
+          weight: 700,
+          fill: palette.text,
+          anchor: "end",
+        }),
+      );
+      parts.push(...cards);
+      parts.push(
+        `<circle cx="${railX}" cy="${anchorY}" r="6.5" fill="${color}" stroke="${palette.canvas}" stroke-width="3" />`,
+      );
+      y = blockBottom + 16;
     }
+  });
+
+  if (dots.length > 1) {
+    parts.unshift(
+      `<line x1="${railX}" y1="${dots[0]}" x2="${railX}" y2="${dots[dots.length - 1]}" stroke="${palette.axis}" stroke-width="2" stroke-linecap="round" />`,
+    );
   }
 
-  const axisEnd = Math.max(axisStart + 8, y - 12);
-  parts.unshift(
-    `<line x1="${axisX}" y1="${axisStart - 10}" x2="${axisX}" y2="${axisEnd}" stroke="${line}" stroke-width="3" />`,
-  );
-
-  const height = Math.max(y + 16, 80);
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="${escapeXml(model.title || "Timeline diagram")}">` +
-    `<rect width="${width}" height="${height}" fill="${surface}" />` +
-    `<g font-family="${escapeXml(fontFamily)}">${parts.join("")}</g>` +
-    `</svg>`
-  );
+  const height = Math.max(y - 16 + pad, 90);
+  return diagramSvg(width, height, palette.canvas, fontFamily, model.title || "Timeline diagram", parts.join(""));
 }
 
 function sanitizeTimelineEvent(event: string): string {
   // Mermaid's event token stops at the next `: ` (colon + space).
   return event.replace(/:\s+/g, " — ");
-}
-
-function wrapLabel(text: string, width: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (next.length > width && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = next;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length ? lines : [text];
-}
-
-function escapeXml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
