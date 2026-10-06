@@ -10,7 +10,9 @@
  * honest: every card field is a form input, no source parsing heuristics.
  */
 
-import { MERMAID_FONT_FAMILY, rasterizeSvgToPngDataUrl } from "./mermaidRender";
+import { DIAGRAM_FONT_FAMILY, diagramPalette, type DiagramPalette } from "./diagramTheme";
+import { escapeXml, measureDiagramText, wrapDiagramText } from "./diagramText";
+import { rasterizeSvgToPngDataUrl } from "./mermaidRender";
 import {
   parseStructuredDiagramSource,
   parseStructuredSummarySource,
@@ -280,69 +282,45 @@ export function parseStewardDiagramTruncated(text: string): StewardDiagramModel 
 /* Layout + SVG                                                        */
 /* ------------------------------------------------------------------ */
 
-const CANVAS_W = 1240;
+const MAX_CANVAS_W = 1240;
+const MIN_CANVAS_W = 640;
+const MIN_CARD_W = 228;
 const MARGIN = 30;
 const GUTTER = 22;
-const ROW_GAP = 62;
+const ROW_GAP = 64;
+const CARD_RADIUS = 10;
 
-const NAVY = "#1b2a4a";
-const CARD_BORDER = "#c6cfdb";
-const BODY_TEXT = "#1f2a37";
-const MUTED_TEXT = "#5c6b7a";
-const TONE_STYLES: Record<StewardDiagramTone, { bg: string; text: string }> = {
-  neutral: { bg: "#e9edf5", text: "#33415c" },
-  positive: { bg: "#e6f1ea", text: "#1c4428" },
-  warning: { bg: "#fbf1dd", text: "#7a5a18" },
-};
-const NOTE_STYLE = { bg: "#fbf1dd", border: "#e3c98b", text: "#6b4a12" };
-const EDGE_STYLES: Record<StewardDiagramEdgeKind, { color: string; dash?: string }> = {
-  primary: { color: "#33415c" },
-  contingent: { color: "#c9a227", dash: "6 4" },
-  inactive: { color: "#8b94a3", dash: "3 4" },
-};
+type EdgeStyle = { color: string; dash?: string };
 
-let measureContext: CanvasRenderingContext2D | null | undefined;
+function edgeStyles(palette: DiagramPalette): Record<StewardDiagramEdgeKind, EdgeStyle> {
+  return {
+    primary: { color: palette.edgeStrong },
+    contingent: { color: palette.contingent, dash: "6 4" },
+    inactive: { color: palette.inactive, dash: "3 4" },
+  };
+}
 
-function textWidth(text: string, size: number, bold: boolean): number {
-  if (measureContext === undefined) {
-    try {
-      measureContext = document.createElement("canvas").getContext("2d");
-    } catch {
-      measureContext = null;
-    }
-  }
-  if (measureContext) {
-    measureContext.font = `${bold ? "600 " : ""}${size}px ${MERMAID_FONT_FAMILY}`;
-    return measureContext.measureText(text).width;
-  }
-  // Headless fallback (tests): average glyph width for the app font.
-  return text.length * size * (bold ? 0.62 : 0.58);
+function toneColors(palette: DiagramPalette, tone: StewardDiagramTone) {
+  if (tone === "positive") return palette.tones.positive;
+  if (tone === "warning") return palette.tones.warning;
+  return palette.tones.accent;
+}
+
+/** Canvas width sized to the busiest row so every card keeps a readable
+ * measure (≈228px) instead of a fixed 1240px canvas shrunk into a chat
+ * column or a document page. */
+export function stewardCanvasWidth(model: StewardDiagramModel): number {
+  const busiest = Math.max(1, ...model.rows.map((row) => row.length));
+  const wanted = busiest * MIN_CARD_W + (busiest - 1) * GUTTER + 2 * MARGIN;
+  return Math.min(MAX_CANVAS_W, Math.max(MIN_CANVAS_W, wanted));
 }
 
 function wrapText(text: string, maxWidth: number, size: number, bold: boolean): string[] {
-  const words = text.split(/\s+/).filter((word) => word !== "");
-  if (words.length === 0) return [];
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current === "" ? word : `${current} ${word}`;
-    if (current !== "" && textWidth(candidate, size, bold) > maxWidth) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
-    }
-  }
-  lines.push(current);
-  return lines;
+  return wrapDiagramText(text, maxWidth, size, bold ? 600 : 400);
 }
 
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function textWidth(text: string, size: number, bold: boolean): number {
+  return measureDiagramText(text, size, bold ? 600 : 400);
 }
 
 type TextBlock = { lines: string[]; size: number; lineHeight: number; bold: boolean };
@@ -372,21 +350,25 @@ type CardLayout = {
 
 function layoutCard(card: StewardDiagramCard, width: number): Omit<CardLayout, "x" | "y" | "height"> {
   const banner = card.variant === "banner";
-  const innerW = width - (banner ? 24 : 26);
-  const title = block(card.title, innerW, banner ? 12.5 : 11.5, banner ? 16 : 15, true);
-  const subtitle = card.subtitle ? block(card.subtitle, innerW, 9.3, 13, false) : undefined;
-  const headerH = banner
-    ? blockHeight(title) + (subtitle ? blockHeight(subtitle) : 0) + 20
-    : blockHeight(title) + (subtitle ? blockHeight(subtitle) : 0) + 16;
-  const bulletW = innerW - 12;
-  const bullets = (card.bullets ?? []).map((bullet) => block(bullet, bulletW, 10, 13.5, false));
-  const note = card.note ? block(card.note, innerW - 18, 9.3, 12.5, false) : undefined;
-  const footer = card.footer ? block(card.footer.text, innerW - 6, 9.3, 12.5, true) : undefined;
+  const innerW = width - 28;
+  const title = block(card.title, innerW, banner ? 14 : 13.5, banner ? 19 : 18, true);
+  const subtitle = card.subtitle ? block(card.subtitle, innerW, 11.5, 15.5, false) : undefined;
+  const headerH = blockHeight(title) + (subtitle ? blockHeight(subtitle) + 2 : 0) + (banner ? 24 : 20);
+  const bulletW = innerW - 14;
+  // Banner bullets are short centered lines under the name (roles, dates).
+  const bullets = (card.bullets ?? []).map((bullet) =>
+    banner ? block(bullet, innerW, 11.5, 15.5, false) : block(bullet, bulletW, 12.5, 17, false),
+  );
+  const note = card.note ? block(card.note, innerW - 20, 11.5, 15.5, false) : undefined;
+  const footer = card.footer ? block(card.footer.text, innerW - 8, 11.5, 15, true) : undefined;
   let minHeight = headerH;
-  if (bullets.length > 0) minHeight += 10 + bullets.reduce((sum, b) => sum + blockHeight(b), 0) + (bullets.length - 1) * 6 + 10;
-  if (note) minHeight += blockHeight(note) + 16 + 8;
-  if (footer) minHeight += blockHeight(footer) + 14;
-  if (banner) minHeight = Math.max(minHeight, 46);
+  if (banner) {
+    if (bullets.length > 0) minHeight += 4 + bullets.reduce((sum, b) => sum + blockHeight(b), 0) + (bullets.length - 1) * 2;
+    return { card, width, headerH, title, subtitle, bullets, note, footer, minHeight: Math.max(minHeight, 52) };
+  }
+  if (bullets.length > 0) minHeight += 12 + bullets.reduce((sum, b) => sum + blockHeight(b), 0) + (bullets.length - 1) * 6 + 12;
+  if (note) minHeight += blockHeight(note) + 18 + 10;
+  if (footer) minHeight += blockHeight(footer) + 16;
   return { card, width, headerH, title, subtitle, bullets, note, footer, minHeight };
 }
 
@@ -411,6 +393,7 @@ export type StewardDiagramTextEl = {
   italic?: boolean;
   /** Canvas-colored halo painted behind edge labels crossing lines. */
   halo?: string;
+  letterSpacing?: number;
   cardId?: string;
   fieldRef?: StewardTextField;
 };
@@ -422,6 +405,11 @@ export type StewardDiagramRectEl = {
   height: number;
   fill: string;
   stroke?: string;
+  /** Corner radius; `corners` limits rounding to the top or bottom edge
+   * (card header and footer bands inside a rounded card). */
+  rx?: number;
+  corners?: "all" | "top" | "bottom";
+  shadow?: boolean;
   cardId?: string;
 };
 
@@ -445,6 +433,7 @@ export type StewardDiagramCardBox = {
 export type StewardDiagramLayout = {
   width: number;
   height: number;
+  dark: boolean;
   rects: StewardDiagramRectEl[];
   paths: StewardDiagramPathEl[];
   texts: StewardDiagramTextEl[];
@@ -457,140 +446,263 @@ export function stewardTextBlockHeight(item: TextBlock): number {
   return blockHeight(item);
 }
 
-export const STEWARD_EDGE_COLORS = EDGE_STYLES;
+/** SVG path for a rectangle rounded on all corners, or only the top or
+ * bottom pair. */
+export function stewardRectPath(el: StewardDiagramRectEl): string {
+  const { x, y, width: w, height: h } = el;
+  const r = Math.min(el.rx ?? 0, w / 2, h / 2);
+  const top = el.corners !== "bottom" ? r : 0;
+  const bottom = el.corners !== "top" ? r : 0;
+  return (
+    `M${x + top},${y}H${x + w - top}` +
+    (top ? `Q${x + w},${y} ${x + w},${y + top}` : "") +
+    `V${y + h - bottom}` +
+    (bottom ? `Q${x + w},${y + h} ${x + w - bottom},${y + h}` : "") +
+    `H${x + bottom}` +
+    (bottom ? `Q${x},${y + h} ${x},${y + h - bottom}` : "") +
+    `V${y + top}` +
+    (top ? `Q${x},${y} ${x + top},${y}` : "") +
+    "Z"
+  );
+}
+
+/** Orthogonal connector with softly rounded elbows. */
+function elbowPath(points: Array<[number, number]>, radius = 9): string {
+  let d = `M ${points[0]![0]} ${points[0]![1]}`;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const [px, py] = points[index - 1]!;
+    const [cx, cy] = points[index]!;
+    const [nx, ny] = points[index + 1]!;
+    const inLength = Math.hypot(cx - px, cy - py);
+    const outLength = Math.hypot(nx - cx, ny - cy);
+    const r = Math.min(radius, inLength / 2, outLength / 2);
+    if (r < 1) {
+      d += ` L ${cx} ${cy}`;
+      continue;
+    }
+    const ax = cx - ((cx - px) / inLength) * r;
+    const ay = cy - ((cy - py) / inLength) * r;
+    const bx = cx + ((nx - cx) / outLength) * r;
+    const by = cy + ((ny - cy) / outLength) * r;
+    d += ` L ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`;
+  }
+  const last = points[points.length - 1]!;
+  return `${d} L ${last[0]} ${last[1]}`;
+}
 
 export function computeStewardDiagramLayout(
   model: StewardDiagramModel,
   dark: boolean,
-  canvasWidth = CANVAS_W,
+  canvasWidth = stewardCanvasWidth(model),
 ): StewardDiagramLayout {
+  const palette = diagramPalette(dark);
+  const styles = edgeStyles(palette);
   const width = Math.max(320, canvasWidth);
-  const canvasText = dark ? "#e9f3f7" : "#12233a";
-  const canvasMuted = dark ? "#9fb1bd" : MUTED_TEXT;
   const rects: StewardDiagramRectEl[] = [];
   const texts: StewardDiagramTextEl[] = [];
   const paths: StewardDiagramPathEl[] = [];
   const cardBoxes: StewardDiagramCardBox[] = [];
   let y = 26;
 
+  let tagWidth = 0;
   if (model.tag) {
-    const tag = block(model.tag, 320, 9.5, 12.5, true);
-    texts.push({ x: width - MARGIN, y: 20, block: tag, color: "#a3273a", anchor: "end" });
+    const tag = block(model.tag, 300, 10.5, 13, true);
+    tagWidth = Math.min(320, Math.max(...tag.lines.map((line) => textWidth(line, 10.5, true)))) + 20;
+    const tagHeight = blockHeight(tag) + 10;
+    rects.push({
+      x: width - MARGIN - tagWidth,
+      y: 18,
+      width: tagWidth,
+      height: tagHeight,
+      fill: palette.tones.accent.fill,
+      stroke: palette.tones.accent.border,
+      rx: tagHeight / 2 > 12 ? 8 : tagHeight / 2,
+    });
+    texts.push({
+      x: width - MARGIN - tagWidth / 2,
+      y: 18 + 3,
+      block: tag,
+      color: palette.tones.accent.text,
+      anchor: "middle",
+      letterSpacing: 0.2,
+    });
   }
   if (model.title) {
-    const title = block(model.title, Math.max(160, width - 2 * MARGIN - 330), 19, 24, true);
-    texts.push({ x: MARGIN, y, block: title, color: canvasText, fieldRef: { scope: "chart", field: "title" } });
+    const title = block(model.title, Math.max(160, width - 2 * MARGIN - (tagWidth ? tagWidth + 24 : 0)), 20, 26, true);
+    texts.push({ x: MARGIN, y, block: title, color: palette.text, fieldRef: { scope: "chart", field: "title" } });
     y += blockHeight(title) + 6;
   }
   if (model.subtitle) {
-    const subtitle = block(model.subtitle, width - 2 * MARGIN, 10.5, 14, false);
-    texts.push({ x: MARGIN, y, block: subtitle, color: canvasMuted, fieldRef: { scope: "chart", field: "subtitle" } });
+    const subtitle = block(model.subtitle, width - 2 * MARGIN, 12.5, 17, false);
+    texts.push({ x: MARGIN, y, block: subtitle, color: palette.muted, fieldRef: { scope: "chart", field: "subtitle" } });
     y += blockHeight(subtitle) + 4;
   }
-  y += 14;
+  y += model.title || model.subtitle ? 18 : 4;
+
+  // Which gaps between rows carry connectors (they need room for elbows and
+  // labels); empty gaps stay tight. Same-row labeled arrows widen their row's
+  // gutter so the label sits in clear space instead of on a card header.
+  const rowOf = new Map<string, number>();
+  const columnOf = new Map<string, number>();
+  model.rows.forEach((row, index) =>
+    row.forEach((card, column) => {
+      rowOf.set(card.id, index);
+      columnOf.set(card.id, column);
+    }),
+  );
+  // Same-row arrows that skip over a card run below the row instead.
+  const skipsCards = (edge: StewardDiagramEdge) =>
+    Math.abs((columnOf.get(edge.from) ?? 0) - (columnOf.get(edge.to) ?? 0)) > 1;
+  const busyGaps = new Set<number>();
+  const rowGutters = model.rows.map(() => GUTTER);
+  for (const edge of model.edges) {
+    const fromRow = rowOf.get(edge.from);
+    const toRow = rowOf.get(edge.to);
+    if (fromRow === undefined || toRow === undefined) continue;
+    if (fromRow === toRow) {
+      if (skipsCards(edge)) {
+        busyGaps.add(fromRow);
+        continue;
+      }
+      if (edge.label) {
+        const needed = Math.min(150, textWidth(edge.label, 11, false) + 26);
+        rowGutters[fromRow] = Math.max(rowGutters[fromRow]!, needed);
+      }
+      continue;
+    }
+    busyGaps.add(toRow > fromRow ? fromRow : toRow);
+  }
 
   // Rows: equal card widths per row; every card stretches to the row height
-  // so footers align, exactly like the reference chart.
+  // so footers align.
   const cards = new Map<string, CardLayout>();
   const rowBottoms: number[] = [];
+  const rowGap = (index: number) => (busyGaps.has(index) ? ROW_GAP : 26);
   model.rows.forEach((row, rowIndex) => {
-    const cardW = (width - 2 * MARGIN - (row.length - 1) * GUTTER) / row.length;
+    const gutter = rowGutters[rowIndex]!;
+    const cardW = (width - 2 * MARGIN - (row.length - 1) * gutter) / row.length;
     const laidOut = row.map((card) => layoutCard(card, cardW));
     const rowH = Math.max(...laidOut.map((item) => item.minHeight));
     row.forEach((card, columnIndex) => {
-      const x = MARGIN + columnIndex * (cardW + GUTTER);
-      cards.set(card.id, { ...laidOut[columnIndex], x, y, height: rowH });
+      const x = MARGIN + columnIndex * (cardW + gutter);
+      cards.set(card.id, { ...laidOut[columnIndex]!, x, y, height: rowH });
       cardBoxes.push({ id: card.id, x, y, width: cardW, height: rowH, rowIndex, columnIndex });
     });
     y += rowH;
     rowBottoms.push(y);
-    y += ROW_GAP;
+    y += rowGap(rowIndex);
   });
-  y -= ROW_GAP;
+  y -= rowGap(model.rows.length - 1);
 
+  const cardFill = dark ? palette.node.fill : palette.canvas;
   for (const layout of cards.values()) {
-    const { card, x, width, height, headerH } = layout;
+    const { card, x, width: cardWidth, height, headerH } = layout;
     const cardId = card.id;
     if (card.variant === "banner") {
-      rects.push({ x, y: layout.y, width, height, fill: NAVY, cardId });
-      const contentH = blockHeight(layout.title) + (layout.subtitle ? blockHeight(layout.subtitle) : 0);
+      rects.push({ x, y: layout.y, width: cardWidth, height, fill: palette.ink, stroke: palette.inkBorder, rx: CARD_RADIUS, shadow: true, cardId });
+      const bulletsH = layout.bullets.length
+        ? 4 + layout.bullets.reduce((sum, item) => sum + blockHeight(item), 0) + (layout.bullets.length - 1) * 2
+        : 0;
+      const contentH = blockHeight(layout.title) + (layout.subtitle ? blockHeight(layout.subtitle) + 2 : 0) + bulletsH;
       const textY = layout.y + (height - contentH) / 2;
       texts.push({
-        x: x + width / 2,
+        x: x + cardWidth / 2,
         y: textY,
         block: layout.title,
-        color: "#ffffff",
+        color: palette.inkText,
         anchor: "middle",
         cardId,
         fieldRef: { scope: "card", cardId, field: "title" },
       });
       if (layout.subtitle) {
         texts.push({
-          x: x + width / 2,
-          y: textY + blockHeight(layout.title) + 1,
+          x: x + cardWidth / 2,
+          y: textY + blockHeight(layout.title) + 2,
           block: layout.subtitle,
-          color: "#c9d4e6",
+          color: palette.inkSubtext,
           anchor: "middle",
           cardId,
           fieldRef: { scope: "card", cardId, field: "subtitle" },
         });
       }
+      let bulletY = textY + blockHeight(layout.title) + (layout.subtitle ? blockHeight(layout.subtitle) + 2 : 0) + 4;
+      layout.bullets.forEach((bullet, index) => {
+        texts.push({
+          x: x + cardWidth / 2,
+          y: bulletY,
+          block: bullet,
+          color: palette.inkSubtext,
+          anchor: "middle",
+          cardId,
+          fieldRef: { scope: "bullet", cardId, index },
+        });
+        bulletY += blockHeight(bullet) + 2;
+      });
       continue;
     }
-    rects.push({ x, y: layout.y, width, height, fill: "#ffffff", stroke: CARD_BORDER, cardId });
-    rects.push({ x, y: layout.y, width, height: headerH, fill: NAVY, cardId });
+    rects.push({ x, y: layout.y, width: cardWidth, height, fill: cardFill, stroke: palette.node.border, rx: CARD_RADIUS, shadow: true, cardId });
+    rects.push({ x, y: layout.y, width: cardWidth, height: headerH, fill: palette.ink, rx: CARD_RADIUS, corners: "top", cardId });
     texts.push({
-      x: x + 13,
-      y: layout.y + 8,
+      x: x + 14,
+      y: layout.y + 10,
       block: layout.title,
-      color: "#ffffff",
+      color: palette.inkText,
       cardId,
       fieldRef: { scope: "card", cardId, field: "title" },
     });
     if (layout.subtitle) {
       texts.push({
-        x: x + 13,
-        y: layout.y + 8 + blockHeight(layout.title) + 1,
+        x: x + 14,
+        y: layout.y + 10 + blockHeight(layout.title) + 2,
         block: layout.subtitle,
-        color: "#c9d4e6",
+        color: palette.inkSubtext,
         cardId,
         fieldRef: { scope: "card", cardId, field: "subtitle" },
       });
     }
-    let cursor = layout.y + headerH + 10;
+    let cursor = layout.y + headerH + 12;
     layout.bullets.forEach((bullet, index) => {
-      rects.push({ x: x + 13, y: cursor + 4, width: 4, height: 4, fill: NAVY, cardId });
+      rects.push({ x: x + 14, y: cursor + 6.5, width: 5, height: 5, fill: palette.series[0]!, rx: 2.5, cardId });
       texts.push({
-        x: x + 23,
+        x: x + 26,
         y: cursor,
         block: bullet,
-        color: BODY_TEXT,
+        color: palette.node.text,
         cardId,
         fieldRef: { scope: "bullet", cardId, index },
       });
       cursor += blockHeight(bullet) + 6;
     });
-    const footerH = layout.footer ? blockHeight(layout.footer) + 14 : 0;
+    const footerH = layout.footer ? blockHeight(layout.footer) + 16 : 0;
     if (layout.note) {
-      const noteH = blockHeight(layout.note) + 16;
-      const noteY = layout.y + height - footerH - noteH - 8;
-      rects.push({ x: x + 8, y: noteY, width: width - 16, height: noteH, fill: NOTE_STYLE.bg, stroke: NOTE_STYLE.border, cardId });
+      const noteH = blockHeight(layout.note) + 18;
+      const noteY = layout.y + height - footerH - noteH - 10;
+      rects.push({
+        x: x + 10,
+        y: noteY,
+        width: cardWidth - 20,
+        height: noteH,
+        fill: palette.tones.warning.fill,
+        stroke: palette.tones.warning.border,
+        rx: 7,
+        cardId,
+      });
       texts.push({
-        x: x + 17,
-        y: noteY + 8,
+        x: x + 20,
+        y: noteY + 9,
         block: layout.note,
-        color: NOTE_STYLE.text,
+        color: palette.tones.warning.text,
         cardId,
         fieldRef: { scope: "card", cardId, field: "note" },
       });
     }
     if (layout.footer && card.footer) {
-      const tone = TONE_STYLES[card.footer.tone ?? "neutral"];
+      const tone = toneColors(palette, card.footer.tone ?? "neutral");
       const footerY = layout.y + height - footerH;
-      rects.push({ x, y: footerY, width, height: footerH, fill: tone.bg, cardId });
+      rects.push({ x: x + 0.5, y: footerY, width: cardWidth - 1, height: footerH - 0.5, fill: tone.fill, rx: CARD_RADIUS - 0.5, corners: "bottom", cardId });
       texts.push({
-        x: x + width / 2,
-        y: footerY + 7,
+        x: x + cardWidth / 2,
+        y: footerY + 8,
         block: layout.footer,
         color: tone.text,
         anchor: "middle",
@@ -609,79 +721,105 @@ export function computeStewardDiagramLayout(
     const to = cards.get(edge.to);
     if (!from || !to) continue;
     const kind = edge.kind ?? "primary";
-    const style = EDGE_STYLES[kind];
+    const style = styles[kind];
     const fromRow = rowIndexOf.get(edge.from) ?? 0;
     const toRow = rowIndexOf.get(edge.to) ?? 0;
     let labelX = 0;
     let labelY = 0;
-    if (fromRow === toRow) {
-      const [left, right] = from.x < to.x ? [from, to] : [to, from];
-      const lineY = left.y + Math.min(left.headerH, right.headerH) / 2;
-      const x1 = from.x < to.x ? left.x + left.width : right.x;
-      const x2 = from.x < to.x ? right.x - 5 : left.x + left.width + 5;
-      paths.push({ d: `M ${x1} ${lineY} L ${x2} ${lineY}`, color: style.color, dash: style.dash, markerKind: kind });
-      labelX = (x1 + x2) / 2;
-      labelY = lineY - 14;
-    } else {
-      const downward = toRow > fromRow;
-      const startY = downward ? from.y + from.height : from.y;
-      const endY = downward ? to.y - 5 : to.y + to.height + 5;
-      const gapIndex = downward ? fromRow : toRow;
-      const used = gapUse.get(gapIndex) ?? 0;
-      gapUse.set(gapIndex, used + 1);
-      const midY = rowBottoms[gapIndex] + 14 + ((used * 10) % (ROW_GAP - 26));
+    if (fromRow === toRow && skipsCards(edge)) {
+      const used = gapUse.get(fromRow) ?? 0;
+      gapUse.set(fromRow, used + 1);
+      const runY = rowBottoms[fromRow]! + 16 + ((used * 10) % (ROW_GAP - 30));
       const startX = from.x + from.width / 2;
       const endX = to.x + to.width / 2;
       paths.push({
-        d: `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`,
+        d: elbowPath([
+          [startX, from.y + from.height],
+          [startX, runY],
+          [endX, runY],
+          [endX, to.y + to.height + 4],
+        ]),
         color: style.color,
         dash: style.dash,
         markerKind: kind,
       });
       labelX = (startX + endX) / 2;
-      labelY = midY - 12;
+      labelY = runY - 13;
+    } else if (fromRow === toRow) {
+      const [left, right] = from.x < to.x ? [from, to] : [to, from];
+      const lineY = left.y + Math.min(left.headerH, right.headerH) / 2;
+      const x1 = from.x < to.x ? left.x + left.width : right.x;
+      const x2 = from.x < to.x ? right.x - 4 : left.x + left.width + 4;
+      paths.push({ d: `M ${x1} ${lineY} L ${x2} ${lineY}`, color: style.color, dash: style.dash, markerKind: kind });
+      labelX = (x1 + x2) / 2;
+      labelY = lineY - 16;
+    } else {
+      const downward = toRow > fromRow;
+      const startY = downward ? from.y + from.height : from.y;
+      const endY = downward ? to.y - 4 : to.y + to.height + 4;
+      const gapIndex = downward ? fromRow : toRow;
+      const used = gapUse.get(gapIndex) ?? 0;
+      gapUse.set(gapIndex, used + 1);
+      const midY = rowBottoms[gapIndex]! + 16 + ((used * 10) % (ROW_GAP - 30));
+      const startX = from.x + from.width / 2;
+      const endX = to.x + to.width / 2;
+      const points: Array<[number, number]> =
+        Math.abs(startX - endX) < 1
+          ? [
+              [startX, startY],
+              [endX, endY],
+            ]
+          : [
+              [startX, startY],
+              [startX, midY],
+              [endX, midY],
+              [endX, endY],
+            ];
+      paths.push({ d: elbowPath(points), color: style.color, dash: style.dash, markerKind: kind });
+      labelX = (startX + endX) / 2;
+      labelY = midY - 13;
     }
     if (edge.label) {
-      const label = block(edge.label, 220, 9, 11.5, false);
+      const label = block(edge.label, 220, 11, 14, false);
       texts.push({
         x: labelX,
         y: labelY,
         block: label,
-        color: style.color,
+        color: kind === "primary" ? palette.muted : style.color,
         anchor: "middle",
         italic: true,
-        halo: dark ? "#0d1c27" : "#ffffff",
+        halo: palette.canvas,
       });
     }
   }
 
   // Legend + footnote.
-  let footerLineY = y + 30;
+  let footerLineY = y + 32;
   if (model.legend && model.legend.length > 0) {
     let legendX = MARGIN;
-    texts.push({ x: legendX, y: footerLineY - 4, block: block("KEY", 60, 9.5, 12, true), color: canvasText });
+    texts.push({ x: legendX, y: footerLineY - 5, block: block("KEY", 60, 10.5, 13, true), color: palette.muted, letterSpacing: 0.6 });
     legendX += 44;
     for (const entry of model.legend) {
-      const style = EDGE_STYLES[entry.kind];
+      const style = styles[entry.kind];
       paths.push({
         d: `M ${legendX} ${footerLineY + 3} L ${legendX + 34} ${footerLineY + 3}`,
         color: style.color,
         dash: style.dash,
         markerKind: entry.kind,
       });
-      const label = block(entry.label, 400, 9.5, 12, false);
-      texts.push({ x: legendX + 42, y: footerLineY - 4, block: label, color: canvasMuted });
-      legendX += 42 + textWidth(entry.label, 9.5, false) + 34;
+      const label = block(entry.label, 400, 11.5, 14, false);
+      texts.push({ x: legendX + 42, y: footerLineY - 5, block: label, color: palette.muted });
+      legendX += 42 + textWidth(entry.label, 11.5, false) + 34;
     }
-    footerLineY += 22;
+    footerLineY += 24;
   }
   if (model.footnote) {
-    const footnote = block(model.footnote, width - 2 * MARGIN, 9.3, 12.5, false);
+    const footnote = block(model.footnote, width - 2 * MARGIN, 11.5, 15.5, false);
     texts.push({
       x: MARGIN,
-      y: footerLineY - 4,
+      y: footerLineY - 5,
       block: footnote,
-      color: canvasMuted,
+      color: palette.muted,
       fieldRef: { scope: "chart", field: "footnote" },
     });
     footerLineY += blockHeight(footnote) + 4;
@@ -689,7 +827,8 @@ export function computeStewardDiagramLayout(
 
   return {
     width,
-    height: Math.ceil(Math.max(footerLineY + 6, y + 16)),
+    height: Math.ceil(Math.max(footerLineY + 8, y + 22)),
+    dark,
     rects,
     paths,
     texts,
@@ -707,45 +846,62 @@ function svgTextMarkup(el: StewardDiagramTextEl): string {
   const weight = el.block.bold ? ' font-weight="600"' : "";
   const style = el.italic ? ' font-style="italic"' : "";
   const anchor = el.anchor ? ` text-anchor="${el.anchor}"` : "";
-  const text = `<text fill="${el.color}" font-size="${el.block.size}"${weight}${style}${anchor}>${spans}</text>`;
+  const spacing = el.letterSpacing ? ` letter-spacing="${el.letterSpacing}"` : "";
+  const text = `<text fill="${el.color}" font-size="${el.block.size}"${weight}${style}${anchor}${spacing}>${spans}</text>`;
   if (!el.halo) return text;
-  return `<g style="paint-order: stroke" stroke="${el.halo}" stroke-width="3">${text}</g>`;
+  return `<g style="paint-order: stroke" stroke="${el.halo}" stroke-width="4" stroke-linejoin="round">${text}</g>`;
 }
 
-export function stewardDiagramMarkerDefs(): string {
-  return (Object.keys(EDGE_STYLES) as StewardDiagramEdgeKind[])
+export function stewardMarkerId(kind: StewardDiagramEdgeKind, dark: boolean) {
+  return `aperture-sd-arrow-${kind}${dark ? "-dark" : ""}`;
+}
+
+export function stewardDiagramMarkerDefs(dark = false): string {
+  const styles = edgeStyles(diagramPalette(dark));
+  const markers = (Object.keys(styles) as StewardDiagramEdgeKind[])
     .map(
       (kind) =>
-        `<marker id="arrow-${kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="${EDGE_STYLES[kind].color}"/></marker>`,
+        `<marker id="${stewardMarkerId(kind, dark)}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 1 1.2 L 9 5 L 1 8.8 z" fill="${styles[kind].color}" stroke="${styles[kind].color}" stroke-linejoin="round"/></marker>`,
     )
     .join("");
+  const shadow = `<filter id="${stewardShadowId(dark)}" x="-5%" y="-5%" width="110%" height="120%"><feDropShadow dx="0" dy="1.2" stdDeviation="1.6" flood-color="${dark ? "#000000" : "#0b2a38"}" flood-opacity="${dark ? "0.35" : "0.10"}"/></filter>`;
+  return markers + shadow;
+}
+
+export function stewardShadowId(dark: boolean) {
+  return `aperture-sd-shadow${dark ? "-dark" : ""}`;
+}
+
+function svgRectMarkup(el: StewardDiagramRectEl, dark: boolean): string {
+  const stroke = el.stroke ? ` stroke="${el.stroke}"` : "";
+  const shadow = el.shadow ? ` filter="url(#${stewardShadowId(dark)})"` : "";
+  if (el.rx && el.corners && el.corners !== "all") {
+    return `<path d="${stewardRectPath(el)}" fill="${el.fill}"${stroke}${shadow}/>`;
+  }
+  const rx = el.rx ? ` rx="${el.rx}"` : "";
+  return `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}"${rx} fill="${el.fill}"${stroke}${shadow}/>`;
 }
 
 /** Lays the model out and renders the full SVG. Deterministic: same model,
- * same markup (theme only changes canvas-level text colors). */
-export function renderStewardDiagramSvg(model: StewardDiagramModel, dark: boolean): string {
-  const layout = computeStewardDiagramLayout(model, dark);
+ * same markup per theme. */
+export function renderStewardDiagramSvg(model: StewardDiagramModel, dark: boolean, canvasWidth?: number): string {
+  const layout = computeStewardDiagramLayout(model, dark, canvasWidth);
+  const palette = diagramPalette(dark);
   const paths = layout.paths
     .map(
       (el) =>
-        `<path d="${el.d}" stroke="${el.color}" stroke-width="1.6" fill="none"${
+        `<path d="${el.d}" stroke="${el.color}" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"${
           el.dash ? ` stroke-dasharray="${el.dash}"` : ""
-        } marker-end="url(#arrow-${el.markerKind})"/>`,
+        } marker-end="url(#${stewardMarkerId(el.markerKind, dark)})"/>`,
     )
     .join("");
-  const rects = layout.rects
-    .map(
-      (el) =>
-        `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" fill="${el.fill}"${
-          el.stroke ? ` stroke="${el.stroke}"` : ""
-        }/>`,
-    )
-    .join("");
+  const rects = layout.rects.map((el) => svgRectMarkup(el, dark)).join("");
   const texts = layout.texts.map(svgTextMarkup).join("");
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" ` +
-    `font-family='${MERMAID_FONT_FAMILY.replace(/'/g, "")}' role="img" aria-label="${escapeXml(model.title ?? "Structure diagram")}">` +
-    `<defs>${stewardDiagramMarkerDefs()}</defs>${paths}${rects}${texts}</svg>`
+    `font-family='${DIAGRAM_FONT_FAMILY.replace(/'/g, "")}' role="img" aria-label="${escapeXml(model.title ?? "Structure diagram")}">` +
+    `<rect width="${layout.width}" height="${layout.height}" fill="${palette.canvas}"/>` +
+    `<defs>${stewardDiagramMarkerDefs(dark)}</defs>${paths}${rects}${texts}</svg>`
   );
 }
 
@@ -856,5 +1012,5 @@ export async function renderStewardDiagramPngDataUrl(source: string): Promise<st
     parseStructuredSummaryDiagram(source) ??
     parseStewardDiagramTruncated(source);
   if (!model) return null;
-  return rasterizeSvgToPngDataUrl(renderStewardDiagramSvg(model, false), "#ffffff");
+  return rasterizeSvgToPngDataUrl(renderStewardDiagramSvg(model, false), diagramPalette(false).canvas);
 }

@@ -10,6 +10,7 @@ import {
   parseMarkdownBlocks,
   replaceDiagramFence,
   unwrapFullDocumentFence,
+  resolveDiagramBlock,
 } from "./markdown";
 
 test("a reply wrapped entirely in a code fence renders as a document, not a code block", () => {
@@ -270,4 +271,53 @@ test("categorized research JSON becomes a document visual while ordinary JSON st
   expect(html).not.toContain("document-code-block");
 
   expect(isStewardDiagramBlock("json", '{"replicas":2,"regions":["us-east-1"]}')).toBe(false);
+});
+
+test("one resolver decides diagrams for every fence notation", () => {
+  expect(resolveDiagramBlock("mermaid", "flowchart LR\n  A --> B")).toMatchObject({ kind: "mermaid" });
+  expect(resolveDiagramBlock("dot", 'digraph { a -> b }')).toMatchObject({ kind: "mermaid", converted: true });
+  expect(resolveDiagramBlock("", "@startuml\nA -> B: hi\n@enduml")?.source).toContain("sequenceDiagram");
+  const drawing = resolveDiagramBlock("text", "Core → Vessel → Pump\n\nHeat moves by convection and radiation.");
+  expect(drawing).toMatchObject({ kind: "mermaid", converted: true });
+  expect(drawing?.notes).toEqual(["Heat moves by convection and radiation."]);
+  expect(resolveDiagramBlock("aperture-diagram", '{"rows":[[{"id":"a","title":"A"}]]}')?.kind).toBe("structure");
+  expect(resolveDiagramBlock("python", "graph = 'TD'")).toBeNull();
+  expect(resolveDiagramBlock("text", "INFO request -> /api/chat (200)")).toBeNull();
+  expect(resolveDiagramBlock("hermes-memory", "A → B → C")).toBeNull();
+});
+
+test("tilde fences and ```markdown wrappers with inner diagrams parse as written", () => {
+  expect(parseMarkdownBlocks("~~~mermaid\nflowchart LR\n  A --> B\n~~~")[0]).toMatchObject({
+    kind: "code",
+    language: "mermaid",
+  });
+  const wrapped = "```markdown\n# Report\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nAfter.\n```";
+  const blocks = parseMarkdownBlocks(wrapped);
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]).toMatchObject({ kind: "code", language: "markdown" });
+  // Drafts unwrap the document and keep its diagram as a diagram figure.
+  const html = markdownToDocumentHtml(wrapped);
+  expect(html).toContain("<h1>Report</h1>");
+  expect(html).toContain("document-diagram-figure");
+  expect(html).toContain("<p>After.</p>");
+});
+
+test("a longer closing fence is required to close a longer opener", () => {
+  const blocks = parseMarkdownBlocks("````md\n```js\nx()\n```\n````\n\nTail");
+  expect(blocks[0]).toMatchObject({ kind: "code", text: "```js\nx()\n```" });
+  expect(blocks[1]).toMatchObject({ kind: "paragraph" });
+});
+
+test("editing a converted drawing saves Mermaid under a mermaid fence", () => {
+  const content = "Intro\n\n```text\nCore → Vessel → Pump\n```\n\nOutro";
+  const resolved = resolveDiagramBlock("text", "Core → Vessel → Pump")!;
+  const next = replaceDiagramFence(content, resolved.source, "flowchart LR\n  A --> B");
+  expect(next).toBe("Intro\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nOutro");
+});
+
+test("Drafts get diagram figures for text drawings, with their notes", () => {
+  const html = markdownToDocumentHtml("Intro\n\n```text\nCore → Vessel → Pump\n\nHeat moves by convection.\n```\n\nOutro");
+  expect(html).toContain("document-diagram-figure");
+  expect(html).toContain(`data-diagram-notes="${encodeURIComponent("Heat moves by convection.")}"`);
+  expect(html).not.toContain("document-code-block");
 });

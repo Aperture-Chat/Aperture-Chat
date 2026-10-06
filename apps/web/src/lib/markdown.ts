@@ -2,6 +2,13 @@ import {
   looksLikeStructuredDiagramSource,
   looksLikeStructuredSummarySource,
 } from "./structuredDiagramSource";
+import {
+  convertDotToMermaid,
+  convertPlantUmlToMermaid,
+  convertTextDiagram,
+  looksLikeDot,
+  looksLikePlantUml,
+} from "./textDiagrams";
 
 export type MarkdownColumnAlign = "left" | "center" | "right" | null;
 
@@ -40,21 +47,16 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
       continue;
     }
 
-    // Fence openers tolerate what models actually emit: longer fences and
-    // info strings after the language (```mermaid {init: …}). Only the first
-    // token becomes the language; extras never demote a block to prose.
-    const fence = /^(`{3,})([^`]*)$/.exec(trimmed);
+    // Fence openers tolerate what models actually emit: longer fences, tilde
+    // fences, and info strings after the language (```mermaid {init: …}).
+    // Only the first token becomes the language; extras never demote a block
+    // to prose.
+    const fence = readFenceOpener(trimmed);
     if (fence) {
       flushParagraph();
-      const language = (fence[2] ?? "").trim().split(/\s+/)[0] ?? "";
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^`{3,}\s*$/.test((lines[index] ?? "").trim())) {
-        codeLines.push((lines[index] ?? "").replace(/\s+$/g, ""));
-        index += 1;
-      }
-      if (index < lines.length) index += 1;
-      blocks.push({ kind: "code", language, text: codeLines.join("\n") });
+      const body = readFenceBody(lines, index + 1, fence);
+      blocks.push({ kind: "code", language: fence.language, text: body.lines.join("\n") });
+      index = body.nextIndex;
       continue;
     }
 
@@ -141,6 +143,57 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
   return blocks;
 }
 
+type FenceOpener = { marker: string; char: "`" | "~"; length: number; language: string };
+
+function readFenceOpener(trimmed: string): FenceOpener | null {
+  const match = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
+  if (!match) return null;
+  const marker = match[1]!;
+  const info = (match[2] ?? "").trim();
+  // A backtick fence's info string cannot itself contain backticks.
+  if (marker.startsWith("`") && info.includes("`")) return null;
+  return {
+    marker,
+    char: marker[0] as "`" | "~",
+    length: marker.length,
+    language: info.split(/\s+/)[0] ?? "",
+  };
+}
+
+function isFenceCloser(trimmed: string, opener: FenceOpener) {
+  const match = /^(`{3,}|~{3,})\s*$/.exec(trimmed);
+  return Boolean(match && match[1]![0] === opener.char && match[1]!.length >= opener.length);
+}
+
+const NESTING_FENCE_LANGUAGES = new Set(["markdown", "md", "mdx"]);
+
+/** Reads a fenced block body. Closers follow CommonMark (same character, at
+ * least as long, no info string). A ```markdown fence that wraps a document
+ * may hold its own ```mermaid fences: those nest instead of ending the outer
+ * block halfway through. */
+function readFenceBody(lines: string[], start: number, opener: FenceOpener) {
+  const body: string[] = [];
+  let index = start;
+  const inner: FenceOpener[] = [];
+  const nests = NESTING_FENCE_LANGUAGES.has(opener.language.toLowerCase());
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const trimmed = line.trim();
+    const open = inner[inner.length - 1];
+    if (open && isFenceCloser(trimmed, open)) {
+      inner.pop();
+    } else if (!open && isFenceCloser(trimmed, opener)) {
+      break;
+    } else if (nests) {
+      const nested = readFenceOpener(trimmed);
+      if (nested?.language) inner.push(nested);
+    }
+    body.push(line.replace(/\s+$/g, ""));
+    index += 1;
+  }
+  return { lines: body, nextIndex: index < lines.length ? index + 1 : index };
+}
+
 /**
  * Models often wrap a whole requested document in a single ``` fence; rendering
  * that verbatim turns the entire draft into one code block. Strip the fence only
@@ -177,7 +230,24 @@ const MERMAID_TAG_HEADERS: Record<string, string> = {
   c4container: "C4Container",
 };
 
-const OTHER_DIAGRAM_TAGS = new Set(["dot", "graphviz", "gv", "plantuml", "puml", "uml"]);
+const DOT_TAGS = new Set(["dot", "graphviz", "gv", "digraph"]);
+const PLANTUML_TAGS = new Set(["plantuml", "puml", "uml"]);
+// Tags under which models draw diagrams as text (arrow chains, layer lists,
+// box art). The content decides; ordinary prose and code stay code.
+const TEXT_DIAGRAM_TAGS = new Set([
+  "",
+  "text",
+  "txt",
+  "plain",
+  "plaintext",
+  "ascii",
+  "asciiart",
+  "ascii-art",
+  "diagram",
+  "drawing",
+  "art",
+  "flow",
+]);
 
 // First-line grammar keywords that identify a Mermaid diagram when a fence
 // carries no usable language tag. `graph`/`flowchart` require a direction so
@@ -197,18 +267,80 @@ const MERMAID_KEYWORD_PATTERN = new RegExp(
  * Explicitly tagged non-mermaid blocks (```python …) never match.
  */
 export function isMermaidBlock(language: string, text: string): boolean {
-  const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  const tag = fenceTag(language);
   if (MERMAID_LANGUAGE_ALIASES.has(tag) || tag in MERMAID_TAG_HEADERS) return true;
-  if (!GENERIC_FENCE_TAGS.has(tag)) return false;
-  return MERMAID_KEYWORD_PATTERN.test(mermaidDiagramSource(text, language));
+  if (!GENERIC_FENCE_TAGS.has(tag) && !TEXT_DIAGRAM_TAGS.has(tag)) return false;
+  return MERMAID_KEYWORD_PATTERN.test(mermaidGrammarLine(mermaidDiagramSource(text, language)));
 }
 
-/** Mermaid plus similar diagram fences (Graphviz, PlantUML) that must render
- * as a visual, never as a Copy/Preview/Edit code panel. */
+function fenceTag(language: string) {
+  return language.trim().toLowerCase().split(/\s+/)[0] ?? "";
+}
+
+/** First line of real grammar: skips blank lines, `%%` comments and init
+ * directives, and a `---` front-matter block. */
+function mermaidGrammarLine(source: string): string {
+  const lines = source.split("\n");
+  let index = 0;
+  while (index < lines.length && !(lines[index] ?? "").trim()) index += 1;
+  if ((lines[index] ?? "").trim() === "---") {
+    index += 1;
+    while (index < lines.length && (lines[index] ?? "").trim() !== "---") index += 1;
+    index += 1;
+  }
+  for (; index < lines.length; index += 1) {
+    const trimmed = (lines[index] ?? "").trim();
+    if (trimmed && !trimmed.startsWith("%%")) return trimmed;
+  }
+  return "";
+}
+
+/** A fenced block that renders as a figure: Mermaid source (native or
+ * converted from Graphviz, PlantUML, or a text drawing) or a structure-chart
+ * spec. `notes` carry prose that accompanied a text drawing. `converted`
+ * marks sources Aperture translated, so an edit can retag the fence. */
+export type ResolvedDiagram = {
+  kind: "mermaid" | "structure";
+  source: string;
+  notes?: string[];
+  converted?: boolean;
+};
+
+/**
+ * The one decision every surface shares (chat, hover previews, Drafts,
+ * diagram editing): is this fenced block a diagram, and what source draws
+ * it? Explicitly tagged code (```python, ```sql) is never a diagram.
+ */
+export function resolveDiagramBlock(language: string, text: string): ResolvedDiagram | null {
+  const tag = fenceTag(language);
+  if (tag.startsWith("hermes-")) return null;
+  if (isStewardDiagramBlock(language, text)) return { kind: "structure", source: text.trim() };
+  const generic = GENERIC_FENCE_TAGS.has(tag) || TEXT_DIAGRAM_TAGS.has(tag);
+  if (DOT_TAGS.has(tag) || (generic && looksLikeDot(text))) {
+    const converted = convertDotToMermaid(text);
+    return converted
+      ? { kind: "mermaid", source: converted.source, notes: converted.notes, converted: true }
+      : { kind: "mermaid", source: text.trim() };
+  }
+  if (PLANTUML_TAGS.has(tag) || (generic && looksLikePlantUml(text))) {
+    const converted = convertPlantUmlToMermaid(text);
+    return converted
+      ? { kind: "mermaid", source: converted.source, notes: converted.notes, converted: true }
+      : { kind: "mermaid", source: text.trim() };
+  }
+  if (isMermaidBlock(language, text)) return { kind: "mermaid", source: mermaidDiagramSource(text, language) };
+  if (TEXT_DIAGRAM_TAGS.has(tag)) {
+    const converted = convertTextDiagram(text);
+    if (converted) return { kind: "mermaid", source: converted.source, notes: converted.notes, converted: true };
+  }
+  return null;
+}
+
+/** Mermaid plus diagrams in other notations (Graphviz, PlantUML, text
+ * drawings) that must render as a visual, never as a Copy/Preview/Edit code
+ * panel. */
 export function isVisualDiagramBlock(language: string, text: string): boolean {
-  const tag = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
-  if (OTHER_DIAGRAM_TAGS.has(tag)) return true;
-  return isMermaidBlock(language, text);
+  return resolveDiagramBlock(language, text)?.kind === "mermaid";
 }
 
 /** Fence tags that carry no rendering intent of their own. A model that meant
@@ -290,27 +422,26 @@ export function replaceDiagramFence(content: string, previousSource: string, nex
   const wanted = previousSource.trim();
   let index = 0;
   while (index < lines.length) {
-    const fence = /^(`{3,})([^`]*)$/.exec((lines[index] ?? "").trim());
+    const fence = readFenceOpener((lines[index] ?? "").trim());
     if (!fence) {
       index += 1;
       continue;
     }
-    const language = (fence[2] ?? "").trim().split(/\s+/)[0] ?? "";
     const bodyStart = index + 1;
-    let bodyEnd = bodyStart;
-    while (bodyEnd < lines.length && !/^`{3,}\s*$/.test((lines[bodyEnd] ?? "").trim())) bodyEnd += 1;
-    const body = lines.slice(bodyStart, bodyEnd).join("\n");
-    const matches = isStewardDiagramBlock(language, body)
-      ? body.trim() === wanted
-      : isVisualDiagramBlock(language, body) && mermaidDiagramSource(body, language).trim() === wanted;
-    if (matches) {
-      const replaced = [...lines.slice(0, bodyStart), nextSource.trim(), ...lines.slice(bodyEnd)];
+    const body = readFenceBody(lines, bodyStart, fence);
+    const bodyEnd = bodyStart + body.lines.length;
+    const resolved = resolveDiagramBlock(fence.language, body.lines.join("\n"));
+    if (resolved && resolved.source.trim() === wanted) {
+      // A converted drawing (Graphviz, PlantUML, text) is saved back as the
+      // Mermaid the reader edited, so the fence is retagged to match.
+      const opener = resolved.converted ? `${fence.marker}mermaid` : lines[index]!;
+      const replaced = [...lines.slice(0, index), opener, nextSource.trim(), ...lines.slice(bodyEnd)];
       // A truncated reply can end mid-fence with no closing line; saving an
       // edit is the moment to close it so the block stays well-formed.
-      if (bodyEnd >= lines.length) replaced.push(fence[1]);
+      if (bodyEnd >= lines.length) replaced.push(fence.marker);
       return replaced.join("\n");
     }
-    index = bodyEnd + 1;
+    index = body.nextIndex;
   }
   return null;
 }
@@ -323,8 +454,11 @@ export function unwrapFullDocumentFence(source: string): string {
   const inner = match[2];
   // A reply that is only a diagram fence must stay a diagram. Unwrapping
   // ```mermaid / ```timeline would turn the body into prose.
-  if (isVisualDiagramBlock(language, inner) || isStewardDiagramBlock(language, inner)) return source;
-  return inner.includes("```") ? source : inner;
+  if (resolveDiagramBlock(language, inner)) return source;
+  // Inner fences are fine when the outer one is a ```markdown wrapper (the
+  // parser nests them); under any other tag they make the split ambiguous.
+  if (inner.includes("```") && !NESTING_FENCE_LANGUAGES.has(language.toLowerCase())) return source;
+  return inner;
 }
 
 export function markdownToDocumentHtml(source: string): string {
@@ -368,12 +502,8 @@ export function markdownToDocumentHtml(source: string): string {
         // DOCX export and AI-revision walkers). The figure starts as a visual
         // placeholder — never the mermaid/JSON source — so Transfer to Drafts
         // shows a diagram slot rather than a code block.
-        if (isStewardDiagramBlock(block.language, block.text)) {
-          return documentDiagramFigureHtml("structure", block.text.trim());
-        }
-        if (isVisualDiagramBlock(block.language, block.text)) {
-          return documentDiagramFigureHtml("mermaid", mermaidDiagramSource(block.text, block.language));
-        }
+        const diagram = resolveDiagramBlock(block.language, block.text);
+        if (diagram) return documentDiagramFigureHtml(diagram.kind, diagram.source, diagram.notes);
         return `<pre class="document-code-block"><code>${escapeHtml(block.text)}</code></pre>`;
       }
       if (block.kind === "quote") {
@@ -389,12 +519,13 @@ export function markdownToDocumentHtml(source: string): string {
     .join("");
 }
 
-function documentDiagramFigureHtml(kind: "mermaid" | "structure", diagramSource: string) {
+function documentDiagramFigureHtml(kind: "mermaid" | "structure", diagramSource: string, notes?: string[]) {
   const kindAttr = kind === "structure" ? ` data-diagram-kind="structure"` : "";
+  const notesAttr = notes?.length ? ` data-diagram-notes="${encodeURIComponent(notes.join("\n"))}"` : "";
   const label = kind === "structure" ? "Structure diagram" : "Diagram";
   return (
     `<figure class="document-media-block document-diagram-figure" contenteditable="false"` +
-    `${kindAttr} data-diagram-source="${encodeURIComponent(diagramSource)}">` +
+    `${kindAttr}${notesAttr} data-diagram-source="${encodeURIComponent(diagramSource)}">` +
     `<div class="document-diagram-pending">${label} will render on this page.</div>` +
     `</figure>`
   );

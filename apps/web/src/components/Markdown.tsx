@@ -7,10 +7,8 @@ import {
   imageFallbackUrl,
   imageUrlWithFallback,
   isDedicatedStewardDiagramLanguage,
-  isVisualDiagramBlock,
-  isStewardDiagramBlock,
-  mermaidDiagramSource,
   parseMarkdownBlocks,
+  resolveDiagramBlock,
 } from "../lib/markdown";
 import { diagramTypeLabel, renderMermaidSvgResult, svgToPngBlob } from "../lib/mermaidRender";
 import { renderMermaidFallbackSvg } from "../lib/mermaidFallback";
@@ -48,10 +46,7 @@ function previewBlockWeight(block: MarkdownBlock) {
     case "image":
       return 720;
     case "code":
-      return isStewardDiagramBlock(block.language, block.text) ||
-        isVisualDiagramBlock(block.language, block.text)
-        ? 760
-        : Math.min(block.text.length, 900);
+      return resolveDiagramBlock(block.language, block.text) ? 760 : Math.min(block.text.length, 900);
     case "table":
       return 520 + block.headers.join(" ").length + block.rows.flat().join(" ").length;
     case "heading":
@@ -238,10 +233,14 @@ export function Markdown({
               <HermesArtifactCard key={index} kind={language.slice("hermes-".length)} text={block.text} />
             );
           }
-          // Steward structure diagrams: JSON card charts with a dedicated
-          // renderer and card-level editor. The fallback is the honest code
-          // block so an invalid source never pretends to be a diagram.
-          if (isStewardDiagramBlock(block.language, block.text)) {
+          // One resolver decides for every surface: Mermaid (native, or
+          // converted from Graphviz, PlantUML, or a text drawing) and
+          // structure charts mount as visual figures, never code panels.
+          const diagram = resolveDiagramBlock(block.language, block.text);
+          // Structure charts: JSON card charts with a dedicated renderer and
+          // card-level editor. The fallback is the honest code block so an
+          // invalid source never pretends to be a diagram.
+          if (diagram?.kind === "structure") {
             return (
               <StewardDiagramFigure
                 fallback={<MarkdownCodeBlock language="json" preview={preview} text={block.text} />}
@@ -249,22 +248,22 @@ export function Markdown({
                 key={index}
                 onUpdate={onUpdateDiagram}
                 preview={preview}
-                source={block.text}
+                source={diagram.source}
               />
             );
           }
-          // Diagram fences always mount as a visual figure. Mermaid, type
-          // tags (` ```timeline `), untagged grammar, Graphviz, and PlantUML
-          // all count. The fallback SVG is synchronous so a failed or slow
-          // mermaid.js draw never leaves a Copy/Preview/Edit code panel.
-          if (isVisualDiagramBlock(block.language, block.text)) {
+          // The fallback SVG is synchronous so a failed or slow mermaid.js
+          // draw never leaves a Copy/Preview/Edit code panel.
+          if (diagram?.kind === "mermaid") {
             return (
               <MermaidDiagram
                 defer={deferDiagrams}
                 key={index}
+                notes={diagram.notes}
                 onUpdate={onUpdateDiagram}
+                originalSource={diagram.converted ? block.text : undefined}
                 preview={preview}
-                source={mermaidDiagramSource(block.text, block.language)}
+                source={diagram.source}
               />
             );
           }
@@ -527,12 +526,20 @@ function isDarkTheme() {
 
 function MermaidDiagram({
   defer = false,
+  notes,
   onUpdate,
+  originalSource,
   preview = false,
   source,
 }: {
   defer?: boolean;
+  /** Prose that came with a converted text drawing, shown under the figure. */
+  notes?: string[];
   onUpdate?: (previousSource: string, nextSource: string) => Promise<boolean> | boolean;
+  /** What the model actually wrote when Aperture converted it (Graphviz,
+   * PlantUML, a text drawing); Code and Copy show this, Edit works on the
+   * Mermaid translation. */
+  originalSource?: string;
   preview?: boolean;
   source: string;
 }) {
@@ -547,8 +554,11 @@ function MermaidDiagram({
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [pngStatus, setPngStatus] = useState<"idle" | "failed">("idle");
   const [editing, setEditing] = useState(false);
+  const mermaidSvgRef = useRef<string | null>(null);
+  mermaidSvgRef.current = mermaidSvg;
   const svg = mermaidSvg ?? fallbackSvg;
-  const typeLabel = diagramTypeLabel(source);
+  const typeLabel = diagramTypeLabel(source.replace(/^\s*---[\s\S]*?\n---\s*\n/, ""));
+  const codeSource = originalSource ?? source;
 
   useEffect(() => {
     if (!defer || shouldRender) return;
@@ -576,13 +586,16 @@ function MermaidDiagram({
     return () => observer.disconnect();
   }, []);
 
-  // Fallback SVG is synchronous so the figure is a visual on the first paint.
-  // mermaid.js may replace it; a hang or throw keeps the fallback. Code view
-  // is opt-in and this figure is never swapped for a code panel.
+  // The fallback SVG is synchronous so the figure is a visual on the first
+  // paint. A finished Mermaid drawing stays on screen while a newer source
+  // renders (a streaming reply grows the diagram instead of flickering back
+  // to the fallback), and a fallback only replaces a real drawing once the
+  // source has settled. Code view is opt-in; this figure never becomes a
+  // code panel.
   useEffect(() => {
     if (!shouldRender) return;
     let cancelled = false;
-    setMermaidSvg(null);
+    let settleTimer: number | undefined;
     setWaiting(true);
     setRenderError(null);
     const timer = window.setTimeout(() => {
@@ -590,23 +603,28 @@ function MermaidDiagram({
         const rendered = await renderMermaidSvgResult(source, dark);
         if (cancelled) return;
         setWaiting(false);
-        if (rendered.svg) {
+        if (rendered.svg && !rendered.fallback) {
           setMermaidSvg(rendered.svg);
           setRenderError(null);
-        } else {
-          setRenderError(rendered.error);
+          return;
         }
+        const apply = () => {
+          setMermaidSvg(rendered.svg);
+          setRenderError(rendered.svg ? null : rendered.error);
+        };
+        settleTimer = window.setTimeout(apply, mermaidSvgRef.current ? 1200 : 0);
       })();
     }, 200);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      if (settleTimer !== undefined) window.clearTimeout(settleTimer);
     };
   }, [source, dark, shouldRender]);
 
   async function copySource() {
     try {
-      await copyCodeToClipboard(source);
+      await copyCodeToClipboard(codeSource);
       setCopyStatus("copied");
       window.setTimeout(() => {
         setCopyStatus((current) => (current === "copied" ? "idle" : current));
@@ -655,7 +673,7 @@ function MermaidDiagram({
   }
   return (
     <figure className="md-diagram-panel" data-diagram-type={typeLabel}>
-      <figcaption className="md-code-toolbar">
+      <figcaption className="md-code-toolbar md-diagram-toolbar">
         <span className="md-code-toolbar-main">
           <Workflow size={15} />
           <strong>{typeLabel}</strong>
@@ -726,7 +744,7 @@ function MermaidDiagram({
         />
       )}
       {showSource ? (
-        <CodeLines lines={source.split("\n")} preview={preview} />
+        <CodeLines lines={codeSource.split("\n")} preview={preview} />
       ) : svg ? (
         <div className="md-diagram-canvas" dangerouslySetInnerHTML={{ __html: svg }} />
       ) : (
@@ -737,6 +755,13 @@ function MermaidDiagram({
             {onUpdate ? ", or Edit to fix it" : ""}.
           </span>
         </p>
+      )}
+      {!showSource && notes && notes.length > 0 && (
+        <div className="md-diagram-notes">
+          {notes.map((note, noteIndex) => (
+            <p key={noteIndex}>{renderInline(note, preview)}</p>
+          ))}
+        </div>
       )}
     </figure>
   );
