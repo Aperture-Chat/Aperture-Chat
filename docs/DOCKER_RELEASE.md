@@ -231,6 +231,44 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.10
+
+- **Diagrams render reliably everywhere.** Chat, hover previews, Drafts,
+  automation output, and drafts created by automations now make the same
+  decision about every diagram block, so a diagram that draws in chat draws
+  the same way after **Transfer to Drafts**, export, or reload.
+- Diagrams the model writes in other notations are drawn instead of shown as
+  code: Graphviz (`dot`), PlantUML, arrow chains (`A → B → C`), numbered
+  **Layer**/**Step** lists, and box-drawing art are converted to Mermaid.
+  Mermaid sources are normalized before rendering (model `%%{init}%%` and
+  theme directives are dropped and `classDef` colors map to the palette by
+  meaning), and common syntax mistakes are repaired only when Mermaid rejects
+  the original.
+- **One visual theme** for Mermaid charts, structure charts, timelines, mind
+  maps, and fallbacks, in light and dark mode. Timelines and mind maps use
+  Aperture's own renderers, which keep every word of each label (Mermaid's
+  mind map dropped words before parentheses and misplaced text).
+- **Drafts keep their diagrams.** Saving a draft preserves diagram figures and
+  their source, so a diagram can still be edited later; edits to a converted
+  drawing are saved back as Mermaid. Drafts created by automations turn
+  diagram blocks into diagrams when they open. Diagram images are drawn at 2×
+  for sharp print and Word export, and converting a draft to slides carries
+  rendered diagrams as image slides.
+- Automation run output renders formatting, tables, and diagrams the way the
+  chat it is delivered to does, instead of plain text.
+- Models are told to draw every visual as a structure chart or Mermaid block,
+  never as text, and not to append JSON or YAML metadata blocks to prose
+  answers unless asked.
+- Code and diagram toolbars use the interface font again (they had fallen back
+  to the monospace font).
+- No database migrations. Draft saves now accept `figure` and `figcaption`
+  with validated `data-diagram-*` attributes; rolling the API back to an
+  earlier release would make stored draft revisions that contain diagram
+  figures fail its content check.
+- API and web images publish as `v0.5.11-dev`, `v0.5.11-test`, and
+  `v0.5.11-main`. Stable `v0.5.11` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.9
 
 - **Personal Data Protection** (**Admin → Policies**) conceals Social Security
