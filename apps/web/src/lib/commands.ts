@@ -43,6 +43,7 @@ const ADMIN_LABELS: Record<AdminSection, string> = {
   sso: "SSO",
   analytics: "Analytics",
   policies: "Policies",
+  datasets: "Datasets",
   audit: "Audit",
   alerts: "Alerts",
 };

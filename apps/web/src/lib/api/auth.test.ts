@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { revokeSession, updateAccountPassword } from "./auth";
+import { revokeSession, ssoRedirectUri, updateAccountPassword } from "./auth";
 import { authHeaders, setSessionToken } from "./http";
 
 afterEach(() => {
@@ -50,4 +50,19 @@ test("logout accepts an already invalid session and reports server revocation fa
   await expect(revokeSession("ended-session")).resolves.toBeUndefined();
   vi.stubGlobal("fetch", vi.fn(async () => new Response("Unavailable", { status: 503 })));
   await expect(revokeSession("ended-session")).rejects.toThrow("could not confirm session revocation");
+});
+
+test("the SSO redirect URI is absolute in a same-origin deployment", async () => {
+  expect(ssoRedirectUri()).toBe("http://localhost:8000/api/auth/sso/callback");
+  // The default Docker build leaves VITE_API_BASE_URL empty and serves the
+  // API from the page's own origin.
+  vi.resetModules();
+  vi.stubEnv("VITE_API_BASE_URL", "");
+  try {
+    const sameOrigin = await import("./auth");
+    expect(sameOrigin.ssoRedirectUri()).toBe(`${window.location.origin}/api/auth/sso/callback`);
+  } finally {
+    vi.stubEnv("VITE_API_BASE_URL", "http://localhost:8000");
+    vi.resetModules();
+  }
 });

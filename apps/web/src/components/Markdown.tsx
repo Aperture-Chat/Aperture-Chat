@@ -17,6 +17,7 @@ import { renderMermaidFallbackSvg } from "../lib/mermaidFallback";
 import { DiagramEditorModal } from "./DiagramEditorModal";
 import { StewardDiagramFigure } from "./StewardDiagram";
 import { StableLabel } from "./Primitives";
+import { renderConcealed } from "./ConcealedText";
 import { useModalFocus } from "../lib/useModalFocus";
 
 const GENERATED_IMAGE_PREFIX = "/api/chat/generated-images/";
@@ -82,7 +83,7 @@ function renderInline(text: string, preview = false): ReactNode[] {
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      nodes.push(<Fragment key={key++}>{text.slice(lastIndex, match.index)}</Fragment>);
+      nodes.push(<Fragment key={key++}>{renderConcealed(text.slice(lastIndex, match.index), `i${key}`)}</Fragment>);
     }
     if (match[3] !== undefined) {
       nodes.push(<InlineImage alt={match[2] ?? ""} key={`${key++}-${match[3]}`} url={match[3]} />);
@@ -109,14 +110,14 @@ function renderInline(text: string, preview = false): ReactNode[] {
           {match[7]}
         </sup>,
       );
-    } else if (match[8] !== undefined) nodes.push(<strong key={key++}>{match[8]}</strong>);
+    } else if (match[8] !== undefined) nodes.push(<strong key={key++}>{renderConcealed(match[8], `s${key}`)}</strong>);
     else if (match[9] !== undefined) nodes.push(<code key={key++}>{match[9]}</code>);
     else if (match[10] !== undefined) nodes.push(<em key={key++}>{match[10]}</em>);
     else if (match[11] !== undefined) nodes.push(<em key={key++}>{match[11]}</em>);
     lastIndex = regex.lastIndex;
   }
   if (lastIndex < text.length) {
-    nodes.push(<Fragment key={key++}>{text.slice(lastIndex)}</Fragment>);
+    nodes.push(<Fragment key={key++}>{renderConcealed(text.slice(lastIndex), `i${key}`)}</Fragment>);
   }
   return nodes;
 }

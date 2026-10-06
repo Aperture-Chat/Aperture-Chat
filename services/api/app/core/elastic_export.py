@@ -49,10 +49,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from app.core.privacy import conceal_thread, conceal_title, privacy_policy_for
 from app.core import clock
 from app.core.config import Settings
 from app.core.net_guard import EgressBlocked, validate_public_url, validate_request_hook
 from app.models.schemas import (
+    TenantPrivacyPolicy,
     ELASTIC_EXPORT_STREAMS,
     ChatAttachment,
     ChatMessage,
@@ -892,6 +894,7 @@ class _ExportContext:
     _governance: dict[str, ChatThreadGovernance] = field(default_factory=dict)
     _governance_complete: bool = False
     _matters: dict[str, str | None] = field(default_factory=dict)
+    _privacy: dict[str, TenantPrivacyPolicy] = field(default_factory=dict)
     # Metadata digests of threads sent in full, recorded once acknowledged.
     pending_metadata: dict[str, str] = field(default_factory=dict)
 
@@ -903,6 +906,11 @@ class _ExportContext:
 
     def out_of_time(self) -> bool:
         return time.monotonic() >= self.deadline
+
+    def privacy_policy(self, tenant_id: str) -> TenantPrivacyPolicy:
+        if tenant_id not in self._privacy:
+            self._privacy[tenant_id] = privacy_policy_for(self.store, tenant_id)
+        return self._privacy[tenant_id]
 
     def cursor(self, name: str) -> int:
         return self.repository.elastic_export_cursor(name, self.target.signature)
@@ -1118,7 +1126,9 @@ def _metadata_from_row(ctx: _ExportContext, row: ChatThreadMetadataRow) -> dict[
     return _thread_metadata(
         ctx,
         thread_id=row.id,
-        title=row.title,
+        # Concealed exactly as the full send conceals it, so the metadata
+        # digest matches and the rescan never re-sends a raw title.
+        title=conceal_title(row.title, ctx.privacy_policy(row.tenant_id)),
         archived=row.archived,
         pinned=row.pinned,
         folder_id=row.folder_id,
@@ -1192,7 +1202,9 @@ def _mark_by_thread(
 
 
 def _thread_documents(ctx: _ExportContext, row: ChatThreadExportRow) -> list[_Doc]:
-    thread = row.thread
+    # Personal-data protection covers what leaves for Elastic too, including
+    # history saved before the organization turned it on.
+    thread = conceal_thread(row.thread, ctx.privacy_policy(row.thread.tenant_id))[0]
     tenant = {"tenant_id": thread.tenant_id, "tenant_name": ctx.tenant_name(thread.tenant_id)}
     owner = ctx.owner_fields(thread.owner_user_id)
     model_name = ctx.model_name(thread.model_id)
@@ -1317,10 +1329,14 @@ def _attachment_documents(ctx: _ExportContext, row: ChatThreadExportRow) -> list
             "status": attachment.status,
             "uploaded_at": _iso(attachment.uploaded_at),
             "thread_id": thread.id,
-            "thread_title": thread.title,
+            "thread_title": conceal_title(thread.title, ctx.privacy_policy(thread.tenant_id)),
         }
+        privacy = ctx.privacy_policy(tenant_id)
+        if privacy.enabled:
+            source["name"] = conceal_title(attachment.name, privacy)
         if ctx.target.include_content and attachment.text_preview:
-            source["text_preview"] = attachment.text_preview[:CONTENT_MAX_CHARS]
+            preview = attachment.text_preview[:CONTENT_MAX_CHARS]
+            source["text_preview"] = conceal_title(preview, privacy) if privacy.enabled else preview
         docs.append(_Doc(ctx.target.index("documents"), f"attachment:{attachment_id}", source))
     return docs
 

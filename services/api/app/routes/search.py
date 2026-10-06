@@ -21,6 +21,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.privacy import conceal_thread, privacy_policy_for
 from app.core.config import get_settings
 from app.core.policy import (
     agent_profile_access_allowed,
@@ -267,7 +268,9 @@ def _search_threads_indexed(
             allow_cross_tenant=is_platform_owner(actor),
         )
         if thread is not None:
-            live.append(thread)
+            # Scored against the concealed copy, so a raw identifier can
+            # never be used to probe history saved before protection.
+            live.append(conceal_thread(thread, privacy_policy_for(store, thread.tenant_id))[0])
     return _search_threads(live, query, limit)
 
 

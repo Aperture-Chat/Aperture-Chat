@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ADMIN_FOCUS_REGIONS, ADMIN_TRAINING_VIDEOS } from "./trainingDecks/admin";
 import { OWNER_FOCUS_REGIONS } from "./trainingDecks/owner";
 import { USER_FOCUS_REGIONS } from "./trainingDecks/user";
-import { layoutForRect, TrainingComposition, TRAINING_HEIGHT, TRAINING_WIDTH, TRAINING_LEFT_RAIL_CARD, type FocusRect, type FocusRegion, type TrainingVideoBase } from "./trainingVideoKit";
+import { activeCardStep, layoutForRect, TrainingComposition, TRAINING_HEIGHT, TRAINING_WIDTH, TRAINING_LEFT_RAIL_CARD, type FocusRect, type FocusRegion, type TrainingVideoBase } from "./trainingVideoKit";
 
 const playback = vi.hoisted(() => ({ frame: 30 }));
 vi.mock("remotion", async (importOriginal) => {
@@ -135,6 +135,42 @@ describe("recorded image fit", () => {
     expect(Number.parseFloat(card.style.width)).toBeGreaterThanOrEqual(150);
     expect(Number.parseFloat(card.style.left) + Number.parseFloat(card.style.width) + 14)
       .toBeLessThanOrEqual(ADMIN_FOCUS_REGIONS.feedbackConversation.rect.x);
+  });
+});
+
+describe("instruction cards", () => {
+  const video: TrainingVideoBase = {
+    id: "card-regression", title: "Cards", description: "", outcomes: [],
+    scenes: [
+      { title: "Copy the redirect URI", caption: "", narration: "", durationSeconds: 4, focus: "panel" },
+      {
+        title: "Register the app", caption: "Steps in the identity provider", narration: "", durationSeconds: 10,
+        card: {
+          where: "Okta Admin Console",
+          steps: ["Open Applications.", "Choose Create App Integration.", "Paste the sign-in redirect URI."],
+          values: [{ label: "Redirect URI", value: "https://chat.example.com/api/auth/sso/callback" }],
+        },
+      },
+    ],
+  };
+  const regions: Record<string, FocusRegion> = { panel: { frame: "panel.png", rect: { x: 300, y: 300, w: 300, h: 100 } } };
+
+  it("draws the card instead of a capture highlight and labels where the steps happen", () => {
+    playback.frame = 30 * 10;
+    const { container } = render(createElement(TrainingComposition, { video, regions, badge: "Owner guide" }));
+    const card = container.querySelector(".training-step-card")!;
+    expect(card.textContent).toContain("Do this in");
+    expect(card.textContent).toContain("Okta Admin Console");
+    expect(card.querySelector("dd")?.textContent).toBe("https://chat.example.com/api/auth/sso/callback");
+    expect(container.querySelector(".training-highlight")).toBeNull();
+    expect(container.querySelector(".training-title-card")?.textContent ?? "").not.toContain("Register the app");
+  });
+
+  it("walks the active step through the list as the scene plays", () => {
+    const steps = video.scenes[1].card!.steps;
+    expect(activeCardStep(steps, 0, 10)).toBe(0);
+    expect(activeCardStep(steps, 5, 10)).toBe(1);
+    expect(activeCardStep(steps, 9.9, 10)).toBe(2);
   });
 });
 

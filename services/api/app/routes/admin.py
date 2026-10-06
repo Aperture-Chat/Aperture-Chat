@@ -18,6 +18,7 @@ from app.core.alerting import (
 )
 from app.core.audit_severity import decorate_audit_events
 from app.core.mailer import email_configured
+from app.core.privacy import conceal_tag, conceal_title, privacy_policy_for
 from app.core.retention import batch_dispose_threads
 from app.core.retention_governance import merged_policy, preview as retention_preview, scan_thread, SENSITIVE_LABELS
 from app.core.usage_analytics import build_usage_summary
@@ -2720,7 +2721,8 @@ def retention_tagged_threads(
 ) -> list[RetentionTaggedThread]:
     """Tagged threads for the retention drilldown. Metadata only, no content."""
     tenant_id = _memory_admin_tenant_id(actor, store)
-    tags = store.list_chat_thread_tags(tenant_id=tenant_id, namespace=namespace)
+    privacy = privacy_policy_for(store, tenant_id)
+    tags = [conceal_tag(tag, privacy) for tag in store.list_chat_thread_tags(tenant_id=tenant_id, namespace=namespace)]
     grouped: dict[str, list] = {}
     for tag in tags:
         grouped.setdefault(tag.thread_id, []).append(tag)
@@ -2733,7 +2735,7 @@ def retention_tagged_threads(
         rows.append(
             RetentionTaggedThread(
                 thread_id=thread_id,
-                title=thread.title if in_tenant else None,
+                title=conceal_title(thread.title, privacy) if in_tenant else None,
                 owner_user_id=thread.owner_user_id if in_tenant else None,
                 tags=thread_tags,
             )
@@ -2756,16 +2758,17 @@ def retention_threads(
     only, never message content).
     """
     tenant_id = _memory_admin_tenant_id(actor, store)
+    privacy = privacy_policy_for(store, tenant_id)
     tags_by_thread: dict[str, list] = {}
     for tag in store.list_chat_thread_tags(tenant_id=tenant_id):
-        tags_by_thread.setdefault(tag.thread_id, []).append(tag)
+        tags_by_thread.setdefault(tag.thread_id, []).append(conceal_tag(tag, privacy))
     matter_labels = store.application_state_repository.matter_labels_for_tenant(tenant_id)
     threads = store.application_state_repository.retention_scan_page(tenant_id, after=after, limit=limit)
     overview = store.application_state_repository.retention_overview(store.tenant_retention_policy(tenant_id))
     rows = [
         RetentionTaggedThread(
             thread_id=thread.id,
-            title=thread.title,
+            title=conceal_title(thread.title, privacy),
             owner_user_id=thread.owner_user_id,
             archived=thread.archived,
             matter_id=thread.matter_id,

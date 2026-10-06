@@ -907,6 +907,10 @@ class ContentFilterRule(BaseModel):
     pattern: str
     action: str = "redact"  # "redact" rewrites matches; "block" refuses the traffic
     applies_to: str = "input"  # "input" | "output" | "both"
+    # Optional checksum or range check from app.core.personal_data.VALIDATORS.
+    # A match only counts when the check passes (or the named "value" group
+    # passes, when the pattern has one), so look-alike numbers are left alone.
+    validator: str | None = None
 
 
 class ContentFilter(BaseModel):
@@ -2247,6 +2251,187 @@ class RetentionBatchResult(BaseModel):
     skipped_missing: int = 0
 
 
+PrivacyCategory = Literal["identity", "contact", "financial", "health", "credentials", "network"]
+PRIVACY_CATEGORIES: tuple[str, ...] = ("identity", "contact", "financial", "health", "credentials", "network")
+
+
+class TenantPrivacyPolicy(BaseModel):
+    """Personal-data concealment for one organization.
+
+    When enabled, detected identifiers are replaced with typed tokens such as
+    ``⟦SSN⟧`` before chats, titles, feedback, memories, tags, alerts, and
+    exports are stored or shown. Off by default so existing deployments keep
+    byte-identical behavior until an administrator opts in.
+    """
+
+    tenant_id: str
+    enabled: bool = False
+    categories: list[PrivacyCategory] = Field(default_factory=lambda: list(PRIVACY_CATEGORIES))
+    # Also conceal typed prompts and attached file text before they reach the
+    # model provider. Off only for teams whose work needs the model to read
+    # the value itself (it is still concealed everywhere it is stored).
+    conceal_from_model: bool = True
+    updated_at: str | None = None
+    updated_by: str | None = None
+
+
+class TenantPrivacyPolicyUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    categories: list[PrivacyCategory] | None = None
+    conceal_from_model: bool | None = None
+
+
+class PrivacyPreviewRequest(BaseModel):
+    sample: str = Field(default="", max_length=20_000)
+    categories: list[PrivacyCategory] | None = None
+
+
+class PrivacyDetectionSummary(BaseModel):
+    id: str
+    label: str
+    count: int
+
+
+class PrivacyPreviewResponse(BaseModel):
+    concealed_sample: str
+    detections: list[PrivacyDetectionSummary] = Field(default_factory=list)
+
+
+TrainingSignal = Literal["positive", "negative", "correction"]
+TrainingFormat = Literal["sft", "preference", "kto"]
+TrainingExampleStatus = Literal["pending", "approved", "excluded"]
+
+
+class TrainingCapturePolicy(BaseModel):
+    """What an organization captures for possible future fine-tuning.
+
+    Captured examples are de-identified copies held inside the deployment;
+    nothing is sent to a model provider. Off by default.
+    """
+
+    tenant_id: str
+    enabled: bool = False
+    capture_positive: bool = True
+    capture_negative: bool = True
+    capture_corrections: bool = True
+    # New examples wait for an administrator's approval before they can be
+    # exported. Turning this off approves every new example on capture.
+    require_review: bool = True
+    # Skip chats carrying sensitive or regulated retention tags (confirmed or
+    # suggested) so flagged conversations never become training data.
+    exclude_sensitive_chats: bool = True
+    # Replace workspace people's names and configured client/matter names.
+    conceal_names: bool = True
+    excluded_group_ids: list[str] = Field(default_factory=list, max_length=200)
+    context_messages: int = Field(default=6, ge=1, le=20)
+    updated_at: str | None = None
+    updated_by: str | None = None
+
+
+class TrainingCapturePolicyUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    capture_positive: bool | None = None
+    capture_negative: bool | None = None
+    capture_corrections: bool | None = None
+    require_review: bool | None = None
+    exclude_sensitive_chats: bool | None = None
+    conceal_names: bool | None = None
+    excluded_group_ids: list[str] | None = Field(default=None, max_length=200)
+    context_messages: int | None = Field(default=None, ge=1, le=20)
+
+
+class TrainingDatasetRules(BaseModel):
+    """Routing rules: an empty list means "any"."""
+
+    signals: list[TrainingSignal] = Field(default_factory=list)
+    practice_areas: list[str] = Field(default_factory=list, max_length=50)
+    task_types: list[str] = Field(default_factory=list, max_length=20)
+    group_ids: list[str] = Field(default_factory=list, max_length=200)
+    model_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
+class TrainingDataset(BaseModel):
+    id: str
+    tenant_id: str
+    name: str
+    description: str = ""
+    format: TrainingFormat = "sft"
+    rules: TrainingDatasetRules = Field(default_factory=TrainingDatasetRules)
+    # Prepended to every exported example; empty exports none.
+    system_prompt: str = ""
+    archived: bool = False
+    created_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    # Derived on read from the current examples and rules.
+    example_count: int = 0
+    approved_count: int = 0
+    pending_count: int = 0
+
+
+class TrainingDatasetWriteRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    description: str = Field(default="", max_length=1000)
+    format: TrainingFormat = "sft"
+    rules: TrainingDatasetRules = Field(default_factory=TrainingDatasetRules)
+    system_prompt: str = Field(default="", max_length=4000)
+    archived: bool = False
+
+
+class TrainingMessage(BaseModel):
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
+class TrainingExample(BaseModel):
+    """One de-identified learning signal taken from a saved chat."""
+
+    id: str
+    tenant_id: str
+    thread_id: str
+    # The assistant message the signal is about.
+    message_id: str
+    signal: TrainingSignal
+    status: TrainingExampleStatus = "pending"
+    user_id: str
+    model_id: str = ""
+    practice_area: str = ""
+    # "subject_tag" (the chat's retention subject), "keywords", or "".
+    practice_source: str = ""
+    task_type: str = ""
+    group_ids: list[str] = Field(default_factory=list)
+    prompt: list[TrainingMessage] = Field(default_factory=list)
+    # The response the signal judged (for corrections, the rejected one).
+    completion: str = ""
+    # Corrections only: what the person said, and the reply that followed.
+    correction: str = ""
+    revision: str = ""
+    # The revision was not itself corrected or rated down, so it can serve
+    # as the preferred answer.
+    revision_accepted: bool = False
+    correction_kind: str = ""  # "follow_up" | "regenerate"
+    comment: str = ""
+    redaction_count: int = 0
+    captured_at: datetime
+    updated_at: datetime
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    # Derived on read.
+    user_name: str = ""
+    dataset_ids: list[str] = Field(default_factory=list)
+
+
+class TrainingExampleReviewRequest(BaseModel):
+    example_ids: list[str] = Field(min_length=1, max_length=1000)
+    status: TrainingExampleStatus
+
+
+class TrainingScanResult(BaseModel):
+    scanned: int
+    captured: int
+    next_after: str | None = None
+
+
 class UserMemorySettings(BaseModel):
     # One settings row per user; the id mirrors user_id for the same generic
     # snapshot-keying reason as TenantMemoryPolicy.
@@ -2520,6 +2705,10 @@ class ChatCompletionResponse(BaseModel):
     # own text, so echoing it back leaks nothing.
     memory_saved: list[MemorySavedNotice] = Field(default_factory=list)
     directives: list[DirectiveResult] = Field(default_factory=list)
+    # Personal-data protection: the person's latest prompt as stored and sent,
+    # with detected values replaced by tokens, so the client shows the same
+    # concealed text. Absent when nothing was concealed.
+    concealed_prompt: str | None = None
 
 
 class AgentStep(BaseModel):

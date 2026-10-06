@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "re
 import { createPortal } from "react-dom";
 import type { ChatFeedbackRating, Role, UserPromptRecord } from "../lib/types";
 import { Markdown } from "./Markdown";
+import { renderConcealed } from "./ConcealedText";
 import { Pill } from "./Primitives";
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -218,7 +219,7 @@ export function PromptActivityList({
                 <small>
                   {record.user_name || record.user_id} · {roleLabel(record.user_role)} · {record.model_id} · {formatTimestamp(record)}
                 </small>
-                <span>{promptPreview(record.content)}</span>
+                <span>{renderConcealed(promptPreview(record.content), record.id)}</span>
               </span>
               <span className="prompt-activity-row-actions">
                 {record.alert_count > 0 && (
@@ -492,7 +493,7 @@ export function FeedbackConversationPreview({
         {item.comment ? (
           <div className="feedback-note-banner" role="note" aria-label="User feedback note">
             {isPositive ? <ThumbsUp size={15} /> : <ThumbsDown size={15} />}
-            <p>“{item.comment}”</p>
+            <p>“{renderConcealed(item.comment, "comment")}”</p>
           </div>
         ) : (
           <p className="prompt-output-thread-note">No written note was added to this rating.</p>

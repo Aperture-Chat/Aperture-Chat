@@ -8,7 +8,10 @@ function validateCaptureSource(appUrl, confirmation) {
     throw new Error("Public training captures require CAPTURE_PUBLIC_SYNTHETIC_CONFIRMATION=I_HAVE_REVIEWED_SYNTHETIC_DATA.");
   }
   const url = new URL(appUrl);
-  if (!["http:", "https:"].includes(url.protocol) || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.username || url.password) {
+  // *.localhost names always resolve to loopback (RFC 6761), so an isolated
+  // instance may use readable names such as chat.localhost in its frames.
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.hostname.endsWith(".localhost");
+  if (!["http:", "https:"].includes(url.protocol) || !loopback || url.username || url.password) {
     throw new Error("Public training captures require an isolated local instance with synthetic data.");
   }
 }

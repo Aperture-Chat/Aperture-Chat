@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable
 
+from app.core.personal_data import VALIDATORS, original_span, shadow_text, validated_subspan
 from app.models.schemas import ContentFilter, ContentFilterRule, ModelConfig
 
 if TYPE_CHECKING:
@@ -37,8 +38,18 @@ BUILTIN_FILTER_ID_PREFIX = "cf-preset-"
 _REDACTION_TEMPLATE = "[REDACTED · {label}]"
 
 
-def _rule(rule_id: str, label: str, pattern: str, *, action: str = "redact", applies_to: str = "both") -> ContentFilterRule:
-    return ContentFilterRule(id=rule_id, label=label, pattern=pattern, action=action, applies_to=applies_to)
+def _rule(
+    rule_id: str,
+    label: str,
+    pattern: str,
+    *,
+    action: str = "redact",
+    applies_to: str = "both",
+    validator: str | None = None,
+) -> ContentFilterRule:
+    return ContentFilterRule(
+        id=rule_id, label=label, pattern=pattern, action=action, applies_to=applies_to, validator=validator
+    )
 
 
 _BUILTIN_FILTERS: tuple[ContentFilter, ...] = (
@@ -47,33 +58,87 @@ _BUILTIN_FILTERS: tuple[ContentFilter, ...] = (
         tenant_id=None,
         name="PII / HIPAA",
         description=(
-            "Redacts common personally identifiable and protected health "
-            "information: SSNs, contact details, dates of birth, medical "
-            "record numbers, and health plan member IDs."
+            "Redacts personally identifiable and protected health information: "
+            "SSNs and ITINs, contact details and street addresses, dates of birth, "
+            "passport and driver's license numbers, medical record numbers, health "
+            "plan and Medicare IDs, vehicle IDs, and IP addresses. Matching ignores "
+            "zero-width characters and look-alike digits, and checksums reject "
+            "numbers that only resemble an identifier."
         ),
         builtin=True,
         rules=[
-            _rule("ssn", "US Social Security number", r"\b\d{3}-\d{2}-\d{4}\b"),
+            _rule("ssn", "US Social Security number", r"(?<![\w-])\d{3}([- ])\d{2}\1\d{4}(?![\w-])", validator="ssn"),
+            _rule(
+                "ssn-labelled",
+                "US Social Security number",
+                r"(?i)\b(?:ssn|social\s+security(?:\s+(?:number|no\.?|#))?|ss\s*#)\s*(?:is|:|#|=)?\s*(?P<value>\d{9})(?!\d)",
+                validator="ssn",
+            ),
+            _rule(
+                "itin",
+                "Individual taxpayer ID (ITIN)",
+                r"(?<![\w-])9\d{2}([- ])(?:5\d|6[0-5]|7\d|8[0-8]|9[0-2]|9[4-9])\1\d{4}(?![\w-])",
+            ),
             _rule(
                 "us-phone",
                 "US phone number",
                 r"\b(?:\+1[ .-]?)?(?:\(\d{3}\)\s?|\d{3}[ .-])\d{3}[ .-]\d{4}\b",
             ),
+            _rule(
+                "intl-phone",
+                "International phone number",
+                r"(?<![\w+])\+[2-9]\d{0,2}[ .-]?(?:\(\d{1,4}\)[ .-]?)?\d{1,4}(?:[ .-]?\d{2,4}){2,4}(?![\w-])",
+            ),
             _rule("email-address", "Email address", r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+            _rule(
+                "street-address",
+                "Street address",
+                r"\b\d{1,6}[A-Z]?\s+(?:(?:N|S|E|W|North|South|East|West)\.?\s+)?(?:[A-Z][A-Za-z0-9'.-]*\s+){0,3}"
+                r"[A-Z][A-Za-z0-9'.-]*\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way"
+                r"|Place|Pl|Terrace|Ter|Circle|Cir|Parkway|Pkwy|Highway|Hwy|Square|Sq|Trail|Trl)\b\.?"
+                r"(?:,?\s+(?:Apt|Apartment|Suite|Ste|Unit|#)\.?\s*#?[A-Za-z0-9-]{1,8})?",
+            ),
             _rule(
                 "date-of-birth",
                 "Date of birth",
-                r"(?i)\b(?:dob|date of birth|birth ?date)\b[^\n]{0,16}?\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}",
+                r"(?i)\b(?:dob|date of birth|birth ?date|born(?: on)?)\b[^\n]{0,16}?"
+                r"(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{2}-\d{2}"
+                r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})",
+            ),
+            _rule(
+                "passport-number",
+                "Passport number",
+                r"(?i)\bpassport\s*(?:number|no\.?|#)?\s*[:#]?\s*(?P<value>[A-Z0-9]{6,9})\b",
+                validator="has_digit",
+            ),
+            _rule(
+                "drivers-license",
+                "Driver's license number",
+                r"(?i)\bdriv(?:er'?s?|ing)\s+licen[cs]e\s*(?:number|no\.?|#)?\s*[:#]?\s*(?P<value>[A-Z0-9][A-Z0-9-]{4,16})\b",
+                validator="has_digit",
             ),
             _rule(
                 "medical-record-number",
                 "Medical record number",
-                r"(?i)\b(?:mrn|medical record (?:number|no\.?))\b[:# ]*[A-Z0-9-]{5,14}\b",
+                r"(?i)\b(?:mrn|medical record (?:number|no\.?)|patient (?:id|number))\b[:# ]*(?P<value>[A-Z0-9-]{5,14})\b",
+                validator="has_digit",
             ),
             _rule(
                 "health-plan-member-id",
                 "Health plan member or subscriber ID",
-                r"(?i)\b(?:member|subscriber|policy)\s*(?:id|number|no\.?)\b[:# ]*[A-Z0-9-]{6,16}\b",
+                r"(?i)\b(?:member|subscriber|policy|beneficiary)\s*(?:id|number|no\.?)\b[:# ]*(?P<value>[A-Z0-9-]{6,16})\b",
+                validator="has_digit",
+            ),
+            _rule(
+                "medicare-mbi",
+                "Medicare beneficiary identifier",
+                r"\b[1-9][AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d-?[AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d-?[AC-HJKMNP-RT-Y]{2}\d{2}\b",
+            ),
+            _rule("vehicle-id", "Vehicle identification number", r"\b[A-HJ-NPR-Z0-9]{17}\b", validator="vin"),
+            _rule(
+                "ip-address",
+                "IP address",
+                r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?!\d|\.\d)",
             ),
         ],
         created_by=None,
@@ -84,24 +149,25 @@ _BUILTIN_FILTERS: tuple[ContentFilter, ...] = (
         tenant_id=None,
         name="Financial Regulatory",
         description=(
-            "Redacts regulated financial identifiers: payment card numbers, "
-            "bank account and ABA routing numbers, IBANs, SWIFT/BIC codes, "
-            "and employer tax IDs."
+            "Redacts regulated financial identifiers: payment card numbers (Luhn "
+            "checked), bank account and ABA routing numbers (checksum verified), "
+            "IBANs (mod-97 verified), SWIFT/BIC codes, and employer tax IDs."
         ),
         builtin=True,
         rules=[
-            _rule("payment-card", "Payment card number", r"\b(?:\d[ -]?){13,19}\b"),
+            _rule("payment-card", "Payment card number", r"(?<![\d-])(?:\d[ -]?){12,18}\d(?![\d-])", validator="luhn"),
             _rule(
                 "aba-routing",
                 "ABA routing number",
-                r"(?i)\b(?:aba|routing)\s*(?:number|no\.?|#)?\s*[:#]?\s*\d{9}\b",
+                r"(?i)\b(?:aba|routing)\s*(?:number|no\.?|#)?\s*[:#]?\s*(?P<value>\d{9})\b",
+                validator="aba",
             ),
             _rule(
                 "bank-account",
                 "Bank account number",
                 r"(?i)\b(?:account|acct)\s*(?:number|no\.?|#)\s*[:#]?\s*\d{6,17}\b",
             ),
-            _rule("iban", "IBAN", r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"),
+            _rule("iban", "IBAN", r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b", validator="iban"),
             _rule(
                 "swift-bic",
                 "SWIFT/BIC code",
@@ -158,6 +224,10 @@ def validate_content_filter_rules(rules: Iterable[ContentFilterRule]) -> None:
             raise ValueError(f"Rule '{rule.id}' has an invalid pattern: {exc}") from exc
         if compiled.search(""):
             raise ValueError(f"Rule '{rule.id}' pattern matches empty text and would redact everything.")
+        if rule.validator is not None and rule.validator not in VALIDATORS:
+            raise ValueError(
+                f"Rule '{rule.id}' validator must be one of: {', '.join(sorted(VALIDATORS))}."
+            )
 
 
 @dataclass(frozen=True)
@@ -175,6 +245,38 @@ class FilterEvaluation:
     text: str
     blocked: list[ContentRuleMatch] = field(default_factory=list)
     redactions: list[ContentRuleMatch] = field(default_factory=list)
+
+
+def _rule_spans(compiled: re.Pattern[str], rule: ContentFilterRule, text: str) -> list[tuple[int, int]]:
+    """Validated match spans in ``text`` coordinates.
+
+    Matching runs on the personal-data engine's shadow copy, so zero-width
+    characters, full-width digits, and Unicode dashes cannot slip a value
+    past a rule; spans map back to the original text, invisible characters
+    included. A rule's validator (when set) must accept the named ``value``
+    group, or the whole match when the pattern has no such group.
+    """
+    shadow, index = shadow_text(text)
+    validator = VALIDATORS.get(rule.validator) if rule.validator else None
+    spans: list[tuple[int, int]] = []
+    for match in compiled.finditer(shadow):
+        if match.start() == match.end():
+            continue
+        start, end = match.start(), match.end()
+        if validator is not None:
+            if "value" in compiled.groupindex and match.group("value"):
+                if not validator(match.group("value")):
+                    continue
+            elif not validator(match.group(0)):
+                # A greedy number pattern can swallow an expiry date or CVV
+                # after a card; keep the longest run of whole digit groups
+                # that still passes instead of dropping the match.
+                span = validated_subspan(shadow, start, end, validator)
+                if span is None:
+                    continue
+                start, end = span
+        spans.append(original_span(index, start, end))
+    return spans
 
 
 def evaluate_content_filters(
@@ -201,8 +303,8 @@ def evaluate_content_filters(
                 compiled = re.compile(rule.pattern)
             except re.error:
                 continue
-            matches = compiled.findall(evaluation.text)
-            if not matches:
+            spans = _rule_spans(compiled, rule, evaluation.text)
+            if not spans:
                 continue
             match = ContentRuleMatch(
                 filter_id=content_filter.id,
@@ -210,12 +312,20 @@ def evaluate_content_filters(
                 rule_id=rule.id,
                 label=rule.label,
                 action=rule.action,
-                match_count=len(matches),
+                match_count=len(spans),
             )
             if rule.action == "block":
                 evaluation.blocked.append(match)
             else:
-                evaluation.text = compiled.sub(_REDACTION_TEMPLATE.format(label=rule.label), evaluation.text)
+                marker = _REDACTION_TEMPLATE.format(label=rule.label)
+                parts: list[str] = []
+                cursor = 0
+                for start, end in spans:
+                    parts.append(evaluation.text[cursor:start])
+                    parts.append(marker)
+                    cursor = end
+                parts.append(evaluation.text[cursor:])
+                evaluation.text = "".join(parts)
                 evaluation.redactions.append(match)
     return evaluation
 

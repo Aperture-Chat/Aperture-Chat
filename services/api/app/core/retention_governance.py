@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from app.core import clock
+from app.core.personal_data import concealed_token_labels, find_personal_data
 from app.core.retention import effective_retention_days
 from app.models.schemas import (
     ChatThreadTag,
@@ -26,6 +27,13 @@ SENSITIVE_LABELS = {
     "payment_card": "Possible payment card",
     "email": "Email address",
 }
+# (tag key, personal-data detector id, concealment token label)
+_SENSITIVE_KEYS = (
+    ("ssn", "ssn", "SSN"),
+    ("payment_card", "payment_card", "CARD NUMBER"),
+    ("email", "email", "EMAIL"),
+)
+_SENSITIVE_DETECTORS = tuple(detector_id for _key, detector_id, _label in _SENSITIVE_KEYS)
 
 
 def merged_policy(
@@ -71,21 +79,18 @@ def detected_tags(policy: TenantRetentionPolicy, texts: list[str]) -> set[tuple[
             if any(pattern.search(value) for pattern in aliases):
                 found.add((f"suggested_{source.kind}", source.id, source.name))
         if policy.sensitive_tagging_enabled:
-            if re.search(r"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b", value):
-                found.add(("suggested_sensitive", "ssn", SENSITIVE_LABELS["ssn"]))
-            if re.search(r"\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", value):
-                found.add(("suggested_sensitive", "email", SENSITIVE_LABELS["email"]))
-            for candidate in re.findall(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)", value):
-                digits = re.sub(r"\D", "", candidate)
-                numbers = [int(d) for d in digits[::-1]]
-                checksum = sum(
-                    n if i % 2 == 0 else (2 * n - 9 if n > 4 else 2 * n)
-                    for i, n in enumerate(numbers)
-                )
-                if len(set(digits)) > 1 and checksum % 10 == 0:
-                    found.add(
-                        ("suggested_sensitive", "payment_card", SENSITIVE_LABELS["payment_card"])
-                    )
+            # The shared engine checks the raw text (shadow-normalized, range-
+            # and checksum-validated). A value already concealed by
+            # personal-data protection still marks the chat: its token says
+            # what was there without keeping it.
+            detected = {
+                finding.detector.id
+                for finding in find_personal_data(raw, detector_ids=_SENSITIVE_DETECTORS)
+            }
+            tokens = concealed_token_labels(raw)
+            for key, detector_id, token_label in _SENSITIVE_KEYS:
+                if detector_id in detected or token_label in tokens:
+                    found.add(("suggested_sensitive", key, SENSITIVE_LABELS[key]))
     return found
 
 

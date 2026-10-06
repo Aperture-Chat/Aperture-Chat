@@ -75,6 +75,8 @@ from app.core.directives import (
     word_count as _word_count,
 )
 from app.core.dlp import scan_prompt
+from app.core.personal_data import StreamingConcealer, conceal
+from app.core.privacy import conceal_message_dicts, conceal_title, detection_summary, privacy_policy_for
 from app.core.generated_images import (
     GeneratedImageError,
     generated_image_file,
@@ -746,12 +748,13 @@ def rename_thread(
         update={"title": title, "updated_at": _format_upload_time(clock.now())}
     )
     saved = store.save_chat_thread(renamed)
+    privacy = privacy_policy_for(store, saved.tenant_id)
     store.record_audit(
         actor,
         "chat.thread_renamed",
         saved.id,
         {
-            "previous_title": existing.title,
+            "previous_title": conceal_title(existing.title, privacy),
             "title": saved.title,
             "thread_updated_at": saved.updated_at,
         },
@@ -917,6 +920,10 @@ def generate_thread_title(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="AI naming needs at least one completed reply in this chat.",
         )
+    privacy = privacy_policy_for(store, existing.tenant_id)
+    if privacy.enabled and privacy.conceal_from_model:
+        # History saved before protection was on may still hold raw values.
+        context = conceal(context, privacy.categories).text
     model = _resolve_model(store, existing.model_id)
     assert_model_access(actor, model)
     assert_group_permission(actor, store.groups, "chat_access", "Chat access")
@@ -988,7 +995,7 @@ def generate_thread_title(
             "chat.thread_renamed",
             saved.id,
             {
-                "previous_title": current.title,
+                "previous_title": conceal_title(current.title, privacy),
                 "title": saved.title,
                 "thread_updated_at": saved.updated_at,
                 "source": "ai_suggestion",
@@ -1061,7 +1068,7 @@ def delete_thread(
         "chat.thread_deleted",
         thread_id,
         {
-            "title": existing.title,
+            "title": conceal_title(existing.title, privacy_policy_for(store, existing.tenant_id)),
             "message_count": len(existing.messages),
             "archived": existing.archived,
         },
@@ -1122,7 +1129,10 @@ def submit_chat_feedback(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No organization exists to record feedback in.",
         )
-    preview = _feedback_preview(payload.message_preview)
+    privacy = privacy_policy_for(store, tenant_id)
+    # Conceal before truncating: a value cut at the preview boundary would no
+    # longer match, and most of its digits would survive.
+    preview = _feedback_preview(conceal_title(payload.message_preview, privacy))
     thread_title = payload.thread_title
     model_id = payload.model_id
     if thread is not None:
@@ -1132,7 +1142,7 @@ def submit_chat_feedback(
             (item for item in thread.messages if item.id == payload.message_id), None
         )
         if message is not None:
-            preview = _feedback_preview(message.content)
+            preview = _feedback_preview(conceal_title(message.content, privacy))
     now = clock.now()
     record = store.upsert_chat_feedback(
         ChatFeedbackRecord(
@@ -1179,7 +1189,9 @@ def complete(
     assert_group_permission(actor, store.groups, "chat_access", "Chat access")
     _record_prompt_security_findings(store, actor, request, model)
     _enforce_input_content_filters(store, actor, request, model)
+    privacy_state = _apply_privacy_to_input(store, actor, request, allow_draft_exemption=True)
     runtime_context = _resolve_runtime_context(store, actor, request, model)
+    _screen_runtime_context(store, actor, request, model, runtime_context, privacy_state)
     # Fast mode trades depth for speed. The concise-answer style note is
     # applied only on the chat surface, never for /v1 gateway clients, whose
     # prompts must reach the provider exactly as sent.
@@ -1285,7 +1297,9 @@ def openai_chat_completions(
     assert_group_permission(actor, store.groups, "chat_access", "Chat access")
     _record_prompt_security_findings(store, actor, request, model)
     _enforce_input_content_filters(store, actor, request, model)
+    privacy_state = _apply_privacy_to_input(store, actor, request)
     runtime_context = _resolve_runtime_context(store, actor, request, model)
+    _screen_runtime_context(store, actor, request, model, runtime_context, privacy_state)
     route = _resolve_gateway_route(
         store,
         model,
@@ -1366,7 +1380,9 @@ def openai_responses(
     assert_group_permission(actor, store.groups, "chat_access", "Chat access")
     _record_prompt_security_findings(store, actor, request, model)
     _enforce_input_content_filters(store, actor, request, model)
+    privacy_state = _apply_privacy_to_input(store, actor, request)
     runtime_context = _resolve_runtime_context(store, actor, request, model)
+    _screen_runtime_context(store, actor, request, model, runtime_context, privacy_state)
     route = _resolve_gateway_route(
         store,
         model,
@@ -2406,6 +2422,9 @@ def _generate_completion(
             request.thread_id,
         )
         final = _normalize_draft_inline_edit_response(request, final)
+        privacy_categories = _privacy_output_categories(runtime_context)
+        if privacy_categories is not None:
+            _conceal_completion(final, privacy_categories)
         hermes.capture_artifacts(
             store,
             actor,
@@ -2415,6 +2434,9 @@ def _generate_completion(
         )
         filtered = _apply_output_content_filters(store, actor, request, model_config, final)
         filtered.directives = _directive_results(runtime_context, filtered)
+        concealed_prompt = runtime_context.get("privacy_concealed_prompt")
+        if isinstance(concealed_prompt, str):
+            filtered.concealed_prompt = concealed_prompt
         usage_context.complete_success()
         return filtered
     except UsageBudgetError as exc:
@@ -2662,6 +2684,189 @@ def _enforce_input_content_filters(
         _record_content_filter_matches(
             store, actor, model, request, redactions, action="redacted", direction="input"
         )
+
+
+def _privacy_tenant_id(store: SeedStore, actor: User, request: ChatCompletionRequest) -> str | None:
+    """The caller's organization decides. Only a tenant-less platform owner
+    falls back to the thread's tenant, and only for a thread they own."""
+    if actor.tenant_id:
+        return actor.tenant_id
+    thread_id = (request.thread_id or "").strip()
+    if thread_id:
+        thread = store.chat_threads.get(thread_id)
+        if thread is not None and thread.owner_user_id == actor.id:
+            return thread.tenant_id
+    return next(iter(store.tenants), None)
+
+
+def _latest_user_index(messages: list[dict[str, Any]]) -> int | None:
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") == "user":
+            return index
+    return None
+
+
+def _apply_privacy_to_input(
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    *,
+    allow_draft_exemption: bool = False,
+) -> dict[str, object]:
+    """Conceal personal data in the conversation before anything reads it.
+
+    With ``conceal_from_model`` on (the default), the provider, retrieval,
+    memory capture, and subject tagging all see tokens such as ``⟦SSN⟧``
+    instead of the value. Either way the concealed latest prompt is returned
+    to the client, and the saved chat is concealed by the store.
+
+    Drafts are documents of record, so the workspace's own draft requests are
+    not rewritten. ``surface`` is client-supplied, so the exemption is never
+    offered on the /v1 gateway, and a draft request that carried personal
+    data is audited so the exemption cannot be used quietly.
+    """
+    policy = privacy_policy_for(store, _privacy_tenant_id(store, actor, request))
+    if not policy.enabled:
+        return {}
+    if request.surface == "draft" and allow_draft_exemption:
+        latest_index = _latest_user_index(request.messages)
+        latest = (
+            _message_content_text(request.messages[latest_index].get("content"))
+            if latest_index is not None
+            else ""
+        )
+        found = conceal(latest, policy.categories)
+        if found.counts:
+            store.record_audit(
+                actor,
+                "privacy.draft_not_concealed",
+                request.thread_id or actor.id,
+                {"detections": detection_summary(found.counts), "model_id": request.model},
+                runtime_state_changed=False,
+            )
+        return {}
+    categories = list(policy.categories)
+    state: dict[str, object] = {
+        "privacy_enabled": True,
+        "privacy_categories": categories,
+        "privacy_conceal_from_model": policy.conceal_from_model,
+    }
+    latest_index = _latest_user_index(request.messages)
+    latest_before = (
+        _message_content_text(request.messages[latest_index].get("content"))
+        if latest_index is not None
+        else ""
+    )
+    if policy.conceal_from_model:
+        counts = conceal_message_dicts(request.messages, categories)
+        latest_after = (
+            _message_content_text(request.messages[latest_index].get("content"))
+            if latest_index is not None
+            else ""
+        )
+    else:
+        result = conceal(latest_before, categories)
+        counts, latest_after = result.counts, result.text
+    if latest_after != latest_before:
+        state["privacy_concealed_prompt"] = latest_after
+    if counts:
+        state["privacy_concealed_counts"] = dict(counts)
+        store.record_audit(
+            actor,
+            "privacy.prompt_concealed",
+            request.thread_id or actor.id,
+            {
+                "detections": detection_summary(counts),
+                "model_id": request.model,
+                "surface": request.surface,
+                "concealed_from_model": policy.conceal_from_model,
+            },
+            runtime_state_changed=False,
+        )
+    return state
+
+
+def _screen_runtime_context(
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    model: ModelConfig,
+    runtime_context: dict[str, object],
+    privacy_state: dict[str, object],
+) -> None:
+    """Hold attached-file text to the same rules as typed text.
+
+    Extracted attachment text reaches the model through the runtime prompt,
+    not ``request.messages``, so input content filters (and personal-data
+    concealment) must screen it here or an uploaded file would bypass them.
+    """
+    runtime_context.update(privacy_state)
+    if privacy_state.get("privacy_conceal_from_model"):
+        memory_block = runtime_context.get("memory_block")
+        if isinstance(memory_block, str) and memory_block:
+            # Memories saved before protection was on are recalled concealed.
+            runtime_context["memory_block"] = conceal(
+                memory_block, list(privacy_state.get("privacy_categories") or [])
+            ).text
+    previews = runtime_context.get("attachment_previews")
+    if not isinstance(previews, list) or not previews:
+        return
+    filters = resolve_model_content_filters(store, model)
+    conceal_categories = (
+        list(privacy_state.get("privacy_categories") or [])
+        if privacy_state.get("privacy_conceal_from_model")
+        else None
+    )
+    blocked: list[ContentRuleMatch] = []
+    redactions: list[ContentRuleMatch] = []
+    for preview in previews:
+        if not isinstance(preview, dict) or not isinstance(preview.get("text"), str):
+            continue
+        text = str(preview["text"])
+        if filters:
+            evaluation = evaluate_content_filters(filters, text, "input")
+            blocked.extend(evaluation.blocked)
+            if evaluation.text != text:
+                redactions.extend(evaluation.redactions)
+                text = evaluation.text
+        if conceal_categories is not None:
+            text = conceal(text, conceal_categories).text
+            preview["name"] = conceal(str(preview.get("name") or ""), conceal_categories).text
+        preview["text"] = text
+    if blocked:
+        _record_content_filter_matches(
+            store, actor, model, request, blocked, action="blocked", direction="attachment"
+        )
+        first = blocked[0]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Attachment blocked by content filter '{first.filter_name}': "
+                f"{first.label} detected. Remove the flagged content and try again."
+            ),
+        )
+    if redactions:
+        _record_content_filter_matches(
+            store, actor, model, request, redactions, action="redacted", direction="attachment"
+        )
+
+
+def _privacy_output_categories(runtime_context: dict[str, object]) -> list[str] | None:
+    """Categories to conceal in model output, or None when protection is off.
+
+    Output is concealed even when the prompt was not: knowledge passages,
+    tool results, and the model itself can surface personal data.
+    """
+    if not runtime_context.get("privacy_enabled"):
+        return None
+    return list(runtime_context.get("privacy_categories") or [])
+
+
+def _conceal_completion(response: ChatCompletionResponse, categories: list[str]) -> None:
+    for choice in response.choices:
+        content = choice.message.get("content")
+        if isinstance(content, str) and content:
+            choice.message["content"] = conceal(content, categories).text
 
 
 def _filtered_output_text(
@@ -3370,6 +3575,123 @@ def _openai_streaming_response(
     )
 
 
+_REASONING_DELTA_KEYS = ("reasoning", "reasoning_content", "reasoning_details")
+
+
+class _GatewayStreamScreen:
+    """Output screening for proxied /v1 chunks.
+
+    Tool-call deltas pass through untouched. Content deltas are held whole
+    when an output content filter is attached (a pattern can span chunks)
+    and released screened on the choice's finish chunk; personal-data
+    concealment alone streams with the short StreamingConcealer hold-back.
+    """
+
+    def __init__(
+        self,
+        store: SeedStore,
+        actor: User,
+        request: ChatCompletionRequest,
+        model: ModelConfig,
+        runtime_context: dict[str, object],
+    ) -> None:
+        self.store = store
+        self.actor = actor
+        self.request = request
+        self.model = model
+        self.filters = resolve_model_content_filters(store, model)
+        self.buffer = filters_have_output_rules(self.filters)
+        self.categories = _privacy_output_categories(runtime_context)
+        self.held: dict[int, str] = {}
+        self.concealers: dict[int, StreamingConcealer] = {}
+        self.reasoning_concealers: dict[tuple[int, str], StreamingConcealer] = {}
+        self.finished: set[int] = set()
+
+    @property
+    def active(self) -> bool:
+        return self.buffer or self.categories is not None
+
+    def _release(self, index: int) -> str:
+        if self.buffer:
+            text = self.held.pop(index, "")
+            if self.categories is not None:
+                text = conceal(text, self.categories).text
+            return _filtered_output_text(
+                self.store, self.actor, self.request, self.model, self.filters, text
+            ) if text else ""
+        concealer = self.concealers.get(index)
+        return concealer.flush() if concealer is not None else ""
+
+    def apply(self, chunk: dict[str, Any]) -> None:
+        if not self.active:
+            return
+        choices = chunk.get("choices")
+        if not isinstance(choices, list):
+            return
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            index = choice.get("index") if isinstance(choice.get("index"), int) else 0
+            delta = choice.get("delta")
+            if isinstance(delta, dict):
+                self._screen_reasoning(index, delta, finished=bool(choice.get("finish_reason")))
+            content = delta.get("content") if isinstance(delta, dict) else None
+            screened = ""
+            if isinstance(content, str) and content:
+                if self.buffer:
+                    self.held[index] = self.held.get(index, "") + content
+                else:
+                    concealer = self.concealers.setdefault(index, StreamingConcealer(self.categories))
+                    screened = concealer.feed(content)
+            if choice.get("finish_reason"):
+                screened += self._release(index)
+                self.finished.add(index)
+            if isinstance(delta, dict) and "content" in delta:
+                delta["content"] = screened
+            elif screened:
+                choice["delta"] = {**(delta if isinstance(delta, dict) else {}), "content": screened}
+
+    def _screen_reasoning(self, index: int, delta: dict[str, Any], *, finished: bool) -> None:
+        """Reasoning text bypasses content but not screening. With an output
+        filter (which needs the whole text) it is dropped; with concealment
+        alone it streams through its own concealer."""
+        for key in _REASONING_DELTA_KEYS:
+            if key not in delta:
+                continue
+            value = delta.get(key)
+            if not isinstance(value, str):
+                # Structured reasoning (lists of parts) cannot be screened
+                # incrementally, so it is withheld while screening is active.
+                delta.pop(key, None)
+                continue
+            if self.buffer:
+                delta.pop(key, None)
+                continue
+            concealer = self.reasoning_concealers.setdefault((index, key), StreamingConcealer(self.categories))
+            screened = concealer.feed(value)
+            if finished:
+                screened += concealer.flush()
+            delta[key] = screened
+
+    def closing_chunks(self, model_name: str) -> list[dict[str, Any]]:
+        """Release anything still held when the provider never sent a finish."""
+        chunks: list[dict[str, Any]] = []
+        for index in sorted(set(self.held) | set(self.concealers)):
+            if index in self.finished:
+                continue
+            text = self._release(index)
+            if text:
+                chunks.append(
+                    {
+                        "id": f"chatcmpl-{uuid4()}",
+                        "object": "chat.completion.chunk",
+                        "model": model_name,
+                        "choices": [{"index": index, "delta": {"content": text}, "finish_reason": None}],
+                    }
+                )
+        return chunks
+
+
 def _openai_stream_events(
     request: ChatCompletionRequest,
     model_config: ModelConfig,
@@ -3398,10 +3720,14 @@ def _openai_stream_events(
             tool_choice=request.tool_choice,
             options=_openai_generation_options(request),
         )
+        screen = _GatewayStreamScreen(store, actor, request, model_config, runtime_context)
         for chunk in events:
             if "usage" in chunk:
                 raw_usage = cast(Mapping[str, Any] | None, chunk.get("usage"))
             chunk["model"] = request.model
+            screen.apply(chunk)
+            yield f"data: {json.dumps(chunk)}\n\n"
+        for chunk in screen.closing_chunks(request.model):
             yield f"data: {json.dumps(chunk)}\n\n"
         usage_context.settle_provider_child(
             completion_id=completion_id,
@@ -3505,6 +3831,8 @@ def _stream_events(
     current_completion_id: str | None = None
     current_usage_sink: dict[str, Any] = {}
     round_settled = True
+    privacy_categories: list[str] | None = None
+    concealer: StreamingConcealer | None = None
     try:
         client = get_model_gateway_client()
         gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
@@ -3516,6 +3844,19 @@ def _stream_events(
         # redact/block rule exists to stop. The response is held until the
         # provider finishes, then delivered screened.
         buffer_output = filters_have_output_rules(output_filters)
+        privacy_categories = _privacy_output_categories(runtime_context)
+        # Concealment streams with a short hold-back instead of buffering the
+        # whole reply (see StreamingConcealer); full buffering still wins when
+        # an output content filter is attached.
+        concealer = (
+            StreamingConcealer(privacy_categories)
+            if privacy_categories is not None and not buffer_output
+            else None
+        )
+        concealed_prompt = runtime_context.get("privacy_concealed_prompt")
+        if isinstance(concealed_prompt, str):
+            # Lets the client show the stored, concealed prompt right away.
+            yield _sse_data({"privacy": {"concealed_prompt": concealed_prompt}})
         request_messages = base_messages
         continuation_rounds = 0
         while True:
@@ -3560,6 +3901,16 @@ def _stream_events(
                         yield ": keep-alive\n\n"
                         last_wire_activity = now
                     continue
+                if concealer is not None:
+                    delta = concealer.feed(delta)
+                    if not delta:
+                        # Held back for concealment; keep the wire alive so the
+                        # client's stall watchdog never mistakes it for a drop.
+                        now = time.monotonic()
+                        if now - last_wire_activity >= KEEPALIVE_INTERVAL_SECONDS:
+                            yield ": keep-alive\n\n"
+                            last_wire_activity = now
+                        continue
                 yield _sse_data({"delta": delta})
                 last_wire_activity = time.monotonic()
             round_annotations = usage_sink.get("annotations")
@@ -3601,6 +3952,12 @@ def _stream_events(
                 {"role": "assistant", "content": accumulated.rstrip()},
                 {"role": "user", "content": CONTINUATION_PROMPT},
             ]
+        if privacy_categories is not None:
+            if concealer is not None:
+                tail = concealer.flush()
+                if tail:
+                    yield _sse_data({"delta": tail})
+            accumulated = conceal(accumulated, privacy_categories).text
         if buffer_output:
             yield _sse_data(
                 {
@@ -3706,6 +4063,12 @@ def _stream_events(
                     logger.exception(
                         "Failed to settle provider usage for a failed continuation round"
                     )
+            if privacy_categories is not None:
+                if concealer is not None:
+                    tail = concealer.flush()
+                    if tail:
+                        yield _sse_data({"delta": tail})
+                accumulated = conceal(accumulated, privacy_categories).text
             if buffer_output:
                 yield _sse_data(
                     {
@@ -5749,6 +6112,7 @@ def _audit_runtime_context(runtime_context: dict[str, object]) -> dict[str, obje
     audit_context = dict(runtime_context)
     audit_context.pop("attachment_previews", None)
     audit_context.pop("retrieval_query", None)
+    audit_context.pop("privacy_concealed_prompt", None)
     # Audit records which images were forwarded, never the base64 payloads.
     attachment_images = audit_context.pop("attachment_images", None)
     if isinstance(attachment_images, list):

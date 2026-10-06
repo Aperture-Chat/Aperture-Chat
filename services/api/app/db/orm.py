@@ -1406,6 +1406,76 @@ class ChatFeedbackRow(Base):
         )
 
 
+class TenantDataPolicyRow(Base):
+    """One organization's personal-data or training-capture policy.
+
+    Small tenant-level JSON documents kept beside the runtime data they
+    govern, so a policy change is a single-row write. No foreign key: tenant
+    deletion removes these rows explicitly in the identity cleanup job.
+    """
+
+    __tablename__ = "tenant_data_policies"
+    __table_args__ = (CheckConstraint("kind IN ('privacy', 'training')", name="kind_known"),)
+
+    tenant_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON(none_as_null=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class TrainingDatasetRow(Base):
+    """An administrator-defined dataset: routing rules plus export format.
+
+    Membership is never stored; it is evaluated from the rules against the
+    current examples, so editing a rule re-routes every example at once.
+    """
+
+    __tablename__ = "training_datasets"
+    __table_args__ = (Index("ix_training_datasets_tenant", "tenant_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON(none_as_null=True), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class TrainingExampleRow(Base):
+    """A de-identified learning signal captured from a saved chat.
+
+    No foreign keys: threads are client-authored and re-inserted in place by
+    workspace saves. Every chat deletion path removes its examples in the
+    same transaction, and user/tenant cleanup purges them explicitly.
+    """
+
+    __tablename__ = "training_examples"
+    __table_args__ = (
+        CheckConstraint("signal IN ('positive', 'negative', 'correction')", name="signal_known"),
+        CheckConstraint("status IN ('pending', 'approved', 'excluded')", name="status_known"),
+        UniqueConstraint("tenant_id", "thread_id", "message_id", "signal", name="uq_training_examples_signal"),
+        Index("ix_training_examples_tenant_captured", "tenant_id", "captured_at"),
+        Index("ix_training_examples_thread", "thread_id"),
+        Index("ix_training_examples_user", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    signal: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_id: Mapped[str] = mapped_column(Text, nullable=False)
+    practice_area: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON(none_as_null=True), nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class ModelAccessRequestRow(Base):
     """A person's request to use one organization model, reviewed by admins.
 

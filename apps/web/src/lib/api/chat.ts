@@ -73,6 +73,8 @@ export type ChatCompletionResponse = {
   usage?: Record<string, number>;
   memory_used?: number;
   memory_saved?: MemorySavedNotice[];
+  /** The latest prompt as stored, with personal data replaced by tokens. */
+  concealed_prompt?: string | null;
 };
 
 export type ChatAssistantReply = {
@@ -84,6 +86,8 @@ export type ChatAssistantReply = {
   memoryUsed?: number;
   /** Memories captured from this turn, so the user sees what was learned. */
   memorySaved?: MemorySavedNotice[];
+  /** Set when personal-data protection concealed part of the prompt. */
+  concealedPrompt?: string;
 };
 
 /** Keep only real, positive token counts; drop all-zero usage blocks so the
@@ -355,6 +359,9 @@ export async function sendChatStream(
     runtime?: ChatRuntimeOptions;
     signal?: AbortSignal;
     onDelta?: (fullText: string) => void;
+    /** Called when the API reports the prompt as stored with personal data
+     * concealed, so the bubble can show the same text immediately. */
+    onConcealedPrompt?: (concealed: string) => void;
     /**
      * Already-streamed assistant text, used after a page reload or a dropped
      * connection so the next attempt continues instead of starting over.
@@ -372,6 +379,7 @@ export async function sendChatStream(
     runtime,
     signal,
     onDelta,
+    onConcealedPrompt,
     initialText = "",
     resumeDelaysMs = STREAM_RESUME_BACKOFF_MS,
     stallTimeoutMs = STREAM_STALL_MS,
@@ -403,6 +411,7 @@ export async function sendChatStream(
           fullText = text;
         },
         onDelta,
+        onConcealedPrompt,
       });
     } catch (error) {
       if (signal?.aborted) {
@@ -433,9 +442,10 @@ async function streamChatOnce(
     stallTimeoutMs: number;
     onText: (fullText: string) => void;
     onDelta?: (fullText: string) => void;
+    onConcealedPrompt?: (concealed: string) => void;
   },
 ): Promise<ChatAssistantReply> {
-  const { model, messages, runtime, signal, baseText, stallTimeoutMs, onText, onDelta } = options;
+  const { model, messages, runtime, signal, baseText, stallTimeoutMs, onText, onDelta, onConcealedPrompt } = options;
   const controller = new AbortController();
   if (signal) {
     if (signal.aborted) controller.abort();
@@ -480,6 +490,7 @@ async function streamChatOnce(
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (contentType.includes("application/json")) {
       const reply = chatReplyFromCompletion((await response.json()) as ChatCompletionResponse);
+      if (reply.concealedPrompt) onConcealedPrompt?.(reply.concealedPrompt);
       return { ...reply, content: joinNonStreamContent(reply.content) };
     }
     if (!contentType.includes("text/event-stream")) {
@@ -497,6 +508,7 @@ async function streamChatOnce(
     let usage: ChatTokenUsage | undefined;
     let memoryUsed = 0;
     let memorySaved: MemorySavedNotice[] = [];
+    let concealedPrompt: string | undefined;
 
     const processLine = (rawLine: string) => {
       const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
@@ -519,6 +531,14 @@ async function streamChatOnce(
       const record = event as Record<string, unknown>;
       if (typeof record.error === "string" && record.error.trim()) {
         throw new ChatRequestError(record.error, undefined, fullText, record.retryable === true);
+      }
+      const privacy = record.privacy;
+      if (privacy && typeof privacy === "object" && !Array.isArray(privacy)) {
+        const concealed = (privacy as Record<string, unknown>).concealed_prompt;
+        if (typeof concealed === "string" && concealed) {
+          concealedPrompt = concealed;
+          onConcealedPrompt?.(concealed);
+        }
       }
       if (typeof record.delta === "string" && record.delta) {
         fullText += joiner + record.delta;
@@ -564,7 +584,7 @@ async function streamChatOnce(
     if (!fullText) {
       throw new ChatRequestError("The model returned an empty response.", undefined, undefined, true);
     }
-    return { content: fullText, citations, usage, memoryUsed, memorySaved };
+    return { content: fullText, citations, usage, memoryUsed, memorySaved, concealedPrompt };
   } catch (error) {
     if (error instanceof ChatRequestError) throw error;
     if (isAbortError(error)) {
@@ -631,6 +651,7 @@ function chatReplyFromCompletion(data: ChatCompletionResponse): ChatAssistantRep
     usage: normalizeTokenUsage(data.usage),
     memoryUsed: typeof data.memory_used === "number" ? data.memory_used : 0,
     memorySaved: Array.isArray(data.memory_saved) ? data.memory_saved : [],
+    concealedPrompt: typeof data.concealed_prompt === "string" && data.concealed_prompt ? data.concealed_prompt : undefined,
   };
 }
 

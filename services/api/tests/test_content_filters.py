@@ -289,3 +289,11 @@ def test_deleting_filter_detaches_it_from_models() -> None:
     response = client.delete(f"/api/admin/content-filters/{created['id']}", headers=headers("user-admin"))
     assert response.status_code == 200
     assert get_store().models["gpt-4o"].content_filter_ids == []
+
+
+def test_financial_preset_still_redacts_a_card_followed_by_its_expiry() -> None:
+    from app.core.content_filters import builtin_content_filters, evaluate_content_filters
+
+    evaluation = evaluate_content_filters(builtin_content_filters(), "Visa 4111-1111-1111-1111 12/27", "input")
+    assert "4111" not in evaluation.text
+    assert "[REDACTED · Payment card number]" in evaluation.text

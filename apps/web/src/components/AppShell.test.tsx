@@ -1022,7 +1022,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   fireEvent.click(screen.getByRole("button", { name: "Help" }));
 
   expect(await screen.findByText("Start chatting")).toBeInTheDocument();
-  expect(screen.getByText("Follow the work trace")).toBeInTheDocument();
+  expect(screen.getByText("Follow the work trace and act on replies")).toBeInTheDocument();
   expect(screen.getByText("Symbol shortcuts: / @ # $ >")).toBeInTheDocument();
   expect(screen.getByText("Attach files and sources")).toBeInTheDocument();
   expect(screen.getByText("Knowledge, Web, Agent, and reply settings")).toBeInTheDocument();
@@ -1033,6 +1033,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   expect(screen.getByText("Tools and the Library")).toBeInTheDocument();
   expect(screen.getByText("Scheduled automations")).toBeInTheDocument();
   expect(screen.getByText("Preview chats at a glance")).toBeInTheDocument();
+  expect(screen.getByText("Personal data in your chats")).toBeInTheDocument();
   expect(screen.getByText("Hover any listed chat to read its prompts and outputs in a compact, scrollable preview.")).toBeInTheDocument();
   expect(screen.getByText("Personalization memory")).toBeInTheDocument();
   expect(
@@ -1049,7 +1050,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   expect(within(dialog).getByTestId("remotion-player")).toBeInTheDocument();
   expect(within(dialog).getByText("Transcript")).toBeInTheDocument();
   expect(within(dialog).getByText("Preview opened")).toBeInTheDocument();
-  expect(within(dialog).getByText("Quick reference")).toBeInTheDocument();
+  expect(within(dialog).getByRole("tab", { name: "Step by step" })).toBeInTheDocument();
 });
 
 function renderShell(

@@ -671,15 +671,18 @@ test("documentation opens owner guide and audit replaces the old activity log ac
   expect(screen.queryByRole("button", { name: "Watch Check platform readiness step by step" })).not.toBeInTheDocument();
   const videoTitles = [
     "Set up the first workspace",
-    "Review workspace search readiness",
     "Providers and connections",
     "API Key Vault and replacement",
     "Organization model availability",
     "Users and role boundaries",
-    "Single sign-on setup",
-    "SSO provisioning and go-live",
-    "Platform branding",
+    "Single sign-on, start to finish",
+    "Single sign-on with Microsoft Entra ID",
+    "Single sign-on with Okta",
+    "Single sign-on with Google Workspace",
+    "Go live: groups, MFA, and enforcement",
     "Policies, budget, and connectors",
+    "Platform branding",
+    "Review workspace search readiness",
     "Analytics: runtime, activity, and usage",
     "Owner audit signals",
     "Alerts and email delivery",
@@ -705,17 +708,23 @@ test("documentation opens owner guide and audit replaces the old activity log ac
   expect(screen.getByTestId("remotion-player")).toHaveAttribute("data-initial-frame", "0");
   expect(screen.getByTestId("remotion-player")).toHaveAttribute("data-initially-show-controls", "true");
   expect(screen.getByText("Voiceover, captions, and title cards use the same timeline.")).toBeInTheDocument();
-  expect(screen.getByText("Setup checklist")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Step by step" })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
   expect(screen.getByRole("dialog", { name: "Platform owner documentation" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Single sign-on" })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Watch Single sign-on setup" }));
-  expect(screen.getByRole("dialog", { name: "Single sign-on setup video" })).toBeInTheDocument();
-  expect(screen.getByTestId("remotion-player")).toHaveTextContent("Single sign-on setup");
+  fireEvent.click(screen.getByRole("button", { name: "Watch Single sign-on, start to finish" }));
+  expect(screen.getByRole("dialog", { name: "Single sign-on, start to finish video" })).toBeInTheDocument();
+  expect(screen.getByTestId("remotion-player")).toHaveTextContent("Single sign-on, start to finish");
   expect(screen.getByTestId("remotion-player")).toHaveAttribute("data-audio-src", "training/owner/sso-setup.mp3");
   expect(screen.getByText("Voiceover, captions, and title cards use the same timeline.")).toBeInTheDocument();
-  expect(screen.getByText("Setup checklist")).toBeInTheDocument();
+  // The written guide carries each provider's complete path and the real refusal messages.
+  expect(screen.getByRole("tab", { name: "Step by step", selected: true })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Microsoft Entra ID" }));
+  expect(screen.getByRole("list", { name: "Microsoft Entra ID steps" })).toHaveTextContent("Single tenant only");
+  fireEvent.click(screen.getByRole("tab", { name: "Troubleshooting" }));
+  expect(screen.getByText(/JIT provisioning is disabled for this SSO provider/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Watch Platform branding" }));
@@ -731,7 +740,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "data-audio-src",
     "training/owner/policies-connectors.mp3",
   );
-  expect(screen.getByText(/Org Settings groups controls into panels/i)).toBeInTheDocument();
+  expect(screen.getByText(/Each area is a collapsed panel; expand only the one you need/i)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Close documentation" }));

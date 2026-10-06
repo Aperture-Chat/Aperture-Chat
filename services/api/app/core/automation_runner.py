@@ -35,12 +35,14 @@ from app.core.model_gateway import (
     ModelGatewayRoute,
     resolve_model_route,
 )
+from app.core.personal_data import conceal
 from app.core.policy import (
     assert_agent_profile_access,
     assert_model_access,
     hermes_companion_allowed,
     is_workspace_agent_profile,
 )
+from app.core.privacy import privacy_policy_for
 from app.core.web_search import OPENROUTER_WEB_SEARCH_TOOL
 from app.core.usage_budget import UsageBudgetError, UsageMeteringInvalid, new_accounting_id
 from app.core.usage_budget_runtime import (
@@ -327,6 +329,12 @@ def execute_chain(
     transcript: list[dict[str, object]] = []
     initial = automation.prompt if prompt_override is None else prompt_override
     carry = initial.strip()
+    # Personal-data protection covers chained runs too: the typed input (the
+    # chat ">" shortcut) is concealed before any provider sees it, and each
+    # step's output is concealed before it is shown, fed forward, or saved.
+    privacy = privacy_policy_for(store, automation.tenant_id)
+    if privacy.enabled and privacy.conceal_from_model:
+        carry = conceal(carry, privacy.categories).text
     for index, step in enumerate(automation.steps, start=1):
         model = store.models.get(step.model_id)
         if model is None:
@@ -417,6 +425,8 @@ def execute_chain(
                     content += "\n\nSources:\n" + "\n".join(
                         f"- [{title}]({url})" for title, url in sources
                     )
+            if privacy.enabled and content:
+                content = conceal(content, privacy.categories).text
             transcript.append(
                 {
                     "step": index,

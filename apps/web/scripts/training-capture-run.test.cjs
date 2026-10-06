@@ -10,6 +10,8 @@ test("only confirmed local synthetic captures may overwrite public assets", () =
   assert.throws(() => validateCaptureSource("https://your-instance.example", confirmation), /isolated local/);
   assert.throws(() => validateCaptureSource("http://localhost:5173", ""), /CONFIRMATION/);
   assert.doesNotThrow(() => validateCaptureSource("http://127.0.0.1:5173", confirmation));
+  assert.doesNotThrow(() => validateCaptureSource("http://chat.localhost:5235", confirmation));
+  assert.throws(() => validateCaptureSource("http://chat.localhost.example:5235", confirmation), /isolated local/);
 });
 
 test("missing frames fail without overwriting earlier public captures", () => {

@@ -54,6 +54,10 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
     snapshot["memoryState"] = memory_state.as_response()
     snapshot["memorySettings"] = store.user_memory_settings_for(actor.id)
     snapshot["memoryPolicy"] = memory_state.policy
+    # Whether the caller's organization conceals personal data and captures
+    # training signals, so chat can explain a ⟦SSN⟧ token and the feedback
+    # note can disclose capture. Policy flags only, never content.
+    snapshot["dataProtection"] = _data_protection_state(actor, store)
     # Resolved authoring capabilities so the workspace can show real create
     # controls instead of discovering the tenant grants through 403s.
     snapshot["authoringState"] = {
@@ -126,6 +130,30 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
     # carries its computed next run (owners see all of them).
     snapshot["automations"] = visible_automations_for(actor, store)
     return snapshot
+
+
+def _data_protection_state(actor: User, store: SeedStore) -> dict[str, object]:
+    tenant_id = actor.tenant_id or next(iter(store.tenants), None)
+    state: dict[str, object] = {
+        "privacy_enabled": False,
+        "privacy_categories": [],
+        "conceal_from_model": False,
+        "training_capture_enabled": False,
+    }
+    if tenant_id is None:
+        return state
+    try:
+        privacy = store.data_protection_repository.privacy_policy(tenant_id)
+        training = store.data_protection_repository.training_policy(tenant_id)
+    except Exception:  # noqa: BLE001 - a status hint must never block sign-in
+        return state
+    state.update(
+        privacy_enabled=privacy.enabled,
+        privacy_categories=list(privacy.categories) if privacy.enabled else [],
+        conceal_from_model=privacy.enabled and privacy.conceal_from_model,
+        training_capture_enabled=training.enabled,
+    )
+    return state
 
 
 def _workspace_connector_enabled(store: SeedStore, connector_id: str) -> bool:

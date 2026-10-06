@@ -673,3 +673,46 @@ def _activate_openrouter() -> None:
         expires="Jun 27, 2027",
         secret_value="openrouter-test-key",
     )
+
+
+def test_personal_data_protection_covers_automation_input_and_output(monkeypatch) -> None:
+    _activate_openrouter()
+    model_id = _approved_model_id()
+    seen_user_messages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        body = _json.loads(request.read())
+        seen_user_messages.append(next((m["content"] for m in body["messages"] if m["role"] == "user"), ""))
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-auto",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Card on file: 4111 1111 1111 1111."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.routes.automations.get_model_gateway_client",
+        lambda: ModelGatewayClient(transport=httpx.MockTransport(handler)),
+    )
+    enabled = client.patch("/api/admin/privacy/policy", json={"enabled": True}, headers=headers("user-admin"))
+    assert enabled.status_code == 200
+    automation_id = client.post("/api/automations", json=_base_payload(model_id), headers=headers()).json()["id"]
+    run = client.post(
+        f"/api/automations/{automation_id}/run",
+        json={"input": "Summarize the intake for SSN 123-45-6789."},
+        headers=headers(),
+    )
+    assert run.status_code == 200, run.text
+    assert seen_user_messages[0] == "Summarize the intake for SSN ⟦SSN⟧."
+    assert run.json()["final_output"] == "Card on file: ⟦CARD NUMBER⟧."
+    assert "4111" not in str(run.json()["transcript"])

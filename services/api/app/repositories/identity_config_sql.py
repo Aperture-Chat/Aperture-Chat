@@ -93,6 +93,7 @@ from app.db.orm import (
 )
 from app.models.schemas import (
     AlertRule,
+    ContentFilter,
     DEFAULT_GROUP_PERMISSIONS,
     EmailSettings,
     Group,
@@ -2043,6 +2044,16 @@ def _model_from_payload(
         ):
             canonical_payload.setdefault(tagging_field, False)
         canonical_payload.setdefault("sources", [])
+    if model_type is ContentFilter and isinstance(canonical_payload.get("rules"), list):
+        # Rule checksum validators shipped after the identity/config SQL
+        # authority. Accept only this exact legacy omission; None keeps every
+        # stored rule matching exactly what its pattern matched before.
+        canonical_payload["rules"] = [
+            {**rule, "validator": None}
+            if isinstance(rule, Mapping) and "validator" not in rule
+            else rule
+            for rule in canonical_payload["rules"]
+        ]
     if model_type is AlertRule and "detector_ids" not in canonical_payload:
         # Detection-scoped alert rules shipped after the identity/config SQL
         # authority. Accept only this exact legacy omission; an empty list
