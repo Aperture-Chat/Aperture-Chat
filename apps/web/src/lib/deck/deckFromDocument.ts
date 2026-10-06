@@ -3,8 +3,9 @@
  * Walks the sanitized document HTML (same parsing idiom as the DOCX
  * exporter's parseDocBlocks) and produces a structured deck: headings start
  * slides, paragraphs and lists become bullets, blockquotes become quote
- * slides. Content the deck format cannot carry yet (images, diagrams,
- * tables' structure) is reported in `warnings` — never silently dropped.
+ * slides, images and rendered diagrams become image slides. Content the deck
+ * format cannot carry (unrendered diagrams, tables' structure) is reported in
+ * `warnings` — never silently dropped.
  */
 
 import {
@@ -270,7 +271,10 @@ export function deckFromDocumentHtml(
       return;
     }
     if (tag === "figure" || tag === "img") {
-      if (node.classList.contains("document-diagram-figure")) {
+      // A rendered diagram is a picture like any other: it becomes an image
+      // slide. Only a figure still waiting to render has nothing to carry.
+      const diagram = node.classList.contains("document-diagram-figure");
+      if (diagram && !node.querySelector("img.document-diagram-image")) {
         skippedCharts += 1;
         return;
       }
@@ -283,7 +287,8 @@ export function deckFromDocumentHtml(
       }
       const caption =
         tag === "figure"
-          ? (node.querySelector("figcaption")?.textContent ?? "").replace(/\s+/g, " ").trim()
+          ? (node.querySelector("figcaption")?.textContent ?? "").replace(/\s+/g, " ").trim() ||
+            (diagram ? (image?.getAttribute("alt") ?? "").trim() : "")
           : "";
       const heading = pending?.title ?? "";
       flushPending();
@@ -333,7 +338,9 @@ export function deckFromDocumentHtml(
   }
   if (skippedCharts) {
     warnings.push(
-      `${skippedCharts} diagram${skippedCharts === 1 ? "" : "s"} not carried over — chart slides arrive in a later phase.`,
+      `${skippedCharts} diagram${skippedCharts === 1 ? "" : "s"} had not finished rendering and ${
+        skippedCharts === 1 ? "was" : "were"
+      } left out — open the draft until diagrams appear, then convert again.`,
     );
   }
   if (flattenedTables) {

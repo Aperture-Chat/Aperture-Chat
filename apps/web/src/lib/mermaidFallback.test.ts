@@ -28,11 +28,28 @@ test("pie fallback draws labeled values", () => {
 });
 
 test("unknown mermaid types still get a visual card diagram, not a listing", () => {
-  const svg = renderMermaidFallbackSvg("mindmap\n  root((Topic))\n    Branch one\n    Branch two", false);
+  const svg = renderMermaidFallbackSvg("requirementDiagram\n  requirement uptime {\n    id: 1\n  }", false);
   expect(svg).toContain("<svg");
-  expect(svg).toContain("mindmap diagram");
-  expect(svg).toContain("Branch one");
+  expect(svg).toContain("requirement diagram");
+  expect(svg).toContain("requirement uptime");
   expect(svg).not.toContain("<pre");
+});
+
+test("mind maps draw as a tree that keeps words before parentheses", () => {
+  const svg = renderMermaidFallbackSvg(
+    "mindmap\n  root((Ottoman Society))\n    Urban Institutions\n      Guilds (Esnaf)\n      Bathhouses",
+    false,
+  );
+  expect(svg).toContain("Ottoman Society");
+  expect(svg).toContain("Guilds (Esnaf)");
+  expect(svg).toContain("Bathhouses");
+  expect(svg).not.toContain("foreignObject");
+});
+
+test("flowchart fallback honors direction and spaced node names", () => {
+  const svg = renderMermaidFallbackSvg("flowchart TD\n  User Login --> Dashboard", false)!;
+  expect(svg).toContain("User Login");
+  expect(svg).toContain("Dashboard");
 });
 
 test("empty source has no fallback svg", () => {

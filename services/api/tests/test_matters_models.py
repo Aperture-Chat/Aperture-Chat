@@ -228,3 +228,27 @@ def test_matter_deletion_job_requires_restart_safe_stage_and_lease_state() -> No
     assert ready.all_references_cleared is True
     complete = ready.model_copy(update={"status": "complete", "completed_at": NOW})
     assert MatterDeletionJob.model_validate(complete.model_dump()).status == "complete"
+
+
+def test_sanitizer_keeps_diagram_figures_with_validated_attributes() -> None:
+    figure = (
+        '<figure class="document-media-block document-diagram-figure" contenteditable="false" '
+        'data-diagram-source="flowchart%20LR%0A%20%20A%20--%3E%20B" data-diagram-rendered="true" '
+        'data-diagram-notes="Heat%20moves." onclick="steal()">'
+        '<img class="document-diagram-image" src="data:image/png;base64,AAAA" alt="Flowchart" width="300">'
+        "<figcaption>Heat moves.</figcaption></figure>"
+    )
+    sanitized = sanitize_draft_html(figure)
+    assert sanitized.startswith('<figure class="document-media-block document-diagram-figure"')
+    assert 'data-diagram-source="flowchart%20LR%0A%20%20A%20--%3E%20B"' in sanitized
+    assert 'data-diagram-rendered="true"' in sanitized
+    assert "<figcaption>Heat moves.</figcaption>" in sanitized
+    assert "onclick" not in sanitized
+    assert "contenteditable" not in sanitized
+    assert sanitize_draft_html(sanitized) == sanitized
+
+    hostile = sanitize_draft_html(
+        '<figure data-diagram-source="a&quot;&gt;&lt;script&gt;" data-diagram-kind="evil" '
+        'data-diagram-rendered="maybe" data-diagram-language="te xt">x</figure>'
+    )
+    assert hostile == "<figure>x</figure>"
