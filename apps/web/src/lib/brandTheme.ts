@@ -12,8 +12,16 @@ export type BrandThemeInput = {
 };
 
 export type BrandBootCache = BrandThemeInput & {
+  /** Title text; falls back to the product name. */
   name?: string | null;
+  /** The configured name, which may be empty for image-only branding. */
+  displayName?: string | null;
+  /** Full-size artwork for the session-restore screen. */
+  logo?: string | null;
   favicon?: string | null;
+  /** Set once the favicon passed the square-icon check; older caches could
+   * hold a full wordmark in this slot. */
+  faviconVerified?: boolean;
 };
 
 export const DEFAULT_ACCENT_COLOR = "#087d8b";
@@ -154,7 +162,7 @@ export function applyCachedBrandBoot(): void {
   if (!cache) return;
   const name = typeof cache.name === "string" ? cache.name.trim() : "";
   if (name) document.title = name;
-  const favicon = typeof cache.favicon === "string" ? cache.favicon.trim() : "";
+  const favicon = cache.faviconVerified && typeof cache.favicon === "string" ? cache.favicon.trim() : "";
   if (favicon) {
     let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!link) {
@@ -163,7 +171,7 @@ export function applyCachedBrandBoot(): void {
       document.head.appendChild(link);
     }
     link.href = favicon;
-    link.type = favicon.endsWith(".svg") ? "image/svg+xml" : "";
+    link.type = favicon.endsWith(".svg") || favicon.startsWith("data:image/svg+xml") ? "image/svg+xml" : "";
   }
   applyBrandTheme(cache);
 }

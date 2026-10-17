@@ -9,6 +9,7 @@ import "./console-workspace.css";
 import "./library-console.css";
 import "./data-protection.css";
 import "./draft-editor.css";
+import "./branding.css";
 
 /* Capture the browser's install prompt before first render — Chromium can
  * fire beforeinstallprompt before React mounts. */

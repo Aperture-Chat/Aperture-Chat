@@ -5492,7 +5492,7 @@ a.nav-item {
   overflow: hidden;
   background:
     linear-gradient(90deg, rgba(15, 35, 45, 0.025), transparent 80px),
-    #f7f9fb;
+    var(--surface-soft);
 }
 
 .document-editor-body.has-citation-panel {
@@ -23474,7 +23474,8 @@ button.retention-tagged-title:focus-visible strong {
   overflow: hidden;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: #ffffff;
+  /* The default install icon's paper tile. */
+  background: #f9f7f2;
 }
 
 .pwa-install-preview-icon img {
@@ -24348,7 +24349,7 @@ button.retention-tagged-title:focus-visible strong {
   overflow: hidden;
   background:
     linear-gradient(90deg, rgba(15, 35, 45, 0.025), transparent 80px),
-    #f7f9fb;
+    var(--surface-soft);
 }
 
 .deck-filmstrip {

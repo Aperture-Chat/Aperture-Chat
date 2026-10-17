@@ -177,14 +177,20 @@ import type {
   User,
 } from "./lib/types";
 import { ConnectorUpdateError, connectorUsesCredentialRecord } from "./components/ConnectorsPanel";
-import { applyBrandTheme, cacheBrandBoot } from "./lib/brandTheme";
+import { applyBrandTheme, cacheBrandBoot, type BrandBootCache } from "./lib/brandTheme";
+import {
+  DEFAULT_BRAND_NAME,
+  applyBrandFavicon,
+  brandDisplayName,
+  compactBrandSources,
+  type BrandAssets,
+} from "./lib/brandIcon";
 import { appendChatCitationsForDraft } from "./lib/draftCitations";
 import type { DraftNavigationGuard } from "./lib/draftNavigation";
 import { sampleData } from "./data/sampleData";
 
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
 const PWA_INSTALL_DISMISSED_KEY = "aperture-pwa-install-dismissed";
-const DEFAULT_FAVICON_HREF = "/favicon.svg";
 const PERSONA_ALIASES: Record<string, string> = {
   owner: "user-owner",
   "platform-owner": "user-owner",
@@ -298,21 +304,8 @@ export function App() {
 
   useEffect(() => {
     const tenant = effectiveData.currentTenant;
-    const brandName = tenant.chat_brand_name?.trim() || "Aperture Chat";
-    const faviconHref =
-      tenant.icon_url?.trim() ||
-      tenant.logo_url?.trim() ||
-      DEFAULT_FAVICON_HREF;
+    const brandName = brandDisplayName(tenant);
     document.title = brandName;
-
-    let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!favicon) {
-      favicon = document.createElement("link");
-      favicon.rel = "icon";
-      document.head.appendChild(favicon);
-    }
-    favicon.href = faviconHref;
-    favicon.type = faviconHref.endsWith(".svg") ? "image/svg+xml" : "";
 
     const themeColor = document.querySelector<HTMLMetaElement>(
       'meta[name="theme-color"]',
@@ -330,14 +323,19 @@ export function App() {
     }
 
     applyBrandTheme(tenant);
-    cacheBrandBoot({
+    const bootCache: BrandBootCache = {
       name: brandName,
-      favicon: faviconHref,
+      displayName: tenant.chat_brand_name ?? DEFAULT_BRAND_NAME,
+      logo: tenant.logo_url,
       primary_color: tenant.primary_color,
       gradient_start: tenant.gradient_start,
       gradient_end: tenant.gradient_end,
       text_color: tenant.text_color,
-    });
+    };
+    // Only an icon that passed the square check is cached for the next boot.
+    return applyBrandFavicon(compactBrandSources(tenant), (favicon) =>
+      cacheBrandBoot({ ...bootCache, favicon, faviconVerified: true }),
+    );
   }, [
     effectiveData.currentTenant.chat_brand_name,
     effectiveData.currentTenant.icon_url,
@@ -1190,35 +1188,22 @@ export function App() {
     [data.me.id],
   );
 
-  const chatBrandName =
-    effectiveData.currentTenant.chat_brand_name?.trim() || "Aperture Chat";
-  const chatBrandLogoUrl =
-    effectiveData.currentTenant.icon_url?.trim() ||
-    effectiveData.currentTenant.logo_url?.trim() ||
-    null;
+  const chatBrandName = brandDisplayName(effectiveData.currentTenant);
+  // Empty for image-only branding; replies then show the icon without a name.
+  const chatBrandDisplayName = (effectiveData.currentTenant.chat_brand_name ?? DEFAULT_BRAND_NAME).trim();
+  const chatBrandIconSources = compactBrandSources(effectiveData.currentTenant);
   const authBranding = !sessionUserId ? authOptions?.tenant_branding : null;
+  const authBrand: BrandAssets = authBranding ?? effectiveData.currentTenant;
+  // An empty brand name is image-only branding, so text falls back to the
+  // product name; only a tenant with no brand name at all uses its org name.
   const authBrandName =
     authBranding?.chat_brand_name?.trim() ||
-    authBranding?.name?.trim() ||
+    (authBranding?.chat_brand_name == null ? authBranding?.name?.trim() : "") ||
     chatBrandName;
-  const authBrandLogoUrl =
-    authBranding?.icon_url?.trim() ||
-    authBranding?.logo_url?.trim() ||
-    chatBrandLogoUrl;
 
   useEffect(() => {
     if (sessionUserId || !authBranding) return;
     document.title = authBrandName;
-
-    let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!favicon) {
-      favicon = document.createElement("link");
-      favicon.rel = "icon";
-      document.head.appendChild(favicon);
-    }
-    const faviconHref = authBrandLogoUrl || DEFAULT_FAVICON_HREF;
-    favicon.href = faviconHref;
-    favicon.type = faviconHref.endsWith(".svg") ? "image/svg+xml" : "";
 
     const themeColor = document.querySelector<HTMLMetaElement>(
       'meta[name="theme-color"]',
@@ -1235,15 +1220,19 @@ export function App() {
     }
 
     applyBrandTheme(authBranding);
-    cacheBrandBoot({
+    const bootCache: BrandBootCache = {
       name: authBrandName,
-      favicon: faviconHref,
+      displayName: authBranding.chat_brand_name ?? authBrandName,
+      logo: authBranding.logo_url,
       primary_color: authBranding.primary_color,
       gradient_start: authBranding.gradient_start,
       gradient_end: authBranding.gradient_end,
       text_color: authBranding.text_color,
-    });
-  }, [authBrandName, authBrandLogoUrl, authBranding, sessionUserId]);
+    };
+    return applyBrandFavicon(compactBrandSources(authBranding), (favicon) =>
+      cacheBrandBoot({ ...bootCache, favicon, faviconVerified: true }),
+    );
+  }, [authBrandName, authBranding, sessionUserId]);
 
   const content = useMemo(() => {
     if (route.kind === "chat") {
@@ -1251,8 +1240,7 @@ export function App() {
         <ChatWorkspace
           data={effectiveData}
           chat={chat}
-          brandName={chatBrandName}
-          brandLogoUrl={chatBrandLogoUrl}
+          brandName={chatBrandDisplayName}
           requestedAgentId={requestedAgentId}
           onRequestedAgentConsumed={() => setRequestedAgentId(null)}
           onTransferToDraft={handleTransferToDraft}
@@ -1368,7 +1356,7 @@ export function App() {
     navigate,
     chat,
     chatBrandName,
-    chatBrandLogoUrl,
+    chatBrandDisplayName,
     draftSessionKey,
     draftImport,
     registerDraftNavigationGuard,
@@ -1396,7 +1384,7 @@ export function App() {
       <AuthScreen
         authOptions={authOptions}
         tenantName={authBrandName}
-        tenantLogoUrl={authBrandLogoUrl}
+        tenantBrand={authBrand}
         isLoading={authLoading && !authOptions}
         isSubmitting={authLoading && Boolean(authOptions)}
         error={authError ?? signOutNotice}
@@ -1500,7 +1488,7 @@ export function App() {
         <PwaInstallPrompt
           platform={pwaInstallPlatform}
           brandName={chatBrandName}
-          brandLogoUrl={chatBrandLogoUrl}
+          brandIconSources={chatBrandIconSources}
           onDismiss={dismissPwaInstallPrompt}
         />
       )}

@@ -1560,24 +1560,26 @@ test("platform owner side panels manage users, policies, branding, and elastic s
 
   const brandingSection = screen.getByText("Platform Branding").closest(".platform-branding-panel") as HTMLElement;
   const brandingPreview = brandingSection.querySelector(".branding-preview") as HTMLElement;
-  expect(within(brandingPreview).getByText("Aperture Chat")).toBeInTheDocument();
+  expect(within(brandingPreview).getAllByText("Aperture Chat").length).toBeGreaterThan(0);
   expect(within(brandingPreview).queryByText("chat.example.com")).not.toBeInTheDocument();
-  const uploadControl = within(brandingSection).getByText("Upload PNG").closest(".branding-file-button") as HTMLElement;
+  const logoCard = within(brandingSection).getByRole("region", { name: "Logo" });
+  const uploadControl = within(logoCard).getByLabelText("Upload logo").closest(".branding-file-button") as HTMLElement;
   const resetButton = within(brandingSection).getByRole("button", { name: "Reset defaults" });
   const applyButton = within(brandingSection).getByRole("button", { name: "Apply branding" });
   expect(uploadControl.compareDocumentPosition(applyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(resetButton.compareDocumentPosition(applyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
   const png = new File([new Uint8Array([137, 80, 78, 71])], "example-logo.png", { type: "image/png" });
-  fireEvent.change(screen.getByLabelText("Upload PNG"), { target: { files: [png] } });
+  fireEvent.change(screen.getByLabelText("Upload logo"), { target: { files: [png] } });
   // Branding feedback must render inside the panel, next to the Apply button.
   expect(
-    await within(brandingSection).findByText(
-      "example-logo.png is ready. Apply branding to update the platform shell and favicon.",
-    ),
+    await within(brandingSection).findByText("example-logo.png is ready. Apply branding to update the platform logo."),
   ).toBeInTheDocument();
-  expect((screen.getByLabelText("Platform logo URL") as HTMLInputElement).value).toMatch(/^data:image\/png/);
-  expect((screen.getByLabelText("Browser icon URL") as HTMLInputElement).value).toMatch(/^data:image\/png/);
+  // The upload sets only the logo, and its data URL never fills the address box.
+  expect(within(logoCard).getByAltText("Logo preview").getAttribute("src")).toMatch(/^data:image\/png/);
+  expect(screen.getByLabelText("Platform logo URL")).toHaveValue("");
+  expect(screen.getByLabelText("Platform logo URL")).toHaveAttribute("placeholder", "Using the uploaded image");
+  expect(screen.getByLabelText("Browser icon URL")).toHaveValue("");
 
   fireEvent.change(screen.getByLabelText("Platform name"), { target: { value: "Example AI" } });
   fireEvent.change(screen.getByLabelText("Platform logo URL"), { target: { value: "https://assets.example.com/logo.png" } });
@@ -1590,7 +1592,11 @@ test("platform owner side panels manage users, policies, branding, and elastic s
   ).toBeInTheDocument();
   expect(updateTenantBranding).toHaveBeenCalledWith(
     data.currentTenant.id,
-    expect.objectContaining({ chat_brand_name: "Example AI", icon_url: "https://assets.example.com/icon.svg" }),
+    expect.objectContaining({
+      chat_brand_name: "Example AI",
+      logo_url: "https://assets.example.com/logo.png",
+      icon_url: "https://assets.example.com/icon.svg",
+    }),
   );
   expect(screen.getAllByText("Example AI").length).toBeGreaterThan(0);
 
@@ -1624,6 +1630,89 @@ test("platform owner side panels manage users, policies, branding, and elastic s
   expect(screen.getByLabelText("Elasticsearch endpoint or Cloud ID")).toBeDisabled();
   expect(screen.getByRole("button", { name: /Save and check/ })).toBeDisabled();
 }, 10_000);
+
+function openBrandingPanel(data: BootstrapData) {
+  const updateTenantBranding = vi.fn(async (_tenantId: string, patch: Record<string, unknown>) => ({
+    ...data.currentTenant,
+    ...patch,
+  }));
+  renderPlatform(data, { updateTenantBranding });
+  selectTab("Org Settings");
+  expandPanel("Platform Branding");
+  const section = screen.getByText("Platform Branding").closest(".platform-branding-panel") as HTMLElement;
+  return { section, updateTenantBranding };
+}
+
+test("logo and icon change independently, and an empty name saves image-only branding", async () => {
+  const data = platformOwnerData();
+  data.currentTenant.icon_url = "https://assets.example.com/icon.png";
+  const { section, updateTenantBranding } = openBrandingPanel(data);
+
+  // A logo upload leaves the icon alone.
+  fireEvent.change(screen.getByLabelText("Upload logo"), {
+    target: { files: [new File(["png"], "wide-logo.png", { type: "image/png" })] },
+  });
+  await within(section).findByText("wide-logo.png is ready. Apply branding to update the platform logo.");
+  expect(screen.getByLabelText("Browser icon URL")).toHaveValue("https://assets.example.com/icon.png");
+
+  // An empty name leaves the logo to stand alone in the preview.
+  const preview = section.querySelector(".branding-preview") as HTMLElement;
+  expect(preview.querySelector(".logo-word")).not.toBeNull();
+  fireEvent.change(screen.getByLabelText("Platform name"), { target: { value: "   " } });
+  expect(preview.querySelector(".logo-word")).toBeNull();
+
+  fireEvent.click(within(section).getByRole("button", { name: "Apply branding" }));
+  expect(
+    await within(section).findByText("Image-only branding saved through the platform API and will persist across reloads."),
+  ).toBeInTheDocument();
+  expect(updateTenantBranding).toHaveBeenCalledWith(
+    data.currentTenant.id,
+    expect.objectContaining({
+      chat_brand_name: "",
+      logo_url: expect.stringMatching(/^data:image\/png/),
+      icon_url: "https://assets.example.com/icon.png",
+      logo_mark: "custom",
+    }),
+  );
+
+  // An icon upload leaves the logo alone; Remove clears just that image.
+  const logo = within(section).getByAltText("Logo preview").getAttribute("src");
+  fireEvent.change(screen.getByLabelText("Upload icon"), {
+    target: { files: [new File(["icon"], "icon.png", { type: "image/png" })] },
+  });
+  await within(section).findByText("icon.png is ready. Apply branding to update the browser tab and compact icon.");
+  expect(within(section).getByAltText("Logo preview")).toHaveAttribute("src", logo);
+  expect(within(section).getByAltText("Icon preview").getAttribute("src")).toMatch(/^data:image\/png/);
+  fireEvent.click(screen.getByRole("button", { name: "Remove logo" }));
+  expect(within(section).queryByAltText("Logo preview")).toBeNull();
+  expect(within(section).getByAltText("Icon preview")).toBeInTheDocument();
+});
+
+test("an icon can be dropped on its card, and unusable files and addresses are refused", async () => {
+  const data = platformOwnerData();
+  const { section, updateTenantBranding } = openBrandingPanel(data);
+  const iconCard = within(section).getByRole("region", { name: "Icon" });
+  const drop = (file: File) =>
+    fireEvent.drop(iconCard, { dataTransfer: { files: [file], types: ["Files"] } });
+
+  drop(new File(["gif"], "spinner.gif", { type: "image/gif" }));
+  expect(await within(section).findByText("spinner.gif is not a PNG, JPEG, WebP, or SVG image.")).toBeInTheDocument();
+  drop(new File(["<svg/>"], "mark.svg", { type: "image/svg+xml" }));
+  // jsdom has no canvas, so SVG conversion is unavailable here.
+  expect(await within(section).findByText("This browser cannot convert SVG files. Upload a PNG instead.")).toBeInTheDocument();
+  drop(new File(["png"], "mark.png", { type: "image/png" }));
+  expect(
+    await within(section).findByText("mark.png is ready. Apply branding to update the browser tab and compact icon."),
+  ).toBeInTheDocument();
+  expect(within(iconCard).getByAltText("Icon preview").getAttribute("src")).toMatch(/^data:image\/png/);
+
+  fireEvent.change(screen.getByLabelText("Platform logo URL"), { target: { value: "http://assets.example.com/logo.png" } });
+  fireEvent.click(within(section).getByRole("button", { name: "Apply branding" }));
+  expect(
+    await within(section).findByText("Image addresses must start with https://. Upload the file instead if it is not hosted."),
+  ).toBeInTheDocument();
+  expect(updateTenantBranding).not.toHaveBeenCalled();
+});
 
 test("owner connects Elastic from the console, verifies it, and syncs", async () => {
   const data = platformOwnerData();

@@ -70,10 +70,13 @@ afterEach(() => {
 test("renders Aperture Chat shell with intentional empty chat history", async () => {
   render(<App />);
   // Scope to the sidebar logo: the transient session-restore screen also
-  // shows the brand name while bootstrap data loads.
-  expect(
-    await screen.findByText("Aperture Chat", { selector: ".logo-word" }),
-  ).toBeInTheDocument();
+  // shows the brand while bootstrap data loads. The default wordmark spells
+  // the name, so it is not repeated as text.
+  await waitFor(() =>
+    expect(document.querySelector(".sidebar .logo img")).toHaveAttribute("src", "/brand/aperture-chat-logo.png"),
+  );
+  expect(document.querySelector(".sidebar .logo")).toHaveAttribute("aria-label", "Aperture Chat");
+  expect(document.querySelector(".sidebar .logo-word")).toBeNull();
   expect(screen.queryByText("Group access enforced")).not.toBeInTheDocument();
   expect(
     screen.queryByText("Review a contract for risk"),
@@ -384,7 +387,7 @@ test("the unsaved-draft confirmation keeps focus when the search shortcut is pre
   expect(screen.getByLabelText("Document title")).toHaveValue("Unfinished research");
 });
 
-test("uses tenant branding for the empty chat workspace", async () => {
+test.each(["ChatFortAI Chat", "", "   "])("uses tenant branding for the empty chat workspace with name %j", async (name) => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.includes("/api/bootstrap")) {
@@ -393,7 +396,7 @@ test("uses tenant branding for the empty chat workspace", async () => {
           ...sampleData,
           currentTenant: {
             ...sampleData.currentTenant,
-            chat_brand_name: "ChatFortAI Chat",
+            chat_brand_name: name,
             logo_url: "/brand-logo.png",
             icon_url: "/brand-icon.png",
           },
@@ -413,15 +416,70 @@ test("uses tenant branding for the empty chat workspace", async () => {
     }),
   ).toBeInTheDocument();
   // The tenant brand now lives in the tagline (the heading is the greeting).
-  expect(screen.getByText(/ask ChatFortAI Chat anything/)).toBeInTheDocument();
+  // An empty name leaves the logo to stand alone.
+  const identity = document.querySelector(".empty-brand-identity") as HTMLElement;
+  expect(identity).toHaveClass("has-logo-image");
   const emptyLogo =
     document.querySelector<HTMLImageElement>(".empty-brand-logo");
-  expect(emptyLogo).toHaveAttribute("src", "/brand-icon.png");
-  await waitFor(() => expect(document.title).toBe("ChatFortAI Chat"));
+  expect(emptyLogo).toHaveAttribute("src", "/brand-logo.png");
+  if (name.trim()) {
+    expect(within(identity).getByText(name)).toBeInTheDocument();
+    expect(screen.getByText(/ask ChatFortAI Chat anything/)).toBeInTheDocument();
+  } else {
+    expect(identity.textContent).toBe("");
+    expect(emptyLogo).toHaveAttribute("alt", "Aperture Chat");
+    expect(screen.getByText(/ask anything/)).toBeInTheDocument();
+  }
+  await waitFor(() => expect(document.title).toBe(name.trim() || "Aperture Chat"));
+});
+
+test("image-only sign-in branding names the product, not the organization", async () => {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/api/auth/options")) {
+      return new Response(
+        JSON.stringify({
+          local_auth_enabled: true,
+          password_auth_enabled: true,
+          bootstrap_required: false,
+          providers: [],
+          tenant_branding: {
+            ...sampleData.currentTenant,
+            name: "New Organization",
+            chat_brand_name: "",
+            logo_url: "/wordmark.png",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response("unavailable", { status: 503 });
+  }));
+
+  render(<App />);
+
+  await waitFor(() => expect(document.querySelector(".auth-brand-mark img")).toHaveAttribute("src", "/wordmark.png"));
+  expect(screen.getByText("New to Aperture Chat?")).toBeInTheDocument();
+  expect(screen.queryByText(/New Organization/)).not.toBeInTheDocument();
+  await waitFor(() => expect(document.title).toBe("Aperture Chat"));
 });
 
 test("uses auth-options tenant branding on the sign-in screen", async () => {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  // Probes for the favicon square check: the icon passes, so the full
+  // wordmark is never even tried as a favicon.
+  const probed: string[] = [];
+  vi.stubGlobal("Image", class {
+    naturalWidth = 256;
+    naturalHeight = 256;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    set src(value: string) {
+      probed.push(value);
+      queueMicrotask(() => this.onload?.());
+    }
+  });
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.includes("/api/auth/options")) {
@@ -452,7 +510,11 @@ test("uses auth-options tenant branding on the sign-in screen", async () => {
     screen.getByText("Use your email and password to pick up where you left off."),
   ).toBeInTheDocument();
   const authLogo = document.querySelector<HTMLImageElement>(".auth-brand-mark img");
-  expect(authLogo).toHaveAttribute("src", "/example-icon.png");
+  expect(authLogo).toHaveAttribute("src", "/example-logo.png");
+  expect(document.querySelector(".auth-brand")).toHaveClass("has-logo-image");
+  await waitFor(() => expect(document.querySelector('link[rel="icon"]')).toHaveAttribute("href", "/example-icon.png"));
+  expect(probed).toContain("/example-icon.png");
+  expect(probed).not.toContain("/example-logo.png");
   await waitFor(() => expect(document.title).toBe("Example AI"));
 });
 

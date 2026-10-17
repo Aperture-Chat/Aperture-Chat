@@ -1,16 +1,23 @@
 /* Aperture's public brand, adapted to a working application: ink, warm white,
  * iris teal, light Jakarta headings, precise mono labels and orbital outlines.
  * Geometry stays outside editing surfaces. Tenant logos, accent/text colors,
- * and the optional branded rail remain authoritative. */
+ * and the optional branded rail remain authoritative.
+ *
+ * Light mode is porcelain: a warm off-white canvas with a faint paper grain,
+ * a sidebar a shade deeper in the same tone, and paper for cards, inputs,
+ * and menus. Every surface stays a shade below white, so bright white
+ * artwork (the default wordmark's lettering) reads as deliberate instead of
+ * melting into the page. */
 :root {
-  --bg: #f6f7f2;
-  --surface-soft: #eef3ef;
-  --surface-sunken: #e8efea;
-  --rail: #eef1eb;
+  --bg: #f4f1ea;
+  --surface: #f9f7f2;
+  --surface-soft: #efece5;
+  --surface-sunken: #e8e4dc;
+  --rail: #eeebe4;
   --rail-dark: #0a151b;
   --rail-dark-2: #13232a;
-  --border: #d7e0db;
-  --border-strong: #b6cbc6;
+  --border: #e0dcd2;
+  --border-strong: #c9c2b4;
   --text: #213c3f;
   --text-strong: #172e31;
   --muted: #536a6d;
@@ -19,11 +26,13 @@
   --accent-ink: var(--teal-strong);
   --radius: 12px;
   --radius-lg: 16px;
-  --shadow-sm: 0 1px 2px rgb(25 43 36 / 4%);
-  --shadow: 0 2px 4px rgb(25 43 36 / 3%), 0 12px 32px -20px rgb(25 43 36 / 16%);
-  --shadow-lg: 0 24px 64px -24px rgb(25 43 36 / 24%);
+  --shadow-sm: 0 1px 2px rgb(44 46 40 / 5%);
+  --shadow: 0 2px 4px rgb(44 46 40 / 4%), 0 12px 32px -20px rgb(44 46 40 / 18%);
+  --shadow-lg: 0 24px 64px -24px rgb(44 46 40 / 26%);
   --brand-edge: color-mix(in srgb, var(--teal-2) 18%, var(--border));
   --brand-wash: color-mix(in srgb, var(--teal-2) 5%, transparent);
+  /* A 160px tile of warm noise at 5% alpha: felt more than seen. */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .18 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .theme-dark {
@@ -41,6 +50,7 @@
   --accent-ink: color-mix(in srgb, var(--teal-2) 55%, white);
   --shadow: 0 8px 24px -16px rgb(0 0 0 / 45%);
   --shadow-lg: 0 24px 64px -24px rgb(0 0 0 / 70%);
+  --paper-grain: none;
 }
 
 .skip-link {
@@ -819,3 +829,17 @@ a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decora
   .document-assistant-page .deck-layout-gallery > button:hover,
   .document-assistant-page .deck-theme-gallery > button:hover { transform: none; }
 }
+
+/* ---------- Light mode paper ---------- */
+/* The canvas surfaces carry the grain; cards and inputs stay clean paper. */
+:is(body, .app, .main-surface, .workspace-header, .document-assistant-page .document-assistant-rail),
+.sidebar:not(.sidebar-dark) {
+  background-image: var(--paper-grain);
+}
+
+:root:not(.theme-dark) .auth-screen {
+  background:
+    var(--paper-grain),
+    linear-gradient(135deg, var(--surface-sunken) 0%, var(--bg) 48%, var(--surface-soft) 100%);
+}
+
