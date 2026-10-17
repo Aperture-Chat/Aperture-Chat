@@ -321,3 +321,14 @@ test("Drafts get diagram figures for text drawings, with their notes", () => {
   expect(html).toContain(`data-diagram-notes="${encodeURIComponent("Heat moves by convection.")}"`);
   expect(html).not.toContain("document-code-block");
 });
+
+test("document conversion keeps section levels and signature lines", () => {
+  const html = markdownToDocumentHtml(
+    "# AGREEMENT\n\n## ARTICLE 1. SERVICES\n\n### 1.1 Scope\n\n#### (a) Detail\n\nVery truly yours,\n\n______________________\n[Attorney Name]\n\n---\n\nExhibit text.",
+  );
+  expect(html).toContain("<h1>AGREEMENT</h1><h2>ARTICLE 1. SERVICES</h2><h3>1.1 Scope</h3><h4>(a) Detail</h4>");
+  // A line of underscores is the rule a signature goes on, with the name
+  // under it, not a page break; a --- line still is one.
+  expect(html).toContain("<p>______________________<br>[Attorney Name]</p>");
+  expect(html.match(/document-page-break/g)).toHaveLength(1);
+});

@@ -151,6 +151,8 @@ class Settings(BaseSettings):
     knowledge_upload_max_mb: int = Field(default=250, ge=25, le=2048)
     # Deck brand templates (.pptx/.potx) parsed for theme extraction.
     deck_template_upload_max_mb: int = Field(default=30, ge=1, le=100)
+    # PDF document imports parsed into editable draft HTML.
+    document_import_upload_max_mb: int = Field(default=40, ge=1, le=200)
     knowledge_max_extracted_chars: int = Field(default=10_000_000, ge=100_000, le=50_000_000)
     knowledge_ocr_enabled: bool = True
     knowledge_ocr_max_pages: int = Field(default=250, ge=1, le=2000)
@@ -305,6 +307,10 @@ class Settings(BaseSettings):
     @property
     def deck_template_upload_max_bytes(self) -> int:
         return self.deck_template_upload_max_mb * 1024 * 1024
+
+    @property
+    def document_import_upload_max_bytes(self) -> int:
+        return self.document_import_upload_max_mb * 1024 * 1024
 
     @property
     def application_database_url(self) -> str:

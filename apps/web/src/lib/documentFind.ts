@@ -35,7 +35,9 @@ export function findTextRanges(root: HTMLElement, query: string, options: FindOp
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
-      if (!parent || parent.closest('[contenteditable="false"]')) return NodeFilter.FILTER_REJECT;
+      // Non-editable islands and an imported document's hidden page setup
+      // (its running header/footer copy) are never find results.
+      if (!parent || parent.closest('[contenteditable="false"], .document-page-setup')) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
     },
   });

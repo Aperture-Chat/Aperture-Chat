@@ -291,6 +291,16 @@ button:focus-visible, a:focus-visible { outline-width: 2px; outline-offset: 3px;
 
 .draft-action-label-mobile { display: none; }
 
+/* Where the editor's action row is short of room — tablets, and between the
+   drawer breakpoint and wide screens, where the inline assistant column takes
+   the width — the version actions take their short labels (names and
+   tooltips stay full) so Export stays on the row instead of wrapping under it
+   and taking height from the page. */
+@media (max-width: 900px), (min-width: 1181px) and (max-width: 1400px) {
+  .document-assistant-page .draft-action-label-full { display: none; }
+  .document-assistant-page .draft-action-label-mobile { display: inline; }
+}
+
 .document-assistant-page .draft-ai-unavailable {
   grid-column: 1 / -1;
   margin: 0;

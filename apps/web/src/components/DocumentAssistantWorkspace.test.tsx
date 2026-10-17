@@ -44,6 +44,14 @@ function documentText() {
   return documentBody().textContent ?? "";
 }
 
+/** The document's words, without the hidden page setup (running header and
+ * footer text) and with layout whitespace (tab spacers) folded. */
+function documentWordsWithoutPageSetup() {
+  const clone = documentBody().cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".document-page-setup, .document-page-label").forEach((node) => node.remove());
+  return (clone.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
 function dataWithApprovedDraftModel(modelId: string) {
   return {
     ...sampleData,
@@ -1217,6 +1225,9 @@ test("applies a template card to the current draft without replacing its content
   await waitFor(() => {
     expect(documentText()).toContain("Anderson v. Northstar Logistics");
   });
+  // A Client Update is a letter: Times New Roman on the firm's page.
+  expect(documentBody().querySelector(".document-page-setup")?.getAttribute("style")).toContain("Times New Roman");
+  const textBefore = documentWordsWithoutPageSetup();
 
   fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
   fireEvent.click(screen.getByRole("button", { name: "Finance" }));
@@ -1226,20 +1237,20 @@ test("applies a template card to the current draft without replacing its content
   expect(investmentMemoCard).toBeDefined();
   fireEvent.click(investmentMemoCard as HTMLElement);
 
-  expect(screen.getByLabelText("Document title")).toHaveValue(
-    "Client Update Draft - Investment Memo",
-  );
-  expect(documentText()).toContain("Investment Memo Draft");
-  expect(documentText()).toContain("Investment thesis");
-  expect(documentText()).toContain("Source draft content");
-  expect(documentText()).toContain("Anderson v. Northstar Logistics");
-  expect(screen.getByText(/Investment Memo applied to the current draft/)).toBeInTheDocument();
+  // The template's page and type replace the letter's; not a word changes
+  // and nothing is injected into the document.
+  expect(screen.getByLabelText("Document title")).toHaveValue("Client Update Draft");
+  expect(documentBody().querySelector(".document-page-setup")?.getAttribute("style")).toContain("Calibri");
+  expect(documentWordsWithoutPageSetup()).toBe(textBefore);
+  expect(documentText()).not.toContain("Source draft content");
+  expect(documentText()).not.toContain("no model call was made");
+  expect(screen.getByText(/Investment Memo layout applied: Calibri 11 pt/)).toBeInTheDocument();
   expect(
-    screen.getByText(/Applied the Investment Memo template to the current document/),
+    screen.getByText(/Applied the Investment Memo template's page, type, and structure/),
   ).toBeInTheDocument();
   expect(screen.getAllByText("Version 2").length).toBeGreaterThan(0);
   expect(screen.getByText("Latest saved revision")).toBeInTheDocument();
-  expect(screen.getByText("Investment Memo template applied to the current draft")).toBeInTheDocument();
+  expect(screen.getByText("Investment Memo template layout applied")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Dismiss saved revision banner" }));
 
@@ -1326,6 +1337,156 @@ test("uploads a .docx template preserving alignment, underline, and Word page br
   expect(editorHtml).not.toContain("doc-align-");
   // The fixture's List Paragraph style is mapped, so no import warning fires.
   expect(screen.queryByText(/Template import note/)).not.toBeInTheDocument();
+});
+
+test("a template card on a blank canvas places the real template in its format", async () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+  fireEvent.click(screen.getByRole("button", { name: "Legal" }));
+  const card = screen
+    .getAllByRole("button", { name: /Legal Contract/ })
+    .find((button) => button.classList.contains("draft-template-card"));
+  fireEvent.click(card as HTMLElement);
+
+  expect(screen.getByLabelText("Document title")).toHaveValue("Legal Contract Draft");
+  const setup = documentBody().querySelector(".document-page-setup");
+  expect(setup?.getAttribute("style")).toContain("Times New Roman");
+  expect(setup?.className).toContain("document-format-signatures");
+  expect(documentText()).toContain("SERVICES AGREEMENT");
+  expect(documentText()).toContain("IN WITNESS WHEREOF");
+  // Real contract structure, not a placeholder outline.
+  expect(documentBody().querySelectorAll("p.document-clause").length).toBeGreaterThan(5);
+  expect(documentBody().querySelectorAll("table.document-signature-table .document-signature-rule")).toHaveLength(8);
+  expect(documentBody().querySelector("h1")?.getAttribute("style")).toContain("text-align: center");
+  expect(screen.getByText(/Legal Contract template added in Times New Roman 12 pt, single spacing, Letter, 1-inch margins/)).toBeInTheDocument();
+});
+
+test("a letterhead with no body text is not treated as a blank canvas", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  const editor = documentBody();
+  editor.innerHTML =
+    '<div class="document-page-setup" style="width: 612pt; height: 792pt"><p class="document-page-normal"><br></p><div class="document-page-header"><p>Firm Name LLP</p></div></div><p><img src="data:image/png;base64,iVBORw0KGgo=" alt="Firm logo"></p>';
+  fireEvent.input(editor);
+
+  fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+  fireEvent.click(screen.getByRole("button", { name: "Legal" }));
+  const card = screen
+    .getAllByRole("button", { name: /Legal Contract/ })
+    .find((button) => button.classList.contains("draft-template-card"));
+  fireEvent.click(card as HTMLElement);
+
+  // The logo stays and the template's text is not poured over it.
+  expect(documentBody().querySelector('img[alt="Firm logo"]')).not.toBeNull();
+  expect(documentText()).not.toContain("SERVICES AGREEMENT");
+  expect(screen.getByText(/Legal Contract layout applied/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentBody().querySelector(".document-page-header")?.textContent).toBe("Firm Name LLP");
+});
+
+test("a contract drafted without a template is set as a contract", async () => {
+  const chatRequests = installChatCompletionFetchMock(
+    [
+      "# MUTUAL NONDISCLOSURE AGREEMENT",
+      "This Agreement is made as of [Effective Date] between Acme Corp. and Beta LLC.",
+      "## ARTICLE 1. DEFINITIONS",
+      "### 1.1 Exclusions",
+      "Confidential Information excludes information that:\n(a) is public; or\n(b) was already known.",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "**ACME CORP.**",
+      "By: ______________\nName: ______________",
+      "**BETA LLC**",
+      "By: ______________\nName: ______________",
+    ].join("\n\n"),
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Draft a mutual NDA between Acme Corp. and Beta LLC." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(documentText()).toContain("MUTUAL NONDISCLOSURE AGREEMENT"));
+  const prompt = (chatRequests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(prompt).toContain("The editor sets the page itself");
+  expect(documentBody().querySelector(".document-page-setup")?.getAttribute("style")).toContain("Times New Roman");
+  expect(documentBody().querySelectorAll("p.document-clause")).toHaveLength(2);
+  expect(documentBody().querySelector("table.document-signature-table")?.textContent).toContain("BETA LLC");
+});
+
+test("a plain-English layout request is applied without a model call and can be undone", async () => {
+  const chatRequests = installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  const editor = documentBody();
+  editor.innerHTML = "<h1>Board Memo</h1><p>The committee reviewed the proposal and recommends approval of the budget.</p>";
+  fireEvent.input(editor);
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Make it Arial 11 pt, double spaced, with 1.25 inch margins and page numbers at the bottom right." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  expect(chatRequests).toHaveLength(0);
+  const setup = documentBody().querySelector(".document-page-setup");
+  expect(setup?.getAttribute("style")).toContain("font-family: Arial");
+  expect(setup?.getAttribute("style")).toContain("padding-left: 90pt");
+  expect(setup?.getAttribute("style")).toContain("line-height: 2.3");
+  expect(setup?.querySelector(".document-page-footer")?.innerHTML).toContain("text-align: right");
+  expect(documentText()).toContain("The committee reviewed the proposal");
+  expect(
+    screen.getByText(
+      "Applied Arial, 11 pt, double spacing, 1.25-inch margins, page numbers bottom right. Nothing was rewritten.",
+    ),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentBody().querySelector(".document-page-setup")).toBeNull();
+  expect(documentText()).toContain("The committee reviewed the proposal");
+});
+
+test("a layout named in a drafting request shapes the draft and stays out of its title", async () => {
+  installChatCompletionFetchMock("# MASTER SERVICES AGREEMENT\n\nThis Agreement is entered into as of [Effective Date].");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Draft a master services agreement with a software vendor in Garamond 12 pt on legal-size paper." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(documentText()).toContain("MASTER SERVICES AGREEMENT"));
+  const style = documentBody().querySelector(".document-page-setup")?.getAttribute("style") ?? "";
+  expect(style).toContain("font-family: Garamond");
+  expect(style).toContain("height: 1008pt");
+  const title = (screen.getByLabelText("Document title") as HTMLInputElement).value;
+  expect(title).not.toMatch(/garamond|legal-size|paper/i);
+});
+
+test("drafting from an uploaded Word template keeps the template's page and styles", async () => {
+  installChatCompletionFetchMock(
+    "# SAMPLE SERVICES AGREEMENT\n\n## 1. ENGAGEMENT\n\nThe Firm shall:\n(a) advise the Client; and\n(b) draft documents.",
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.change(screen.getByLabelText("Upload Word document template"), {
+    target: { files: [sampleDocxFile()] },
+  });
+  await waitFor(() => expect(documentText()).toContain("SIGNATURE PAGE"));
+  const templateSetup = documentBody().querySelector(".document-page-setup")?.getAttribute("style");
+  expect(templateSetup).toBeTruthy();
+
+  if (!screen.queryByRole("button", { name: /^Create .* draft$/ })) {
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: /^Create .* draft$/ }));
+
+  await waitFor(() => expect(documentText()).toContain("advise the Client"));
+  const draftedSetup = documentBody().querySelector(".document-page-setup")?.getAttribute("style") ?? "";
+  // Same page, margins, and Normal text as the Word template.
+  const pageOf = (style: string) => style.replace(/;\s*color:.*$/, "");
+  expect(pageOf(draftedSetup)).toBe(pageOf(templateSetup ?? ""));
+  // A contract form still gets the contract's clause layout.
+  expect(documentBody().querySelectorAll("p.document-clause")).toHaveLength(2);
 });
 
 test("renders template fill-in underscores as continuous blank-line spans", async () => {
@@ -2025,7 +2186,7 @@ test("a right-aligned money column stays right aligned in the document", async (
   await waitFor(() => expect(documentText()).toContain("$4,800.00"));
   const table = documentBody().querySelector("table.document-data-table")!;
   const headers = Array.from(table.querySelectorAll("th"));
-  expect(headers[0].getAttribute("style")).toBeNull();
+  expect(headers[0].getAttribute("style") ?? "").not.toContain("text-align: right");
   expect(headers[1].getAttribute("style")).toContain("text-align: right");
   expect(headers[2].getAttribute("style")).toContain("text-align: right");
   const firstRow = Array.from(table.querySelectorAll("tbody tr")).at(0)!;
@@ -3545,6 +3706,99 @@ test("opens a Word file as the draft itself instead of attaching it", async () =
   );
 });
 
+test("an opened Word file keeps its page setup and draws its own sheets", async () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [sampleDocxFile("Services Agreement v3.docx")] },
+  });
+
+  await waitFor(() => expect(documentText()).toContain("SAMPLE SERVICES AGREEMENT"));
+  const canvas = documentBody();
+  expect(canvas).toHaveClass("is-source-layout");
+  // Letter with Word's default margins, at the editor's preview scale.
+  expect(canvas.style.getPropertyValue("--source-sheet-width")).toBe("902.08px");
+  expect(canvas.style.getPropertyValue("--source-pad-left")).toBe("106.13px");
+  // The page setup rides along as a hidden marker ahead of the sheets.
+  expect(canvas.firstElementChild).toHaveClass("document-page-setup");
+  expect(canvas.innerHTML.match(/class="document-page"/g)?.length).toBe(2);
+  // This sample has no running header or footer, so the marker holds no text.
+  expect(canvas.firstElementChild?.textContent?.trim()).toBe("");
+  await waitFor(() =>
+    expect(storedDraftHistory()[0]?.content ?? "").toContain('class="document-page-setup"'),
+  );
+});
+
+function installPdfImportFetchMock(response: { status: number; body: unknown }) {
+  const requests: string[] = [];
+  const fetchMock = globalThis.fetch as unknown as {
+    mockImplementation: (implementation: typeof fetch) => void;
+  };
+  fetchMock.mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requests.push(url);
+    if (url.includes("/api/drafts/document-import/pdf")) {
+      return new Response(JSON.stringify(response.body), {
+        status: response.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ error: "offline" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  return requests;
+}
+
+test("a PDF opens through the converter with its formatting and import notes", async () => {
+  const requests = installPdfImportFetchMock({
+    status: 200,
+    body: {
+      filename: "Engagement Letter.pdf",
+      page_count: 1,
+      warnings: ["Page 2 is a scanned image; its text was recognized automatically. Check it against the original."],
+      html:
+        '<div class="document-page-setup" style="width: 612pt; height: 792pt; padding-top: 72pt; padding-right: 72pt; padding-bottom: 72pt; padding-left: 72pt; margin-top: 36pt; margin-bottom: 36pt; font-family: Arial, sans-serif; font-size: 16.21px; line-height: 1.15; color: #000000">' +
+        '<div class="document-page-footer"><p>Page <span class="document-field-page">1</span></p></div></div>' +
+        '<h1 style="margin-top: 0px; margin-bottom: 0px; text-align: center; font-size: 26.53px; font-weight: normal"><strong>Engagement Letter</strong></h1>' +
+        '<p style="margin-top: 17.69px; margin-bottom: 0px; text-indent: 53.06px; line-height: 20.64px">Dear Client, thank you for choosing the firm.<script>alert(1)</script></p>',
+    },
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [new File(["%PDF-1.7"], "Engagement Letter.pdf", { type: "application/pdf" })] },
+  });
+
+  await waitFor(() => expect(documentText()).toContain("Dear Client, thank you for choosing the firm."));
+  expect(requests.some((url) => url.includes("/api/drafts/document-import/pdf"))).toBe(true);
+  const canvas = documentBody();
+  expect(canvas).toHaveClass("is-source-layout");
+  expect(canvas.innerHTML).toContain("text-indent: 53.06px");
+  expect(canvas.innerHTML).not.toContain("<script");
+  expect(screen.getByLabelText("Document title")).toHaveValue("Engagement Letter");
+  expect(screen.getByText(/Import note: Page 2 is a scanned image/)).toBeInTheDocument();
+  expectRailNotice(/Engagement Letter\.pdf opened in the editor/);
+});
+
+test("a PDF the converter cannot read says why and leaves the draft alone", async () => {
+  installPdfImportFetchMock({
+    status: 422,
+    body: { detail: "This PDF is password-protected. Remove the password and try again." },
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  documentBody().innerHTML = "<p>Existing notes stay put.</p>";
+  fireEvent.input(documentBody());
+
+  fireEvent.change(screen.getByLabelText("Open a file in the editor"), {
+    target: { files: [new File(["%PDF-1.7"], "Locked.pdf", { type: "application/pdf" })] },
+  });
+
+  await waitFor(() => expectRailNotice(/Could not open Locked\.pdf\. This PDF is password-protected/));
+  expect(documentText()).toContain("Existing notes stay put.");
+});
+
 test("opening a file keeps Markdown structure and guards unsaved edits", async () => {
   render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
   documentBody().innerHTML = "<p>Unsaved notes worth keeping.</p>";
@@ -4943,6 +5197,108 @@ test("the deck assistant drafts validated slides from the composer", async () =>
   expect(sent.messages[0].content).toContain("aperture-deck-v1");
 });
 
+test("the deck assistant measures its slides and sends text that does not fit back before placing the deck", async () => {
+  const crowded = "Revenue across every region grew faster than the plan assumed, ".repeat(9).trim();
+  const results = {
+    id: "s2",
+    layout: "title-bullets",
+    notes: "Results",
+    title: "Results this year",
+    bullets: Array.from({ length: 8 }, () => ({ runs: [{ text: crowded }], level: 0 })),
+  };
+  const draft = {
+    schema: "aperture-deck-v1",
+    title: "Boston Expansion",
+    slides: [
+      { id: "s1", layout: "title", title: "Boston Expansion", subtitle: "Growth plan", notes: "" },
+      results,
+      { id: "s3", layout: "closing", title: "Next steps", body: "Approve the budget", notes: "" },
+    ],
+  };
+  const requests = installChatCompletionFetchMock((payload) => {
+    const prompt = (payload.messages as Array<{ content: string }>)[0].content;
+    if (prompt.startsWith("You are fixing slide layout")) {
+      const tight = [
+        "Revenue beat the plan in every region we serve this year",
+        "Two new regions opened ahead of the planned schedule",
+        "Churn fell to 4 percent after the onboarding redesign",
+        "Average deal size grew by a fifth across mid-market",
+        "Partner-sourced pipeline doubled in the second half",
+        "Support response times dropped below two hours",
+      ];
+      return ["```json", JSON.stringify({ slides: [{ ...results, bullets: tight.map((text) => ({ runs: [{ text }], level: 0 })) }] }), "```"].join("\n");
+    }
+    return ["```json", JSON.stringify(draft), "```"].join("\n");
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.change(screen.getByPlaceholderText("Ask the deck assistant what to build"), {
+    target: { value: "Draft a deck about our Boston expansion" },
+  });
+  fireEvent.submit(screen.getByRole("textbox", { name: "Ask the deck assistant" }).closest("form")!);
+
+  await waitFor(() => expect(screen.getByText("Slide 1 of 3")).toBeInTheDocument());
+  // The draft prompt carries each layout's measured capacity up front.
+  const draftPrompt = (requests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(draftPrompt).toMatch(/"title-bullets".*Fits: title ≤\d+ chars; bullets ≤\d+ one-line bullets of ~\d+ chars\./);
+  // The fit check sent only the crowded slide back, with its measurements,
+  // and without web search or sources.
+  expect(requests).toHaveLength(2);
+  const fitRequest = requests[1] as { messages: Array<{ content: string }>; runtime?: Record<string, unknown> };
+  const fitPrompt = fitRequest.messages[0].content;
+  expect(fitPrompt).toContain('Slide 2 (id "s2", layout "title-bullets"):');
+  expect(fitPrompt).toMatch(/"bullets" \(Bullets, 16pt\): "Revenue across every region/);
+  expect(fitPrompt).toContain('exactly these slides, each complete with all of its fields: "s2".');
+  expect(
+    screen.getAllByText(/Fit check found 1 text field too large for slide 2; .* rewrote 1 slide to fit in 1 round; every slide now fits\./).length,
+  ).toBeGreaterThan(0);
+
+  fireEvent.click(screen.getByRole("button", { name: "Slide 2: Title + bullets" }));
+  const bullets = screen.getByRole("textbox", { name: "Title + bullets slide bullets" });
+  expect(bullets.querySelectorAll("li")).toHaveLength(6);
+  expect(bullets).toHaveTextContent("Revenue beat the plan in every region we serve this year");
+});
+
+test("Edit slide with AI measures its reply and asks once for a version that fits", async () => {
+  const crowded = "Pipeline coverage improved in every territory we track this quarter, ".repeat(10).trim();
+  const requests = installChatCompletionFetchMock((payload) => {
+    const messages = payload.messages as Array<{ content: string }>;
+    const last = messages[messages.length - 1].content;
+    const bullets = last.startsWith("You are fixing slide layout")
+      ? [
+          "Coverage up in every territory we track this quarter",
+          "Two new segments added to the pipeline review",
+          "Stage conversion improved from discovery to proposal",
+          "Win rates held steady while deal sizes grew",
+          "Forecast accuracy within five percent for two quarters",
+          "Renewals pipeline built a full quarter ahead",
+        ]
+      : Array.from({ length: 8 }, () => crowded);
+    return [
+      "```json",
+      JSON.stringify({
+        slides: [{ id: "any", layout: "title-bullets", title: "Pipeline", notes: "", bullets: bullets.map((text) => ({ runs: [{ text }], level: 0 })) }],
+      }),
+      "```",
+    ].join("\n");
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  fireEvent.click(screen.getByRole("option", { name: "Improve this slide" }));
+
+  const accept = await screen.findByRole("button", { name: "Accept AI suggestion" });
+  expect(requests).toHaveLength(2);
+  const followUp = (requests[1] as { messages: Array<{ role: string; content: string }> }).messages;
+  // One conversation: the reply that did not fit, then the measured follow-up.
+  expect(followUp.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+  expect(followUp[2].content).toMatch(/^You are fixing slide layout: the editor laid out your reply exactly as PowerPoint will/);
+  fireEvent.click(accept);
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Title + bullets slide bullets" })).toHaveTextContent("Coverage up in every territory we track this quarter"),
+  );
+});
+
 test("invalid deck JSON retries then falls back to a real outline deck", async () => {
   const requests = installChatCompletionFetchMock(
     "## Boston Expansion\n\n- Talent density\n- Customer cluster",
@@ -5082,14 +5438,220 @@ test("deck templates drawer offers starters, brand upload, and honest AI image g
   expect(screen.getByText("Slide 1 of 7")).toBeInTheDocument();
   expect(screen.getByText(/Pitch deck template started/)).toBeInTheDocument();
 
-  // Image slide: dialog opens; AI generation is honestly gated when no
-  // image-output model exists in the workspace catalog.
+  // Image slide: the picture blade opens; AI generation is honestly gated
+  // when no image-output model exists in the workspace catalog.
   fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
   fireEvent.click(screen.getByRole("button", { name: "Add image" }));
-  const dialog = screen.getByRole("dialog", { name: "Slide image" });
-  expect(within(dialog).getByRole("button", { name: "Generate AI image" })).toBeDisabled();
-  expect(within(dialog).getByRole("button", { name: "Find web image" })).toBeInTheDocument();
+  const dialog = screen.getByRole("dialog", { name: "Slide picture" });
+  expect(dialog).toHaveClass("deck-blade");
+  expect(within(dialog).getByRole("button", { name: "Upload from this device" })).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toBeDisabled();
+  expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toHaveAttribute(
+    "data-tooltip",
+    "No image-generation model is enabled for your workspace",
+  );
+  expect(within(dialog).getByRole("button", { name: "Find web images" })).toBeInTheDocument();
+});
+
+test("deck panels open as one blade from the left and close with its X or Escape", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+
+  // Add slide is pinned under the slide list, not inside it.
+  const addSlide = screen.getByRole("button", { name: "Add slide" });
+  expect(addSlide.closest(".deck-filmstrip")).toBeNull();
+  expect(addSlide.closest(".deck-filmstrip-pane")).not.toBeNull();
+
+  fireEvent.click(addSlide);
+  const blade = screen.getByRole("dialog", { name: "Add a slide" });
+  expect(blade).toHaveClass("deck-blade");
+  expect(blade).toHaveTextContent("Goes after slide 1");
+  expect(addSlide).toHaveAttribute("aria-expanded", "true");
+  const menu = within(blade).getByRole("menu", { name: "Add a slide" });
+  // Each layout is a live miniature in the deck's own theme.
+  const option = within(menu).getByRole("menuitem", { name: "Two columns" });
+  expect(option.querySelector(".deck-slide-canvas")).not.toBeNull();
+  expect(document.activeElement).toBe(within(menu).getAllByRole("menuitem")[0]);
+  // Its own close button closes it and hands focus back to Add slide.
+  fireEvent.click(within(blade).getByRole("button", { name: "Close add a slide" }));
+  expect(screen.queryByRole("dialog", { name: "Add a slide" })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(addSlide);
+
+  fireEvent.click(addSlide);
+  fireEvent.click(within(screen.getByRole("menu", { name: "Add a slide" })).getByRole("menuitem", { name: "Image + caption" }));
+  expect(screen.queryByRole("dialog", { name: "Add a slide" })).not.toBeInTheDocument();
+  expect(screen.getByText("Slide 2 of 2")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  expect(screen.getByRole("dialog", { name: "Slide picture" })).toHaveClass("deck-blade");
+  // Opening the layout gallery swaps what the blade shows: never two at once.
+  fireEvent.click(screen.getByRole("button", { name: "Slide layout" }));
+  expect(screen.queryByRole("dialog", { name: "Slide picture" })).not.toBeInTheDocument();
+  const switcher = screen.getByRole("dialog", { name: "Change layout" });
+  expect(within(switcher).getByRole("menuitem", { name: "Image + caption" })).toHaveAttribute("aria-current", "true");
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Change layout" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Picture description" }), { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Slide picture" })).not.toBeInTheDocument();
+
+  // AI slide edits open in the same blade.
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  expect(screen.getByRole("dialog", { name: "Edit slide with AI" }).closest(".deck-blade")).not.toBeNull();
+});
+
+test("the picture button offers a picture layout for a slide without one and keeps its words", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Title + bullets" }));
+  const title = screen.getByRole("textbox", { name: "Title + bullets slide title" });
+  title.innerHTML = "Why this team";
+  fireEvent.input(title);
+
+  fireEvent.click(screen.getByRole("button", { name: "Slide pictures" }));
+  const blade = screen.getByRole("dialog", { name: "Slide picture" });
+  expect(blade).toHaveTextContent("Title + bullets has no picture");
+  fireEvent.click(within(blade).getByRole("menuitem", { name: "Image + caption" }));
+
+  expect(screen.getByRole("textbox", { name: "Image + caption slide title" })).toHaveTextContent("Why this team");
+  // The blade now serves the new layout's picture, described by the slide's words.
+  const pictures = screen.getByRole("dialog", { name: "Slide picture" });
+  expect(within(pictures).getByRole("button", { name: "Upload from this device" })).toBeInTheDocument();
+  expect(within(pictures).getByRole("textbox", { name: "Picture description" })).toHaveValue("Why this team");
+  // Moving to a slide without a picture puts the blade away; one press of the
+  // picture button opens it again there.
+  fireEvent.click(screen.getByRole("button", { name: "Slide 1: Title" }));
+  expect(screen.queryByRole("dialog", { name: "Slide picture" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Slide pictures" }));
+  expect(screen.getByRole("dialog", { name: "Slide picture" })).toHaveTextContent("Title has no picture");
+});
+
+test("a web search offers a choice of pictures and the chosen one lands with its description as alt text", async () => {
+  let answer: (response: Response) => void = () => {};
+  (globalThis.fetch as unknown as { mockImplementation: (implementation: typeof fetch) => void }).mockImplementation(
+    () => new Promise<Response>((resolve) => { answer = resolve; }),
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  const blade = screen.getByRole("dialog", { name: "Slide picture" });
+  fireEvent.change(within(blade).getByRole("textbox", { name: "Picture description" }), { target: { value: "harbor at dawn" } });
+  fireEvent.click(within(blade).getByRole("button", { name: "Find web images" }));
+  expect(within(blade).getByRole("button", { name: "Searching…" })).toBeDisabled();
+  // The blade cannot be put away while the search is out.
+  expect(within(blade).getByRole("button", { name: "Close slide picture dialog" })).toBeDisabled();
+
+  await act(async () => {
+    answer(
+      new Response(
+        JSON.stringify({
+          query: {
+            pages: {
+              "2": { index: 2, title: "Boston Harbor", thumbnail: { source: "https://upload.wikimedia.org/harbor.jpg" } },
+              "1": { index: 1, title: "Harbor seal", thumbnail: { source: "https://upload.wikimedia.org/seal.jpg" } },
+              "3": { index: 3, title: "Flag", thumbnail: { source: "https://upload.wikimedia.org/flag.svg.png" } },
+            },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  });
+  const results = await within(blade).findByRole("group", { name: "Web image results" });
+  // Search order, and no flags or logos.
+  expect(within(results).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+    "Use Harbor seal",
+    "Use Boston Harbor",
+  ]);
+  fireEvent.click(within(results).getByRole("button", { name: "Use Boston Harbor" }));
+  // Placed on the slide, the empty caption takes the source, and the alt
+  // text is the author's description.
+  expect(screen.getAllByAltText("harbor at dawn").some((image) => image.getAttribute("src") === "https://upload.wikimedia.org/harbor.jpg")).toBe(true);
+  expect(within(blade).getByRole("textbox", { name: "Picture alt text" })).toHaveValue("harbor at dawn");
+  expect(screen.getByRole("textbox", { name: "Image + caption slide caption" })).toHaveTextContent("Boston Harbor (Wikipedia)");
+  fireEvent.change(within(blade).getByRole("textbox", { name: "Picture alt text" }), { target: { value: "Boston Harbor at dawn" } });
+  expect(screen.getAllByAltText("Boston Harbor at dawn").length).toBeGreaterThan(0);
+  fireEvent.click(within(blade).getByRole("button", { name: "Done" }));
+  expect(screen.queryByRole("dialog", { name: "Slide picture" })).not.toBeInTheDocument();
+});
+
+test("slide text shows a format toolbar; with nothing highlighted it formats the whole box", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Title + bullets" }));
+  const body = screen.getByRole("textbox", { name: "Title + bullets slide bullets" });
+  body.innerHTML = "<ul><li>First point</li><li>Second point</li></ul>";
+  fireEvent.input(body);
+  fireEvent.focus(body);
+  const caret = document.createRange();
+  caret.setStart(body.querySelectorAll("li")[1].firstChild!, 3);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(caret);
+
+  const toolbar = screen.getByRole("toolbar", { name: "Slide text formatting" });
+  expect(toolbar).toHaveTextContent("Whole box");
+  // The layout sets bullets at 16pt.
+  expect(within(toolbar).getByRole("button", { name: "Font size: 16 point" })).toBeInTheDocument();
+  fireEvent.click(within(toolbar).getByRole("button", { name: "Increase font size" }));
+  // Both bullets step up from the layout's size, one PowerPoint step.
+  expect(body.innerHTML.match(/font-size: 18px/g)).toHaveLength(2);
+  expect(body.querySelectorAll("li")).toHaveLength(2);
+  expect(screen.getAllByText(/Text made larger to the whole text box\./).length).toBeGreaterThan(0);
+  // The caret is back where it was.
+  expect(window.getSelection()!.getRangeAt(0).startContainer.textContent).toBe("Second point");
+
+  // With a highlight only that text changes, in a color from the deck's theme.
+  const word = document.createRange();
+  word.setStart(body.querySelectorAll("li")[0].querySelector("span")!.firstChild!, 0);
+  word.setEnd(body.querySelectorAll("li")[0].querySelector("span")!.firstChild!, 5);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(word);
+  fireEvent.click(within(toolbar).getByRole("button", { name: "Text color" }));
+  fireEvent.click(within(toolbar).getByRole("menuitem", { name: "Accent 1" }));
+  expect(body.querySelectorAll("li")[0].innerHTML).toMatch(/color: (#087d8b|rgb\(8, 125, 139\))[^>]*>First</);
+  expect(body.querySelectorAll("li")[1].innerHTML).not.toMatch(/087d8b|rgb\(8, 125, 139\)/);
+  expect(window.getSelection()!.toString()).toBe("First");
+
+  // Leaving the text puts the toolbar away.
+  fireEvent.blur(body);
+  expect(screen.queryByRole("toolbar", { name: "Slide text formatting" })).not.toBeInTheDocument();
+});
+
+test("a bullet box stays bullets when its text is typed over as loose lines", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Title + bullets" }));
+  const body = screen.getByRole("textbox", { name: "Title + bullets slide bullets" });
+  body.innerHTML = "<div>Retyped point</div>";
+  const caret = document.createRange();
+  caret.setStart(body.querySelector("div")!.firstChild!, 7);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(caret);
+  fireEvent.input(body);
+  expect(body.querySelector("ul > li")).toHaveTextContent("Retyped point");
+  const restored = window.getSelection()!.getRangeAt(0);
+  expect(restored.startContainer.textContent).toBe("Retyped point");
+  expect(restored.startOffset).toBe(7);
+});
+
+test("the layouts and themes strip folds away and comes back", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  expect(screen.getByLabelText("Browse slide layouts")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Fold away layouts and themes" }));
+  expect(screen.queryByLabelText("Browse slide layouts")).not.toBeInTheDocument();
+  expect(window.localStorage.getItem("aperture.drafts.deckLayoutStrip")).toBe("closed");
+  // Picking a view brings the strip back.
+  fireEvent.click(screen.getByRole("button", { name: "Themes" }));
+  expect(screen.getByRole("group", { name: "Deck color themes" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Fold away layouts and themes" })).toHaveAttribute("aria-expanded", "true");
 });
 
 test("slide background menu offers upload and honestly gates the remove actions", () => {

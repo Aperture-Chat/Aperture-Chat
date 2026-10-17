@@ -166,6 +166,8 @@ const ALLOWED_TAGS = new Set([
  * formatting the drafting toolbar legitimately produces survives. */
 const GLOBAL_ALLOWED_ATTRIBUTES = new Set([
   "class",
+  // Right-to-left paragraphs from imported documents (values checked below).
+  "dir",
   // Provenance the drafting editor writes on AI-authored runs: when the edit
   // landed and which model produced it. The AI edit trail reads these back,
   // so they have to survive the round trip through storage.
@@ -180,6 +182,26 @@ const GLOBAL_ALLOWED_ATTRIBUTES = new Set([
 const SAFE_CSS_COLOR_VALUE =
   /^(#[0-9a-f]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)|[a-z]{3,20})$/i;
 
+const CSS_LENGTH = "(?:\\d{1,4}(?:\\.\\d{1,3})?|\\.\\d{1,3})(?:px|pt|em|rem|%)|0";
+const NONNEGATIVE_LENGTH = new RegExp(`^(?:${CSS_LENGTH})$`, "i");
+const SIGNED_LENGTH = new RegExp(`^-?(?:${CSS_LENGTH})$`, "i");
+const MARGIN_VALUE = new RegExp(`^(?:-?(?:${CSS_LENGTH})|auto)$`, "i");
+const BOX_LENGTHS = new RegExp(`^(?:${CSS_LENGTH})(?:\\s+(?:${CSS_LENGTH})){0,3}$`, "i");
+const SIZE_VALUE = new RegExp(`^(?:(?:${CSS_LENGTH})|auto)$`, "i");
+const MARGIN_BOX = new RegExp(`^(?:-?(?:${CSS_LENGTH})|auto)(?:\\s+(?:-?(?:${CSS_LENGTH})|auto)){0,3}$`, "i");
+const BORDER_STYLE_KEYWORD = "(?:none|hidden|solid|double|dotted|dashed)";
+const BORDER_COLOR_TOKEN =
+  "(?:#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\\(\\s*\\d{1,3}\\s*,\\s*\\d{1,3}\\s*,\\s*\\d{1,3}\\s*(?:,\\s*(?:0|1|0?\\.\\d+)\\s*)?\\))";
+// Width and color are optional: browsers drop a default currentcolor (and
+// medium width) when they re-serialize an edited style attribute.
+const BORDER_VALUE = new RegExp(
+  `^(?:none|0|(?:\\d{1,2}(?:\\.\\d{1,3})?(?:px|pt)\\s+)?(?:solid|double|dotted|dashed)(?:\\s+(?:#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\\(\\s*\\d{1,3}\\s*,\\s*\\d{1,3}\\s*,\\s*\\d{1,3}\\s*(?:,\\s*(?:0|1|0?\\.\\d+)\\s*)?\\)))?)$`,
+  "i",
+);
+
+/** Properties whose case is meaningful (font names round-trip to Word). */
+const CASE_PRESERVING_STYLE_PROPERTIES = new Set(["font-family"]);
+
 const ALLOWED_STYLE_PROPERTIES: Record<string, RegExp> = {
   color: SAFE_CSS_COLOR_VALUE,
   "background-color": SAFE_CSS_COLOR_VALUE,
@@ -188,6 +210,50 @@ const ALLOWED_STYLE_PROPERTIES: Record<string, RegExp> = {
   // Plain family names only (optionally quoted, comma-separated fallbacks);
   // no url()/expression() shapes are expressible under this pattern.
   "font-family": /^[a-z0-9 "',\-]{1,120}$/i,
+  // Explicit formatting carried by documents opened from Word or PDF:
+  // paragraph spacing and indents, line spacing, borders and cell padding,
+  // caps, and fixed-width tab spacers. Every value is a bounded length,
+  // color, or keyword, so no url()/expression() shape fits.
+  "font-weight": /^(normal|bold|bolder|lighter|[1-9]00)$/i,
+  "font-style": /^(normal|italic|oblique)$/i,
+  "font-variant": /^(normal|small-caps|all-small-caps)$/i,
+  "font-variant-caps": /^(normal|small-caps|all-small-caps)$/i,
+  "text-transform": /^(none|uppercase|lowercase|capitalize)$/i,
+  "text-decoration": /^(none|underline|line-through|underline line-through|line-through underline)$/i,
+  "text-decoration-line": /^(none|underline|line-through|underline line-through|line-through underline)$/i,
+  "letter-spacing": new RegExp(`^(?:normal|-?(?:${CSS_LENGTH}))$`, "i"),
+  "line-height": new RegExp(`^(?:normal|\\d(?:\\.\\d{1,3})?|(?:${CSS_LENGTH}))$`, "i"),
+  "margin-top": MARGIN_VALUE,
+  "margin-bottom": MARGIN_VALUE,
+  "margin-left": MARGIN_VALUE,
+  "margin-right": MARGIN_VALUE,
+  "text-indent": SIGNED_LENGTH,
+  padding: BOX_LENGTHS,
+  "padding-top": NONNEGATIVE_LENGTH,
+  "padding-right": NONNEGATIVE_LENGTH,
+  "padding-bottom": NONNEGATIVE_LENGTH,
+  "padding-left": NONNEGATIVE_LENGTH,
+  // Browsers re-serialize edited inline styles with shorthands.
+  margin: MARGIN_BOX,
+  "border-width": BOX_LENGTHS,
+  "border-style": new RegExp(`^${BORDER_STYLE_KEYWORD}(?:\\s+${BORDER_STYLE_KEYWORD}){0,3}$`, "i"),
+  "border-color": new RegExp(`^${BORDER_COLOR_TOKEN}(?:\\s+${BORDER_COLOR_TOKEN}){0,3}$`, "i"),
+  border: BORDER_VALUE,
+  "border-top": BORDER_VALUE,
+  "border-right": BORDER_VALUE,
+  "border-bottom": BORDER_VALUE,
+  "border-left": BORDER_VALUE,
+  "border-collapse": /^(collapse|separate)$/i,
+  "table-layout": /^(auto|fixed)$/i,
+  "vertical-align": /^(baseline|super|sub|top|middle|bottom|text-top|text-bottom)$/i,
+  width: SIZE_VALUE,
+  height: SIZE_VALUE,
+  "min-width": SIZE_VALUE,
+  "max-width": SIZE_VALUE,
+  display: /^inline-block$/i,
+  "white-space": /^(normal|nowrap|pre|pre-wrap|pre-line)$/i,
+  "list-style-type":
+    /^(none|disc|circle|square|decimal|decimal-leading-zero|lower-alpha|upper-alpha|lower-latin|upper-latin|lower-roman|upper-roman)$/i,
 };
 
 /** Filters a raw style attribute down to the allowlisted declarations.
@@ -201,20 +267,26 @@ export function sanitizeStyleAttribute(value: string): string {
     const propertyValue = declaration.slice(separator + 1).trim();
     const pattern = ALLOWED_STYLE_PROPERTIES[property];
     if (!pattern || !pattern.test(propertyValue)) return;
-    kept.push(`${property}: ${propertyValue.toLowerCase()}`);
+    kept.push(
+      `${property}: ${CASE_PRESERVING_STYLE_PROPERTIES.has(property) ? propertyValue : propertyValue.toLowerCase()}`,
+    );
   });
   return kept.join("; ");
 }
 
 const TAG_ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   img: ["src", "alt", "title", "width", "height"],
+  ol: ["start", "type", "reversed"],
+  li: ["value"],
   a: ["href", "title", "target", "rel"],
   th: ["colspan", "rowspan"],
   td: ["colspan", "rowspan"],
   col: ["span"],
   colgroup: ["span"],
   time: ["datetime"],
-  section: ["data-page-number"],
+  // A sheet that starts after the author's page break says so; print and
+  // repagination keep that boundary.
+  section: ["data-page-number", "data-page-break-before"],
   figure: ["data-diagram-source", "data-diagram-kind", "data-diagram-rendered", "data-diagram-notes"],
 };
 
@@ -239,6 +311,25 @@ function sanitizeAttributes(element: Element, tag: string) {
       return;
     }
     if (name.startsWith("on") || (!GLOBAL_ALLOWED_ATTRIBUTES.has(name) && !allowed.includes(name))) {
+      element.removeAttribute(attribute.name);
+      return;
+    }
+    if (name === "dir" && !/^(ltr|rtl|auto)$/i.test(attribute.value)) {
+      element.removeAttribute(attribute.name);
+      return;
+    }
+    if (
+      (name === "start" || name === "value" || name === "span") &&
+      !/^\d{1,5}$/.test(attribute.value)
+    ) {
+      element.removeAttribute(attribute.name);
+      return;
+    }
+    if (name === "data-page-break-before" && attribute.value !== "manual") {
+      element.removeAttribute(attribute.name);
+      return;
+    }
+    if (name === "type" && tag === "ol" && !/^[1aAiI]$/.test(attribute.value)) {
       element.removeAttribute(attribute.name);
       return;
     }
@@ -351,6 +442,8 @@ function imageTail(src: string) {
 function collectBlocksFromElement(element: Element, blocks: RedlineBlock[]) {
   const tag = element.tagName.toLowerCase();
   if (element.classList.contains("document-page-label")) return;
+  // The page setup of an imported document is layout, not compared text.
+  if (element.classList.contains("document-page-setup")) return;
   if (tag === "section" || tag === "div" || tag === "article") {
     Array.from(element.children).forEach((child) => collectBlocksFromElement(child, blocks));
     return;

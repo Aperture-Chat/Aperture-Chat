@@ -17,6 +17,8 @@ from typing import Any, BinaryIO
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
 
+from app.core.pdfium_lock import PDFIUM_LOCK
+
 MAX_EXTRACTED_TEXT_CHARS = 10_000_000
 DEFAULT_CHUNK_CHARS = 1200
 DEFAULT_CHUNK_OVERLAP = 160
@@ -624,12 +626,14 @@ def _ocr_pdf_pages(
     _rewind_source(source)
     pdf_source = source if isinstance(source, bytes) else source
     try:
-        pdf = pdfium.PdfDocument(pdf_source)
+        with PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(pdf_source)
     except Exception:
         return {}
 
     try:
-        page_count = len(pdf)
+        with PDFIUM_LOCK:
+            page_count = len(pdf)
         indexes = [page_index for page_index in page_indexes if page_index < page_count]
         return _ocr_pages(
             _render_pdf_pages(pdf, indexes),
@@ -637,7 +641,8 @@ def _ocr_pdf_pages(
             timeout_seconds=timeout_seconds,
         )
     finally:
-        pdf.close()
+        with PDFIUM_LOCK:
+            pdf.close()
 
 
 def _render_pdf_pages(pdf: Any, page_indexes: list[int]) -> Iterator[_OcrPage]:
@@ -646,9 +651,10 @@ def _render_pdf_pages(pdf: Any, page_indexes: list[int]) -> Iterator[_OcrPage]:
     for page_index in page_indexes:
         page = bitmap = image = None
         try:
-            page = pdf[page_index]
-            bitmap = page.render(scale=2, rotation=0)
-            image = bitmap.to_pil()
+            with PDFIUM_LOCK:
+                page = pdf[page_index]
+                bitmap = page.render(scale=2, rotation=0)
+                image = bitmap.to_pil()
         except Exception:
             _close_all(image, bitmap, page)
             continue
@@ -719,6 +725,12 @@ class _OcrPage:
 
 
 def _close_all(*resources: Any) -> None:
+    # Pages and bitmaps are PDFium objects; closing them is a PDFium call.
+    with PDFIUM_LOCK:
+        _close_each(resources)
+
+
+def _close_each(resources: tuple[Any, ...]) -> None:
     for resource in resources:
         if resource is not None:
             resource.close()
