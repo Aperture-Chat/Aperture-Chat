@@ -1,10 +1,17 @@
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, Lock, ShieldCheck, X } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import {
+  DEFAULT_BRAND_MARK,
+  DEFAULT_BRAND_NAME,
+  brandLockup,
+  compactBrandSources,
+  isCompactBrandImage,
+  type BrandAssets,
+  type BrandLockup,
+} from "../lib/brandIcon";
 
-const BLADE = "M32 8.4 C40.1 9.1 47.2 14.5 49.7 22 C44.2 21.1 39.1 23.8 35.7 29.4 C33.2 24.8 31.4 16.5 32 8.4 Z";
-const ANGLES = [0, 60, 120, 180, 240, 300];
-
+/** The default Aperture Chat icon, used wherever a tenant has not set its own. */
 export function ApertureMark({
   size = 28,
   className,
@@ -14,54 +21,88 @@ export function ApertureMark({
   className?: string;
   title?: string;
 }) {
-  const gradientId = useId();
-  const maskId = useId();
   return (
-    <svg
+    <img
       className={clsx("aperture-mark", className)}
+      src={DEFAULT_BRAND_MARK}
       width={size}
       height={size}
-      viewBox="0 0 64 64"
-      role="img"
-      aria-label={title}
-    >
-      <defs>
-        <linearGradient id={gradientId} x1="14" y1="8" x2="50" y2="56" gradientUnits="userSpaceOnUse">
-          {/* Stops read brand-mark variables so a tenant accent recolors the default mark. */}
-          <stop offset="0" style={{ stopColor: "var(--brand-mark-1, #41d3e2)" }} />
-          <stop offset=".52" style={{ stopColor: "var(--brand-mark-2, #0aa4b5)" }} />
-          <stop offset="1" style={{ stopColor: "var(--brand-mark-3, #066a78)" }} />
-        </linearGradient>
-        <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
-          <rect width="64" height="64" fill="#ffffff" />
-          <circle cx="32" cy="32" r="6.4" fill="#000000" />
-        </mask>
-      </defs>
-      <g fill={`url(#${gradientId})`} opacity="0.96" mask={`url(#${maskId})`}>
-        {ANGLES.map((angle) => (
-          <path key={angle} d={BLADE} transform={`rotate(${angle} 32 32)`} />
-        ))}
-      </g>
-    </svg>
+      alt={title}
+    />
   );
 }
 
-export function Logo({
-  compact = false,
-  brandName = "Aperture Chat",
-  logoUrl,
+/** A compact brand slot: the first source that loads roughly square, else
+ * the default Aperture Chat icon. A wordmark shrunk to icon size is unreadable, so wide
+ * artwork is skipped here while full-size slots keep showing it. */
+export function BrandIcon({
+  sources,
+  size = 28,
+  title = "Aperture",
+  className,
 }: {
-  compact?: boolean;
-  brandName?: string;
-  logoUrl?: string | null;
+  sources: ReadonlyArray<string | null | undefined>;
+  size?: number;
+  title?: string;
+  className?: string;
 }) {
-  const label = brandName.trim() || "Aperture Chat";
+  const [rejected, setRejected] = useState<readonly string[]>([]);
+  const [verified, setVerified] = useState<string | null>(null);
+  const src = sources.map((source) => source?.trim() ?? "").find((source) => source && !rejected.includes(source));
+  if (!src) return <ApertureMark size={size} title={title} className={className} />;
   return (
-    <div className="logo" aria-label={label}>
+    <img
+      key={src}
+      src={src}
+      alt=""
+      className={className}
+      // Hidden until checked so a wide image never flashes in the slot.
+      data-brand-pending={verified === src ? undefined : ""}
+      onLoad={(event) => {
+        const image = event.currentTarget;
+        if (isCompactBrandImage(image.naturalWidth, image.naturalHeight)) setVerified(src);
+        else setRejected((current) => [...current, src]);
+      }}
+      onError={() => setRejected((current) => [...current, src])}
+    />
+  );
+}
+
+/** Full-size artwork for a lockup, or the default icon without one. */
+export function BrandArtwork({
+  lockup,
+  label,
+  className,
+  markSize = 28,
+}: {
+  lockup: BrandLockup;
+  label: string;
+  className?: string;
+  markSize?: number;
+}) {
+  if (!lockup.imageUrl) return <ApertureMark size={markSize} title={label} />;
+  // Decorative beside a visible name; otherwise the image is the name.
+  return <img src={lockup.imageUrl} alt={lockup.name ? "" : label} className={className} />;
+}
+
+export function Logo({ compact = false, brand }: { compact?: boolean; brand?: BrandAssets | null }) {
+  const label = brand?.chat_brand_name?.trim() || DEFAULT_BRAND_NAME;
+  if (compact) {
+    return (
+      <div className="logo logo-compact" aria-label={label}>
+        <span className="logo-mark">
+          <BrandIcon sources={compactBrandSources(brand)} size={28} title={label} className="custom-logo-mark" />
+        </span>
+      </div>
+    );
+  }
+  const lockup = brandLockup(brand);
+  return (
+    <div className={clsx("logo", lockup.source === "logo" && "has-logo-image", !lockup.name && "logo-image-only")} aria-label={label}>
       <span className="logo-mark">
-        {logoUrl ? <img src={logoUrl} alt="" className="custom-logo-mark" /> : <ApertureMark size={28} title={label} />}
+        <BrandArtwork lockup={lockup} label={label} className="custom-logo-mark" />
       </span>
-      {!compact && <span className="logo-word">{label}</span>}
+      {lockup.name && <span className="logo-word">{lockup.name}</span>}
     </div>
   );
 }

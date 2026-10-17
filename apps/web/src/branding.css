@@ -1,0 +1,332 @@
+/* Tenant logos and icons: uploaded artwork keeps its own proportions,
+ * including wordmarks that carry their own lettering. */
+
+/* ---------- Brand slots ---------- */
+.sidebar-top .logo.has-logo-image:not(.logo-compact) {
+  flex: 1 1 auto;
+  max-width: 100%;
+}
+
+.sidebar-top .logo.has-logo-image .logo-mark {
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  max-width: 96px;
+  flex: 0 1 auto;
+}
+
+.sidebar-top .logo.has-logo-image.logo-image-only .logo-mark {
+  max-width: 100%;
+}
+
+.sidebar-top .logo.has-logo-image .custom-logo-mark {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 32px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.sidebar-top > .icon-button {
+  flex-shrink: 0;
+}
+
+.auth-brand.has-logo-image {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.auth-brand.has-logo-image .auth-brand-mark {
+  justify-content: flex-start;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  max-width: min(280px, 100%);
+  flex: 0 1 auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.auth-brand.has-logo-image .auth-brand-mark img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 56px;
+  object-fit: contain;
+}
+
+.empty-brand-identity.has-logo-image {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.empty-brand-identity.has-logo-image .empty-mark {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  max-width: min(280px, 100%);
+  flex: 0 1 auto;
+}
+
+.empty-brand-identity.has-logo-image .empty-brand-logo {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 44px;
+  object-fit: contain;
+  border-radius: 4px;
+  filter: none;
+}
+
+/* A compact icon stays hidden until it loads and passes the square check,
+ * so a wordmark never flashes in an icon-sized slot. */
+img[data-brand-pending] {
+  visibility: hidden;
+}
+
+/* ---------- Owner console: Platform Branding ---------- */
+.platform-branding-panel .branding-preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.branding-preview-tile {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.branding-preview-tile figcaption {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.branding-preview-rail,
+.branding-preview-icons {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 64px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.branding-preview-rail .sidebar-top {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Fixed light-rail colors, so the tile previews the light theme even while
+ * the console itself is dark. */
+.branding-preview-rail.is-light {
+  --text-strong: #172e31;
+  background: #eeebe4;
+  color: #213c3f;
+}
+
+.branding-preview-rail.sidebar-dark {
+  border-color: transparent;
+}
+
+.branding-preview-icons {
+  gap: 10px;
+  background: var(--surface-soft);
+}
+
+.branding-preview-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 190px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.branding-preview-tab > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branding-preview-tab > img,
+.branding-preview-tab > .aperture-mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  object-fit: contain;
+}
+
+.branding-preview-tab > svg:last-child {
+  flex: none;
+  color: var(--muted);
+}
+
+.branding-preview-compact {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 10px;
+}
+
+.branding-preview-compact > img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+/* Fields sharing a row keep their inputs aligned when one note runs longer. */
+.platform-branding-panel .owner-form-grid > label {
+  align-content: start;
+}
+
+.branding-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.branding-image-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  transition:
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease);
+}
+
+.branding-image-field.is-dragging {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-ring);
+}
+
+.branding-image-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.branding-image-heading strong {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.branding-image-heading small,
+.branding-image-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.branding-image-meta {
+  font-weight: 600;
+}
+
+.branding-image-warning {
+  color: var(--orange);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* Checkerboard shows which parts of the artwork are transparent. */
+.branding-image-stage {
+  display: grid;
+  place-items: center;
+  min-height: 84px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: #ffffff;
+  background-image: conic-gradient(#edf1ee 25%, transparent 0 50%, #edf1ee 0 75%, transparent 0);
+  background-size: 16px 16px;
+}
+
+.branding-image-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 64px;
+  object-fit: contain;
+}
+
+.branding-image-drop-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.branding-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.branding-image-actions .secondary-button {
+  min-height: 34px;
+  justify-content: center;
+  line-height: 1;
+}
+
+.branding-file-button.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.branding-file-button.is-disabled input {
+  cursor: not-allowed;
+}
+
+.owner-form-grid .branding-image-url {
+  gap: 4px;
+  font-size: 12px;
+}
+
+.branding-actions .primary-button {
+  min-height: 38px;
+  width: 100%;
+  justify-content: center;
+  line-height: 1;
+}
+
+@media (max-width: 760px) {
+  .platform-branding-panel .branding-preview,
+  .branding-image-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

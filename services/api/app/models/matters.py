@@ -472,6 +472,9 @@ _ALLOWED_TAGS = frozenset(
         "blockquote",
         "br",
         "code",
+        # Imported Word tables keep their grid column widths.
+        "col",
+        "colgroup",
         "del",
         "div",
         "em",
@@ -510,7 +513,7 @@ _ALLOWED_TAGS = frozenset(
         "ul",
     }
 )
-_VOID_TAGS = frozenset({"br", "hr", "img"})
+_VOID_TAGS = frozenset({"br", "col", "hr", "img"})
 _DROP_CONTENT_TAGS = frozenset(
     {
         "applet",
@@ -544,36 +547,72 @@ _TAG_ATTRIBUTES = {
             "data-diagram-source",
         }
     ),
+    "col": frozenset({"span"}),
+    "colgroup": frozenset({"span"}),
     "img": frozenset({"alt", "height", "src", "title", "width"}),
-    "ol": frozenset({"start", "type"}),
+    "li": frozenset({"value"}),
+    "ol": frozenset({"reversed", "start", "type"}),
     "td": frozenset({"colspan", "rowspan"}),
     "th": frozenset({"colspan", "rowspan", "scope"}),
 }
+# Includes the explicit formatting documents opened from Word or PDF carry
+# (spacing, indents, borders, cell padding, caps, tab spacers) so a reload
+# shows the page exactly as it was imported.
 _SAFE_STYLE_PROPERTIES = frozenset(
     {
         "background-color",
+        "border",
+        "border-bottom",
+        "border-collapse",
+        "border-color",
+        "border-left",
+        "border-right",
+        "border-style",
+        "border-top",
+        "border-width",
         "break-after",
         "break-before",
         "color",
+        "display",
         "font-family",
         "font-size",
         "font-style",
+        "font-variant",
+        "font-variant-caps",
         "font-weight",
         "height",
+        "letter-spacing",
         "line-height",
         "list-style-type",
+        "margin",
+        "margin-bottom",
         "margin-left",
         "margin-right",
+        "margin-top",
         "max-width",
+        "min-width",
+        "padding",
+        "padding-bottom",
+        "padding-left",
+        "padding-right",
+        "padding-top",
         "page-break-after",
         "page-break-before",
-        "padding-left",
+        "table-layout",
         "text-align",
         "text-decoration",
+        "text-decoration-line",
         "text-indent",
+        "text-transform",
+        "vertical-align",
+        "white-space",
         "width",
     }
 )
+# Properties whose values are a closed set rather than free-form text.
+_ENUMERATED_STYLE_VALUES = {
+    "display": frozenset({"inline-block"}),
+}
 _SAFE_STYLE_VALUE = re.compile(r"^[a-zA-Z0-9\s#.,%()'\"/+\-]*$")
 _SAFE_CLASS = re.compile(r"^[a-zA-Z0-9_\- ]*$")
 _SAFE_DIMENSION = re.compile(r"^[0-9]{1,5}(?:\.[0-9]{1,3})?(?:px|pt|em|rem|%)?$")
@@ -678,8 +717,10 @@ class _DraftHTMLSanitizer(HTMLParser):
             return _safe_url(tag, name, value)
         if name in {"height", "width"}:
             return value if _SAFE_DIMENSION.fullmatch(value) else None
-        if name in {"colspan", "rowspan", "start"}:
+        if name in {"colspan", "rowspan", "span", "start", "value"}:
             return value if value.isdigit() and 0 < int(value) <= 10_000 else None
+        if name == "reversed":
+            return "" if value in {"", "reversed"} else None
         if name == "target":
             return value if value in {"_blank", "_self"} else None
         if name == "rel":
@@ -719,6 +760,9 @@ def _sanitize_style(value: str) -> str | None:
         raw_property, raw_value = raw_declaration.split(":", 1)
         property_name = raw_property.strip().lower()
         property_value = raw_value.strip()
+        enumerated = _ENUMERATED_STYLE_VALUES.get(property_name)
+        if enumerated is not None and property_value.lower() not in enumerated:
+            continue
         if (
             property_name in _SAFE_STYLE_PROPERTIES
             and len(property_value) <= 160

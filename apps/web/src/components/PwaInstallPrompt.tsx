@@ -1,7 +1,7 @@
 import { EllipsisVertical, Share, Smartphone, SquarePlus, X } from "lucide-react";
 import { useId, useState } from "react";
 import { getCapturedInstallPrompt, type MobilePlatform } from "../lib/pwa";
-import { ApertureMark } from "./Primitives";
+import { BrandIcon } from "./Primitives";
 
 /* Prompt to put the workspace on the phone's home screen with the tenant's
  * own icon and name (served per-tenant by /api/pwa/*). Android Chromium
@@ -14,12 +14,13 @@ import { ApertureMark } from "./Primitives";
 export function PwaInstallPrompt({
   platform,
   brandName,
-  brandLogoUrl,
+  brandIconSources,
   onDismiss,
 }: {
   platform: MobilePlatform;
   brandName: string;
-  brandLogoUrl: string | null;
+  /** Icon candidates, best first; wide artwork falls back to the mark. */
+  brandIconSources: readonly string[];
   onDismiss: () => void;
 }) {
   const [installing, setInstalling] = useState(false);
@@ -75,7 +76,7 @@ export function PwaInstallPrompt({
         </div>
         <div className="pwa-install-preview">
           <span className="pwa-install-preview-icon">
-            {brandLogoUrl ? <img src={brandLogoUrl} alt="" /> : <ApertureMark size={30} />}
+            <BrandIcon sources={brandIconSources} size={30} title={brandName} />
           </span>
           <span className="pwa-install-preview-name">
             <strong>{brandName}</strong>

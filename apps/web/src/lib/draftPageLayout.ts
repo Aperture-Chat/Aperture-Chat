@@ -5,6 +5,9 @@ export function removeDraftPageLabels(html: string): string {
   const template = document.createElement("template");
   template.innerHTML = html;
   template.content.querySelectorAll(".document-page-label").forEach(node => node.remove());
+  // Text in a document opened from Word or PDF is authored, never a
+  // generated page label: its "Page 2 of 3" footers and lines stay.
+  if (template.content.querySelector(".document-page-setup")) return template.innerHTML;
   template.content.querySelectorAll("p, span, h1, h2, h3, h4, h5, h6").forEach(node => {
     // Keep quotations, source references, and table cells exactly as authored.
     if (node.closest("blockquote, pre, code, table, a")) return;

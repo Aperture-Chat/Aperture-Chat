@@ -15,6 +15,9 @@ export function cleanPastedHtml(html: string): string {
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<\/?o:p[^>]*>/gi, "");
   promoteStyledEmphasis(template.content);
+  // Copying everything from an imported document can carry its hidden page
+  // setup; pasted content never brings another document's page with it.
+  template.content.querySelectorAll(".document-page-setup").forEach((node) => node.remove());
   const sanitized = sanitizeDocumentHtml(template.innerHTML);
   const cleaned = document.createElement("template");
   cleaned.innerHTML = sanitized;

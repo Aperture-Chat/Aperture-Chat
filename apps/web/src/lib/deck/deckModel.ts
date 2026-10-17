@@ -299,6 +299,13 @@ export function serializeSlideDeck(deck: SlideDeck): string {
   return JSON.stringify(sortValueKeys(deck));
 }
 
+/** True when two slides hold the same content, whatever order their keys
+ * were written in (the DOM reader and the model build runs in different
+ * orders, and a false "changed" redraws a text box under the caret). */
+export function deckSlidesEqual(a: DeckSlide, b: DeckSlide): boolean {
+  return a === b || JSON.stringify(sortValueKeys(a)) === JSON.stringify(sortValueKeys(b));
+}
+
 /** Cheap discriminator for stored content strings, confirmed by the caller
  * with parseSlideDeck before use. Canonical sorting places "schema" after
  * "slides", so match the schema tag anywhere in the first chunk. */
@@ -755,6 +762,35 @@ export function deckSlideBackgroundSource(slide: DeckSlide, theme: DeckTheme): s
     if (stored) return stored;
   }
   return slide.background?.dataUrl ?? theme.backgroundImage?.dataUrl ?? null;
+}
+
+/** Text content of one region on a slide, or null when the layout has no
+ * such region. Bullet regions return their bullets; the rest run lists. */
+export function deckSlideRegionContent(slide: DeckSlide, region: string): DeckRichText | DeckBullet[] | null {
+  switch (slide.layout) {
+    case "title":
+    case "section":
+      return region === "title" ? slide.title : region === "subtitle" ? slide.subtitle : null;
+    case "title-bullets":
+      return region === "title" ? slide.title : region === "bullets" ? slide.bullets : null;
+    case "two-column":
+      return region === "title" ? slide.title : region === "left" ? slide.left : region === "right" ? slide.right : null;
+    case "image-caption":
+      return region === "title" ? slide.title : region === "caption" ? slide.caption : null;
+    case "quote":
+      return region === "quote" ? slide.quote : region === "attribution" ? slide.attribution : null;
+    case "chart":
+      return region === "title" ? slide.title : null;
+    case "closing":
+      return region === "title" ? slide.title : region === "body" ? slide.body : null;
+  }
+}
+
+/** Plain text of a region's content, bullets one per line. */
+export function deckRegionPlainText(content: DeckRichText | DeckBullet[] | null | undefined): string {
+  if (!content?.length) return "";
+  if (isDeckBulletList(content)) return content.map((bullet) => deckRunsText(bullet.runs)).join("\n");
+  return deckRunsText(content);
 }
 
 /** True when a region holds bullets rather than a flat run list. */

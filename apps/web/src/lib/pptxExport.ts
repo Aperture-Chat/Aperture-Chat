@@ -45,6 +45,7 @@ import {
   type DeckTheme,
   type SlideDeck,
 } from "./deck/deckModel";
+import { deckFitAutofitAttributes, deckRegionFit } from "./deck/deckTextFit";
 
 export const PPTX_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -224,13 +225,15 @@ function textShapeXml(
   }
   const { xEmu, yEmu, wEmu, hEmu } = boxToEmu(spec.box);
   const anchor = spec.anchor === "middle" ? ' anchor="ctr"' : ' anchor="t"';
+  // The shrink the stage shows is the shrink PowerPoint opens with.
+  const autofit = deckFitAutofitAttributes(deckRegionFit(spec, content, theme));
   return (
     `<p:sp>` +
     `<p:nvSpPr><p:cNvPr id="${shapeId}" name="${escapeXml(name)}"/>` +
     `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
     `<p:spPr><a:xfrm><a:off x="${xEmu}" y="${yEmu}"/><a:ext cx="${wEmu}" cy="${hEmu}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>` +
-    `<p:txBody><a:bodyPr wrap="square" rtlCol="0"${anchor}><a:normAutofit/></a:bodyPr><a:lstStyle/>` +
+    `<p:txBody><a:bodyPr wrap="square" rtlCol="0"${anchor}><a:normAutofit${autofit}/></a:bodyPr><a:lstStyle/>` +
     paragraphs.join("") +
     `</p:txBody></p:sp>`
   );

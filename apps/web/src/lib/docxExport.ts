@@ -388,6 +388,20 @@ const BLOCK_CONTAINER_SELECTOR = "p,h1,h2,h3,ul,ol,table,figure,blockquote,pre,d
  * (marked data-split-continuation) so exports and model snapshots carry the
  * original flowing paragraph instead of a paragraph break mid-sentence. Word
  * then paginates the joined paragraph naturally at its own page edge. */
+/** Inline wrappers a range split leaves behind with nothing in them (an
+ * empty <span style>, <strong>, <a>…). Left alone they pile up each time a
+ * paragraph is split across sheets and re-joined, so the page layout never
+ * settles. Tab spacers, fields, and line breaks always have content. */
+export function removeEmptyInlineWrappers(root: ParentNode) {
+  const wrappers = Array.from(
+    root.querySelectorAll<HTMLElement>("span, strong, em, b, i, u, s, strike, sup, sub, a, mark, small, code"),
+  );
+  for (let index = wrappers.length - 1; index >= 0; index -= 1) {
+    const element = wrappers[index];
+    if (element.textContent === "" && !element.querySelector("img, br, svg, figure, table")) element.remove();
+  }
+}
+
 export function mergeSplitContinuationBlocks(root: ParentNode) {
   root.querySelectorAll<HTMLElement>("[data-split-continuation]").forEach((element) => {
     element.removeAttribute("data-split-continuation");
@@ -410,6 +424,7 @@ export function mergeSplitContinuationBlocks(root: ParentNode) {
     if (!(previous instanceof HTMLElement) || previous.tagName !== element.tagName) return;
     previous.append(...Array.from(element.childNodes));
     element.remove();
+    removeEmptyInlineWrappers(previous);
   });
 }
 
@@ -708,12 +723,12 @@ function blockAlignment(element: HTMLElement): DocBlockAlignment | undefined {
   return undefined;
 }
 
-function cssDeclaration(style: string, property: string) {
+export function cssDeclaration(style: string, property: string) {
   const match = style.match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, "i"));
   return match?.[1]?.trim() ?? null;
 }
 
-function normalizeWordColor(value: string | null) {
+export function normalizeWordColor(value: string | null) {
   if (!value) return undefined;
   const trimmed = value.trim();
   const shortHex = /^#([0-9a-f]{3})$/i.exec(trimmed);
@@ -737,7 +752,7 @@ function normalizeWordColor(value: string | null) {
     .toUpperCase();
 }
 
-function safeExternalRelationshipTarget(value: string | null, allowMailto = false) {
+export function safeExternalRelationshipTarget(value: string | null, allowMailto = false) {
   const trimmed = value?.trim();
   if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) return null;
   try {
@@ -753,7 +768,7 @@ function safeExternalRelationshipTarget(value: string | null, allowMailto = fals
   }
 }
 
-function safeDocumentAnchor(value: string | null) {
+export function safeDocumentAnchor(value: string | null) {
   const match = /^#([A-Za-z_][A-Za-z0-9_.-]{0,79})$/.exec(value?.trim() ?? "");
   return match?.[1] ?? null;
 }
@@ -837,8 +852,11 @@ async function loadDocxImageResources(blocks: DocBlock[], imageProxy?: ExportIma
 
 /* ------------------------------ XML helpers ------------------------------ */
 
-function escapeXml(value: string) {
+export function escapeXml(value: string) {
+  // Control characters are not allowed in XML 1.0 at all (not even as
+  // references); Word refuses a file that contains one.
   return value
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

@@ -1086,3 +1086,26 @@ def test_draft_rules_never_become_user_requirements():
     requested = wrapped.replace("Write an MLA essay", "Include images and write an MLA essay")
     assert [d.id for d in extract_draft_directives(requested)] == ["images"]
     assert extract_draft_directives("You are a presentation writer producing a slide deck as structured JSON. Include image slides.") == []
+
+
+def test_every_deck_editor_prompt_skips_requirement_mining():
+    """The deck editor's prompts quote its JSON contract ("image", "bullets",
+    "a 10 page slide deck"); mining them would inject long-document and
+    markdown-image requirements into every deck request."""
+    from app.core.directives import extract_draft_directives
+
+    contract = (
+        'If the request names a slide or page count ("a 10 page slide deck", "20 slides"), produce exactly that many. '
+        '{"layout":"image-caption","title":"...","image":{"src":"","alt":"<describe the picture to add>"}}. '
+        "Return ONLY a fenced ```json code block."
+    )
+    for opening in (
+        "You are a presentation writer producing a slide deck as structured JSON.",
+        "You are revising an existing slide deck. Apply the user's instruction and return the COMPLETE revised deck.",
+        'You are editing slide 3 of 9 in the presentation "Quarterly review".',
+        "You are fixing slide layout in a slide deck. The editor laid out every slide exactly as PowerPoint will.",
+        "You are fixing slide layout: the editor laid out your reply exactly as PowerPoint will.",
+    ):
+        assert extract_draft_directives(f"{opening}\n{contract}\n\nUser request:\nInclude images in a 10 page deck") == []
+    # A document draft that merely mentions decks is still mined.
+    assert "images" in [d.id for d in extract_draft_directives("User request: Include images in a memo about slide decks\n\nDraft type: Memo")]
