@@ -1,10 +1,7 @@
 import { Loader2, LockKeyhole, LogOut, RefreshCw } from "lucide-react";
-import { ApertureMark } from "./Primitives";
+import { BrandArtwork } from "./Primitives";
 import { readBrandBoot } from "../lib/brandTheme";
-
-/* The stock favicon is not a tenant logo; only a cached custom icon may brand
- * the mark slot. Mirrors DEFAULT_FAVICON_HREF in App.tsx. */
-const DEFAULT_FAVICON_HREF = "/favicon.svg";
+import { DEFAULT_BRAND_ICON, DEFAULT_BRAND_NAME, brandLockup } from "../lib/brandIcon";
 
 /** Full-page hold shown while a stored session resumes, and the honest
  * recovery screen when that resume fails outside dev/demo builds. Rendered
@@ -21,25 +18,30 @@ export function SessionRestoreScreen({
   onSignOut?: () => void;
 }) {
   const boot = readBrandBoot();
-  const brandName = boot?.name?.trim() || "Aperture Chat";
-  const bootFavicon = boot?.favicon?.trim() || "";
-  const brandLogoUrl =
-    bootFavicon && bootFavicon !== DEFAULT_FAVICON_HREF ? bootFavicon : null;
+  const brandName = boot?.name?.trim() || DEFAULT_BRAND_NAME;
+  // The stock favicon is not a tenant icon; only a verified custom one may
+  // stand in when no logo was cached.
+  const bootFavicon = boot?.faviconVerified ? boot.favicon?.trim() || "" : "";
+  const brandMark = brandLockup({
+    chat_brand_name: boot?.displayName ?? brandName,
+    logo_url: boot?.logo,
+    icon_url: bootFavicon !== DEFAULT_BRAND_ICON ? bootFavicon : null,
+  });
 
   return (
     <main className="auth-screen">
       <section className="auth-shell" aria-labelledby="auth-title">
         <div className="auth-panel" aria-busy={!error}>
-          <div className="auth-brand">
-            {brandLogoUrl ? (
+          <div className={`auth-brand${brandMark.source === "logo" ? " has-logo-image" : ""}`} aria-label={brandName}>
+            {brandMark.imageUrl ? (
               <span className="auth-brand-mark">
-                <img src={brandLogoUrl} alt="" />
+                <BrandArtwork lockup={brandMark} label={brandName} />
               </span>
             ) : (
-              <ApertureMark size={34} title={brandName} />
+              <BrandArtwork lockup={brandMark} label={brandName} markSize={34} />
             )}
             <div>
-              <span>{brandName}</span>
+              {brandMark.name && <span>{brandMark.name}</span>}
               <strong>{error ? "Session recovery" : "Account sign-in"}</strong>
             </div>
           </div>

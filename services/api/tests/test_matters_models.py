@@ -252,3 +252,57 @@ def test_sanitizer_keeps_diagram_figures_with_validated_attributes() -> None:
         'data-diagram-rendered="maybe" data-diagram-language="te xt">x</figure>'
     )
     assert hostile == "<figure>x</figure>"
+
+
+def test_sanitizer_keeps_formatting_of_documents_opened_from_word_or_pdf() -> None:
+    imported = (
+        '<div class="document-page-setup" style="width: 612pt; height: 792pt; padding-top: 72pt; '
+        "margin-top: 36pt; margin-bottom: 30pt; font-family: 'Times New Roman', serif\">"
+        '<div class="document-page-footer"><p>Page <span class="document-field-page">2</span></p></div></div>'
+        '<p style="margin-top: 17.69px; margin-bottom: 0px; text-indent: -53.06px; '
+        "border-bottom: 0.75px solid #000000; padding-bottom: 2px; font-variant: small-caps; "
+        'letter-spacing: 0.5px; text-transform: uppercase">'
+        '<span class="document-tab document-tab-right document-tab-at-9360" '
+        'style="display: inline-block; width: 580px; border-bottom: 1.5px dotted currentcolor">\t</span>1</p>'
+        '<table style="border-collapse: collapse; table-layout: fixed; margin: 0px auto">'
+        '<colgroup span="1"><col span="2" style="width: 294.8px"></colgroup>'
+        '<tbody><tr style="height: 19.31px"><td colspan="2" style="vertical-align: middle; padding: 0px 7.96px">x</td></tr></tbody></table>'
+        '<ol reversed start="3" type="a"><li value="5">item</li></ol>'
+    )
+    sanitized = sanitize_draft_html(imported)
+
+    for fragment in (
+        "width: 612pt",
+        "margin-bottom: 30pt",
+        "font-family: &#x27;Times New Roman&#x27;, serif",
+        'class="document-field-page"',
+        "margin-top: 17.69px",
+        "text-indent: -53.06px",
+        "border-bottom: 0.75px solid #000000",
+        "padding-bottom: 2px",
+        "font-variant: small-caps",
+        "letter-spacing: 0.5px",
+        "text-transform: uppercase",
+        "display: inline-block",
+        "border-bottom: 1.5px dotted currentcolor",
+        "table-layout: fixed",
+        "margin: 0px auto",
+        '<colgroup span="1">',
+        '<col span="2" style="width: 294.8px">',
+        "height: 19.31px",
+        "vertical-align: middle",
+        'reversed=""',
+        'start="3"',
+        'value="5"',
+    ):
+        assert fragment in sanitized, fragment
+    assert sanitize_draft_html(sanitized) == sanitized
+
+
+def test_sanitizer_allows_only_inline_block_display() -> None:
+    assert sanitize_draft_html('<span style="display: none; color: red">x</span>') == (
+        '<span style="color: red">x</span>'
+    )
+    assert sanitize_draft_html('<span style="display: inline-block">x</span>') == (
+        '<span style="display: inline-block">x</span>'
+    )

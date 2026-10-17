@@ -1,5 +1,8 @@
 import { draftHtmlForAccount, removeDraftPageLabels } from "../lib/draftPageLayout";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
+import { DeckBlade, DECK_BLADE_DEFAULT_WIDTH } from "./DeckBlade";
+import { DeckLayoutGallery, DeckPicturePanel, type DeckWebImageChoice } from "./DeckBladePanels";
+import { DeckTextToolbar, type DeckTextCommand, type DeckTextToolbarFormat } from "./DeckTextToolbar";
 import { AiEditComposer, type AiComposerAnchor, type AiComposerPhase } from "./AiEditComposer";
 import { DocumentSelectionToolbar } from "./DocumentSelectionToolbar";
 import { DocumentSlashMenu, type SlashCommandItem } from "./DocumentSlashMenu";
@@ -98,6 +101,7 @@ import {
   Home,
   ImagePlus,
   Image as ImageIcon,
+  Images,
   Italic,
   LayoutTemplate,
   LibraryBig,
@@ -160,6 +164,41 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import mammoth from "mammoth";
+import { importDocxDocument } from "../lib/docxImport";
+import { importPdfDocument } from "../lib/api/documentImport";
+import { buildSourceLayoutDocx } from "../lib/docxSourceExport";
+import { relayoutDocumentTabs } from "../lib/documentTabs";
+import {
+  documentSheetGeometry,
+  hasPageSetupMarker,
+  leadingPageSetupMarker,
+  pageSetupFromMarkerHtml,
+  pageSetupMarkerHtml,
+  sourceLayoutCssVariables,
+  cssVariablesText,
+  splitPageSetup,
+  withPageSetupMarker,
+  type DocumentPageSetup,
+} from "../lib/documentPageSetup";
+import {
+  applyNormalTextChange,
+  describePageSetup,
+  documentFormatById,
+  formatDocumentBody,
+  inferBlockStyles,
+  pageSetupForFormat,
+  restyleScopeBetween,
+  type DocumentFormat,
+  type FormatBodyOptions,
+} from "../lib/documentFormats";
+import {
+  applyLayoutChanges,
+  isLayoutOnlyRequest,
+  parseLayoutRequest,
+  stripLayoutPhrases,
+  type LayoutRequest,
+} from "../lib/documentLayoutRequest";
+import { DocumentPageChrome } from "./DocumentPageChrome";
 import {
   ChatRequestError,
   apiBase,
@@ -175,6 +214,7 @@ import {
   DOCX_MIME_TYPE,
   isAutomatedTestMode,
   mergeSplitContinuationBlocks,
+  removeEmptyInlineWrappers,
   type ExportImageProxy,
 } from "../lib/docxExport";
 import type { BootstrapData, ChatCitation } from "../lib/types";
@@ -223,9 +263,12 @@ import {
   deckBackgroundKey,
   deckRichText,
   deckRichTextParagraphs,
+  deckRegionPlainText,
   deckRunsText,
   deckSlideBackgroundSource,
   deckSlideOutline,
+  deckSlideRegionContent,
+  deckSlidesEqual,
   defaultDeckTheme,
   isDeckBulletList,
   nextDeckSlideId,
@@ -246,6 +289,8 @@ import {
   type SlideDeck,
 } from "../lib/deck/deckModel";
 import {
+  DECK_LINE_HEIGHT,
+  DECK_LIST_REGIONS,
   DECK_LOGO_BOX,
   DECK_PREVIEW_HEIGHT_PX,
   DECK_PREVIEW_WIDTH_PX,
@@ -257,6 +302,28 @@ import {
   type DeckTextRegionSpec,
 } from "../lib/deck/deckGeometry";
 import { deckFromDocumentHtml, textRunsFromElement } from "../lib/deck/deckFromDocument";
+import { deckFontStack, deckRegionFit, type DeckTextFit } from "../lib/deck/deckTextFit";
+import {
+  applyDeckTextSize,
+  deckLayoutSizeAt,
+  deckRangeFromOffsets,
+  deckTextOffsets,
+  deckTextSizeOf,
+  resetDeckTextColor,
+  styleDeckTextPieces,
+  type DeckSizeChange,
+  type DeckTextOffsets,
+} from "../lib/deck/deckTextFormat";
+import {
+  auditDeckLayout,
+  changedDeckSlideIds,
+  deckFitIssueSlides,
+  deckFitScore,
+  deckLayoutCapacityLine,
+  deckRegionCapacity,
+  describeDeckFitIssues,
+  type DeckFitIssue,
+} from "../lib/deck/deckLayoutCheck";
 import { BUILT_IN_DECK_TEMPLATES, builtInDeckTemplate } from "../lib/deck/deckTemplates";
 import { parseDeckTemplate, type DeckTemplateParseResponse } from "../lib/api/deckTemplates";
 import { markdownOutlineFromDeck } from "../lib/deck/deckToDocument";
@@ -465,6 +532,8 @@ type DraftTemplate = {
   keywords: string[];
   requiresCitations: boolean;
   requiresApproval: boolean;
+  /** Page format the template's drafts are set in (lib/documentFormats). */
+  formatId?: string;
   sourceHtml?: string;
   sourceFilename?: string;
 };
@@ -499,16 +568,6 @@ type CodeArtifact = {
   extension: string;
   filename: string;
   content: string;
-};
-
-type DraftComposition = {
-  content: string;
-  html?: string;
-  summary: string;
-  title?: string;
-  requiresCitations?: boolean;
-  requiresApproval?: boolean;
-  codeArtifact?: CodeArtifact | null;
 };
 
 export type DraftImportPayload = {
@@ -576,6 +635,32 @@ type DeckAiSelectionOffer = {
   text: string;
   top: number;
   left: number;
+};
+
+/** The picture blade: which slide it serves (region null when the slide's
+ * layout holds no picture), the description, and the work in flight. */
+type DeckPictureDialogState = {
+  open: boolean;
+  slideId: string | null;
+  region: "image" | null;
+  prompt: string;
+  working: false | "generate" | "web" | "upload";
+  error: string | null;
+  /** Web image candidates for the current description. */
+  results: DeckWebImageChoice[] | null;
+  /** The author typed the description (it then serves as alt text). */
+  promptEdited: boolean;
+};
+
+const CLOSED_DECK_PICTURE_DIALOG: DeckPictureDialogState = {
+  open: false,
+  slideId: null,
+  region: null,
+  prompt: "",
+  working: false,
+  error: null,
+  results: null,
+  promptEdited: false,
 };
 
 type ProgressiveDraftTiming = {
@@ -801,6 +886,16 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
 
 const OUTLINE_PREFERENCE_KEY = "aperture.drafts.outline";
 const ZOOM_PREFERENCE_KEY = "aperture.drafts.zoom";
+const DECK_BLADE_WIDTH_PREFERENCE_KEY = "aperture.drafts.deckBladeWidth";
+const DECK_LAYOUT_STRIP_PREFERENCE_KEY = "aperture.drafts.deckLayoutStrip";
+
+/** Status lines for the slide text toolbar's toggles. */
+const DECK_TEXT_COMMAND_LABELS: Record<DeckTextCommand, string> = {
+  bold: "Bold toggled",
+  italic: "Italic toggled",
+  underline: "Underline toggled",
+  strikeThrough: "Strikethrough toggled",
+};
 const FIND_PAINT = "aperture-find";
 const FIND_CURRENT_PAINT = "aperture-find-current";
 
@@ -918,279 +1013,929 @@ const DRAFT_ATTACHMENT_CONNECTORS: DraftConnectorOption[] = [
   },
 ];
 
-const INITIAL_DOCUMENT = `Client Update Draft
+const CLIENT_UPDATE_TEMPLATE = `[Month Day, Year]
 
-Matter: Anderson v. Northstar Logistics
-Status as of June 28, 2026
+**PRIVILEGED & CONFIDENTIAL**
+**ATTORNEY-CLIENT COMMUNICATION**
 
-We reviewed the currently connected matter files and prepared this client-facing update for attorney review.
+**VIA EMAIL**
 
-Key points:
-- The discovery deadline remains July 12, 2026.
-- Opposing counsel produced a supplemental privilege log that needs a source check before it is described externally.
-- The draft motion should not be filed until the Litigation Playbook source check is complete.
+[Client Contact Name]
+[Title]
+[Client Legal Name]
+[Street Address]
+[City, State ZIP]
 
-Next steps:
-- Confirm the approval owner before sending.
-- Keep citations attached to each factual statement.
-- Remove any leftover internal notes before export.`;
+**Re: [Matter Name] — Status Update as of [Date]**
+
+Dear [Mr./Ms. Last Name]:
+
+We write to update you on [Matter Name] since our report of [date of last update]. This letter summarizes the developments since then, the deadlines ahead, and the decisions we need from you.
+
+## Summary
+
+[Two or three sentences stating where the matter stands and the single most important point for the client.]
+
+## Recent Developments
+
+- [Development, with its date and the document or event it comes from.]
+- [Development, with its date and the document or event it comes from.]
+
+## Upcoming Deadlines
+
+| Date | Event | Responsible |
+|---|---|---|
+| [Date] | [Filing, hearing, production, or closing step] | [Firm / Client] |
+| [Date] | [Filing, hearing, production, or closing step] | [Firm / Client] |
+
+## Decisions Needed
+
+1. [Decision required from you, with our recommendation and the date we need your answer.]
+2. [Decision required from you, with our recommendation and the date we need your answer.]
+
+## Next Steps
+
+[What we will do next, and when you will next hear from us.]
+
+Please contact me at [phone] or [email] with any questions.
+
+Very truly yours,
+
+[FIRM NAME]
+
+______________________________
+[Attorney Name]
+[Title]
+
+cc: [Name]`;
+
+const APPROVAL_EMAIL_TEMPLATE = `TO: [Approving Attorney]
+FROM: [Drafting Attorney]
+CC: [Matter Team]
+DATE: [Month Day, Year]
+SUBJECT: Approval requested — [Client / Matter]: [Work Product Title]
+
+[Approving Attorney first name]:
+
+Please review and approve [the attached / the linked] [work product] for delivery to [recipient] by [date and time].
+
+## What Is Ready for Review
+
+- **Document:** [Exact title, version, and date]
+- **Recipient:** [Name and organization]
+- **Delivery method:** [Email / client portal / court filing]
+
+## Source Checks Completed
+
+- [Source document checked, and by whom]
+- [Citations and defined terms verified against the source]
+- [Privilege and confidentiality review completed]
+
+## Open Items
+
+- [Open item, owner, and due date]
+
+## Approval
+
+Please reply “Approved” or send edits by [deadline]. Once approved, [Drafting Attorney] will deliver the document and record the approval in the matter file.
+
+[Drafting Attorney]
+[Title] | [Phone]`;
+
+const INVESTMENT_MEMO_TEMPLATE = `# Investment Memorandum: [Company / Asset]
+
+TO: Investment Committee
+FROM: [Deal Team]
+DATE: [Month Day, Year]
+RE: Recommendation to [approve diligence / submit a letter of intent / approve the investment] — [Project Name]
+
+## Recommendation
+
+[One paragraph: the recommendation, the proposed investment amount and structure, and the decision requested from the Committee.]
+
+## Transaction Overview
+
+| Term | Proposed |
+|---|---|
+| Enterprise value | $[amount] |
+| Equity investment | $[amount] |
+| Ownership | [percentage]% |
+| Structure | [Majority recapitalization / minority growth / asset purchase] |
+| Expected closing | [Date] |
+
+## Company Overview
+
+[What the company does, its customers, its market position, and its management team.]
+
+## Investment Thesis
+
+1. **[Thesis point].** [Evidence supporting it.]
+2. **[Thesis point].** [Evidence supporting it.]
+3. **[Thesis point].** [Evidence supporting it.]
+
+## Financial Summary
+
+| ($ in thousands) | FY[Year − 2] | FY[Year − 1] | FY[Year] | LTM |
+|---|---:|---:|---:|---:|
+| Revenue | [ ] | [ ] | [ ] | [ ] |
+| Gross margin % | [ ] | [ ] | [ ] | [ ] |
+| EBITDA | [ ] | [ ] | [ ] | [ ] |
+| EBITDA margin % | [ ] | [ ] | [ ] | [ ] |
+
+## Valuation and Returns
+
+[Entry multiple, key assumptions, base / downside / upside cases, and expected IRR and MOIC.]
+
+## Key Risks and Mitigants
+
+| Risk | Mitigant |
+|---|---|
+| [Commercial risk] | [Mitigant] |
+| [Financial risk] | [Mitigant] |
+| [Legal or regulatory risk] | [Mitigant] |
+
+## Diligence Plan
+
+- [Workstream, adviser, and completion date]
+- [Workstream, adviser, and completion date]
+
+## Decision Requested
+
+[The specific approval requested from the Committee and any conditions attached to it.]`;
+
+const BOARD_UPDATE_TEMPLATE = `# Board Update: [Reporting Period]
+
+[Company Name]
+Prepared for the Board of Directors — Meeting of [Month Day, Year]
+
+## Executive Summary
+
+[Three to five sentences on performance against plan, the most important developments, and what the Board is asked to decide.]
+
+## Key Metrics
+
+| Metric | [Period] | Prior Period | Plan | Variance to Plan |
+|---|---:|---:|---:|---:|
+| Revenue | $[ ] | $[ ] | $[ ] | [ ]% |
+| Gross margin | [ ]% | [ ]% | [ ]% | [ ] pts |
+| Operating expenses | $[ ] | $[ ] | $[ ] | [ ]% |
+| EBITDA | $[ ] | $[ ] | $[ ] | [ ]% |
+| Cash balance | $[ ] | $[ ] | $[ ] | — |
+| Runway (months) | [ ] | [ ] | [ ] | — |
+
+## Business Highlights
+
+- [Customer, product, or operational highlight]
+- [Customer, product, or operational highlight]
+
+## Financial Review
+
+[Revenue, margin, and spending against plan, with the reasons for material variances.]
+
+## Risks and Mitigations
+
+| Risk | Impact | Mitigation | Owner |
+|---|---|---|---|
+| [Risk] | [High / Medium / Low] | [Mitigation] | [Name] |
+
+## Decisions Requested
+
+1. **[Resolution]:** [What the Board is asked to approve, with the supporting rationale.]
+2. **[Resolution]:** [What the Board is asked to approve, with the supporting rationale.]`;
+
+const PROJECT_BRIEF_TEMPLATE = `# Project Brief: [Project Name]
+
+| Item | Detail |
+|---|---|
+| Project owner | [Name] |
+| Executive sponsor | [Name] |
+| Target completion | [Date] |
+| Budget | $[amount] |
+| Status | [Proposed / Approved / In progress] |
+
+## Objective
+
+[The outcome this project must achieve, stated so that success can be measured.]
+
+## Background
+
+[The problem or opportunity, and why it matters now.]
+
+## Scope
+
+**In scope**
+- [Item]
+- [Item]
+
+**Out of scope**
+- [Item]
+
+## Deliverables
+
+- [Deliverable and acceptance criteria]
+- [Deliverable and acceptance criteria]
+
+## Milestones
+
+| Milestone | Owner | Target Date |
+|---|---|---|
+| [Milestone] | [Name] | [Date] |
+| [Milestone] | [Name] | [Date] |
+
+## Risks and Dependencies
+
+- [Risk or dependency, and how it will be managed]
+
+## Success Measures
+
+- [Metric and target]
+
+## Approvals
+
+| Role | Name | Date |
+|---|---|---|
+| Sponsor | [Name] | [Date] |
+| Owner | [Name] | [Date] |`;
+
+const RESEARCH_PAPER_TEMPLATE = `# [Title of the Paper]
+
+[Author Name]
+[Department or Organization]
+[Course or Publication]
+[Instructor or Editor]
+[Month Day, Year]
+
+## Abstract
+
+[A 150–250 word summary of the question, the method, the principal findings, and the conclusion.]
+
+## Introduction
+
+[Introduce the topic, explain why it matters, and end with the thesis the paper defends.]
+
+## Background
+
+[The context and prior work a reader needs to follow the analysis.]
+
+## Analysis
+
+### [First Line of Argument]
+
+[Develop the point with evidence, and cite each source in the text.]
+
+### [Second Line of Argument]
+
+[Develop the point with evidence, and address the strongest counterargument.]
+
+## Conclusion
+
+[Restate the thesis in light of the analysis and state its implications.]
+
+## References
+
+[Author, A. A. (Year). Title of the work. Publisher. https://doi.org/xxxx]
+[Author, B. B., & Author, C. C. (Year). Title of the article. Journal Name, Volume(Issue), pages. https://doi.org/xxxx]`;
+
+const SCREENPLAY_TEMPLATE = `# [TITLE]
+
+FADE IN:
+
+EXT. [LOCATION] - DAY
+
+[Action: what we see and hear, in the present tense, in short paragraphs.]
+
+[CHARACTER NAME]
+(beat)
+[Dialogue.]
+
+[SECOND CHARACTER]
+[Dialogue.]
+
+INT. [LOCATION] - NIGHT
+
+[Action.]
+
+[CHARACTER NAME]
+[Dialogue.]
+
+CUT TO:
+
+EXT. [LOCATION] - CONTINUOUS
+
+[Action.]
+
+FADE OUT.`;
+
+const SERVICES_AGREEMENT_TEMPLATE = `# SERVICES AGREEMENT
+
+This Services Agreement (this “Agreement”) is entered into as of [Effective Date] (the “Effective Date”) by and between [Provider Legal Name], a [State] [entity type] with its principal office at [Address] (“Provider”), and [Client Legal Name], a [State] [entity type] with its principal office at [Address] (“Client”). Provider and Client are each a “Party” and together the “Parties.”
+
+## RECITALS
+
+WHEREAS, Provider is in the business of providing [describe the services]; and
+
+WHEREAS, Client wishes to engage Provider to provide such services, and Provider wishes to provide them, on the terms of this Agreement.
+
+NOW, THEREFORE, in consideration of the mutual covenants in this Agreement and other good and valuable consideration, the receipt and sufficiency of which are acknowledged, the Parties agree as follows:
+
+## ARTICLE 1. DEFINITIONS
+
+### 1.1 Affiliate
+
+“Affiliate” means any entity that directly or indirectly controls, is controlled by, or is under common control with a Party, where “control” means ownership of more than fifty percent (50%) of the voting interests of the entity.
+
+### 1.2 Deliverables
+
+“Deliverables” means the documents, materials, and other work product that Provider delivers to Client under a Statement of Work.
+
+### 1.3 Services
+
+“Services” means the services described in Exhibit A and in each Statement of Work.
+
+### 1.4 Statement of Work
+
+“Statement of Work” means a written statement of work signed by both Parties that references this Agreement.
+
+## ARTICLE 2. SERVICES
+
+### 2.1 Performance
+
+Provider shall perform the Services in a professional and workmanlike manner, consistent with generally accepted industry standards, and in accordance with this Agreement and each applicable Statement of Work.
+
+### 2.2 Statements of Work
+
+Each Statement of Work will describe, as applicable:
+(a) the scope of the Services and the Deliverables;
+(b) the schedule and any milestones;
+(c) the fees and any payment milestones; and
+(d) each Party's project contact.
+
+### 2.3 Order of Precedence
+
+If this Agreement conflicts with a Statement of Work, this Agreement controls unless the Statement of Work expressly identifies the provision of this Agreement it supersedes for that Statement of Work.
+
+### 2.4 Change Orders
+
+Either Party may request a change to a Statement of Work. No change is binding until it is set out in a written change order signed by both Parties.
+
+## ARTICLE 3. TERM AND TERMINATION
+
+### 3.1 Term
+
+This Agreement begins on the Effective Date and continues for [one (1) year] (the “Initial Term”). It then renews automatically for successive [one (1) year] periods (each, a “Renewal Term”) unless either Party gives written notice of non-renewal at least [thirty (30)] days before the end of the then-current term.
+
+### 3.2 Termination for Convenience
+
+Client may terminate this Agreement or any Statement of Work for any reason on [thirty (30)] days' written notice to Provider.
+
+### 3.3 Termination for Cause
+
+Either Party may terminate this Agreement on written notice if the other Party:
+(a) materially breaches this Agreement and fails to cure the breach within [thirty (30)] days after receiving written notice describing it; or
+(b) becomes insolvent, makes a general assignment for the benefit of creditors, or becomes the subject of a bankruptcy, receivership, or similar proceeding that is not dismissed within sixty (60) days.
+
+### 3.4 Effect of Termination
+
+On termination, Client shall pay Provider for Services performed through the effective date of termination, and each Party shall return or destroy the other Party's Confidential Information as required by Section 6.4. Articles 4 through 9 and Article 11 survive termination.
+
+## ARTICLE 4. FEES AND PAYMENT
+
+### 4.1 Fees
+
+Client shall pay Provider the fees stated in each Statement of Work.
+
+### 4.2 Invoices and Payment
+
+Provider shall invoice Client [monthly in arrears]. Client shall pay each undisputed invoice within [thirty (30)] days after receipt.
+
+### 4.3 Disputed Amounts
+
+Client may withhold any invoiced amount it disputes in good faith by notifying Provider of the dispute and its basis before the payment due date. The Parties shall work together in good faith to resolve the dispute within [fifteen (15)] days.
+
+### 4.4 Expenses
+
+Client shall reimburse Provider for reasonable out-of-pocket expenses that Client approved in advance and that Provider incurs in performing the Services, supported by receipts.
+
+### 4.5 Taxes
+
+Fees exclude sales, use, and similar taxes, which Client shall pay, other than taxes based on Provider's net income.
+
+## ARTICLE 5. INTELLECTUAL PROPERTY
+
+### 5.1 Deliverables
+
+On Client's payment in full for a Deliverable, Provider assigns to Client all right, title, and interest in that Deliverable, excluding Provider Materials.
+
+### 5.2 Provider Materials
+
+Provider retains all rights in the tools, methods, know-how, and materials it owned before the Effective Date or develops independently of this Agreement (“Provider Materials”). To the extent Provider Materials are incorporated into a Deliverable, Provider grants Client a non-exclusive, perpetual, royalty-free license to use them as part of that Deliverable.
+
+## ARTICLE 6. CONFIDENTIALITY
+
+### 6.1 Confidential Information
+
+“Confidential Information” means all non-public information disclosed by one Party (the “Disclosing Party”) to the other (the “Receiving Party”) that is marked confidential or that a reasonable person would understand to be confidential.
+
+### 6.2 Exclusions
+
+Confidential Information does not include information that:
+(a) is or becomes publicly available through no fault of the Receiving Party;
+(b) was lawfully known to the Receiving Party before disclosure;
+(c) is lawfully received from a third party without a duty of confidentiality; or
+(d) is independently developed without use of the Disclosing Party's Confidential Information.
+
+### 6.3 Obligations
+
+The Receiving Party shall use the Disclosing Party's Confidential Information only to perform its obligations or exercise its rights under this Agreement, and shall protect it with at least reasonable care. The Receiving Party may disclose Confidential Information only to its employees and contractors who need to know it and are bound by confidentiality obligations no less protective than this Article 6, or as required by law after giving the Disclosing Party prompt notice where legally permitted.
+
+### 6.4 Return or Destruction
+
+On the Disclosing Party's written request, the Receiving Party shall promptly return or destroy the Disclosing Party's Confidential Information, except copies retained in routine backups or as required by law, which remain subject to this Article 6.
+
+## ARTICLE 7. REPRESENTATIONS AND WARRANTIES
+
+### 7.1 Mutual
+
+Each Party represents and warrants that it is duly organized and in good standing, that it has full authority to enter into and perform this Agreement, and that its performance will not violate any agreement by which it is bound.
+
+### 7.2 Services Warranty
+
+Provider warrants that the Services will conform in all material respects to the applicable Statement of Work for [ninety (90)] days after performance. Client's exclusive remedy, and Provider's sole obligation, for breach of this warranty is for Provider to re-perform the non-conforming Services at no additional charge.
+
+### 7.3 Disclaimer
+
+EXCEPT AS EXPRESSLY STATED IN THIS AGREEMENT, NEITHER PARTY MAKES ANY OTHER WARRANTY, EXPRESS OR IMPLIED, INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
+
+## ARTICLE 8. INDEMNIFICATION
+
+### 8.1 By Provider
+
+Provider shall defend, indemnify, and hold harmless Client and its officers, directors, and employees from and against any third-party claim, and the resulting losses, damages, and reasonable attorneys' fees, arising out of:
+(a) Provider's gross negligence or willful misconduct; or
+(b) any allegation that a Deliverable infringes a third party's intellectual property rights.
+
+### 8.2 By Client
+
+Client shall defend, indemnify, and hold harmless Provider and its officers, directors, and employees from and against any third-party claim, and the resulting losses, damages, and reasonable attorneys' fees, arising out of materials Client provides to Provider for use in the Services.
+
+### 8.3 Procedure
+
+The indemnified Party shall give the indemnifying Party prompt written notice of the claim, sole control of its defense and settlement (except that no settlement may impose an obligation on the indemnified Party without its written consent), and reasonable cooperation at the indemnifying Party's expense.
+
+## ARTICLE 9. LIMITATION OF LIABILITY
+
+### 9.1 Exclusion of Damages
+
+EXCEPT FOR A PARTY'S INDEMNIFICATION OBLIGATIONS OR BREACH OF ARTICLE 6, NEITHER PARTY IS LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, ARISING OUT OF THIS AGREEMENT, EVEN IF ADVISED OF THEIR POSSIBILITY.
+
+### 9.2 Cap on Liability
+
+EXCEPT FOR A PARTY'S INDEMNIFICATION OBLIGATIONS OR BREACH OF ARTICLE 6, EACH PARTY'S TOTAL LIABILITY ARISING OUT OF THIS AGREEMENT WILL NOT EXCEED THE FEES PAID AND PAYABLE TO PROVIDER UNDER THIS AGREEMENT IN THE TWELVE (12) MONTHS BEFORE THE EVENT GIVING RISE TO THE LIABILITY.
+
+## ARTICLE 10. INSURANCE
+
+### 10.1 Required Coverage
+
+During the term of this Agreement, Provider shall maintain commercial general liability insurance of at least $[amount] per occurrence and professional liability insurance of at least $[amount] per claim, with insurers rated A- or better by A.M. Best, and shall provide certificates of insurance on request.
+
+## ARTICLE 11. GENERAL PROVISIONS
+
+### 11.1 Independent Contractor
+
+Provider is an independent contractor. Nothing in this Agreement creates a partnership, joint venture, employment, or agency relationship between the Parties.
+
+### 11.2 Notices
+
+Notices must be in writing and delivered by hand, by nationally recognized overnight courier, or by email with confirmation of transmission, to the addresses below or to another address a Party designates by notice. Notices are effective on receipt.
+
+Provider: [Name, Title, Address, Email]
+Client: [Name, Title, Address, Email]
+
+### 11.3 Assignment
+
+Neither Party may assign this Agreement without the other Party's prior written consent, except to a successor in a merger, acquisition, or sale of all or substantially all of its assets, on notice to the other Party. Any other attempted assignment is void.
+
+### 11.4 Governing Law and Venue
+
+This Agreement is governed by the laws of the State of [State], without regard to its conflict-of-laws rules. The state and federal courts located in [County, State] have exclusive jurisdiction over any dispute arising out of this Agreement, and each Party consents to their personal jurisdiction.
+
+### 11.5 Force Majeure
+
+Neither Party is liable for a delay or failure to perform, other than a payment obligation, caused by events beyond its reasonable control, if it gives prompt notice and uses reasonable efforts to resume performance.
+
+### 11.6 Entire Agreement; Amendment
+
+This Agreement, together with its Exhibits and each Statement of Work, is the entire agreement of the Parties on its subject matter and supersedes all prior agreements and understandings. It may be amended only in a writing signed by both Parties.
+
+### 11.7 Waiver
+
+No waiver is effective unless it is in writing. A Party's failure to enforce a provision is not a waiver of its right to enforce that provision later.
+
+### 11.8 Severability
+
+If any provision is held unenforceable, it will be enforced to the maximum extent permissible, and the remaining provisions remain in full force and effect.
+
+### 11.9 Counterparts; Electronic Signatures
+
+This Agreement may be executed in counterparts, each of which is an original and all of which together are one instrument. Signatures delivered electronically or by PDF are effective as originals.
+
+[Signature page follows.]
+
+---
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+**[PROVIDER LEGAL NAME]**
+
+By: ______________________
+Name: ____________________
+Title: ___________________
+Date: ____________________
+
+**[CLIENT LEGAL NAME]**
+
+By: ______________________
+Name: ____________________
+Title: ___________________
+Date: ____________________
+
+---
+
+## EXHIBIT A
+
+## DESCRIPTION OF SERVICES
+
+[Describe the Services, the Deliverables and their acceptance criteria, and the schedule.]`;
+
+const MUTUAL_NDA_TEMPLATE = `# MUTUAL NONDISCLOSURE AGREEMENT
+
+This Mutual Nondisclosure Agreement (this “Agreement”) is entered into as of [Effective Date] (the “Effective Date”) by and between [Party A Legal Name], a [State] [entity type] with its principal office at [Address] (“[Party A Short Name]”), and [Party B Legal Name], a [State] [entity type] with its principal office at [Address] (“[Party B Short Name]”). Each is a “Party” and together they are the “Parties.”
+
+## RECITALS
+
+WHEREAS, the Parties wish to evaluate, negotiate, or carry out [describe the business purpose] (the “Purpose”); and
+
+WHEREAS, in connection with the Purpose, each Party may disclose Confidential Information to the other and wishes to protect it on the terms of this Agreement.
+
+NOW, THEREFORE, in consideration of the mutual covenants in this Agreement, the Parties agree as follows:
+
+## ARTICLE 1. DEFINITIONS
+
+### 1.1 Confidential Information
+
+“Confidential Information” means all non-public business, technical, financial, and other information that a Party (the “Disclosing Party”) discloses to the other Party (the “Receiving Party”), in any form, that is marked or identified as confidential or that a reasonable person would understand to be confidential given its nature and the circumstances of its disclosure.
+
+### 1.2 Affiliate
+
+“Affiliate” means any entity that directly or indirectly controls, is controlled by, or is under common control with a Party.
+
+### 1.3 Exclusions
+
+Confidential Information does not include information that the Receiving Party can show by written records:
+(a) is or becomes generally available to the public through no breach of this Agreement;
+(b) was known to the Receiving Party without restriction before the Disclosing Party disclosed it;
+(c) is received from a third party that is not under a duty of confidentiality to the Disclosing Party; or
+(d) is independently developed by the Receiving Party without use of or reference to the Disclosing Party's Confidential Information.
+
+## ARTICLE 2. OBLIGATIONS
+
+### 2.1 Use and Protection
+
+The Receiving Party shall:
+(a) use Confidential Information solely for the Purpose;
+(b) protect it with at least the degree of care it uses for its own information of similar importance, and no less than reasonable care; and
+(c) not disclose it except as permitted by Section 2.2 or Section 2.3.
+
+### 2.2 Permitted Recipients
+
+The Receiving Party may disclose Confidential Information to its and its Affiliates' directors, officers, employees, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations at least as protective as this Agreement. The Receiving Party is responsible for any breach of this Agreement by those recipients.
+
+### 2.3 Compelled Disclosure
+
+If the Receiving Party is required by law, regulation, or court order to disclose Confidential Information, it shall, to the extent legally permitted, give the Disclosing Party prompt written notice and reasonable assistance so that the Disclosing Party may seek a protective order, and shall disclose only the portion it is legally required to disclose.
+
+## ARTICLE 3. TERM AND RETURN OF MATERIALS
+
+### 3.1 Term
+
+This Agreement governs disclosures made during the [two (2)] years after the Effective Date. The Receiving Party's obligations for each item of Confidential Information continue for [three (3)] years after its disclosure and, for trade secrets, for as long as they remain trade secrets under applicable law.
+
+### 3.2 Return or Destruction
+
+Within [ten (10)] business days after the Disclosing Party's written request, the Receiving Party shall return or destroy the Disclosing Party's Confidential Information and certify in writing that it has done so, except copies retained in routine backups or as required by law, which remain subject to this Agreement.
+
+## ARTICLE 4. GENERAL PROVISIONS
+
+### 4.1 No License or Obligation
+
+All Confidential Information remains the property of the Disclosing Party. Nothing in this Agreement grants a license under any patent, copyright, or other intellectual property right, or obligates either Party to enter into any further agreement or transaction.
+
+### 4.2 No Warranty
+
+CONFIDENTIAL INFORMATION IS PROVIDED “AS IS.” NEITHER PARTY MAKES ANY WARRANTY AS TO ITS ACCURACY OR COMPLETENESS.
+
+### 4.3 Remedies
+
+Unauthorized use or disclosure of Confidential Information may cause the Disclosing Party irreparable harm for which damages would be an inadequate remedy. The Disclosing Party is entitled to seek injunctive relief, without posting a bond, in addition to any other remedy available at law or in equity.
+
+### 4.4 Governing Law and Venue
+
+This Agreement is governed by the laws of the State of [State], without regard to its conflict-of-laws rules. The state and federal courts located in [County, State] have exclusive jurisdiction over any dispute arising out of this Agreement.
+
+### 4.5 Entire Agreement; Amendment; Assignment
+
+This Agreement is the entire agreement of the Parties on its subject matter and supersedes all prior understandings. It may be amended only in a writing signed by both Parties. Neither Party may assign this Agreement without the other Party's prior written consent.
+
+### 4.6 Counterparts; Electronic Signatures
+
+This Agreement may be executed in counterparts, each of which is an original and all of which together are one instrument. Electronic and PDF signatures are effective as originals.
+
+[Signature page follows.]
+
+---
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+**[PARTY A LEGAL NAME]**
+
+By: ______________________
+Name: ____________________
+Title: ___________________
+Date: ____________________
+
+**[PARTY B LEGAL NAME]**
+
+By: ______________________
+Name: ____________________
+Title: ___________________
+Date: ____________________`;
+
+const AMENDMENT_TEMPLATE = `# [FIRST] AMENDMENT TO [AGREEMENT NAME]
+
+This [First] Amendment (this “Amendment”) is entered into as of [Amendment Effective Date] (the “Amendment Effective Date”) by and between [Party A Legal Name], a [State] [entity type] (“[Party A Short Name]”), and [Party B Legal Name], a [State] [entity type] (“[Party B Short Name]”). Each is a “Party” and together they are the “Parties.”
+
+## RECITALS
+
+WHEREAS, the Parties are parties to that certain [Agreement Name] dated as of [Original Agreement Date] (as amended before the Amendment Effective Date, the “Agreement”); and
+
+WHEREAS, the Parties wish to amend the Agreement as set forth in this Amendment.
+
+NOW, THEREFORE, in consideration of the mutual covenants in this Amendment and other good and valuable consideration, the receipt and sufficiency of which are acknowledged, the Parties agree as follows:
+
+## AGREEMENT
+
+### 1.1 Defined Terms
+
+Capitalized terms used but not defined in this Amendment have the meanings given to them in the Agreement.
+
+### 1.2 Amendment to Section [X]
+
+Section [X] of the Agreement is deleted in its entirety and replaced with the following:
+
+> “[X]. [Replacement text of the section.]”
+
+### 1.3 Amendment to Section [Y]
+
+Section [Y] of the Agreement is amended by adding the following sentence at the end of that Section: “[Added text.]”
+
+### 1.4 Effect of Amendment
+
+Except as expressly modified by this Amendment, the Agreement remains unchanged and in full force and effect. If this Amendment conflicts with the Agreement, this Amendment controls. From the Amendment Effective Date, each reference in the Agreement to “this Agreement” means the Agreement as amended by this Amendment.
+
+### 1.5 Governing Law
+
+This Amendment is governed by the law that governs the Agreement.
+
+### 1.6 Counterparts; Electronic Signatures
+
+This Amendment may be executed in counterparts, each of which is an original and all of which together are one instrument. Electronic and PDF signatures are effective as originals.
+
+IN WITNESS WHEREOF, the Parties have executed this Amendment as of the Amendment Effective Date.
+
+**[PARTY A LEGAL NAME]**
+
+By: ______________________
+Name: ____________________
+Title: ___________________
+Date: ____________________
+
+**[PARTY B LEGAL NAME]**
+
+By: ______________________
+Name: ____________________
+Title: ___________________
+Date: ____________________`;
+
+const IMPLEMENTATION_PLAN_TEMPLATE = `# Implementation Plan: [Feature Name]
+
+| Item | Detail |
+|---|---|
+| Owner | [Name] |
+| Reviewers | [Names] |
+| Target release | [Version or date] |
+| Status | [Draft / In review / Approved] |
+
+## Summary
+
+[What will ship and why, in two or three sentences.]
+
+## Goals
+
+- [User-facing outcome]
+- [Measurable success criterion]
+
+## Non-Goals
+
+- [What is explicitly out of scope]
+
+## Requirements
+
+1. [Functional requirement]
+2. [Data or API requirement]
+3. [Accessibility and responsive behavior]
+
+## Design
+
+### Architecture
+
+[The components involved, the data flow, and where the change lives.]
+
+### Data Model
+
+[Schema or state changes, and the migration that applies them.]
+
+### API Changes
+
+| Endpoint | Method | Change |
+|---|---|---|
+| [/api/path] | [GET / POST] | [Description] |
+
+## Files to Change
+
+- [path/to/file] — [the change]
+
+## Testing
+
+- **Unit:** [cases]
+- **Integration:** [flows]
+- **Browser QA:** [steps and viewports]
+
+## Rollout
+
+1. [Feature flag or migration step]
+2. [Deploy and verify]
+3. [Rollback plan]
+
+## Risks and Open Questions
+
+- [Risk and its mitigation]`;
 
 const BUILT_IN_DRAFT_TEMPLATES: DraftTemplate[] = [
   {
     id: "legal-client-update",
     name: "Client Update",
     category: "Legal",
-    description: "Client-facing matter update with source checks and approval gates.",
+    description: "Privileged status letter to a client: developments, deadlines, and decisions needed.",
     defaultTitle: "Client Update Draft",
-    promptHint: "Draft a client update for Anderson v. Northstar Logistics.",
-    body: INITIAL_DOCUMENT,
+    promptHint: "Draft a client update letter on the status of a matter.",
+    body: CLIENT_UPDATE_TEMPLATE,
     keywords: ["legal", "client", "matter", "update", "attorney", "approval"],
     requiresCitations: true,
     requiresApproval: true,
+    formatId: "legal-letter",
   },
   {
     id: "legal-approval-email",
     name: "Approval Email",
     category: "Legal",
-    description: "Internal approval note before sending external client work product.",
+    description: "Internal request to approve work product before it goes to a client or court.",
     defaultTitle: "Approval Email Draft",
     promptHint: "Draft an approval email for an external client update.",
-    body: `Approval Email Draft
-
-To: [Approver]
-Subject: Approval requested: [Client / Matter]
-
-Summary:
-- [Describe what is ready for review.]
-- [List source materials checked.]
-- [Identify the exact client-facing artifact.]
-
-Approval request:
-Please review the attached draft and confirm whether it is approved for external delivery.
-
-Open items:
-- [Decision needed]
-- [Citation or source check needed]`,
+    body: APPROVAL_EMAIL_TEMPLATE,
     keywords: ["approval", "email", "client", "review", "send"],
     requiresCitations: true,
     requiresApproval: true,
-  },
-  {
-    id: "finance-investment-memo",
-    name: "Investment Memo",
-    category: "Finance",
-    description: "Investment thesis, financial snapshot, risks, and next steps.",
-    defaultTitle: "Investment Memo Draft",
-    promptHint: "Draft an investment memo for a software services acquisition.",
-    body: `Investment Memo Draft
-
-Opportunity: [Company / Asset]
-Prepared for: [Committee / Sponsor]
-
-Executive summary:
-- [One-paragraph investment recommendation.]
-
-Investment thesis:
-- [Market or strategic rationale]
-- [Financial rationale]
-- [Operational value creation angle]
-
-Financial snapshot:
-- Revenue: [amount / period]
-- EBITDA or margin: [amount / percentage]
-- Growth profile: [trend]
-- Key assumptions: [drivers]
-
-Risks and diligence:
-- [Commercial risk]
-- [Financial risk]
-- [Legal / regulatory risk]
-
-Decision needed:
-- [Approve diligence, proceed to LOI, pause, or decline]`,
-    keywords: ["finance", "investment", "memo", "deal", "acquisition", "ebitda", "model"],
-    requiresCitations: false,
-    requiresApproval: false,
-  },
-  {
-    id: "finance-board-update",
-    name: "Board Update",
-    category: "Finance",
-    description: "Operating and finance update for executives or board review.",
-    defaultTitle: "Board Update Draft",
-    promptHint: "Draft a board update for Q2 performance and cash runway.",
-    body: `Board Update Draft
-
-Reporting period: [Period]
-Audience: [Board / Executive team]
-
-Highlights:
-- [Business performance highlight]
-- [Financial performance highlight]
-- [Operational progress]
-
-Metrics:
-- Revenue: [amount]
-- Gross margin: [percentage]
-- Cash balance / runway: [amount / months]
-- Pipeline or backlog: [amount]
-
-Risks:
-- [Risk]
-- [Mitigation]
-
-Asks:
-- [Decision, approval, or guidance requested]`,
-    keywords: ["finance", "board", "update", "performance", "runway", "cfo"],
-    requiresCitations: false,
-    requiresApproval: false,
-  },
-  {
-    id: "business-project-brief",
-    name: "Project Brief",
-    category: "Business",
-    description: "General-purpose business brief for initiatives, launches, and operations.",
-    defaultTitle: "Project Brief Draft",
-    promptHint: "Draft a project brief for a new AI onboarding workflow.",
-    body: `Project Brief Draft
-
-Project: [Name]
-Owner: [Owner]
-
-Objective:
-[State the outcome this project should achieve.]
-
-Background:
-[Explain the current problem or opportunity.]
-
-Scope:
-- In scope: [items]
-- Out of scope: [items]
-
-Milestones:
-- [Milestone and date]
-- [Milestone and date]
-
-Risks:
-- [Risk and mitigation]
-
-Next actions:
-- [Action owner and deadline]`,
-    keywords: ["business", "project", "brief", "initiative", "launch", "operations"],
-    requiresCitations: false,
-    requiresApproval: false,
-  },
-  {
-    id: "writing-research-paper",
-    name: "Research Paper",
-    category: "Writing",
-    description: "Long-form paper or essay with sections, thesis, analysis, and conclusion.",
-    defaultTitle: "Research Paper Draft",
-    promptHint: "Draft a research paper or essay on the requested topic.",
-    body: `Research Paper Draft
-
-Title: [Topic]
-
-Introduction:
-[Introduce the topic and thesis.]
-
-Background:
-[Explain the context the reader needs.]
-
-Analysis:
-[Develop the argument with evidence and examples.]
-
-Conclusion:
-[Close with the final takeaway.]`,
-    keywords: ["writing", "research", "paper", "essay", "article", "mla", "apa", "report"],
-    requiresCitations: false,
-    requiresApproval: false,
-  },
-  {
-    id: "writing-screenplay",
-    name: "Screenplay",
-    category: "Writing",
-    description: "Film or video script with scene headings, action, character names, and transitions.",
-    defaultTitle: "Screenplay Draft",
-    promptHint: "Draft a screenplay scene in standard script formatting.",
-    body: `Screenplay Draft
-
-SCENE: INT. LOCATION - DAY
-
-Action line describing what the audience sees.
-
-CHARACTER: CHARACTER NAME
-
-DIALOGUE: Dialogue goes here.
-
-TRANSITION: FADE OUT.`,
-    keywords: ["screenplay", "script", "film", "scene", "character", "dialogue", "fade"],
-    requiresCitations: false,
-    requiresApproval: false,
+    formatId: "legal-memo",
   },
   {
     id: "legal-contract",
     name: "Legal Contract",
     category: "Legal",
-    description: "Contract draft with parties, obligations, payment, term, confidentiality, and signatures.",
+    description: "Complete services agreement: recitals, numbered articles, indemnities, liability cap, and signature page.",
     defaultTitle: "Legal Contract Draft",
     promptHint: "Draft a legal contract for the requested transaction or relationship.",
-    body: `Legal Contract Draft
-
-Agreement:
-[Describe the agreement.]
-
-Parties:
-- [Party 1]
-- [Party 2]
-
-Terms:
-- [Obligation]
-- [Payment]
-- [Term]
-
-Signatures:
-[Signature blocks]`,
-    keywords: ["legal", "contract", "agreement", "terms", "party", "parties", "clause"],
+    body: SERVICES_AGREEMENT_TEMPLATE,
+    keywords: ["legal", "contract", "agreement", "terms", "party", "parties", "clause", "services", "msa"],
     requiresCitations: false,
     requiresApproval: true,
+    formatId: "legal-agreement",
+  },
+  {
+    id: "legal-mutual-nda",
+    name: "Mutual NDA",
+    category: "Legal",
+    description: "Mutual nondisclosure agreement with exclusions, compelled disclosure, and return of materials.",
+    defaultTitle: "Mutual Nondisclosure Agreement Draft",
+    promptHint: "Draft a mutual nondisclosure agreement.",
+    body: MUTUAL_NDA_TEMPLATE,
+    keywords: ["nda", "nondisclosure", "non-disclosure", "confidentiality"],
+    requiresCitations: false,
+    requiresApproval: true,
+    formatId: "legal-agreement",
+  },
+  {
+    id: "legal-amendment",
+    name: "Contract Amendment",
+    category: "Legal",
+    description: "Amendment to an existing agreement: recitals, replaced and added text, and effect of amendment.",
+    defaultTitle: "Amendment Draft",
+    promptHint: "Draft an amendment to an existing agreement.",
+    body: AMENDMENT_TEMPLATE,
+    keywords: ["amendment", "amend", "amending"],
+    requiresCitations: false,
+    requiresApproval: true,
+    formatId: "legal-agreement",
+  },
+  {
+    id: "finance-investment-memo",
+    name: "Investment Memo",
+    category: "Finance",
+    description: "Committee memo: recommendation, transaction terms, thesis, financials, and risks.",
+    defaultTitle: "Investment Memo Draft",
+    promptHint: "Draft an investment memo for a software services acquisition.",
+    body: INVESTMENT_MEMO_TEMPLATE,
+    keywords: ["finance", "investment", "memo", "deal", "acquisition", "ebitda", "model"],
+    requiresCitations: false,
+    requiresApproval: false,
+    formatId: "business-confidential",
+  },
+  {
+    id: "finance-board-update",
+    name: "Board Update",
+    category: "Finance",
+    description: "Board report: metrics against plan, highlights, risks, and resolutions requested.",
+    defaultTitle: "Board Update Draft",
+    promptHint: "Draft a board update for Q2 performance and cash runway.",
+    body: BOARD_UPDATE_TEMPLATE,
+    keywords: ["finance", "board", "update", "performance", "runway", "cfo"],
+    requiresCitations: false,
+    requiresApproval: false,
+    formatId: "business-confidential",
+  },
+  {
+    id: "business-project-brief",
+    name: "Project Brief",
+    category: "Business",
+    description: "Project charter: objective, scope, deliverables, milestones, and approvals.",
+    defaultTitle: "Project Brief Draft",
+    promptHint: "Draft a project brief for a new AI onboarding workflow.",
+    body: PROJECT_BRIEF_TEMPLATE,
+    keywords: ["business", "project", "brief", "initiative", "launch", "operations"],
+    requiresCitations: false,
+    requiresApproval: false,
+    formatId: "business-report",
+  },
+  {
+    id: "writing-research-paper",
+    name: "Research Paper",
+    category: "Writing",
+    description: "Paper with title block, abstract, sections, and references, double spaced.",
+    defaultTitle: "Research Paper Draft",
+    promptHint: "Draft a research paper or essay on the requested topic.",
+    body: RESEARCH_PAPER_TEMPLATE,
+    keywords: ["writing", "research", "paper", "essay", "article", "mla", "apa", "report"],
+    requiresCitations: false,
+    requiresApproval: false,
+    formatId: "academic-paper",
+  },
+  {
+    id: "writing-screenplay",
+    name: "Screenplay",
+    category: "Writing",
+    description: "Script in industry format: scene headings, action, character cues, dialogue, and transitions.",
+    defaultTitle: "Screenplay Draft",
+    promptHint: "Draft a screenplay scene in standard script formatting.",
+    body: SCREENPLAY_TEMPLATE,
+    keywords: ["screenplay", "script", "film", "scene", "character", "dialogue", "fade"],
+    requiresCitations: false,
+    requiresApproval: false,
+    formatId: "screenplay",
   },
   {
     id: "code-implementation-plan",
     name: "Implementation Plan",
     category: "Code",
-    description: "Engineering plan with requirements, files, tests, and rollout steps.",
+    description: "Engineering plan: requirements, design, files, tests, and rollout.",
     defaultTitle: "Implementation Plan Draft",
     promptHint: "Draft an implementation plan for a document editor feature.",
-    body: `Implementation Plan Draft
-
-Feature: [Name]
-
-Goal:
-[Describe what the shipped behavior must do.]
-
-Requirements:
-- [User-facing behavior]
-- [Data or API requirement]
-- [Accessibility / responsive requirement]
-
-Implementation notes:
-- Files to change: [paths]
-- State model: [state shape]
-- Edge cases: [cases]
-
-Verification:
-- Unit tests: [tests]
-- Browser QA: [flows]
-- Build / typecheck: [commands]
-
-Rollout:
-- [Deployment or migration note]`,
+    body: IMPLEMENTATION_PLAN_TEMPLATE,
     keywords: ["code", "implementation", "plan", "engineering", "feature", "tests"],
     requiresCitations: false,
     requiresApproval: false,
+    formatId: "standard",
   },
 ];
+
 
 function blankDraftVersion(): DraftVersion {
   const executedAt = new Date().toISOString();
@@ -1439,22 +2184,54 @@ export function DocumentAssistantWorkspace({
   const [draftKind, setDraftKind] = useState<"document" | "deck">("document");
   const [deckState, setDeckState] = useState<SlideDeck | null>(null);
   const [selectedSlideId, setSelectedSlideId] = useState<string | null>(null);
+  // The deck as last rendered, for work that finishes after an await (a
+  // picture landing must not roll back edits made while it was on its way).
+  const latestDeckRef = useRef(deckState);
+  latestDeckRef.current = deckState;
   const [deckUndoStack, setDeckUndoStack] = useState<string[]>([]);
   const [deckRedoStack, setDeckRedoStack] = useState<string[]>([]);
   const [deckModeDialogOpen, setDeckModeDialogOpen] = useState(false);
   const [deckLayoutMenuOpen, setDeckLayoutMenuOpen] = useState<"add" | "switch" | null>(null);
+  // The deck blade (layouts, pictures, AI slide edits) slides out from the
+  // editor's left seam; focus returns to the control that opened it.
+  const deckBladeTriggerRef = useRef<HTMLElement | null>(null);
+  const deckBladeReturnFocus = useCallback(() => deckBladeTriggerRef.current, []);
+  const [deckBladeWidth, setDeckBladeWidth] = useState(() => {
+    const stored = Number(readDraftPreference(DECK_BLADE_WIDTH_PREFERENCE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : DECK_BLADE_DEFAULT_WIDTH;
+  });
+  // Right edge of the docked blade; the stage column steps clear of it so the
+  // slide stays wholly in view beside the blade.
+  const [deckBladeEdge, setDeckBladeEdge] = useState<number | null>(null);
+  // The layouts-and-themes strip above the slide folds away to give the slide
+  // the height; short windows start with it folded.
+  const [deckLayoutStripOpen, setDeckLayoutStripOpen] = useState(() => {
+    const stored = readDraftPreference(DECK_LAYOUT_STRIP_PREFERENCE_KEY);
+    if (stored === "open" || stored === "closed") return stored === "open";
+    return (window.innerHeight || 900) >= 760;
+  });
+  const [deckStageInset, setDeckStageInset] = useState(0);
+  const deckStageColumnRef = useRef<HTMLDivElement | null>(null);
+  const assistantShellRef = useRef<HTMLElement | null>(null);
+  const deckBladeLeftEdge = useCallback(() => assistantShellRef.current?.getBoundingClientRect().left ?? 0, []);
+  // The slide text box the floating format toolbar serves, its formatting,
+  // and the last selection in it (kept for keyboard use of the toolbar).
+  const [deckTextTarget, setDeckTextTarget] = useState<{ slideId: string; region: string } | null>(null);
+  const [deckTextFormat, setDeckTextFormat] = useState<DeckTextToolbarFormat | null>(null);
+  const deckTextRangeRef = useRef<DeckTextOffsets | null>(null);
+  const deckTextTargetRef = useRef(deckTextTarget);
+  deckTextTargetRef.current = deckTextTarget;
   const [deckNotesOpen, setDeckNotesOpen] = useState(false);
   const [deckPresentation, setDeckPresentation] = useState<{ index: number; notesOpen: boolean } | null>(null);
   const deckPresentationOpenRef = useRef(false);
   deckPresentationOpenRef.current = deckPresentation !== null;
   const [deckDropIndex, setDeckDropIndex] = useState<number | null>(null);
-  const [deckImageDialog, setDeckImageDialog] = useState<{
-    open: boolean;
-    slideId: string | null;
-    prompt: string;
-    working: false | "generate" | "web";
-    error: string | null;
-  }>({ open: false, slideId: null, prompt: "", working: false, error: null });
+  const [deckImageDialog, setDeckImageDialog] = useState<DeckPictureDialogState>(CLOSED_DECK_PICTURE_DIALOG);
+  const deckPictureInputRef = useRef<HTMLInputElement | null>(null);
+  // Each picture action (upload, web search, generation) takes a ticket; a
+  // finished action updates the picture blade only if it is still the latest,
+  // so a slow result never lands on a slide chosen after it started.
+  const deckPictureRequestRef = useRef(0);
   const [selectedDeckTemplateId, setSelectedDeckTemplateId] = useState<string>(
     BUILT_IN_DECK_TEMPLATES[0].id,
   );
@@ -1661,6 +2438,7 @@ export function DocumentAssistantWorkspace({
   } | null>(null);
   useEffect(() => {
     setDeckActiveBlock(null);
+    setDeckTextTarget(null);
     deckResizeRef.current = null;
   }, [selectedSlideId, draftKind]);
   const indentDragRef = useRef<{
@@ -1768,6 +2546,51 @@ export function DocumentAssistantWorkspace({
     deckState?.theme.backgroundImage ||
       deckState?.slides.some((slide) => slide.background || slide.backgroundId),
   );
+  const selectedSlideIndex =
+    deckState && selectedSlide ? deckState.slides.findIndex((slide) => slide.id === selectedSlide.id) : -1;
+  // The deck blade shows one thing at a time: an AI slide edit, a layout
+  // gallery, or the picture panel.
+  const deckBladeKind: "ai" | "add" | "switch" | "picture" | null =
+    draftKind !== "deck" || !deckState || !selectedSlide || deckPresentation || deckSorterOpen
+      ? null
+      : deckAi
+        ? "ai"
+        : deckLayoutMenuOpen ?? (deckImageDialog.open && deckImageDialog.slideId === selectedSlide.id ? "picture" : null);
+  // The stage column steps clear of the docked blade: it keeps its place in
+  // the layout and takes a left margin up to the blade's right edge.
+  useLayoutEffect(() => {
+    const column = deckStageColumnRef.current;
+    if (!column || deckBladeEdge === null) {
+      setDeckStageInset(0);
+      return;
+    }
+    const naturalLeft = column.getBoundingClientRect().left - (parseFloat(window.getComputedStyle(column).marginLeft) || 0);
+    setDeckStageInset(Math.max(0, Math.round(deckBladeEdge + 12 - naturalLeft)));
+  }, [deckBladeEdge, viewportWidth, deckSorterOpen, draftKind]);
+  // The picture blade follows the selected slide: to its picture, or put
+  // away when the slide's layout holds none.
+  useEffect(() => {
+    if (!deckImageDialog.open || !selectedSlide || deckImageDialog.slideId === selectedSlide.id) return;
+    if (deckImageDialog.working) return;
+    if (selectedSlide.layout !== "image-caption") {
+      closeDeckImageDialog();
+      return;
+    }
+    openDeckImageDialog(selectedSlide.id, "image");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlide?.id]);
+  // The format toolbar follows the selection inside its text box.
+  useEffect(() => {
+    if (!deckTextTarget) {
+      setDeckTextFormat(null);
+      return undefined;
+    }
+    refreshDeckTextFormat();
+    if (typeof document.addEventListener !== "function") return undefined;
+    document.addEventListener("selectionchange", refreshDeckTextFormat);
+    return () => document.removeEventListener("selectionchange", refreshDeckTextFormat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckTextTarget, deckState]);
   const hasUnsavedEdits = Boolean(
     selectedVersion &&
       (documentTitle.trim() !== savedDocumentTitle.trim() || (draftKind === "deck"
@@ -1898,6 +2721,38 @@ export function DocumentAssistantWorkspace({
       : "Current version is saved.";
   const documentPageCount = countDocumentPages(content);
   const isPaginatedDocument = documentPageCount > 0;
+  // A document opened from Word or PDF carries its page setup; the canvas
+  // then draws sheets at that size with its margins, text, and headers.
+  const sourceMarkerHtml = useMemo(() => leadingPageSetupMarker(content), [content]);
+  const sourceSetup = useMemo(() => pageSetupFromMarkerHtml(sourceMarkerHtml), [sourceMarkerHtml]);
+  const sourceLayoutStyle = useMemo(
+    () => (sourceSetup ? (sourceLayoutCssVariables(sourceSetup) as CSSProperties) : null),
+    [sourceSetup],
+  );
+  // An imported page keeps its exact layout on any screen: instead of
+  // narrowing the sheet (which would rewrap every line), it scales to fit.
+  const [sourceFitScale, setSourceFitScale] = useState(1);
+  useLayoutEffect(() => {
+    const scroller = pageScrollRef.current;
+    if (!sourceSetup || !scroller) {
+      setSourceFitScale(1);
+      return;
+    }
+    const sheetWidth = documentSheetGeometry(sourceSetup).sheetWidthPx;
+    const measure = () => {
+      const style = window.getComputedStyle(scroller);
+      const available =
+        scroller.clientWidth - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0);
+      const next = available > 0 ? Math.min(1, Math.floor((available / sheetWidth) * 1000) / 1000) : 1;
+      setSourceFitScale((current) => (Math.abs(current - next) > 0.001 ? next : current));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [sourceSetup, draftKind]);
+  const canvasZoom = documentZoom * (sourceSetup ? sourceFitScale : 1);
   const renderedPageCount = documentPageCount || pageCount || 1;
   const activeSourceLabel =
     sourceSummary.activeKnowledge.length === 1
@@ -1999,7 +2854,7 @@ export function DocumentAssistantWorkspace({
         }
         // The user may have edited while we measured; never clobber newer content.
         if (!applyRebalancedLayout(sourceHtml, healed, versionIdAtSchedule)) return;
-        setStatus("Pages rebalanced to match the Word layout.");
+        setStatus("Pages rebalanced to fit the page layout.");
       })();
     }, 250);
   }
@@ -2551,7 +3406,7 @@ export function DocumentAssistantWorkspace({
       // Normalized comparison: parse the DOM through the same reader the
       // commit path uses; rewrite only when the model genuinely differs.
       const currentSlide = deckSlideWithRegionFromElement(slide, region, element, deckState.theme);
-      if (JSON.stringify(currentSlide) !== JSON.stringify(slide)) {
+      if (!deckSlidesEqual(currentSlide, slide)) {
         element.innerHTML = deckRegionHtml(slide, region);
       }
     }
@@ -2671,14 +3526,15 @@ export function DocumentAssistantWorkspace({
   /** Reads any in-progress text edit out of the focused block so operations
    * (save, export, slide ops) always act on what the user sees. */
   function flushDeckTextEdits(): SlideDeck | null {
-    if (!deckState) return null;
-    let next = deckState;
+    const base = latestDeckRef.current;
+    if (!base) return null;
+    let next = base;
     let changed = false;
     for (const { element, slideId, region } of deckBlockRefs.current.values()) {
       const slide = next.slides.find((item) => item.id === slideId);
       if (!slide) continue;
       const updated = deckSlideWithRegionFromElement(slide, region, element, next.theme);
-      if (JSON.stringify(updated) !== JSON.stringify(slide)) {
+      if (!deckSlidesEqual(updated, slide)) {
         next = {
           ...next,
           slides: next.slides.map((item) => (item.id === slideId ? updated : item)),
@@ -2711,7 +3567,23 @@ export function DocumentAssistantWorkspace({
     const slide = deckState.slides.find((item) => item.id === slideId);
     if (!slide) return;
     const updated = deckSlideWithRegionFromElement(slide, region, element, deckState.theme);
-    if (JSON.stringify(updated) === JSON.stringify(slide)) return;
+    // A bullet box stays bullets: when an edit leaves loose lines (typing over
+    // a select-all, a paste), it is redrawn as bullets with the caret kept,
+    // so Enter and Tab go on making and indenting bullets.
+    if (DECK_LIST_REGIONS.has(region) && element.textContent?.trim() && !element.querySelector("li")) {
+      const selection = window.getSelection?.();
+      const offsets =
+        selection && selection.rangeCount > 0 && element.contains(selection.getRangeAt(0).commonAncestorContainer)
+          ? deckTextOffsets(element, selection.getRangeAt(0))
+          : null;
+      element.innerHTML = deckRegionHtml(updated, region);
+      const caret = offsets ? deckRangeFromOffsets(element, offsets) : null;
+      if (selection && caret) {
+        selection.removeAllRanges();
+        selection.addRange(caret);
+      }
+    }
+    if (deckSlidesEqual(updated, slide)) return;
     setDeckState({
       ...deckState,
       slides: deckState.slides.map((item) => (item.id === slideId ? updated : item)),
@@ -2919,24 +3791,378 @@ export function DocumentAssistantWorkspace({
     );
   }
 
-  function openDeckImageDialog(slideId: string) {
+  /* ------------------------- slide text format toolbar ------------------------- */
+
+  /** The registry entry for the text box the format toolbar serves. */
+  function deckTextEntry() {
+    const target = deckTextTargetRef.current;
+    return target ? deckBlockRefs.current.get(`${target.slideId}:${target.region}`) ?? null : null;
+  }
+
+  /** What the toolbar shows: the highlighted text's formatting, or the whole
+   * box's when nothing is highlighted. Weight and slant read the rendered
+   * style, because some regions are bold or italic by layout. */
+  function readDeckTextFormat(block: HTMLElement, region: string, slide: DeckSlide): DeckTextToolbarFormat {
+    const selection = window.getSelection?.();
+    const range =
+      selection && selection.rangeCount > 0 && block.contains(selection.getRangeAt(0).commonAncestorContainer)
+        ? selection.getRangeAt(0)
+        : null;
+    const hasSelection = Boolean(range && !range.collapsed && range.toString().trim());
+    const state = computeEditorFormatState(block);
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let firstText: Node | null = walker.nextNode();
+    while (firstText && !firstText.textContent?.trim()) firstText = walker.nextNode();
+    const probe = (range && block.contains(range.startContainer) ? range.startContainer : null) ?? firstText ?? block;
+    const element = probe instanceof Element ? probe : probe.parentElement;
+    const computed = element && typeof window.getComputedStyle === "function" ? window.getComputedStyle(element) : null;
+    const weight = computed?.fontWeight ?? "";
+    const theme = deckState?.theme ?? defaultDeckTheme();
+    const spec = resolvedTextRegions(slide)[region];
+    const content = deckSlideRegionContent(slide, region);
+    // Only this box is measured: it runs on every selection change.
+    const issue = content?.length ? auditDeckLayout({ theme, slides: [slide] }, { regions: [region] })[0] : undefined;
+    const fit: DeckTextToolbarFormat["fit"] =
+      issue?.problem === "overflow" || issue?.problem === "broken-word"
+        ? "overflow"
+        : issue?.problem === "too-small" || (spec && content && deckRegionFit(spec, content, theme).fontScale < 0.995)
+          ? "shrunk"
+          : "fits";
+    return {
+      bold: weight ? weight === "bold" || Number(weight) >= 600 : state.bold,
+      italic: computed?.fontStyle ? computed.fontStyle === "italic" : state.italic,
+      underline: state.underline,
+      strikethrough: state.strikethrough,
+      sizePt: deckTextSizeOf(block, hasSelection ? range : null),
+      layoutSizePt: deckLayoutSizeAt(probe, block) ?? (spec ? Math.round(spec.sizePt) : null),
+      isList: DECK_LIST_REGIONS.has(region),
+      hasSelection,
+      fit,
+    };
+  }
+
+  function refreshDeckTextFormat() {
+    const entry = deckTextEntry();
+    const slide = entry ? deckState?.slides.find((item) => item.id === entry.slideId) : null;
+    if (!entry || !slide) return;
+    const selection = window.getSelection?.();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      if (entry.element.contains(range.commonAncestorContainer)) {
+        deckTextRangeRef.current = deckTextOffsets(entry.element, range);
+      }
+    }
+    const next = readDeckTextFormat(entry.element, entry.region, slide);
+    setDeckTextFormat((current) =>
+      current && (Object.keys(next) as Array<keyof DeckTextToolbarFormat>).every((key) => current[key] === next[key])
+        ? current
+        : next,
+    );
+  }
+
+  /** Runs one toolbar format on the target text box — the highlighted text,
+   * or with nothing highlighted the whole box, as PowerPoint formats a
+   * selected text box — then redraws the box from the deck model with the
+   * selection back where it was. */
+  function formatDeckText(
+    label: string,
+    apply: (block: HTMLElement, range: Range) => boolean,
+    options: { wholeBox?: boolean; fitNote?: boolean } = {},
+  ) {
+    const entry = deckTextEntry();
+    const slide = entry ? deckState?.slides.find((item) => item.id === entry.slideId) : null;
+    const selection = window.getSelection?.();
+    if (!entry || !slide || !deckState || !selection) {
+      setStatus("Click into slide text before formatting.");
+      return;
+    }
+    const block = entry.element;
+    if (!block.textContent?.trim()) {
+      setStatus("Type some text in this box first, then format it.");
+      return;
+    }
+    const live =
+      selection.rangeCount > 0 && block.contains(selection.getRangeAt(0).commonAncestorContainer)
+        ? selection.getRangeAt(0)
+        : null;
+    const offsets = (live ? deckTextOffsets(block, live) : null) ?? deckTextRangeRef.current ?? { start: 0, end: 0 };
+    const whole = options.wholeBox !== false && offsets.start === offsets.end;
+    if (document.activeElement !== block) block.focus({ preventScroll: true });
+    const range = whole ? document.createRange() : deckRangeFromOffsets(block, offsets);
+    if (!range) return;
+    if (whole) range.selectNodeContents(block);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const undoSnapshot = deckEditSessionUndoRef.current ?? serializedDeck;
+    if (!apply(block, range)) {
+      setStatus("Highlight slide text first, then change its formatting.");
+      return;
+    }
+    const updated = deckSlideWithRegionFromElement(slide, entry.region, block, deckState.theme);
+    const next: SlideDeck = {
+      ...deckState,
+      slides: deckState.slides.map((item) => (item.id === slide.id ? updated : item)),
+    };
+    // Size changes say when the text stops fitting its box, measured the way
+    // the export lays it out.
+    let fitNote = "";
+    if (options.fitNote) {
+      const issue = auditDeckLayout(next, { slideIds: [slide.id], regions: [entry.region] })[0];
+      const spec = resolvedTextRegions(updated)[entry.region];
+      const content = deckSlideRegionContent(updated, entry.region);
+      if (issue?.problem === "overflow" || issue?.problem === "broken-word") {
+        fitNote = " It no longer fits its box and will spill over in PowerPoint: shorten it, size it down, or drag a corner to make the box bigger.";
+      } else if (issue?.problem === "too-small" || (spec && content && deckRegionFit(spec, content, next.theme).fontScale < 0.995)) {
+        fitNote = " The box shrinks its text to fit, as PowerPoint does, so it may not look larger: drag a corner to give it room.";
+      }
+    }
+    commitDeck(next, `${label}${whole ? " to the whole text box" : ""}.${fitNote}`, undoSnapshot);
+    // Typing after this is its own undo step.
+    deckEditSessionUndoRef.current = serializeSlideDeck(next);
+    block.innerHTML = deckRegionHtml(updated, entry.region);
+    const restored = deckRangeFromOffsets(block, offsets);
+    if (restored) {
+      selection.removeAllRanges();
+      selection.addRange(restored);
+    }
+    deckTextRangeRef.current = offsets;
+    setDeckTextFormat(readDeckTextFormat(block, entry.region, updated));
+  }
+
+  /** execCommand with CSS styling (spans the run reader reads back), with the
+   * DOM fallback for engines without it. */
+  function execDeckTextCommand(block: HTMLElement, command: string, value?: string) {
+    let applied = false;
+    if (typeof document.execCommand === "function") {
+      try {
+        document.execCommand("styleWithCSS", false, "true");
+      } catch {
+        // Older engines ignore the mode switch; the <font> path still parses.
+      }
+      try {
+        applied = document.execCommand(command, false, value);
+      } catch {
+        applied = false;
+      }
+    }
+    if (!applied) applyEditorCommandFallback(block, command, value);
+    return true;
+  }
+
+  function runDeckTextToolbarCommand(command: DeckTextCommand) {
+    formatDeckText(DECK_TEXT_COMMAND_LABELS[command], (block) => execDeckTextCommand(block, command));
+  }
+
+  function sizeDeckText(change: DeckSizeChange) {
+    const label =
+      "size" in change
+        ? `Text size set to ${change.size} pt`
+        : "step" in change
+          ? change.step > 0
+            ? "Text made larger"
+            : "Text made smaller"
+          : "Text size reset to the layout size";
+    formatDeckText(label, (block, range) => applyDeckTextSize(block, range, change) > 0, { fitNote: true });
+  }
+
+  function colorDeckText(color: string | null) {
+    const swatch = deckState ? deckThemePalette(deckState.theme).find((item) => item.color === color) : undefined;
+    formatDeckText(
+      swatch ? `Text colored ${swatch.label}` : "Text color reset to the theme",
+      (block, range) =>
+        (color ? styleDeckTextPieces(block, range, () => ({ color })) : resetDeckTextColor(block, range)) > 0,
+    );
+  }
+
+  function indentDeckText(direction: 1 | -1) {
+    formatDeckText(
+      direction > 0 ? "Bullet moved in a level" : "Bullet moved out a level",
+      (block) => execDeckTextCommand(block, direction > 0 ? "indent" : "outdent"),
+      { wholeBox: false },
+    );
+  }
+
+  function clearDeckTextFormatting() {
+    formatDeckText("Formatting cleared", (block) => execDeckTextCommand(block, "removeFormat"));
+  }
+
+  /** Focus back to the text box with its selection, from the toolbar. */
+  function returnToDeckText() {
+    const entry = deckTextEntry();
+    if (!entry) return;
+    entry.element.focus({ preventScroll: true });
+    const range = deckTextRangeRef.current ? deckRangeFromOffsets(entry.element, deckTextRangeRef.current) : null;
+    const selection = window.getSelection?.();
+    if (range && selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+
+  /** Text box keys: Alt+F10 reaches the format toolbar, ⇧⌘> / ⇧⌘< step the
+   * size as in PowerPoint, Tab and ⇧Tab change a bullet's level. */
+  function handleDeckBlockKeyDown(event: ReactKeyboardEvent<HTMLElement>, isList: boolean) {
+    const mod = event.metaKey || event.ctrlKey;
+    if (event.altKey && event.key === "F10") {
+      event.preventDefault();
+      document.querySelector<HTMLElement>(".deck-text-toolbar button:not(:disabled)")?.focus();
+      return;
+    }
+    if (mod && event.shiftKey && !event.altKey) {
+      const grow = event.key === ">" || event.key === "." || event.code === "Period";
+      const shrink = event.key === "<" || event.key === "," || event.code === "Comma";
+      if (grow || shrink) {
+        event.preventDefault();
+        event.stopPropagation();
+        sizeDeckText({ step: grow ? 1 : -1 });
+        return;
+      }
+    }
+    if (isList) handleDeckBulletsKeyDown(event);
+  }
+
+  /* ------------------------------ deck blade ------------------------------ */
+
+  /** Folds the layouts-and-themes strip away (or back), remembered here. */
+  function setDeckDesignStripOpen(open: boolean) {
+    setDeckLayoutStripOpen(open);
+    writeDraftPreference(DECK_LAYOUT_STRIP_PREFERENCE_KEY, open ? "open" : "closed");
+  }
+
+  /** Opens the layout blade (or closes it when it already shows `mode`). */
+  function toggleDeckLayoutMenu(mode: "add" | "switch", trigger: HTMLElement) {
+    deckBladeTriggerRef.current = trigger;
+    closeDeckImageDialog();
+    if (deckAi) closeDeckAiEdit();
+    setDeckLayoutMenuOpen((value) => (value === mode ? null : mode));
+  }
+
+  /** Opens the picture blade on a slide: on its picture when its layout holds
+   * one, otherwise with the layouts that do (region null). */
+  function openDeckImageDialog(slideId: string, region: "image" | null, trigger?: HTMLElement | null) {
+    if (deckImageDialog.open && deckImageDialog.working) {
+      setStatus("A picture is still on its way. Wait for it, then choose another slide.");
+      return;
+    }
+    deckPictureRequestRef.current += 1;
+    if (trigger) deckBladeTriggerRef.current = trigger;
+    setDeckLayoutMenuOpen(null);
+    if (deckAi) closeDeckAiEdit();
     const slide = deckState?.slides.find((item) => item.id === slideId);
+    // A real description only: the picture's own, the words around it, or the
+    // deck's name — never a placeholder word that would search for nothing.
     const suggestion =
-      slide && slide.layout === "image-caption"
-        ? deckRunsText(slide.caption).trim() ||
-          deckRunsText(slide.title).trim() ||
-          documentTitle.trim()
-        : documentTitle.trim();
-    setDeckImageDialog({ open: true, slideId, prompt: suggestion, working: false, error: null });
+      (slide?.layout === "image-caption" ? slide.image.alt.trim() : "") ||
+      (slide ? deckPictureContextAlt(slide) : "") ||
+      (documentTitle.trim() !== EMPTY_DOCUMENT_TITLE ? documentTitle.trim() : "");
+    setDeckImageDialog((current) => {
+      // Reopening on the same slide keeps the description and the web
+      // results the author is choosing from.
+      const sameSlide = current.open && current.slideId === slideId;
+      return {
+        open: true,
+        slideId,
+        region,
+        prompt: sameSlide && current.prompt.trim() ? current.prompt : suggestion,
+        working: false,
+        error: null,
+        results: sameSlide ? current.results : null,
+        promptEdited: sameSlide ? current.promptEdited : false,
+      };
+    });
   }
 
   function closeDeckImageDialog() {
-    setDeckImageDialog({ open: false, slideId: null, prompt: "", working: false, error: null });
+    deckPictureRequestRef.current += 1;
+    setDeckImageDialog(CLOSED_DECK_PICTURE_DIALOG);
   }
 
-  function applyDeckSlideImage(slideId: string, src: string, alt: string, caption?: string) {
+  /** The toolbar's picture button: the selected slide's picture, or the
+   * layouts that hold one; a second press closes the blade. */
+  function toggleDeckPictures(trigger: HTMLElement) {
+    if (deckBladeKind === "picture") {
+      if (deckImageDialog.working) return;
+      closeDeckImageDialog();
+      return;
+    }
+    if (!selectedSlide) return;
+    openDeckImageDialog(selectedSlide.id, selectedSlide.layout === "image-caption" ? "image" : null, trigger);
+  }
+
+  /** Switches a slide without a picture to a layout with one from the picture
+   * blade, keeping its words, then serves the new picture. */
+  function switchDeckSlideToPictureLayout(layout: DeckSlideLayout) {
+    if (!selectedSlide) return;
+    switchDeckSlideLayout(layout);
+    openDeckImageDialog(selectedSlide.id, "image");
+  }
+
+  /** Alt text for the placed picture; typing joins one undo step. */
+  function setDeckPictureAlt(alt: string) {
+    const { slideId } = deckImageDialog;
+    if (!deckState || !slideId) return;
+    setDeckState({
+      ...deckState,
+      slides: deckState.slides.map((slide) =>
+        slide.id === slideId && slide.layout === "image-caption" && slide.image.src
+          ? { ...slide, image: { ...slide.image, alt: alt.slice(0, 500) } }
+          : slide,
+      ),
+    });
+  }
+
+  /** A picture from this device (chosen or dropped), downscaled to a bounded
+   * JPEG so the deck stays within its size limit. */
+  async function handleDeckPictureUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) await placeDeckPictureFile(file);
+  }
+
+  /** Places a picture file in the picture blade's slide; the blade stays
+   * open on the result. */
+  async function placeDeckPictureFile(file: File) {
+    const { slideId, region } = deckImageDialog;
+    if (!slideId || !region) return;
+    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) {
+      setDeckImageDialog((current) => ({ ...current, error: "Pictures can be PNG, JPEG, WebP, or GIF." }));
+      return;
+    }
+    const ticket = ++deckPictureRequestRef.current;
+    const settle = (update: (current: DeckPictureDialogState) => DeckPictureDialogState) => {
+      if (deckPictureRequestRef.current === ticket) setDeckImageDialog(update);
+    };
+    setDeckImageDialog((current) => ({ ...current, working: "upload", error: null }));
+    try {
+      const original = await readFileAsDataUrl(file);
+      const dataUrl = original ? await boundedSlideBackgroundDataUrl(original) : null;
+      if (!dataUrl) {
+        settle((current) => ({
+          ...current,
+          working: false,
+          error: `${file.name} could not be read or is too large. Try a smaller image.`,
+        }));
+        return;
+      }
+      const slide = latestDeckRef.current?.slides.find((item) => item.id === slideId);
+      const alt =
+        (deckImageDialog.promptEdited && deckImageDialog.prompt.trim()) ||
+        (slide ? deckPictureContextAlt(slide) : "") ||
+        file.name.replace(/\.[a-z0-9]+$/i, "");
+      if (applyDeckSlideImage(slideId, dataUrl, alt)) setStatus(`${file.name} placed on the slide.`);
+      settle((current) => ({ ...current, working: false }));
+    } catch {
+      settle((current) => ({ ...current, working: false, error: `${file.name} could not be read.` }));
+    }
+  }
+
+  function applyDeckSlideImage(slideId: string, src: string, alt: string, caption?: string): boolean {
     const deck = flushDeckTextEdits();
-    if (!deck) return;
+    if (!deck) return false;
+    if (deck.slides.find((slide) => slide.id === slideId)?.layout !== "image-caption") {
+      setStatus("That slide no longer holds a picture.");
+      return false;
+    }
     const slides = deck.slides.map((slide) => {
       if (slide.id !== slideId || slide.layout !== "image-caption") return slide;
       return {
@@ -2949,7 +4175,17 @@ export function DocumentAssistantWorkspace({
             : slide.caption,
       };
     });
-    commitDeck({ ...deck, slides }, "Slide image updated.", serializeSlideDeck(deck));
+    const next = { ...deck, slides };
+    if (utf8ByteLength(serializeSlideDeck(next)) > MAX_DECK_CONTENT_BYTES) {
+      setStatus(
+        `That picture would push the deck past its ${Math.round(
+          MAX_DECK_CONTENT_BYTES / 1_000_000,
+        )} MB limit. Try a smaller picture, or remove other pictures first.`,
+      );
+      return false;
+    }
+    commitDeck(next, "Slide image updated.", serializeSlideDeck(deck));
+    return true;
   }
 
   function removeDeckSlideImage(slideId: string) {
@@ -3208,9 +4444,9 @@ export function DocumentAssistantWorkspace({
    * model). The signed image link is re-encoded into a data URL so the slide
    * keeps its picture after the link expires. */
   async function generateDeckSlideImage() {
-    const { slideId, prompt } = deckImageDialog;
+    const { slideId, region, prompt } = deckImageDialog;
     const request = prompt.trim();
-    if (!slideId || !request) return;
+    if (!slideId || !region || !request) return;
     if (!imageGenerationAgent) {
       setDeckImageDialog((current) => ({
         ...current,
@@ -3218,10 +4454,17 @@ export function DocumentAssistantWorkspace({
       }));
       return;
     }
+    const ticket = ++deckPictureRequestRef.current;
+    const settle = (update: (current: DeckPictureDialogState) => DeckPictureDialogState) => {
+      if (deckPictureRequestRef.current === ticket) setDeckImageDialog(update);
+    };
     setDeckImageDialog((current) => ({ ...current, working: "generate", error: null }));
     try {
       const dataUrl = await generateSlideImageDataUrl(request);
-      applyDeckSlideImage(slideId, dataUrl, request);
+      if (!applyDeckSlideImage(slideId, dataUrl, request)) {
+        settle((current) => ({ ...current, working: false }));
+        return;
+      }
       setEvents((current) => [
         ...current,
         draftEvent(
@@ -3230,7 +4473,7 @@ export function DocumentAssistantWorkspace({
           `Generated a slide image with ${imageGenerationAgent.name} for "${request}".`,
         ),
       ]);
-      closeDeckImageDialog();
+      settle((current) => ({ ...current, working: false }));
       setStatus("Generated image added to the slide.");
     } catch (error) {
       const message =
@@ -3239,28 +4482,37 @@ export function DocumentAssistantWorkspace({
           : error instanceof Error
             ? error.message
             : "Image generation failed before an image was returned.";
-      setDeckImageDialog((current) => ({ ...current, working: false, error: message }));
+      settle((current) => ({ ...current, working: false, error: message }));
       setStatus(`Slide image generation failed: ${message}`);
     }
   }
 
-  /** Web image lookup (same real source as the document editor's web images). */
-  async function findDeckWebImage() {
-    const { slideId, prompt } = deckImageDialog;
+  /** Web picture candidates for the description (the same real source as
+   * the document editor's web images); the author picks one. */
+  async function findDeckWebImages() {
+    const { slideId, region, prompt } = deckImageDialog;
     const request = prompt.trim();
-    if (!slideId || !request) return;
-    setDeckImageDialog((current) => ({ ...current, working: "web", error: null }));
-    try {
-      const result = await resolveWebImageResult(request);
-      applyDeckSlideImage(slideId, result.url, request, `${result.caption} (${result.source})`);
-      closeDeckImageDialog();
-      setStatus(`Web image for "${request}" added to the slide.`);
-    } catch {
-      setDeckImageDialog((current) => ({
-        ...current,
-        working: false,
-        error: "No web image could be found for this description.",
-      }));
+    if (!slideId || !region || !request) return;
+    const ticket = ++deckPictureRequestRef.current;
+    setDeckImageDialog((current) => ({ ...current, working: "web", error: null, results: null }));
+    const results = await searchWebImages(request);
+    setDeckImageDialog((current) =>
+      deckPictureRequestRef.current === ticket && current.open
+        ? {
+            ...current,
+            working: false,
+            results,
+            error: results.length ? null : `No web images were found for "${request}". Try other words.`,
+          }
+        : current,
+    );
+  }
+
+  function pickDeckWebImage(choice: DeckWebImageChoice) {
+    const { slideId, region, prompt } = deckImageDialog;
+    if (!slideId || !region) return;
+    if (applyDeckSlideImage(slideId, choice.url, prompt.trim() || choice.caption, `${choice.caption} (${choice.source})`)) {
+      setStatus(`Web image placed: ${choice.caption} (${choice.source}).`);
     }
   }
 
@@ -3304,6 +4556,12 @@ export function DocumentAssistantWorkspace({
       }
       const range = selection.getRangeAt(0).cloneRange();
       deckAiEditRangeRef.current = range;
+      // A highlight in a text box brings up its format toolbar.
+      setDeckTextTarget((current) =>
+        current?.slideId === entry.slideId && current.region === entry.region
+          ? current
+          : { slideId: entry.slideId, region: entry.region },
+      );
       const rect = range.getBoundingClientRect?.() ?? null;
       const left = Math.max(12, Math.min(rect?.left ?? 24, Math.max(12, window.innerWidth - 132)));
       const top = Math.max(12, Math.min((rect?.bottom ?? 64) + 8, window.innerHeight - 48));
@@ -3322,6 +4580,8 @@ export function DocumentAssistantWorkspace({
       closeDeckAiEdit();
       return;
     }
+    setDeckLayoutMenuOpen(null);
+    closeDeckImageDialog();
     if (!deckState || !selectedSlide) {
       setStatus("Add a slide first, then ask the AI to edit it.");
       return;
@@ -3368,6 +4628,42 @@ export function DocumentAssistantWorkspace({
     deckAiEditRangeRef.current = null;
     setDeckAi({ ...base, mode: "slide", slideId: selectedSlide.id, region: null, selectedText: "" });
   }
+
+  /** The format toolbar's anchor: the text box plus its move grip, so the
+   * toolbar never covers the grip. */
+  const getDeckTextAnchor = useCallback((): AiComposerAnchor | null => {
+    const target = deckTextTargetRef.current;
+    const element = target ? deckBlockRefs.current.get(`${target.slideId}:${target.region}`)?.element : null;
+    if (!element?.isConnected) return null;
+    const rect = element.getBoundingClientRect();
+    let { top, bottom } = rect;
+    const grip = deckStageViewportRef.current?.querySelector<HTMLElement>(".deck-block-move");
+    if (grip) {
+      const gripRect = grip.getBoundingClientRect();
+      top = Math.min(top, gripRect.top);
+      bottom = Math.max(bottom, gripRect.bottom);
+    }
+    return { top, bottom, left: rect.left, right: rect.right };
+  }, []);
+
+  /** The other boxes on the open slide, which the toolbar keeps clear of. */
+  const getDeckTextObstacles = useCallback((): AiComposerAnchor[] => {
+    const target = deckTextTargetRef.current;
+    const own = target ? deckBlockRefs.current.get(`${target.slideId}:${target.region}`)?.element : null;
+    const stage = deckStageViewportRef.current;
+    if (!stage) return [];
+    return Array.from(stage.querySelectorAll<HTMLElement>("[data-deck-block], .deck-media-slot"))
+      .filter((element) => element !== own)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+      });
+  }, []);
+
+  const getDeckStageFrame = useCallback((): AiComposerAnchor | null => {
+    const rect = deckStageViewportRef.current?.getBoundingClientRect();
+    return rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right } : null;
+  }, []);
 
   const getDeckAiAnchor = useCallback((): AiComposerAnchor | null => {
     const range = deckAiEditRangeRef.current;
@@ -3500,9 +4796,44 @@ export function DocumentAssistantWorkspace({
           parsed = parseAiSlideReply(raw, deckNow, session.slideId);
         }
         if (!parsed.ok) throw new Error(`The model's slide did not pass validation: ${parsed.error}`);
+        // Fit check before review: one measured fix turn in this
+        // conversation, kept only if it measures better.
+        let reviewMessages = messages;
+        const proposed = parsed.slides;
+        const fitIds = proposed.map((slide) => slide.id);
+        const fitIssues = auditDeckLayout(parsed.deck, { slideIds: fitIds });
+        if (fitIssues.length) {
+          setStatus(
+            `Fit check: ${fitIssues.length} text field${fitIssues.length === 1 ? "" : "s"} too large; ${agent.name} is rewriting ${
+              fitIssues.length === 1 ? "it" : "them"
+            }…`,
+          );
+          const fitMessages: ChatWireMessage[] = [
+            ...messages,
+            { role: "assistant", content: raw },
+            { role: "user", content: deckFitFollowUp(parsed.deck, fitIssues) },
+          ];
+          reply = await ask(fitMessages);
+          if (requestId !== deckAiRequestRef.current) return;
+          const fitRaw = splitAssistantThinking(reply.content).visibleContent.trim();
+          const fitted = parseAiSlideReply(fitRaw, deckNow, session.slideId);
+          if (fitted.ok) {
+            const fittedIds = fitted.slides.map((slide) => slide.id);
+            const before = deckFitScore(fitIssues);
+            const after = deckFitScore(auditDeckLayout(fitted.deck, { slideIds: fittedIds }));
+            const keeps =
+              fittedIds.length === fitIds.length &&
+              fitted.slides.every((slide, index) => deckFitFixKeepsContent(proposed[index], slide));
+            if (after < before && keeps) {
+              parsed = fitted;
+              raw = fitRaw;
+              reviewMessages = fitMessages;
+            }
+          }
+        }
         const slides = parsed.slides;
         setDeckAi((current) =>
-          current && { ...current, phase: "review", stream: "", proposalSlides: slides, proposalRaw: raw, messages },
+          current && { ...current, phase: "review", stream: "", proposalSlides: slides, proposalRaw: raw, messages: reviewMessages },
         );
       }
       setStatus("AI suggestion ready. Apply it, refine it, or discard it.");
@@ -4259,6 +5590,24 @@ export function DocumentAssistantWorkspace({
       });
       return reply.content ?? "";
     };
+    // Fit fixes are rewording only: no web, sources, or attachments.
+    const askFit = async (prompt: string) => {
+      const reply = await sendChat(completionUserId, {
+        model: selectedAgent.id,
+        messages: [{ role: "user", content: prompt }],
+        runtime: {
+          surface: "draft",
+          draftTitle: documentTitle.trim() || EMPTY_DOCUMENT_TITLE,
+          clientStartedAt: draftNowIso(),
+          webEnabled: false,
+          citationsEnabled: false,
+          knowledgeConfigIds: [],
+          maxCompletionTokens: 6000,
+          reasoningEffort: reasoningEffortForSend,
+        },
+      });
+      return splitAssistantThinking(reply.content ?? "").visibleContent;
+    };
 
     try {
       advanceDraftTrace("context");
@@ -4279,7 +5628,6 @@ export function DocumentAssistantWorkspace({
         replyText = await askProvider(retryPrompt);
         parsed = parseAiDeckReply(replyText, theme, fallbackTitle, keptBackgrounds);
       }
-      advanceDraftTrace("apply");
       let nextDeck: SlideDeck;
       let summary: string;
       let fallbackNotice: string | null = null;
@@ -4312,6 +5660,23 @@ export function DocumentAssistantWorkspace({
         return;
       }
       if (!nextDeck.title.trim()) nextDeck = { ...nextDeck, title: fallbackTitle };
+      // Look before landing: measure the new or changed slides, send any that
+      // do not fit back to the model, and only then place the deck.
+      advanceDraftTrace("fit");
+      const fitReview = await reviewDeckFit(
+        nextDeck,
+        revising ? changedDeckSlideIds(currentDeck, nextDeck) : nextDeck.slides.map((slide) => slide.id),
+        askFit,
+        (round, issues) =>
+          setStatus(
+            `Fit check: ${issues.length} text field${issues.length === 1 ? "" : "s"} too large for ${deckSlideList(
+              deckFitIssueSlides(issues),
+            )}; ${selectedAgent.name} is rewriting ${issues.length === 1 ? "it" : "them"} (round ${round} of ${DECK_FIT_MAX_ROUNDS})…`,
+          ),
+      );
+      nextDeck = fitReview.deck;
+      const fitSummary = deckFitSummary(fitReview, selectedAgent.name);
+      advanceDraftTrace("apply");
       setDeckState(nextDeck);
       setSelectedSlideId(nextDeck.slides[0]?.id ?? null);
       // Any replacement of real slide content is undoable — including a fresh
@@ -4338,7 +5703,7 @@ export function DocumentAssistantWorkspace({
           "deck-draft",
           `${revising ? "Revised" : "Drafted"} ${nextDeck.slides.length} slide${
             nextDeck.slides.length === 1 ? "" : "s"
-          } with ${selectedAgent.name}.${fallbackNotice ? ` ${fallbackNotice}` : ""}`,
+          } with ${selectedAgent.name}.${fallbackNotice ? ` ${fallbackNotice}` : ""} ${fitSummary}`,
           {
             createdAt: completedAt,
             executedAt: requestStartedAt,
@@ -4359,6 +5724,10 @@ export function DocumentAssistantWorkspace({
           ? `${nextDeck.slides.length} slides drafted from the model's outline (structured output failed validation).`
           : `${nextDeck.slides.length} slide${nextDeck.slides.length === 1 ? "" : "s"} ${
               revising ? "revised" : "drafted"
+            }${
+              fitReview.remaining.length
+                ? `; text is still too large on ${deckSlideList(deckFitIssueSlides(fitReview.remaining))}`
+                : ""
             }${artPassPlanned ? "; adding slide artwork…" : " and ready to edit."}`,
       );
       // Image passes run after the text lands so a slow image source never
@@ -4820,6 +6189,8 @@ export function DocumentAssistantWorkspace({
   function startDeckPresentation(fromCurrent: boolean) {
     if (!deckState?.slides.length) return;
     endDeckEditSession();
+    setDeckLayoutMenuOpen(null);
+    closeDeckImageDialog();
     const index =
       fromCurrent && selectedSlide
         ? Math.max(0, deckState.slides.findIndex((slide) => slide.id === selectedSlide.id))
@@ -5532,6 +6903,60 @@ export function DocumentAssistantWorkspace({
     );
   }
 
+  /** The live document as one sanitized flow: sheets unwrapped, split
+   * paragraphs rejoined, and each page break the author made kept as a
+   * page-break rule (the sanitizer alone would drop the sheet boundaries). */
+  function currentDocumentFlowHtml() {
+    return sanitizeDocumentHtml(draftHtmlForAccount(editorRef.current?.innerHTML ?? content));
+  }
+
+  /** Records a change made in the editor without a model call as its own
+   * undoable version, with a matching entry in the assistant trail. */
+  function commitLocalDocumentChange(change: {
+    html: string;
+    title?: string;
+    summary: string;
+    status: string;
+    eventKind: string;
+    eventText: string;
+    userRequest?: string;
+    replaceBlankDraft?: boolean;
+  }) {
+    const executedAt = draftNowIso();
+    const nextVersionNumber = change.replaceBlankDraft ? 1 : versions.length + 1;
+    const nextVersion: DraftVersion = {
+      id: `version-${nextVersionNumber}`,
+      label: `Version ${nextVersionNumber}`,
+      time: draftTimeLabel(executedAt),
+      executedAt,
+      content: change.html,
+      summary: change.summary,
+    };
+    const title = change.title ?? documentTitle;
+    setDocumentTitle(title);
+    // Undo reaches back past a local change, including one on a blank canvas.
+    recordUndoSnapshot();
+    setContent(change.html);
+    setVersions((current) => (change.replaceBlankDraft ? [nextVersion] : [...current, nextVersion]));
+    setSelectedVersionId(nextVersion.id);
+    setCodeArtifact(null);
+    setShowEdits(!change.replaceBlankDraft);
+    setStatus(change.status);
+    rememberDocumentSnapshot(title, change.html, change.summary);
+    setEvents((current) => [
+      ...current,
+      ...(change.userRequest ? [draftEvent("user", "user", change.userRequest, { createdAt: executedAt })] : []),
+      draftEvent("assistant", change.eventKind, change.eventText, { createdAt: executedAt, executedAt }),
+    ]);
+    setAttachMenuOpen(false);
+    setExportMenuOpen(false);
+    setInsertMenuOpen(false);
+  }
+
+  /** A template card. On a blank canvas it places the template itself, set in
+   * its format, ready to fill in. On a draft it sets the draft in the
+   * template's page, type, and structure without rewriting a word; the
+   * assistant restructures content into the template's sections on request. */
   function applyTemplateToCurrentDraft(template: DraftTemplate) {
     clearDraftTimers();
     if (template.sourceHtml) {
@@ -5547,58 +6972,92 @@ export function DocumentAssistantWorkspace({
       );
       return;
     }
-    const currentDraftText = documentHtmlToText(content);
     setSelectedTemplateId(template.id);
     setTemplateContextEnabled(true);
-    if (!currentDraftText.trim()) {
-      setStatus(`${template.name} selected. Create a draft or add content to apply this template.`);
+    const format = documentFormatById(template.formatId);
+    if (!format) {
+      setStatus(`${template.name} selected. Ask the assistant what to write and it will follow this template.`);
       return;
     }
-
-    const formattedDraft = formatExistingDraftWithTemplate(
-      template,
-      documentTitle,
-      currentDraftText,
-      draftContextOptions(sourceSummary, { useTemplateContext: true }),
-    );
-    const nextContentHtml = formattedDraft.html ?? textToDocumentHtml(formattedDraft.content);
-    const nextVersionNumber = versions.length + 1;
-    const executedAt = draftNowIso();
-    const nextVersion: DraftVersion = {
-      id: `version-${nextVersionNumber}`,
-      label: `Version ${nextVersionNumber}`,
-      time: draftTimeLabel(executedAt),
-      executedAt,
-      content: nextContentHtml,
-      summary: formattedDraft.summary,
-    };
-    setDocumentTitle(formattedDraft.title ?? documentTitle);
-    recordUndoSnapshot();
-    setContent(nextContentHtml);
-    setVersions((current) => [...current, nextVersion]);
-    setSelectedVersionId(nextVersion.id);
-    setRequireCitations(formattedDraft.requiresCitations ?? template.requiresCitations);
-    setCodeArtifact(null);
-    setShowEdits(true);
-    setStatus(`${template.name} applied to the current draft.`);
-    rememberDocumentSnapshot(
-      formattedDraft.title ?? documentTitle,
-      nextContentHtml,
-      formattedDraft.summary,
-    );
-    setEvents((current) => [
-      ...current,
-      draftEvent(
-        "assistant",
-        "template-format",
-        `Applied the ${template.name} template to the current document without replacing the draft content.`,
-        { createdAt: executedAt, executedAt },
-      ),
-    ]);
-    setAttachMenuOpen(false);
-    setExportMenuOpen(false);
-    setInsertMenuOpen(false);
+    const setup = pageSetupForFormat(format);
+    const sourceHtml = currentDocumentFlowHtml();
+    // A letterhead opened from Word (its text in the header, a logo in the
+    // body) is not a blank canvas; neither is a picture-only page.
+    const blank =
+      !documentHtmlToText(sourceHtml).trim() && !/<(?:img|table|figure|pre)\b/i.test(sourceHtml) && !hasPageSetupMarker(sourceHtml);
+    if (blank) {
+      const html = paginateTransferredDocumentHtml(
+        formattedDraftHtml(documentHtmlFromMarkdown(template.body), setup),
+        template.body,
+        { forceMarkerPages: true },
+      );
+      setRequireCitations(template.requiresCitations);
+      commitLocalDocumentChange({
+        html,
+        title: template.defaultTitle,
+        summary: `${template.name} template`,
+        status: `${template.name} template added in ${describePageSetup(setup)}. Fill in the bracketed fields, or ask the assistant to draft from it.`,
+        eventKind: "template-format",
+        eventText: `Placed the ${template.name} template on the canvas in its ${format.label.toLowerCase()} format.`,
+        replaceBlankDraft: true,
+      });
+    } else {
+      const html = paginateTransferredDocumentHtml(
+        formattedDraftHtml(flattenDocumentBodyHtml(splitPageSetup(sourceHtml).bodyHtml), setup, { restyle: "all" }),
+        documentHtmlToText(sourceHtml),
+        { forceMarkerPages: true },
+      );
+      commitLocalDocumentChange({
+        html,
+        summary: `${template.name} template layout applied`,
+        status: `${template.name} layout applied: ${describePageSetup(setup)}. Your text is unchanged; ask the assistant to restructure it into this template's sections.`,
+        eventKind: "template-format",
+        eventText: `Applied the ${template.name} template's page, type, and structure to the current document without changing its text.`,
+      });
+    }
     window.setTimeout(() => editorRef.current?.focus(), 0);
+  }
+
+  /** Applies layout asked for in plain English ("Times New Roman 12, double
+   * spaced, 1-inch margins") directly to the page setup: no model call and
+   * no rewritten words, as one undoable version. */
+  function applyLayoutRequest(layout: LayoutRequest, request: string) {
+    clearDraftTimers();
+    const sourceHtml = currentDocumentFlowHtml();
+    if (sourceHtml.includes("document-mla-text")) {
+      setStatus("This paper is set in MLA layout (12-point Times New Roman, double spaced); its layout is not changed here.");
+      return;
+    }
+    const { setup: currentSetup, bodyHtml } = splitPageSetup(sourceHtml);
+    const named = documentFormatById(layout.changes.formatId);
+    const base = named
+      ? pageSetupForFormat(named)
+      : currentSetup ?? pageSetupForFormat(documentFormatById("standard") as DocumentFormat);
+    const nextSetup = applyLayoutChanges(base, layout.changes);
+    const flatBody = flattenDocumentBodyHtml(bodyHtml);
+    // A named format ("format this as a contract") restyles the whole
+    // document; otherwise only what was asked for changes, and the author's
+    // own sizes, faces, and alignment elsewhere stay.
+    const nextBody = named
+      ? formatDocumentBody(flatBody, nextSetup, { restyle: "all" })
+      : formatDocumentBody(applyNormalTextChange(flatBody, base, nextSetup), nextSetup, {
+          restyle: restyleScopeBetween(base, nextSetup),
+          structure: false,
+        });
+    const html = paginateTransferredDocumentHtml(
+      withPageSetupMarker(pageSetupMarkerHtml(nextSetup), nextBody),
+      request,
+      { forceMarkerPages: true },
+    );
+    const appliedList = layout.applied.join(", ");
+    commitLocalDocumentChange({
+      html,
+      summary: `Layout: ${appliedList}`,
+      status: `Applied ${appliedList}. Nothing was rewritten.`,
+      eventKind: "layout-format",
+      eventText: `Applied the requested layout directly in the editor (${appliedList}); no model call was needed.`,
+      userRequest: request,
+    });
   }
 
   async function startProviderDraftFromTemplate(
@@ -5618,7 +7077,8 @@ export function DocumentAssistantWorkspace({
     const contextOptions = draftContextOptions(sourceSummaryForDraft, options);
     const liveWebSearch = contextOptions.useWebSearch;
     const requestText = request?.trim() || `Create a complete ${template.name} draft from the selected template.`;
-    const requestSubject = request ? extractDraftSubject(request) : null;
+    // Layout wording ("in Garamond 12 on legal-size paper") is not the subject.
+    const requestSubject = request ? extractDraftSubject(stripLayoutPhrases(request)) : null;
     const nextTitle = requestSubject ? providerWebDraftTitle(template, requestSubject) : template.defaultTitle;
     const requestedPages = Math.max(1, parseRequestedPageCount(requestText));
     const pageTotal = requestedPages > 1 ? requestedPages : 1;
@@ -5726,8 +7186,14 @@ export function DocumentAssistantWorkspace({
           "The document changed while the assistant was working, so the new draft was not substituted. Submit the request again from the current version.",
         );
       }
+      const draftBodyHtml = formatMlaDocument(documentHtmlFromMarkdown(markdownWithSources), requestText);
+      // The draft is set in its page format: a layout the request describes,
+      // the template's own, or its genre's (contract, letter, filing, ...).
+      const draftSetup = draftBodyHtml.includes("document-mla-text")
+        ? null
+        : draftPageSetupFor(template, requestText, contextOptions.useTemplateContext);
       let nextContentHtml = paginateTransferredDocumentHtml(
-        formatMlaDocument(documentHtmlFromMarkdown(markdownWithSources), requestText),
+        draftSetup ? formattedDraftHtml(draftBodyHtml, draftSetup) : draftBodyHtml,
         `${requestText}\n\n${reply.content}`,
       );
       if (!isAutomatedTestMode()) {
@@ -6030,8 +7496,19 @@ export function DocumentAssistantWorkspace({
         documentHtmlFromMarkdown(revisedMarkdown),
         revisionSnapshot.assets,
       );
+      // A revised document keeps its page setup, headers, and footers (from
+      // Word, PDF, a template, or a layout request); only the text comes back
+      // from the model, and the returned blocks are set in the document's
+      // styles. A template or layout the request names replaces the setup.
+      const revisedBodyHtml = formatMlaDocument(
+        restoredRevisionHtml,
+        `${request} ${sourceHtml.includes("document-mla-text") ? "MLA" : ""}`,
+      );
+      const revisionLayout = revisedBodyHtml.includes("document-mla-text")
+        ? { markerHtml: "", bodyHtml: revisedBodyHtml }
+        : revisionPageLayout(sourceHtml, revisedBodyHtml, request, revisionTemplate);
       let revisedHtml = paginateTransferredDocumentHtml(
-        formatMlaDocument(restoredRevisionHtml, `${request} ${sourceHtml.includes("document-mla-text") ? "MLA" : ""}`),
+        withPageSetupMarker(revisionLayout.markerHtml, revisionLayout.bodyHtml),
         `${documentTitle}\n\n${reply.content}`,
       );
       if (!isAutomatedTestMode()) {
@@ -6150,9 +7627,18 @@ export function DocumentAssistantWorkspace({
 
   async function submitInstruction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const request = instruction.trim();
+    // Layout asked for in plain English is applied directly; it needs no model.
+    if (request && draftKind === "document" && !assistantWorking && !revisionInFlightRef.current) {
+      const layout = parseLayoutRequest(request);
+      if (layout && isLayoutOnlyRequest(request, layout)) {
+        setInstruction("");
+        applyLayoutRequest(layout, request);
+        return;
+      }
+    }
     // Keep the prompt intact if model access disappears while it is being composed.
     if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
-    const request = instruction.trim();
     if (!request) return;
     if (draftKind === "deck") {
       if (assistantWorking || revisionInFlightRef.current) {
@@ -6601,9 +8087,12 @@ export function DocumentAssistantWorkspace({
     setStatus(`Opening ${file.name} in the editor...`);
     let opened: UploadedWordTemplate;
     try {
-      opened = await readDocumentFileForEditor(file);
-    } catch {
-      notifyRail(`Could not open ${file.name}. Choose a .docx, .doc, .md, .txt, or .html file.`);
+      opened = await readDocumentFileForEditor(file, completionUserId);
+    } catch (error) {
+      // The PDF converter explains its own failures (password protection,
+      // unreadable files, size limit); other files get the supported types.
+      const reason = error instanceof ChatRequestError ? ` ${error.message}` : ` Choose a ${OPEN_IN_EDITOR_TYPES_LABEL} file.`;
+      notifyRail(`Could not open ${file.name}.${reason}`);
       return;
     }
     let nextContentHtml = paginateTransferredDocumentHtml(opened.html, "", { forceMarkerPages: true });
@@ -6774,6 +8263,7 @@ export function DocumentAssistantWorkspace({
       hasCurrentDraft
         ? conformCurrentDocumentToUploadedTemplate(
             uploadedTemplate.html,
+            currentDocumentFlowHtml(),
             currentDraftText,
           )
         : uploadedTemplate.html,
@@ -6964,13 +8454,8 @@ export function DocumentAssistantWorkspace({
 
   function applyMlaLayout() {
     const original = editorRef.current?.innerHTML ?? content;
-    const root = document.createElement("template");
-    root.innerHTML = original;
-    mergeSplitContinuationBlocks(root.content);
-    root.content.querySelectorAll(".document-page-label").forEach(node => node.remove());
-    root.content.querySelectorAll("section.document-page").forEach(node => node.replaceWith(...Array.from(node.childNodes)));
     recordUndoSnapshot(original);
-    setContent(paginateTransferredDocumentHtml(formatMlaDocument(sanitizeDocumentHtml(root.innerHTML), "MLA"), "MLA"));
+    setContent(paginateTransferredDocumentHtml(formatMlaDocument(currentDocumentFlowHtml(), "MLA"), "MLA"));
     setStatus("MLA layout applied: double spacing, 12-point Times New Roman, and a centered title. Save a version to keep it.");
   }
 
@@ -8685,7 +10170,7 @@ export function DocumentAssistantWorkspace({
           onClick={() => setRailOpen(false)}
         />
       )}
-      <section className="document-assistant-shell" aria-label="Draft editor">
+      <section className="document-assistant-shell" aria-label="Draft editor" ref={assistantShellRef}>
         <aside
           ref={assistantRailRef}
           className={`document-assistant-rail ${railIsDrawer ? "is-drawer" : ""} ${
@@ -9167,7 +10652,13 @@ export function DocumentAssistantWorkspace({
                           key={template.id}
                           type="button"
                           data-template-id={template.id}
-                          data-tooltip={`Apply the ${template.name} template to your current draft`}
+                          data-tooltip={
+                            template.sourceHtml || documentFormatById(template.formatId)
+                              ? hasDraftContent
+                                ? `Set your draft in the ${template.name} layout without changing its text`
+                                : `Start from the ${template.name} template`
+                              : `Use the ${template.name} template when the assistant drafts`
+                          }
                           className={`draft-template-card ${
                             selectedTemplate.id === template.id ? "is-selected" : ""
                           }`}
@@ -9572,7 +11063,7 @@ export function DocumentAssistantWorkspace({
                         data-tooltip={
                           draftKind === "deck"
                             ? "Open a PowerPoint file as this deck so you can edit its slides directly"
-                            : "Open a Word, Markdown, or text file as this draft so you can edit it directly"
+                            : "Open a Word, PDF, Markdown, or text file as this draft, keeping its formatting, so you can edit it directly"
                         }
                         disabled={assistantWorking}
                         onClick={triggerOpenInEditor}
@@ -9796,9 +11287,10 @@ export function DocumentAssistantWorkspace({
             </div>
             <span className="document-version-label">
               <History size={17} />
-              {versions.find((version) => version.id === selectedVersionId)?.label ??
-                "Version"}
-              {hasUnsavedEdits ? " + unsaved edits" : ""}
+              <span className="document-version-text">
+                {versions.find((version) => version.id === selectedVersionId)?.label ?? "Version"}
+                {hasUnsavedEdits ? " + unsaved edits" : ""}
+              </span>
             </span>
             <div className="document-top-actions">
               <DraftModelMenu
@@ -10799,6 +12291,23 @@ export function DocumentAssistantWorkspace({
                 >
                   <AiPenIcon size={18} />
                 </button>
+                <button
+                  type="button"
+                  aria-label="Slide pictures"
+                  aria-haspopup="dialog"
+                  aria-expanded={deckBladeKind === "picture"}
+                  data-tooltip={
+                    !selectedSlide
+                      ? "Add a slide first"
+                      : selectedSlide.layout === "image-caption"
+                        ? "Add or replace this slide's picture: upload, web, or AI"
+                        : "Add a picture: this layout has none, so pick a layout with a picture first"
+                  }
+                  disabled={!selectedSlide}
+                  onClick={(event) => toggleDeckPictures(event.currentTarget)}
+                >
+                  <Images size={18} />
+                </button>
                 <div className="document-insert-control">
                   <button
                     type="button"
@@ -11021,13 +12530,11 @@ export function DocumentAssistantWorkspace({
                 <button
                   type="button"
                   aria-label="Slide layout"
-                  aria-haspopup="menu"
-                  aria-expanded={deckLayoutMenuOpen === "switch"}
+                  aria-haspopup="dialog"
+                  aria-expanded={deckBladeKind === "switch"}
                   data-tooltip="Change the selected slide's layout"
                   disabled={!selectedSlide}
-                  onClick={() =>
-                    setDeckLayoutMenuOpen((value) => (value === "switch" ? null : "switch"))
-                  }
+                  onClick={(event) => toggleDeckLayoutMenu("switch", event.currentTarget)}
                 >
                   <LayoutTemplate size={18} />
                 </button>
@@ -11072,9 +12579,14 @@ export function DocumentAssistantWorkspace({
                   onDelete={deleteDeckSlide}
                 />
               )}
+              <div className="deck-filmstrip-pane">
               <div className="deck-filmstrip" aria-label="Slides" ref={deckFilmstripRef}>
                 {deckState.slides.map((slide, index) => (
-                  <div className="deck-thumb" key={slide.id} data-slide-thumb={slide.id}>
+                  <div
+                    className={`deck-thumb ${selectedSlide?.id === slide.id ? "is-selected" : ""}`}
+                    key={slide.id}
+                    data-slide-thumb={slide.id}
+                  >
                     {deckDropIndex === index && (
                       <span className="deck-drop-indicator" aria-hidden="true" />
                     )}
@@ -11146,39 +12658,75 @@ export function DocumentAssistantWorkspace({
                 {deckDropIndex === deckState.slides.length && (
                   <span className="deck-drop-indicator" aria-hidden="true" />
                 )}
+              </div>
                 <button
                   type="button"
                   className="deck-add-slide"
-                  aria-haspopup="menu"
-                  aria-expanded={deckLayoutMenuOpen === "add"}
-                  data-tooltip="Add a slide from a layout (⇧⌘N)"
-                  onClick={() => {
-                    // The layout menu lives on the stage; an empty deck has no
-                    // stage yet, so its first slide starts as a title slide.
+                  aria-haspopup="dialog"
+                  aria-expanded={deckBladeKind === "add"}
+                  data-tooltip="Add a slide from a layout (⇧⌘N adds Title + bullets)"
+                  onClick={(event) => {
+                    // An empty deck has no slide to add after, so its first
+                    // slide starts as a title slide.
                     if (!selectedSlide) {
                       addDeckSlide("title");
                       return;
                     }
-                    setDeckLayoutMenuOpen((value) => (value === "add" ? null : "add"));
+                    toggleDeckLayoutMenu("add", event.currentTarget);
                   }}
                 >
                   <Plus size={16} />
                   Add slide
                 </button>
               </div>
-              <div className="deck-stage-column">
+              <div
+                className="deck-stage-column"
+                ref={deckStageColumnRef}
+                style={deckStageInset ? { marginLeft: deckStageInset } : undefined}
+              >
                 <section className="deck-design-browser" aria-label="Slide design choices">
                   <div className="deck-design-heading">
+                    <span className="deck-design-lead">
+                    <button
+                      type="button"
+                      className="deck-design-fold"
+                      aria-expanded={deckLayoutStripOpen}
+                      aria-controls="deck-design-gallery"
+                      aria-label={deckLayoutStripOpen ? "Fold away layouts and themes" : "Show layouts and themes"}
+                      data-tooltip={
+                        deckLayoutStripOpen
+                          ? "Fold the layouts and themes strip away to give the slide more room"
+                          : "Show the layouts and themes strip above the slide"
+                      }
+                      onClick={() => setDeckDesignStripOpen(!deckLayoutStripOpen)}
+                    >
+                      <ChevronDown className="deck-design-chevron" size={15} aria-hidden="true" />
+                    </button>
                     <div className="deck-design-tabs" role="group" aria-label="Slide design view">
-                      <button type="button" aria-pressed={deckDesignTab === "layouts"} onClick={() => setDeckDesignTab("layouts")}>
+                      <button
+                        type="button"
+                        aria-pressed={deckLayoutStripOpen && deckDesignTab === "layouts"}
+                        onClick={() => {
+                          setDeckDesignTab("layouts");
+                          setDeckDesignStripOpen(true);
+                        }}
+                      >
                         <LayoutTemplate size={14} aria-hidden="true" />
                         Layouts
                       </button>
-                      <button type="button" aria-pressed={deckDesignTab === "themes"} onClick={() => setDeckDesignTab("themes")}>
+                      <button
+                        type="button"
+                        aria-pressed={deckLayoutStripOpen && deckDesignTab === "themes"}
+                        onClick={() => {
+                          setDeckDesignTab("themes");
+                          setDeckDesignStripOpen(true);
+                        }}
+                      >
                         <Palette size={14} aria-hidden="true" />
                         Themes
                       </button>
                     </div>
+                    </span>
                     <button
                       type="button"
                       className="deck-design-starters"
@@ -11189,8 +12737,8 @@ export function DocumentAssistantWorkspace({
                       Deck starters &amp; brand themes
                     </button>
                   </div>
-                  {deckDesignTab === "layouts" ? (
-                    <div className="deck-layout-gallery" aria-label="Browse slide layouts">
+                  {!deckLayoutStripOpen ? null : deckDesignTab === "layouts" ? (
+                    <div className="deck-layout-gallery" id="deck-design-gallery" aria-label="Browse slide layouts">
                       {SUPPORTED_DECK_LAYOUTS.map(layout => (
                         <button type="button" key={layout} aria-label={`Apply ${DECK_LAYOUT_LABELS[layout]} layout`}
                           data-tooltip={`Switch the selected slide to the ${DECK_LAYOUT_LABELS[layout]} layout`}
@@ -11201,7 +12749,7 @@ export function DocumentAssistantWorkspace({
                       ))}
                     </div>
                   ) : (
-                    <div className="deck-theme-gallery" role="group" aria-label="Deck color themes">
+                    <div className="deck-theme-gallery" id="deck-design-gallery" role="group" aria-label="Deck color themes">
                       {DECK_COLOR_PALETTES.map(([name, accent, background, heading, body]) => {
                         const active = deckState.theme.colors.accent1 === accent && deckState.theme.colors.background === background;
                         return (
@@ -11225,70 +12773,6 @@ export function DocumentAssistantWorkspace({
                 </section>
                 {selectedSlide ? (
                   <>
-                    {/* Fixed-position pill; must live OUTSIDE the scaled
-                        .deck-stage or the transform would re-anchor it. */}
-                    {deckAi && (
-                      <AiEditComposer
-                        getAnchor={getDeckAiAnchor}
-                        title={deckAi.mode === "slide" ? "Edit slide with AI" : "Edit slide text with AI"}
-                        targetLabel={
-                          deckAi.mode === "slide"
-                            ? `Slide ${Math.max(1, deckState.slides.findIndex((slide) => slide.id === deckAi.slideId) + 1)} · ${
-                                DECK_LAYOUT_LABELS[
-                                  deckState.slides.find((slide) => slide.id === deckAi.slideId)?.layout ?? "title"
-                                ] ?? "Slide"
-                              }`
-                            : `“${deckAi.selectedText.length > 90 ? `${deckAi.selectedText.slice(0, 90)}…` : deckAi.selectedText}”`
-                        }
-                        placeholder={
-                          deckAi.mode === "slide"
-                            ? "Tell AI how to change this slide…"
-                            : "Tell AI how to change the highlighted text…"
-                        }
-                        actions={deckAi.mode === "slide" ? SLIDE_ACTIONS : DOCUMENT_SELECTION_ACTIONS.filter((action) => action.group === "improve")}
-                        chipGroups={deckAi.mode === "slide" ? SLIDE_CHIP_GROUPS : DOCUMENT_SELECTION_CHIP_GROUPS}
-                        phase={deckAi.phase}
-                        agentName={selectedAgent?.name ?? "AI"}
-                        streamText={deckAi.stream}
-                        runLabel={deckAi.runLabel}
-                        baseText={deckAi.mode === "selection" ? deckAi.selectedText : undefined}
-                        proposalText={deckAi.mode === "selection" ? deckAi.proposalText : undefined}
-                        proposalHtml={deckAi.mode === "selection" ? escapeHtml(deckAi.proposalText) : undefined}
-                        reviewPreview={
-                          deckAi.mode === "slide" && deckAi.phase === "review" ? (
-                            <SlideAiPreview
-                              before={deckState.slides.find((slide) => slide.id === deckAi.slideId) ?? null}
-                              after={deckAi.proposalSlides}
-                              theme={deckState.theme}
-                            />
-                          ) : undefined
-                        }
-                        error={deckAi.error}
-                        disabledReason={draftAiAvailable ? null : draftAiUnavailableReason}
-                        acceptLabel={deckAi.mode === "slide" ? "Apply to slide" : "Replace"}
-                        onRun={runDeckAi}
-                        onRefine={refineDeckAi}
-                        onAccept={acceptDeckAi}
-                        onRetry={retryDeckAi}
-                        onStop={() => deckAiAbortRef.current?.abort()}
-                        onClose={closeDeckAiEdit}
-                      />
-                    )}
-                    {deckAiSelectionOffer && !deckAi && (
-                      <button
-                        className="inline-ai-selection-trigger"
-                        type="button"
-                        style={{ top: deckAiSelectionOffer.top, left: deckAiSelectionOffer.left }}
-                        aria-label="Ask AI to edit highlighted slide text"
-                        data-tooltip={draftAiAvailable ? "Rewrite the highlighted slide text with AI" : draftAiUnavailableReason}
-                        disabled={!draftAiAvailable}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={openDeckAiEdit}
-                      >
-                        <Sparkles size={14} />
-                        Ask AI
-                      </button>
-                    )}
                     <div
                       className="deck-stage-viewport"
                       ref={deckStageViewportRef}
@@ -11296,6 +12780,7 @@ export function DocumentAssistantWorkspace({
                       onScroll={() => setDeckAiSelectionOffer(null)}
                     >
                       <div
+                        key={selectedSlide.id}
                         className={`deck-stage deck-slide-canvas ${
                           deckAiWorking ? "is-ai-editing" : ""
                         }`}
@@ -11340,8 +12825,11 @@ export function DocumentAssistantWorkspace({
                             <span className="deck-media-slot-actions">
                               <button
                                 type="button"
-                                data-tooltip="Generate an AI image or find a web image for this slide"
-                                onClick={() => openDeckImageDialog(selectedSlide.id)}
+                                data-tooltip="Upload, find on the web, or generate a picture for this slide"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openDeckImageDialog(selectedSlide.id, "image", event.currentTarget);
+                                }}
                               >
                                 {selectedSlide.image.src ? "Replace image" : "Add image"}
                               </button>
@@ -11387,7 +12875,7 @@ export function DocumentAssistantWorkspace({
                                 className={`deck-block deck-block--${region} ${
                                   isBullets ? "is-bullets" : ""
                                 }`}
-                                style={deckRegionStyle(spec, deckState.theme, selectedSlide)}
+                                style={deckRegionStyle(spec, deckState.theme, selectedSlide, region)}
                                 contentEditable
                                 suppressContentEditableWarning
                                 spellCheck
@@ -11401,6 +12889,7 @@ export function DocumentAssistantWorkspace({
                                 onFocus={() => {
                                   beginDeckEditSession();
                                   setDeckActiveBlock({ slideId: selectedSlide.id, region });
+                                  setDeckTextTarget({ slideId: selectedSlide.id, region });
                                 }}
                                 onInput={(event) =>
                                   handleDeckBlockInput(
@@ -11409,8 +12898,13 @@ export function DocumentAssistantWorkspace({
                                     event.currentTarget,
                                   )
                                 }
-                                onBlur={endDeckEditSession}
-                                onKeyDown={isBullets ? handleDeckBulletsKeyDown : undefined}
+                                onBlur={(event) => {
+                                  endDeckEditSession();
+                                  // Focus moving onto the format toolbar keeps it up.
+                                  const next = event.relatedTarget as HTMLElement | null;
+                                  if (!next?.closest?.(".deck-text-toolbar")) setDeckTextTarget(null);
+                                }}
+                                onKeyDown={(event) => handleDeckBlockKeyDown(event, isBullets)}
                                 onKeyUp={captureDeckAiSelection}
                                 onMouseUp={captureDeckAiSelection}
                                 onSelect={captureDeckAiSelection}
@@ -11491,125 +12985,14 @@ export function DocumentAssistantWorkspace({
                       <button
                         type="button"
                         className="deck-layout-control"
-                        aria-haspopup="menu"
-                        aria-expanded={deckLayoutMenuOpen === "switch"}
+                        aria-haspopup="dialog"
+                        aria-expanded={deckBladeKind === "switch"}
                         data-tooltip="Change this slide's layout"
-                        onClick={() =>
-                          setDeckLayoutMenuOpen((value) => (value === "switch" ? null : "switch"))
-                        }
+                        onClick={(event) => toggleDeckLayoutMenu("switch", event.currentTarget)}
                       >
                         <LayoutTemplate size={14} />
                         {DECK_LAYOUT_LABELS[selectedSlide.layout]}
                       </button>
-                      {deckLayoutMenuOpen && (
-                        <div
-                          className="document-insert-menu deck-layout-menu"
-                          role="menu"
-                          aria-label={
-                            deckLayoutMenuOpen === "add"
-                              ? "Add a slide with this layout"
-                              : "Switch this slide's layout"
-                          }
-                        >
-                          {SUPPORTED_DECK_LAYOUTS.map((layout) => (
-                            <button
-                              key={layout}
-                              type="button"
-                              role="menuitem"
-                              data-tooltip={
-                                deckLayoutMenuOpen === "add"
-                                  ? `Add a ${DECK_LAYOUT_LABELS[layout]} slide`
-                                  : `Use the ${DECK_LAYOUT_LABELS[layout]} layout`
-                              }
-                              onClick={() =>
-                                deckLayoutMenuOpen === "add"
-                                  ? addDeckSlide(layout)
-                                  : switchDeckSlideLayout(layout)
-                              }
-                            >
-                              <span
-                                className={`deck-layout-glyph is-${layout}`}
-                                aria-hidden="true"
-                              />
-                              {DECK_LAYOUT_LABELS[layout]}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {deckImageDialog.open && (
-                        <form
-                          className="inline-ai-popover deck-image-dialog"
-                          role="dialog"
-                          aria-label="Slide image"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            void generateDeckSlideImage();
-                          }}
-                        >
-                          <div className="inline-ai-popover-header">
-                            <strong>Slide image</strong>
-                            <button
-                              type="button"
-                              aria-label="Close slide image dialog"
-                              data-tooltip="Close without changing the slide"
-                              onClick={closeDeckImageDialog}
-                            >
-                              <X size={15} />
-                            </button>
-                          </div>
-                          <label>
-                            <span>Describe the image</span>
-                            <input
-                              type="text"
-                              aria-label="Image description"
-                              value={deckImageDialog.prompt}
-                              disabled={Boolean(deckImageDialog.working)}
-                              placeholder="Boston skyline at dusk"
-                              onChange={(event) =>
-                                setDeckImageDialog((current) => ({
-                                  ...current,
-                                  prompt: event.target.value,
-                                  error: null,
-                                }))
-                              }
-                            />
-                          </label>
-                          {deckImageDialog.error && (
-                            <p className="document-link-error" role="alert">
-                              {deckImageDialog.error}
-                            </p>
-                          )}
-                          <div className="inline-ai-actions">
-                            <button
-                              type="button"
-                              data-tooltip="Find a real web image matching this description"
-                              disabled={
-                                Boolean(deckImageDialog.working) || !deckImageDialog.prompt.trim()
-                              }
-                              onClick={() => void findDeckWebImage()}
-                            >
-                              {deckImageDialog.working === "web" ? "Searching…" : "Find web image"}
-                            </button>
-                            <button
-                              type="submit"
-                              data-tooltip={
-                                imageGenerationAgent
-                                  ? `Generate an image with ${imageGenerationAgent.name}`
-                                  : "No image-generation model is enabled for your workspace"
-                              }
-                              disabled={
-                                Boolean(deckImageDialog.working) ||
-                                !deckImageDialog.prompt.trim() ||
-                                !imageGenerationAgent
-                              }
-                            >
-                              {deckImageDialog.working === "generate"
-                                ? "Generating…"
-                                : "Generate AI image"}
-                            </button>
-                          </div>
-                        </form>
-                      )}
                     </div>
                     <div className={`deck-notes-strip ${deckNotesOpen ? "is-open" : ""}`}>
                       <button
@@ -11666,6 +13049,208 @@ export function DocumentAssistantWorkspace({
                   </div>
                 )}
               </div>
+              <DeckBlade
+                open={deckBladeKind !== null}
+                label={
+                  deckBladeKind === "add"
+                    ? "Add a slide"
+                    : deckBladeKind === "switch"
+                      ? "Change layout"
+                      : deckBladeKind === "picture"
+                        ? "Slide picture"
+                        : deckAi?.mode === "selection"
+                          ? "Edit slide text with AI"
+                          : "Edit slide with AI"
+                }
+                title={deckBladeKind === "picture" ? "Picture" : undefined}
+                subtitle={
+                  !selectedSlide
+                    ? undefined
+                    : deckBladeKind === "add"
+                      ? `Goes after slide ${selectedSlideIndex + 1}`
+                      : `Slide ${selectedSlideIndex + 1} · ${DECK_LAYOUT_LABELS[selectedSlide.layout]}`
+                }
+                icon={
+                  deckBladeKind === "picture" ? <Images size={16} /> : deckBladeKind === "add" ? <Plus size={16} /> : <LayoutTemplate size={16} />
+                }
+                bare={deckBladeKind === "ai"}
+                contentKey={deckBladeKind ?? ""}
+                getLeftEdge={deckBladeLeftEdge}
+                preferredWidth={deckBladeWidth}
+                onPreferredWidthChange={(width, done) => {
+                  setDeckBladeWidth(width);
+                  if (done) writeDraftPreference(DECK_BLADE_WIDTH_PREFERENCE_KEY, String(width));
+                }}
+                onEdgeChange={setDeckBladeEdge}
+                returnFocus={deckBladeReturnFocus}
+                dismissible={!(deckBladeKind === "picture" && deckImageDialog.working)}
+                closeLabel={deckBladeKind === "picture" ? "Close slide picture dialog" : undefined}
+                onClose={() => {
+                  if (deckBladeKind === "picture") closeDeckImageDialog();
+                  else if (deckBladeKind === "ai") closeDeckAiEdit();
+                  else setDeckLayoutMenuOpen(null);
+                }}
+                onSubmit={
+                  deckBladeKind === "picture"
+                    ? (event) => {
+                        event.preventDefault();
+                        void generateDeckSlideImage();
+                      }
+                    : undefined
+                }
+                footer={
+                  deckBladeKind === "picture" && deckImageDialog.region ? (
+                    <button
+                      type="button"
+                      className="deck-blade-done"
+                      disabled={Boolean(deckImageDialog.working)}
+                      onClick={() => {
+                        const target = deckBladeTriggerRef.current;
+                        closeDeckImageDialog();
+                        if (target?.isConnected) target.focus({ preventScroll: true });
+                      }}
+                    >
+                      Done
+                    </button>
+                  ) : undefined
+                }
+              >
+                {deckBladeKind === "ai" && deckAi && selectedSlide && (
+                  <AiEditComposer
+                    embedded
+                    getAnchor={getDeckAiAnchor}
+                    title={deckAi.mode === "slide" ? "Edit slide with AI" : "Edit slide text with AI"}
+                    targetLabel={
+                      deckAi.mode === "slide"
+                        ? `Slide ${Math.max(1, deckState.slides.findIndex((slide) => slide.id === deckAi.slideId) + 1)} · ${
+                            DECK_LAYOUT_LABELS[
+                              deckState.slides.find((slide) => slide.id === deckAi.slideId)?.layout ?? "title"
+                            ] ?? "Slide"
+                          }`
+                        : `“${deckAi.selectedText.length > 90 ? `${deckAi.selectedText.slice(0, 90)}…` : deckAi.selectedText}”`
+                    }
+                    placeholder={
+                      deckAi.mode === "slide"
+                        ? "Tell AI how to change this slide…"
+                        : "Tell AI how to change the highlighted text…"
+                    }
+                    actions={deckAi.mode === "slide" ? SLIDE_ACTIONS : DOCUMENT_SELECTION_ACTIONS.filter((action) => action.group === "improve")}
+                    chipGroups={deckAi.mode === "slide" ? SLIDE_CHIP_GROUPS : DOCUMENT_SELECTION_CHIP_GROUPS}
+                    phase={deckAi.phase}
+                    agentName={selectedAgent?.name ?? "AI"}
+                    streamText={deckAi.stream}
+                    runLabel={deckAi.runLabel}
+                    baseText={deckAi.mode === "selection" ? deckAi.selectedText : undefined}
+                    proposalText={deckAi.mode === "selection" ? deckAi.proposalText : undefined}
+                    proposalHtml={deckAi.mode === "selection" ? escapeHtml(deckAi.proposalText) : undefined}
+                    reviewPreview={
+                      deckAi.mode === "slide" && deckAi.phase === "review" ? (
+                        <SlideAiPreview
+                          before={deckState.slides.find((slide) => slide.id === deckAi.slideId) ?? null}
+                          after={deckAi.proposalSlides}
+                          theme={deckState.theme}
+                        />
+                      ) : undefined
+                    }
+                    error={deckAi.error}
+                    disabledReason={draftAiAvailable ? null : draftAiUnavailableReason}
+                    acceptLabel={deckAi.mode === "slide" ? "Apply to slide" : "Replace"}
+                    onRun={runDeckAi}
+                    onRefine={refineDeckAi}
+                    onAccept={acceptDeckAi}
+                    onRetry={retryDeckAi}
+                    onStop={() => deckAiAbortRef.current?.abort()}
+                    onClose={closeDeckAiEdit}
+                  />
+                )}
+                {(deckBladeKind === "add" || deckBladeKind === "switch") && selectedSlide && (
+                  <DeckLayoutGallery
+                    mode={deckBladeKind}
+                    currentLayout={selectedSlide.layout}
+                    renderPreview={(layout) => <DeckSlideStatic slide={previewDeckLayout(layout)} theme={deckState.theme} />}
+                    onPick={(layout) => (deckBladeKind === "add" ? addDeckSlide(layout) : switchDeckSlideLayout(layout))}
+                  />
+                )}
+                {deckBladeKind === "picture" && selectedSlide && (
+                  <>
+                    <input
+                      ref={deckPictureInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      hidden
+                      onChange={(event) => void handleDeckPictureUpload(event)}
+                    />
+                    <DeckPicturePanel
+                      picture={
+                        selectedSlide.layout === "image-caption"
+                          ? (() => {
+                              const box = resolvedMediaBox(selectedSlide);
+                              return {
+                                label: "Slide picture",
+                                w: box?.w ?? 640,
+                                h: box?.h ?? 334,
+                                src: selectedSlide.image.src,
+                                alt: selectedSlide.image.alt,
+                              };
+                            })()
+                          : null
+                      }
+                      prompt={deckImageDialog.prompt}
+                      onPromptChange={(value) =>
+                        setDeckImageDialog((current) => ({ ...current, prompt: value, error: null, promptEdited: true }))
+                      }
+                      working={deckImageDialog.working}
+                      error={deckImageDialog.error}
+                      webResults={deckImageDialog.results}
+                      onUpload={() => deckPictureInputRef.current?.click()}
+                      onDropFile={(file) => void placeDeckPictureFile(file)}
+                      onFindWeb={() => void findDeckWebImages()}
+                      onPickWeb={pickDeckWebImage}
+                      generateUnavailable={imageGenerationAgent ? null : "No image-generation model is enabled for your workspace"}
+                      generatorName={imageGenerationAgent?.name ?? null}
+                      onAltFocus={beginDeckEditSession}
+                      onAltChange={setDeckPictureAlt}
+                      onAltBlur={endDeckEditSession}
+                      onRemove={() => removeDeckSlideImage(selectedSlide.id)}
+                      noPlaceholder={
+                        deckImageDialog.region
+                          ? null
+                          : {
+                              reason: `${DECK_LAYOUT_LABELS[selectedSlide.layout]} has no picture. Switch this slide to a layout that holds one; its words come along.`,
+                              renderPreview: (layout) => <DeckSlideStatic slide={previewDeckLayout(layout)} theme={deckState.theme} />,
+                              onSwitch: switchDeckSlideToPictureLayout,
+                            }
+                      }
+                    />
+                  </>
+                )}
+              </DeckBlade>
+              {deckTextTarget &&
+                deckTextFormat &&
+                selectedSlide &&
+                deckTextTarget.slideId === selectedSlide.id &&
+                !deckAi &&
+                !deckPresentation &&
+                !deckSorterOpen && (
+                  <DeckTextToolbar
+                    getAnchor={getDeckTextAnchor}
+                    getObstacles={getDeckTextObstacles}
+                    getFrame={getDeckStageFrame}
+                    layoutKey={`${deckTextTarget.region}:${deckStageBox.scale}:${deckStageBox.left}:${deckStageInset}:${serializedDeck?.length ?? 0}`}
+                    format={deckTextFormat}
+                    palette={deckThemePalette(deckState.theme)}
+                    aiDisabledReason={draftAiAvailable ? null : draftAiUnavailableReason}
+                    onAskAi={openDeckAiEdit}
+                    onCommand={runDeckTextToolbarCommand}
+                    onSize={(size) => sizeDeckText(size === null ? { reset: true } : { size })}
+                    onStepSize={(direction) => sizeDeckText({ step: direction })}
+                    onColor={colorDeckText}
+                    onIndent={indentDeckText}
+                    onClear={clearDeckTextFormatting}
+                    onReturn={returnToDeckText}
+                    onLeave={() => setDeckTextTarget(null)}
+                  />
+                )}
             </div>
           )}
 
@@ -11920,7 +13505,7 @@ export function DocumentAssistantWorkspace({
                 ref={editorRef}
                 className={`document-canvas document-rich-editor ${
                   isPaginatedDocument ? "is-paginated" : ""
-                } ${showEdits ? "show-edits" : ""} ${
+                } ${sourceSetup ? "is-source-layout" : ""} ${showEdits ? "show-edits" : ""} ${
                   documentAiEditing ? "is-ai-editing" : ""
                 } ${aiEditsFresh ? "has-fresh-ai-edits" : ""} ${
                   aiTrailOpen ? "show-ai-edits" : ""
@@ -11937,12 +13522,18 @@ export function DocumentAssistantWorkspace({
                     "--doc-indent-left": `${indentLeft}px`,
                     "--doc-indent-right": `${indentRight}px`,
                     "--doc-indent-first": `${indentFirstLine}px`,
-                    ...(documentZoom !== 1 ? { zoom: documentZoom } : {}),
+                    ...(sourceLayoutStyle ?? {}),
+                    ...(canvasZoom !== 1 ? { zoom: canvasZoom } : {}),
                   } as CSSProperties
                 }
                 onInput={(event) => {
                   skipNextEditorSyncRef.current = true;
                   normalizedLayoutHtmlRef.current = null;
+                  // Clearing an imported document (select all, delete) keeps
+                  // its page setup and headers, as Word does.
+                  if (sourceMarkerHtml && !event.currentTarget.querySelector(":scope > .document-page-setup")) {
+                    event.currentTarget.insertAdjacentHTML("afterbegin", sourceMarkerHtml);
+                  }
                   // Editing commands run by an autoformat or paste report
                   // their own input; the transform already took the undo step.
                   if (editorTransformRef.current) return;
@@ -11973,6 +13564,15 @@ export function DocumentAssistantWorkspace({
                   if (!docAiOpenRef.current) scheduleSheetOverflowHeal(event.currentTarget.innerHTML);
                 }}
               />
+              {sourceSetup && isPaginatedDocument ? (
+                <DocumentPageChrome
+                  editorRef={editorRef}
+                  scrollerRef={pageScrollRef}
+                  setup={sourceSetup}
+                  layoutKey={content}
+                  zoom={canvasZoom}
+                />
+              ) : null}
             </div>
             {citationsOpen && (
               <aside className="document-citation-panel" aria-label="Citation workspace">
@@ -12239,6 +13839,137 @@ function draftTemplatesFromData(data: BootstrapData): DraftTemplate[] {
   return [...BUILT_IN_DRAFT_TEMPLATES, ...libraryTemplates];
 }
 
+/** An uploaded template's own page (from Word), with block samples taken
+ * from its body when the template carries none. Null for templates that
+ * were not Word files (no page setup). */
+function uploadedTemplatePageSetup(templateHtml: string): DocumentPageSetup | null {
+  const { setup, bodyHtml } = splitPageSetup(templateHtml);
+  if (!setup) return null;
+  if (setup.blockStyles && Object.keys(setup.blockStyles).length) return setup;
+  return { ...setup, blockStyles: inferBlockStyles(bodyHtml) };
+}
+
+/** Body HTML (no marker) set in a page setup, with the marker in front. */
+function formattedDraftHtml(bodyHtml: string, setup: DocumentPageSetup, options?: FormatBodyOptions) {
+  return withPageSetupMarker(pageSetupMarkerHtml(setup), formatDocumentBody(bodyHtml, setup, options));
+}
+
+/** A paginated body as one flow: page labels removed, split fragments
+ * rejoined, sheets unwrapped, and each page break the author made kept as a
+ * page-break rule so repagination honors it. */
+function flattenDocumentBodyHtml(bodyHtml: string) {
+  if (typeof document === "undefined") return bodyHtml;
+  const root = document.createElement("template");
+  root.innerHTML = bodyHtml;
+  mergeSplitContinuationBlocks(root.content);
+  root.content.querySelectorAll(".document-page-label").forEach((node) => node.remove());
+  Array.from(root.content.querySelectorAll<HTMLElement>("section.document-page")).forEach((section, index) => {
+    const nodes = Array.from(section.childNodes);
+    const authoredBreak =
+      index > 0 && section.dataset.pageBreakBefore === "manual" && !section.firstElementChild?.matches("hr.document-page-break");
+    if (authoredBreak) {
+      const pageBreak = document.createElement("hr");
+      pageBreak.className = "document-page-break";
+      section.replaceWith(pageBreak, ...nodes);
+    } else {
+      section.replaceWith(...nodes);
+    }
+  });
+  return root.innerHTML;
+}
+
+/** A Word template's page with the structure rules its genre needs: an
+ * uploaded contract form still gets hanging clauses, signature blocks, and
+ * exhibits on their own page. */
+function withGenreStructure(setup: DocumentPageSetup | null, genre: DocumentGenre): DocumentPageSetup | null {
+  if (!setup || setup.features?.length) return setup;
+  const genreFormat = genre === "legal" ? documentFormatById("legal-agreement") : null;
+  return genreFormat ? { ...setup, features: [...genreFormat.features] } : setup;
+}
+
+/** The format for a genre when no template supplies one. */
+function genreDocumentFormat(request: string, genre: DocumentGenre): DocumentFormat | null {
+  if (genre === "general") return null;
+  if (genre === "fiscal") return documentFormatById("business-confidential");
+  if (/\b(motion|brief|complaint|pleading|petition|affidavit|declaration|stipulation|memorandum of law|memorandum in support)\b/i.test(request)) {
+    return documentFormatById("legal-brief");
+  }
+  if (/\bletter\b/i.test(request)) return documentFormatById("legal-letter");
+  if (/\b(memo|memorandum)\b/i.test(request)) return documentFormatById("legal-memo");
+  return documentFormatById("legal-agreement");
+}
+
+/** Page setup for a new AI draft: a layout the request names or describes,
+ * the template's own format (an uploaded Word template's own page), or the
+ * genre's format for contracts, letters, memos, filings, and financial
+ * documents. General writing keeps the editor's default page unless the
+ * request describes a layout. */
+function draftPageSetupFor(template: DraftTemplate, request: string, useTemplateContext: boolean): DocumentPageSetup | null {
+  const layout = parseLayoutRequest(request);
+  const genre = documentGenre(request, template);
+  const named = documentFormatById(layout?.changes.formatId);
+  let base: DocumentPageSetup | null = named ? pageSetupForFormat(named) : null;
+  if (!base && template.sourceHtml && useTemplateContext) {
+    base = withGenreStructure(uploadedTemplatePageSetup(template.sourceHtml), genre);
+  }
+  if (!base && !template.sourceHtml) {
+    const own = templateSuitsGenre(template, genre) ? documentFormatById(template.formatId) : null;
+    if (own && (useTemplateContext || genre !== "general")) base = pageSetupForFormat(own);
+  }
+  if (!base) {
+    const genreFormat = genreDocumentFormat(request, genre);
+    if (genreFormat) base = pageSetupForFormat(genreFormat);
+  }
+  if (!base && layout) base = pageSetupForFormat(documentFormatById("standard") as DocumentFormat);
+  if (!base) return null;
+  return layout ? applyLayoutChanges(base, layout.changes) : base;
+}
+
+/** The document's first heading or line, for genre detection. */
+function documentTitleFromHtml(html: string) {
+  return documentHtmlToText(html).split("\n").find((line) => line.trim())?.trim().slice(0, 120) ?? "";
+}
+
+/** The page a revised document is set in, and its body in those styles. The
+ * document keeps its own setup (blocks styled from its samples, or from its
+ * own most common styles when it was opened from Word or PDF); a template the
+ * request follows or a layout it describes replaces the setup. */
+function revisionPageLayout(
+  sourceHtml: string,
+  revisedBodyHtml: string,
+  request: string,
+  template: DraftTemplate | undefined,
+): { markerHtml: string; bodyHtml: string } {
+  const { setup: sourceSetup, markerHtml: sourceMarker, bodyHtml: sourceBody } = splitPageSetup(sourceHtml);
+  let setup = sourceSetup;
+  const genre = documentGenre(`${documentTitleFromHtml(sourceHtml)} ${request}`, template ?? BLANK_CRAFT_TEMPLATE);
+  if (template) {
+    const templateSetup = template.sourceHtml
+      ? withGenreStructure(uploadedTemplatePageSetup(template.sourceHtml), genre)
+      : (() => {
+          const format = documentFormatById(template.formatId);
+          return format ? pageSetupForFormat(format) : null;
+        })();
+    if (templateSetup) setup = templateSetup;
+  }
+  const layout = parseLayoutRequest(request);
+  if (layout) {
+    const named = documentFormatById(layout.changes.formatId);
+    const base = named ? pageSetupForFormat(named) : setup ?? pageSetupForFormat(documentFormatById("standard") as DocumentFormat);
+    setup = applyLayoutChanges(base, layout.changes);
+  }
+  if (!setup) return { markerHtml: "", bodyHtml: revisedBodyHtml };
+  // A document opened from Word carries no samples or structure rules; its
+  // own most common styles and its genre's rules stand in for them.
+  const sampled =
+    setup.blockStyles && Object.keys(setup.blockStyles).length ? setup : { ...setup, blockStyles: inferBlockStyles(sourceBody) };
+  const styled = withGenreStructure(sampled, genre) ?? sampled;
+  return {
+    markerHtml: setup === sourceSetup ? sourceMarker : pageSetupMarkerHtml(setup),
+    bodyHtml: formatDocumentBody(revisedBodyHtml, styled),
+  };
+}
+
 function persistedWordTemplateToDraftTemplate(template: PersistedWordTemplate): DraftTemplate {
   return {
     id: template.id,
@@ -12321,6 +14052,7 @@ const DOCUMENT_CRAFT_BASE = [
   "Where a fact is not supplied, leave a bracketed placeholder such as [Party Legal Name], [Effective Date], or [Address] — never invent parties, addresses, dollar amounts, dates, statutes, or case citations.",
   "Where the reader is meant to write or sign on the page, put a run of underscores (________________); the editor renders those as true ruled lines.",
   "Match the length and density the document type actually has. A real instrument is complete, not a summary of itself.",
+  "The editor sets the page itself — typeface, size, spacing, margins, alignment, headers, footers, and page numbers — from the template and the user's words, so never describe formatting inside the document or add notes about fonts, margins, or layout.",
   "Include a code block only when the request actually asks for code or the document is an engineering deliverable that needs it. A business, legal, or financial document carries prose, tables, and lists — never a script.",
 ];
 
@@ -12328,11 +14060,11 @@ const LEGAL_INSTRUMENT_CRAFT = [
   "This is a legal instrument. Draft it the way a practicing attorney would, in this order:",
   "1. Title in capitals on its own line, then a preamble identifying the instrument, its effective date, and each party by full legal name, entity type, jurisdiction of formation, and address — giving each a short defined term in quotes and parentheses, e.g. (\"Provider\").",
   "2. Recitals as WHEREAS paragraphs when the instrument type conventionally uses them, closing with the NOW, THEREFORE consideration clause.",
-  "3. Operative provisions as numbered Articles or Sections. Give every one a real Markdown heading that carries its number and title (## ARTICLE 1. SERVICES, then ### 1.1 Scope of Services) — never a bold paragraph standing in for a heading — and number subsections hierarchically (1., 1.1, 1.1(a)). Keep one obligation per clause.",
+  "3. Operative provisions as numbered Articles or Sections. Give every one a real Markdown heading that carries its number and title (## ARTICLE 1. SERVICES, then ### 1.1 Scope of Services) — never a bold paragraph standing in for a heading — and number subsections hierarchically (1., 1.1, 1.1(a)). Put each lettered sub-clause on its own line beginning (a), (b), (c), with romanettes (i), (ii) beneath them, so the editor can hang them on their indents. Keep one obligation per clause.",
   "4. Include the provisions this deal actually needs, in conventional order — scope, term and termination, fees and payment terms, taxes, intellectual property, confidentiality, representations and warranties, indemnification, limitation of liability, insurance, assignment, notices with addresses, governing law and venue, dispute resolution, force majeure, entire agreement, amendment, waiver, severability, and counterparts/electronic signature — and leave out the ones that do not fit.",
   "5. Define a term once, capitalize it consistently after that, and never use a defined term before it is defined.",
   "6. Write amounts, periods, and deadlines the way instruments do: Thirty (30) days, $50,000 (Fifty Thousand and 00/100 Dollars), \"within ten (10) business days after receipt\".",
-  "7. Close with an IN WITNESS WHEREOF paragraph and a signature block for each party: entity name, then By, Name, Title, and Date lines with underscore rules.",
+  "7. Close with an IN WITNESS WHEREOF paragraph and a signature block for each party: the entity name in bold on its own line, then By, Name, Title, and Date lines with underscore rules (By: ________________), one per line. The editor sets the blocks side by side and keeps them on one page.",
   "8. Put any exhibit, schedule, or annex after the signature block under its own heading, and reference it from the clause that uses it.",
   "9. An executed instrument carries no research apparatus: never annotate clauses with [Source: ...] notes, statute lookups, or verification brackets. Cite authority only where the instrument itself would — a governing-law clause, a statutory definition it adopts, a regulation it requires compliance with.",
 ];
@@ -12648,12 +14380,13 @@ function renderFormattedLine(line: string) {
 }
 
 function documentHtmlToText(value: string) {
-  const withBreaks = value
+  // The page-setup marker holds layout and running headers, not body text.
+  const withBreaks = splitPageSetup(value).bodyHtml
     .replace(/<span[^>]*class="[^"]*document-page-label[^"]*"[^>]*>.*?<\/span>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<li[^>]*>/gi, "- ")
     .replace(/<\/li>/gi, "\n")
-    .replace(/<\/(p|h1|h2|h3|blockquote|ul|ol)>/gi, "\n\n")
+    .replace(/<\/(p|h[1-6]|blockquote|ul|ol|table|tr)>/gi, "\n\n")
     .replace(/<[^>]+>/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -12739,7 +14472,7 @@ function documentHtmlToRevisionSnapshot(value: string): RevisionDocumentSnapshot
     return { assets: [], markdown: documentHtmlToText(value) };
   }
   const template = document.createElement("template");
-  template.innerHTML = value;
+  template.innerHTML = splitPageSetup(value).bodyHtml;
   template.content.querySelectorAll(".document-page-label").forEach((node) => node.remove());
   mergeSplitContinuationBlocks(template.content);
   const assets: RevisionAsset[] = [];
@@ -12768,8 +14501,8 @@ function documentNodeToRevisionMarkdown(node: Node, assets: RevisionAsset[]): st
   if (tag === "pre") {
     return `\`\`\`\n${node.textContent ?? ""}\n\`\`\``;
   }
-  if (tag === "h1" || tag === "h2" || tag === "h3") {
-    const level = tag === "h1" ? "#" : tag === "h2" ? "##" : "###";
+  if (/^h[1-6]$/.test(tag)) {
+    const level = "#".repeat(Math.min(4, Number(tag.slice(1))));
     return `${level} ${documentInlineChildrenToRevisionMarkdown(node, assets)}`.trim();
   }
   if (tag === "p") return documentInlineChildrenToRevisionMarkdown(node, assets);
@@ -12986,22 +14719,72 @@ function tagWordParagraphAlignment(element: MammothDocumentElement): MammothDocu
   return syntheticStyle ? { ...next, ...syntheticStyle } : next;
 }
 
-const OPEN_IN_EDITOR_EXTENSIONS = new Set(["docx", "dotx", "doc", "md", "markdown", "txt", "html", "htm"]);
+const OPEN_IN_EDITOR_EXTENSIONS = new Set(["docx", "dotx", "pdf", "doc", "md", "markdown", "txt", "html", "htm"]);
 const OPEN_IN_EDITOR_ACCEPT =
-  ".docx,.dotx,.doc,.md,.markdown,.txt,.html,.htm,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/markdown,text/plain,text/html";
+  ".docx,.dotx,.pdf,.doc,.md,.markdown,.txt,.html,.htm,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,application/msword,text/markdown,text/plain,text/html";
+const OPEN_IN_EDITOR_TYPES_LABEL = ".docx, .pdf, .doc, .md, .txt, or .html";
 
-/** Reads a local file for "Open in editor": Word and HTML keep their
- * formatting through the template importer, Markdown keeps its structure. */
-async function readDocumentFileForEditor(file: File): Promise<UploadedWordTemplate> {
+/** Reads a local file for "Open in editor". Word and PDF files open with
+ * their own page setup and formatting intact (Word converted here, PDF by
+ * the API's stateless converter); HTML keeps its formatting through the
+ * template importer, and Markdown keeps its structure. */
+async function readDocumentFileForEditor(file: File, userId: string): Promise<UploadedWordTemplate> {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!OPEN_IN_EDITOR_EXTENSIONS.has(extension)) {
     throw new Error(`${file.name} is not a document the editor can open.`);
   }
+  if (extension === "pdf") return readPdfDocumentForEditor(file, userId);
   if (extension !== "md" && extension !== "markdown") return readUploadedWordTemplate(file);
   const html = documentHtmlFromMarkdown(await readFileAsText(file));
   const text = documentHtmlToText(html);
   if (!text.trim()) throw new Error("The file did not contain readable document content.");
   return { filename: file.name, html, text, title: titleFromUploadedTemplate(file.name, text), warnings: [] };
+}
+
+async function readPdfDocumentForEditor(file: File, userId: string): Promise<UploadedWordTemplate> {
+  const converted = await importPdfDocument(userId, file);
+  const html = sanitizeDocumentHtml(converted.html);
+  const text = documentHtmlToText(html);
+  if (!text.trim() && !/<img\b/i.test(html)) {
+    throw new Error("The PDF did not contain readable document content.");
+  }
+  return {
+    filename: file.name,
+    html,
+    text,
+    title: titleFromUploadedTemplate(file.name, text),
+    warnings: converted.warnings,
+  };
+}
+
+/** Word packages open through the format-preserving converter. A package it
+ * cannot read falls back to the simplified semantic import, and says so. */
+async function readWordPackageHtml(file: File, warnings: string[]): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  try {
+    const imported = await importDocxDocument(bytes);
+    warnings.push(...imported.warnings);
+    return sanitizeDocumentHtml(imported.html);
+  } catch {
+    warnings.push(
+      "The Word file's full formatting could not be read, so it opened with simplified formatting.",
+    );
+    return readWordPackageWithMammoth(bytes, warnings);
+  }
+}
+
+async function readWordPackageWithMammoth(bytes: Uint8Array, warnings: string[]): Promise<string> {
+  const result = await mammoth.convertToHtml(
+    { arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer },
+    {
+      convertImage: mammoth.images.dataUri,
+      includeDefaultStyleMap: true,
+      styleMap: UPLOADED_WORD_TEMPLATE_STYLE_MAP,
+      transformDocument: tagWordParagraphAlignment,
+    },
+  );
+  warnings.push(...Array.from(new Set(result.messages.map((message) => message.message))));
+  return sanitizeUploadedTemplateHtml(result.value);
 }
 
 async function readUploadedWordTemplate(file: File): Promise<UploadedWordTemplate> {
@@ -13010,17 +14793,7 @@ async function readUploadedWordTemplate(file: File): Promise<UploadedWordTemplat
   let html = "";
 
   if (extension === "docx" || extension === "dotx") {
-    const result = await mammoth.convertToHtml(
-      { arrayBuffer: await file.arrayBuffer() },
-      {
-        convertImage: mammoth.images.dataUri,
-        includeDefaultStyleMap: true,
-        styleMap: UPLOADED_WORD_TEMPLATE_STYLE_MAP,
-        transformDocument: tagWordParagraphAlignment,
-      },
-    );
-    html = sanitizeUploadedTemplateHtml(result.value);
-    warnings.push(...Array.from(new Set(result.messages.map((message) => message.message))));
+    html = await readWordPackageHtml(file, warnings);
   } else {
     const rawText = await readFileAsText(file);
     html = looksLikeHtml(rawText)
@@ -13199,7 +14972,28 @@ function sanitizeUploadedTemplateHtml(value: string) {
   return html || textToDocumentHtml(documentHtmlToText(value));
 }
 
-function conformCurrentDocumentToUploadedTemplate(templateHtml: string, currentDraftText: string) {
+function conformCurrentDocumentToUploadedTemplate(
+  templateHtml: string,
+  currentHtml: string,
+  currentDraftText: string,
+): string {
+  // A Word template carries its own page, headers, footers, and styles.
+  const templateSetup = uploadedTemplatePageSetup(templateHtml);
+  if (templateSetup) {
+    const { markerHtml, bodyHtml } = splitPageSetup(templateHtml);
+    if (!templatePlaceholderPattern().test(documentHtmlToText(bodyHtml))) {
+      // Without a content placeholder the template lends the draft its page,
+      // running header and footer, and styles; the draft's text stays.
+      return formattedDraftHtml(flattenDocumentBodyHtml(splitPageSetup(currentHtml).bodyHtml), templateSetup, {
+        restyle: "all",
+      });
+    }
+    // The draft goes where the template asks for it, in the template's styles.
+    return withPageSetupMarker(
+      markerHtml,
+      formatDocumentBody(conformCurrentDocumentToUploadedTemplate(bodyHtml, "", currentDraftText), templateSetup),
+    );
+  }
   const currentDraftHtml = existingDraftContentHtml(currentDraftText);
   if (typeof document === "undefined") {
     return `${templateHtml}<h2>Current draft content</h2>${currentDraftHtml}`;
@@ -13297,8 +15091,13 @@ function paginateTransferredDocumentHtml(
   html: string,
   requestContext: string,
   options?: { forceMarkerPages?: boolean },
-) {
+): string {
   html = removeDraftPageLabels(html);
+  // An imported page setup stays a top-level marker ahead of the sheets.
+  const { markerHtml, bodyHtml } = splitPageSetup(html);
+  if (markerHtml) {
+    return withPageSetupMarker(markerHtml, paginateTransferredDocumentHtml(bodyHtml, requestContext, options));
+  }
   if (countDocumentPages(html)) return html;
   html = wrapFillInBlanks(html);
   const requestedPages = parseRequestedPageCount(requestContext);
@@ -13542,6 +15341,9 @@ const DOCUMENT_SHEET_PAD_Y_PX = 60;
 const DOCUMENT_SHEET_CONTENT_HEIGHT_PX =
   Math.round((DOCUMENT_SHEET_WIDTH_PX * 11) / 8.5) - DOCUMENT_SHEET_PAD_Y_PX * 2;
 const SHEET_OVERFLOW_TOLERANCE_PX = 26;
+// About a third of a body line: rounding in line boxes and table rows must
+// not push a full source page's last line onto the next sheet.
+const SOURCE_SHEET_OVERFLOW_TOLERANCE_PX = 8;
 const SHEET_IMAGE_SETTLE_TIMEOUT_MS = 6000;
 /* Splitting a text block across sheets only pays off when the page being
  * left behind still has a few lines of room and both halves keep real
@@ -13669,6 +15471,9 @@ function splitOverflowingSheetBlock(
   range.setEnd(cut.node, cut.offset);
   const prefix = block.cloneNode(false) as HTMLElement;
   prefix.appendChild(range.extractContents());
+  // Extraction leaves empty copies of the inline wrappers it cut through.
+  removeEmptyInlineWrappers(prefix);
+  removeEmptyInlineWrappers(block);
   block.before(prefix);
   block.remove();
   block.setAttribute("data-split-continuation", "true");
@@ -13681,14 +15486,19 @@ function splitOverflowingSheetBlock(
  * page created by the user's Page break control remains a hard boundary. */
 async function repaginateOverfullDocumentPages(contentHtml: string): Promise<string | null> {
   if (typeof document === "undefined") return null;
+  // Imported documents measure against their own page size and margins.
+  const { setup, markerHtml, bodyHtml } = splitPageSetup(contentHtml);
+  const sourceGeometry = setup ? documentSheetGeometry(setup) : null;
   const host = document.createElement("article");
-  host.className = "document-canvas is-paginated";
+  host.className = `document-canvas is-paginated${setup ? " is-source-layout" : ""}`;
   host.setAttribute("aria-hidden", "true");
   host.setAttribute(
     "style",
-    `position:fixed;left:-11000px;top:0;width:${DOCUMENT_SHEET_WIDTH_PX}px;visibility:hidden;pointer-events:none;`,
+    `position:fixed;left:-11000px;top:0;width:${sourceGeometry?.sheetWidthPx ?? DOCUMENT_SHEET_WIDTH_PX}px;visibility:hidden;pointer-events:none;${
+      setup ? cssVariablesText(sourceLayoutCssVariables(setup)) : ""
+    }`,
   );
-  host.innerHTML = contentHtml;
+  host.innerHTML = bodyHtml;
   const sourceSheets = Array.from(
     host.querySelectorAll<HTMLElement>(":scope > section.document-page"),
   );
@@ -13706,6 +15516,9 @@ async function repaginateOverfullDocumentPages(contentHtml: string): Promise<str
       // Font readiness is best-effort; measurement proceeds with fallbacks.
     }
     await whenSheetImagesSettled(host);
+    // Imported tab stops are re-measured with the fonts actually rendered
+    // before any block is measured for page fit.
+    const tabsChanged = setup ? relayoutDocumentTabs(host) : false;
 
     const units: Array<{ block: HTMLElement; hardBreakBefore: boolean }> = [];
     let hardBreakBefore = false;
@@ -13758,13 +15571,21 @@ async function repaginateOverfullDocumentPages(contentHtml: string): Promise<str
       if (manualBoundary) sheet.dataset.pageBreakBefore = "manual";
       // Preview padding uses responsive clamps; pin the hidden measuring sheet
       // to the exact geometry shared with the DOCX export.
-      sheet.style.padding = `${DOCUMENT_SHEET_PAD_Y_PX}px ${DOCUMENT_SHEET_PAD_X_PX}px`;
+      // Source sheets have no border (see .is-source-layout in
+      // draft-editor.css), so their padding is exactly the source margins.
+      sheet.style.padding = sourceGeometry
+        ? `${sourceGeometry.padTopPx}px ${sourceGeometry.padRightPx}px ${sourceGeometry.padBottomPx}px ${sourceGeometry.padLeftPx}px`
+        : `${DOCUMENT_SHEET_PAD_Y_PX}px ${DOCUMENT_SHEET_PAD_X_PX}px`;
       host.appendChild(sheet);
       return sheet;
     };
 
     let currentSheet = createSheet();
-    const sheetCapacityPx = DOCUMENT_SHEET_CONTENT_HEIGHT_PX + SHEET_OVERFLOW_TOLERANCE_PX;
+    // A source page holds exactly what fits between its margins; only a
+    // sliver of rounding slack is allowed so the sheets break where Word does.
+    const sheetCapacityPx = sourceGeometry
+      ? sourceGeometry.contentHeightPx + SOURCE_SHEET_OVERFLOW_TOLERANCE_PX
+      : DOCUMENT_SHEET_CONTENT_HEIGHT_PX + SHEET_OVERFLOW_TOLERANCE_PX;
     const sheetOverflows = () => renderedSheetContentHeight(currentSheet) > sheetCapacityPx;
     units.forEach(({ block, hardBreakBefore: startsNewPage }) => {
       if (startsNewPage && currentSheet.childElementCount) {
@@ -13796,17 +15617,23 @@ async function repaginateOverfullDocumentPages(contentHtml: string): Promise<str
         if (!hadContent || movedToFreshSheet) break;
 
         currentSheet.removeChild(pending);
-        const trailing = currentSheet.lastElementChild;
-        const carriedHeading =
-          currentSheet.childElementCount > 1 &&
-          trailing instanceof HTMLElement &&
-          /^H[1-3]$/.test(trailing.tagName) &&
-          trailing.getBoundingClientRect().height <= SHEET_HEADING_CARRY_MAX_PX
-            ? trailing
-            : null;
-        if (carriedHeading) carriedHeading.remove();
+        // Headings and keep-with-next blocks (a signature lead-in) travel
+        // with the block that follows them instead of ending a sheet.
+        const carried: HTMLElement[] = [];
+        while (carried.length < 2 && currentSheet.childElementCount > 1) {
+          const trailing = currentSheet.lastElementChild;
+          if (
+            !(trailing instanceof HTMLElement) ||
+            !(/^H[1-4]$/.test(trailing.tagName) || trailing.classList.contains("document-keep-next")) ||
+            trailing.getBoundingClientRect().height > SHEET_HEADING_CARRY_MAX_PX
+          ) {
+            break;
+          }
+          trailing.remove();
+          carried.unshift(trailing);
+        }
         currentSheet = createSheet();
-        if (carriedHeading) currentSheet.appendChild(carriedHeading);
+        carried.forEach((block) => currentSheet.appendChild(block));
         movedToFreshSheet = true;
       }
     });
@@ -13816,8 +15643,8 @@ async function repaginateOverfullDocumentPages(contentHtml: string): Promise<str
       if (!sheet.getAttribute("style")) sheet.removeAttribute("style");
     });
     renumberDocumentPages(host);
-    if (documentPageDistribution(host) === beforeDistribution) return null;
-    return host.innerHTML;
+    if (documentPageDistribution(host) === beforeDistribution && !tabsChanged) return null;
+    return withPageSetupMarker(markerHtml, host.innerHTML);
   } finally {
     host.remove();
   }
@@ -15732,6 +17559,54 @@ type WebImageResult = {
   source: string;
 };
 
+/** A picture's default alt text from the words around it: the caption, else
+ * the slide's title. */
+function deckPictureContextAlt(slide: DeckSlide): string {
+  for (const region of ["caption", "title"]) {
+    const text = deckRegionPlainText(deckSlideRegionContent(slide, region)).replace(/\s+/g, " ").trim();
+    if (text) return text.slice(0, 200);
+  }
+  return "";
+}
+
+/** Several web picture candidates for a description: Wikipedia page images,
+ * the same real source the document editor uses. Empty when nothing matches
+ * or the search cannot be reached — never a stand-in picture. */
+async function searchWebImages(subject: string, limit = 8): Promise<WebImageResult[]> {
+  if (typeof fetch !== "function") return [];
+  try {
+    const endpoint = new URL("https://en.wikipedia.org/w/api.php");
+    endpoint.searchParams.set("action", "query");
+    endpoint.searchParams.set("generator", "search");
+    endpoint.searchParams.set("gsrsearch", subject);
+    endpoint.searchParams.set("gsrlimit", "20");
+    endpoint.searchParams.set("prop", "pageimages");
+    endpoint.searchParams.set("piprop", "thumbnail");
+    endpoint.searchParams.set("pithumbsize", "1200");
+    endpoint.searchParams.set("pilimit", "20");
+    endpoint.searchParams.set("origin", "*");
+    endpoint.searchParams.set("format", "json");
+    const response = await fetch(endpoint.toString());
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      query?: { pages?: Record<string, { index?: number; title?: string; thumbnail?: { source?: string } }> };
+    };
+    const seen = new Set<string>();
+    return Object.values(payload.query?.pages ?? {})
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+      .flatMap((page) => {
+        const url = page.thumbnail?.source;
+        // SVG renders are flags, seals, logos, and maps; slides want photos.
+        if (!url || seen.has(url) || /\.svg\.png$/i.test(url)) return [];
+        seen.add(url);
+        return [{ url, caption: page.title || subject, source: "Wikipedia" }];
+      })
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
 async function resolveWebImageResult(subject: string): Promise<WebImageResult> {
   if (typeof fetch === "function") {
     try {
@@ -15854,14 +17729,17 @@ function templateForInstruction(
 ) {
   const normalized = normalizeForMatch(instruction);
   const libraryIntent = /\b(library|package|prompt|template)\b/i.test(normalized);
+  // Whole words only (plurals allowed): "nda" must not match "standard".
+  const hasWords = (phrase: string) =>
+    !!phrase && new RegExp(`(?:^| )${escapeRegExp(phrase)}(?:s|es)?(?= |$)`).test(normalized);
   const scoredTemplates = templates
     .map((template) => {
       const normalizedName = normalizeForMatch(template.name);
-      const exactNameScore = normalized.includes(normalizedName) ? 8 : 0;
+      const exactNameScore = hasWords(normalizedName) ? 8 : 0;
       const nameScore = normalizedName
         .split(" ")
-        .filter((word) => word.length > 2 && normalized.includes(word)).length * 3;
-      const categoryScore = normalized.includes(template.category.toLowerCase()) ? 4 : 0;
+        .filter((word) => word.length > 2 && hasWords(word)).length * 3;
+      const categoryScore = hasWords(template.category.toLowerCase()) ? 4 : 0;
       const keywordWords = new Set(
         template.keywords.flatMap((keyword) =>
           normalizeForMatch(keyword)
@@ -15871,7 +17749,7 @@ function templateForInstruction(
       );
       const keywordScore = Math.min(
         4,
-        Array.from(keywordWords).filter((word) => normalized.includes(word)).length,
+        Array.from(keywordWords).filter((word) => hasWords(word)).length,
       );
       const libraryPenalty =
         template.category === "Library" && !libraryIntent && !exactNameScore ? -4 : 0;
@@ -15882,280 +17760,6 @@ function templateForInstruction(
     })
     .sort((left, right) => right.score - left.score);
   return scoredTemplates[0]?.score ? scoredTemplates[0].template : fallback;
-}
-
-function formatExistingDraftWithTemplate(
-  template: DraftTemplate,
-  currentTitle: string,
-  plainText: string,
-  context: DraftContextOptions,
-): DraftComposition {
-  const sourceText = normalizeExistingDraftText(plainText);
-  const subject = existingDraftSubject(currentTitle, sourceText);
-  const title = titleForAppliedTemplate(template, currentTitle, subject);
-  const lead = firstMeaningfulDraftParagraph(sourceText);
-  const bullets = draftContentBullets(sourceText);
-  const contentHtml = existingDraftContentHtml(sourceText);
-  const sourceLine = context.useWorkspaceSources
-    ? `Selected workspace source: ${context.primarySourceName}.`
-    : context.useWebSearch
-      ? "Public web search is available for source checks."
-      : "No external source context is selected.";
-  const agentLine = "Template formatting applied locally; no model call was made for this reformat.";
-
-  const sections = appliedTemplateSections(template, {
-    agentLine,
-    bullets,
-    contentHtml,
-    lead,
-    sourceLine,
-    subject,
-  });
-  const html = sections.join("");
-  return {
-    content: documentHtmlToText(html),
-    html,
-    summary: `${template.name} template applied to the current draft`,
-    title,
-    requiresCitations: template.requiresCitations,
-    requiresApproval: template.requiresApproval,
-  };
-}
-
-function appliedTemplateSections(
-  template: DraftTemplate,
-  context: {
-    agentLine: string;
-    bullets: string[];
-    contentHtml: string;
-    lead: string;
-    sourceLine: string;
-    subject: string;
-  },
-) {
-  const { agentLine, bullets, contentHtml, lead, sourceLine, subject } = context;
-  const bulletHtml = listHtml(bullets);
-  const sourceParagraph = `<p>${escapeHtml(sourceLine)}</p>`;
-  const agentParagraph = `<p>${escapeHtml(agentLine)}</p>`;
-
-  if (template.id === "legal-client-update") {
-    return [
-      `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-      `<p><strong>Matter:</strong> ${escapeHtml(subject)}</p>`,
-      "<h2>Client-facing summary</h2>",
-      `<p>${escapeHtml(lead)}</p>`,
-      "<h2>Key developments</h2>",
-      bulletHtml,
-      "<h2>Recommended next steps</h2>",
-      listHtml([
-        "Confirm the final source set before sending.",
-        "Assign the attorney reviewer and approval owner.",
-        "Remove internal notes before external delivery.",
-      ]),
-      "<h2>Source check notes</h2>",
-      sourceParagraph,
-      "<h2>Reformatted draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  if (template.id === "legal-approval-email") {
-    return [
-      `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-      `<p><strong>Subject:</strong> Approval requested: ${escapeHtml(subject)}</p>`,
-      "<h2>Summary for reviewer</h2>",
-      `<p>${escapeHtml(lead)}</p>`,
-      "<h2>Items for approval</h2>",
-      bulletHtml,
-      "<h2>Open questions</h2>",
-      listHtml([
-        "Confirm whether the draft is ready for external delivery.",
-        "Confirm citations and privileged material have been reviewed.",
-      ]),
-      "<h2>Source draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  if (template.id === "finance-investment-memo") {
-    return [
-      `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-      `<p><strong>Opportunity:</strong> ${escapeHtml(subject)}</p>`,
-      "<h2>Executive summary</h2>",
-      `<p>${escapeHtml(lead)}</p>`,
-      "<h2>Investment thesis</h2>",
-      bulletHtml,
-      "<h2>Financial snapshot</h2>",
-      listHtml([
-        "Revenue: [Add amount and period]",
-        "Margin / EBITDA: [Add amount or percentage]",
-        "Growth profile: [Add trend]",
-      ]),
-      "<h2>Risks and diligence</h2>",
-      listHtml([
-        "Commercial risk: [Add diligence finding]",
-        "Financial risk: [Add diligence finding]",
-        "Legal / regulatory risk: [Add diligence finding]",
-      ]),
-      "<h2>Source draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  if (template.id === "finance-board-update") {
-    return [
-      `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-      `<p><strong>Reporting topic:</strong> ${escapeHtml(subject)}</p>`,
-      "<h2>Highlights</h2>",
-      bulletHtml,
-      "<h2>Metrics</h2>",
-      listHtml([
-        "Revenue: [Add amount]",
-        "Gross margin: [Add percentage]",
-        "Cash balance / runway: [Add amount or months]",
-      ]),
-      "<h2>Risks</h2>",
-      `<p>${escapeHtml(lead)}</p>`,
-      "<h2>Asks</h2>",
-      listHtml(["[Decision, approval, or guidance requested]"]),
-      "<h2>Source draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  if (template.id === "business-project-brief") {
-    return [
-      `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-      `<p><strong>Project:</strong> ${escapeHtml(subject)}</p>`,
-      "<h2>Objective</h2>",
-      `<p>${escapeHtml(lead)}</p>`,
-      "<h2>Scope</h2>",
-      listHtml(["In scope: [Confirm included work]", "Out of scope: [Confirm exclusions]"]),
-      "<h2>Milestones</h2>",
-      bulletHtml,
-      "<h2>Risks</h2>",
-      listHtml(["[Risk and mitigation]"]),
-      "<h2>Source draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  if (template.id === "code-implementation-plan") {
-    return [
-      `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-      `<p><strong>Feature:</strong> ${escapeHtml(subject)}</p>`,
-      "<h2>Goal</h2>",
-      `<p>${escapeHtml(lead)}</p>`,
-      "<h2>Requirements</h2>",
-      bulletHtml,
-      "<h2>Implementation notes</h2>",
-      listHtml([
-        "Files to change: [Add paths]",
-        "State model: [Add state shape]",
-        "Edge cases: [Add cases]",
-      ]),
-      "<h2>Verification</h2>",
-      listHtml(["Unit tests: [Add tests]", "Browser QA: [Add flows]"]),
-      "<h2>Source draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  if (template.category === "Library") {
-    return [
-      `<h1>${escapeHtml(template.name)} Applied Draft</h1>`,
-      "<h2>Purpose</h2>",
-      `<p>${escapeHtml(template.description)}</p>`,
-      "<h2>Template instruction</h2>",
-      `<p>${escapeHtml(template.promptHint)}</p>`,
-      "<h2>Current draft content</h2>",
-      contentHtml,
-      agentParagraph,
-    ];
-  }
-
-  return [
-    `<h1>${escapeHtml(template.defaultTitle)}</h1>`,
-    `<p><strong>Topic:</strong> ${escapeHtml(subject)}</p>`,
-    "<h2>Introduction</h2>",
-    `<p>${escapeHtml(lead)}</p>`,
-    "<h2>Key sections</h2>",
-    bulletHtml,
-    "<h2>Source and verification plan</h2>",
-    sourceParagraph,
-    "<h2>Reformatted draft content</h2>",
-    contentHtml,
-    agentParagraph,
-  ];
-}
-
-function normalizeExistingDraftText(value: string) {
-  return value
-    .replace(/^Page\s+\d+\s*/gim, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function existingDraftSubject(currentTitle: string, sourceText: string) {
-  const cleanTitle = currentTitle.trim();
-  if (cleanTitle && cleanTitle !== EMPTY_DOCUMENT_TITLE) return cleanTitle;
-  const firstLine = sourceText
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-  return firstLine ? paperTitle(firstLine).slice(0, 90) : "Current Draft";
-}
-
-function titleForAppliedTemplate(
-  template: DraftTemplate,
-  currentTitle: string,
-  subject: string,
-) {
-  const cleanTitle = currentTitle.trim();
-  if (!cleanTitle || cleanTitle === EMPTY_DOCUMENT_TITLE) return template.defaultTitle;
-  if (cleanTitle.includes(` - ${template.name}`)) return cleanTitle;
-  return `${subject} - ${template.name}`;
-}
-
-function firstMeaningfulDraftParagraph(sourceText: string) {
-  return (
-    sourceText
-      .split(/\n{2,}/)
-      .map((block) =>
-        block
-          .split("\n")
-          .map((line) => line.replace(/^-\s*/, "").trim())
-          .filter(Boolean)
-          .join(" "),
-      )
-      .find((block) => block.split(/\s+/).filter(Boolean).length > 4) ??
-    "Use the current draft content as the source material for this template."
-  );
-}
-
-function draftContentBullets(sourceText: string) {
-  const explicitBullets = sourceText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => /^-\s+/.test(line))
-    .map((line) => line.replace(/^-\s+/, "").trim())
-    .filter(Boolean);
-  if (explicitBullets.length >= 2) return explicitBullets.slice(0, 5);
-
-  const sentences = sourceText
-    .replace(/\n+/g, " ")
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.split(/\s+/).filter(Boolean).length > 4);
-  if (sentences.length > 0) return sentences.slice(0, 5);
-
-  return ["Review and refine the source draft content under this template."];
 }
 
 function existingDraftContentHtml(sourceText: string) {
@@ -16438,6 +18042,13 @@ async function buildExportBlob(
     return new Blob([pptx.bytes.slice().buffer], { type: PPTX_MIME_TYPE });
   }
   if (format === "word") {
+    // A document opened from Word or PDF goes back to Word with its own page
+    // setup, headers/footers, and formatting rather than the draft design.
+    if (hasPageSetupMarker(contentHtml)) {
+      const sourceDocx = await buildSourceLayoutDocx(contentHtml, imageProxy);
+      if (sourceDocx.warnings.length) onExportWarnings?.(sourceDocx.warnings);
+      return new Blob([sourceDocx.bytes.slice().buffer], { type: DOCX_MIME_TYPE });
+    }
     // A real OOXML .docx: Word for macOS opens the previous HTML/MHTML
     // ".doc" approach as an empty document, so only genuine OOXML is honest.
     const docx = await buildDocxExportDocument(normalizedTitle, contentHtml, imageProxy);
@@ -17038,6 +18649,7 @@ function deckRegionStyle(
   spec: DeckTextRegionSpec,
   theme: DeckTheme,
   slide?: DeckSlide,
+  region?: string,
 ): CSSProperties {
   const color =
     slide?.textColor ??
@@ -17046,25 +18658,62 @@ function deckRegionStyle(
       : spec.colorRole === "accent1"
         ? theme.colors.accent1
         : theme.colors.body);
+  // PowerPoint's shrink on overflow, measured once for the stage and the
+  // export (deckTextFit). The box lays its text out at full size in a box
+  // 1/scale as large and is drawn scaled, which wraps exactly like the
+  // smaller font in the real box while run sizes stay what the deck holds.
+  const fit: DeckTextFit =
+    slide && region ? deckRegionFit(spec, deckSlideRegionContent(slide, region), theme) : { fontScale: 1, lineReduction: 0 };
+  const scale = fit.fontScale;
   // Middle-anchored regions centre by positioning the block's own middle at
   // the region's middle. Flex centring put the placeholder mid-box while the
   // browser drew the caret at the top; with the block sized to its content
   // the caret and the text always share the same line.
   const middle = spec.anchor === "middle";
+  const transforms = [scale < 1 ? `scale(${scale})` : "", middle ? "translateY(-50%)" : ""].filter(Boolean);
+  // The text toolbar reads the layout's size and color from these (one level
+  // set per bullet depth; the layouts give every depth the same).
+  const levels: Record<string, string> = {};
+  for (const level of [0, 1, 2]) {
+    levels[`--l${level}-size`] = `${spec.sizePt}px`;
+    levels[`--l${level}-color`] = color;
+  }
   return {
+    ...(levels as CSSProperties),
     left: spec.box.x,
     top: middle ? spec.box.y + spec.box.h / 2 : spec.box.y,
-    width: spec.box.w,
-    height: middle ? undefined : spec.box.h,
-    maxHeight: spec.box.h,
-    transform: middle ? "translateY(-50%)" : undefined,
+    width: spec.box.w / scale,
+    height: middle ? undefined : spec.box.h / scale,
+    maxHeight: spec.box.h / scale,
+    transform: transforms.length ? transforms.join(" ") : undefined,
+    transformOrigin: scale < 1 ? "0 0" : undefined,
     fontSize: `${spec.sizePt}px`,
     fontWeight: spec.bold ? 700 : 400,
     fontStyle: spec.italic ? "italic" : undefined,
     textAlign: spec.align === "center" ? "center" : "left",
+    lineHeight: fit.lineReduction > 0 ? DECK_LINE_HEIGHT * (1 - fit.lineReduction) : undefined,
     color,
-    fontFamily: `"${theme.fonts[spec.font]}", "Plus Jakarta Sans", ui-sans-serif, sans-serif`,
+    fontFamily: deckFontStack(theme.fonts[spec.font] ?? ""),
   };
+}
+
+/** The deck theme's colors for the slide text toolbar, plus white and black
+ * for text over pictures. */
+function deckThemePalette(theme: DeckTheme): Array<{ color: string; label: string }> {
+  const entries: Array<[string, string]> = [
+    [theme.colors.heading, "Heading"],
+    [theme.colors.body, "Body text"],
+    [theme.colors.accent1, "Accent 1"],
+    [theme.colors.accent2, "Accent 2"],
+    [theme.colors.surface, "Surface"],
+    [theme.colors.background, "Background"],
+    ["#ffffff", "White"],
+    ["#000000", "Black"],
+  ];
+  const seen = new Set<string>();
+  return entries
+    .map(([color, label]) => ({ color: color.toLowerCase(), label }))
+    .filter(({ color }) => (seen.has(color) ? false : (seen.add(color), true)));
 }
 
 /** Linear mix of two #RRGGBB colors; `amount` is the share of `b`. */
@@ -17552,7 +19201,7 @@ function DeckSlideStatic({ slide, theme }: { slide: DeckSlide; theme: DeckTheme 
           <div
             key={region}
             className={`deck-block deck-block--${region} is-static`}
-            style={deckRegionStyle(spec, theme, slide)}
+            style={deckRegionStyle(spec, theme, slide, region)}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         );
@@ -17677,8 +19326,24 @@ function SlideAiPreview({
   theme: DeckTheme;
 }) {
   const notesChanged = after.some((slide, index) => (index === 0 ? slide.notes !== before?.notes : Boolean(slide.notes)));
+  // The miniatures scale to the width they get, so the whole slide shows in
+  // a narrow blade as well as a wide one.
+  const ref = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return undefined;
+    const apply = () => {
+      const width = root.querySelector<HTMLElement>(".slide-ai-thumb")?.clientWidth ?? 0;
+      if (width > 0) root.style.setProperty("--slide-ai-scale", String(width / DECK_PREVIEW_WIDTH_PX));
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(apply);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
   return (
-    <div className="slide-ai-preview">
+    <div className="slide-ai-preview" ref={ref}>
       <div className="slide-ai-compare">
         {before && (
           <figure>
@@ -17884,15 +19549,26 @@ function imageUrlToJpegDataUrl(src: string, maxDimension = 1280): Promise<string
 /** The strict JSON contract for AI deck output, embedded in prompts and
  * enforced by parseSlideDeck — nothing renders without passing the validator. */
 /** Per-layout slide shapes, shared by whole-deck and single-slide prompts. */
+const DECK_LAYOUT_RULE_SHAPES: Array<[DeckSlideLayout, string]> = [
+  ["title", '- {"layout":"title","title":"...","subtitle":"..."} — opening slide.'],
+  ["section", '- {"layout":"section","title":"...","subtitle":"..."} — section divider.'],
+  [
+    "title-bullets",
+    '- {"layout":"title-bullets","title":"...","bullets":[{"runs":[{"text":"..."}],"level":0}]} — at most 6 bullets; level is 0, 1, or 2; a run may set "bold":true.',
+  ],
+  ["two-column", '- {"layout":"two-column","title":"...","left":[bullets],"right":[bullets]}.'],
+  [
+    "image-caption",
+    '- {"layout":"image-caption","title":"...","image":{"src":"","alt":"<describe the picture to add>"},"caption":"..."} — always leave src empty; images attach in the editor.',
+  ],
+  ["quote", '- {"layout":"quote","quote":"...","attribution":"..."}.'],
+  ["closing", '- {"layout":"closing","title":"...","body":"..."}.'],
+];
+
 const DECK_LAYOUT_RULES = [
   "Each slide has: \"id\" (short unique string), \"notes\" (1-3 sentence speaker notes), \"layout\", and the layout's fields:",
-  '- {"layout":"title","title":"...","subtitle":"..."} — opening slide.',
-  '- {"layout":"section","title":"...","subtitle":"..."} — section divider.',
-  '- {"layout":"title-bullets","title":"...","bullets":[{"runs":[{"text":"..."}],"level":0}]} — at most 6 bullets; level is 0, 1, or 2; a run may set "bold":true.',
-  '- {"layout":"two-column","title":"...","left":[bullets],"right":[bullets]}.',
-  '- {"layout":"image-caption","title":"...","image":{"src":"","alt":"<describe the picture to add>"},"caption":"..."} — always leave src empty; images attach in the editor.',
-  '- {"layout":"quote","quote":"...","attribution":"..."}.',
-  '- {"layout":"closing","title":"...","body":"..."}.',
+  ...DECK_LAYOUT_RULE_SHAPES.map(([layout, rule]) => `${rule} Fits: ${deckLayoutCapacityLine(layout)}.`),
+  'Each layout lists what its fields hold at the layout\'s own type size ("Fits"). Stay inside those sizes: the editor lays out every slide as PowerPoint will and sends back any text that does not fit its box.',
 ];
 
 const DECK_JSON_CONTRACT = [
@@ -18137,6 +19813,231 @@ function parseAiDeckReply(
   return parseSlideDeck(candidate);
 }
 
+/* ------------------------------ slide fit check ------------------------------ */
+
+/** Rounds of measured fixes the model gets. */
+const DECK_FIT_MAX_ROUNDS = 2;
+
+/** Every fit prompt opens with this; the API recognizes it as a deck prompt
+ * (services/api/app/core/directives.py) and mines no requirements from it. */
+const DECK_FIT_PROMPT_PREFIX = "You are fixing slide layout";
+
+/** Sends the slides with measured fit problems back to the model. */
+function providerDeckFitPrompt(deck: SlideDeck, issues: DeckFitIssue[]): string {
+  const ids = [...new Set(issues.map((issue) => issue.slideId))];
+  const outline = deck.slides
+    .map((slide, position) => `${position + 1}. ${deckSlideOutline(slide).split("\n")[0] || DECK_LAYOUT_LABELS[slide.layout]}`)
+    .join("\n");
+  return [
+    `${DECK_FIT_PROMPT_PREFIX} in a slide deck. The editor laid out every slide exactly as PowerPoint will and measured each text box. On these slides, text does not fit its box:`,
+    "",
+    describeDeckFitIssues(deck, issues),
+    "",
+    "Fix every listed field so it fits at the layout's own type size:",
+    "- Tighten the wording; keep the facts, figures, names, and meaning.",
+    '- When a slide carries more than its layout holds, trim it to the essential points, or move it to a roomier layout from the list below (for example, split a long list across a "two-column" slide). Do not add or remove slides.',
+    "- Keep each slide's id and speaker notes, and keep fields that are not listed unless the fix needs them. Keep citation markers such as [K1].",
+    "- Pictures are not shown to you: leave image src empty.",
+    "",
+    `Return ONLY a fenced \`\`\`json code block containing {"slides":[...]} with exactly these slides, each complete with all of its fields: ${ids
+      .map((id) => `"${id}"`)
+      .join(", ")}.`,
+    "",
+    ...DECK_LAYOUT_RULES,
+    "",
+    "Deck outline, for context only:",
+    outline,
+    "",
+    "Slides to fix (current JSON):",
+    "```json",
+    JSON.stringify(deck.slides.filter((slide) => ids.includes(slide.id)).map((slide) => slideJsonForPrompt(slide))),
+    "```",
+  ].join("\n");
+}
+
+/** Follow-up turn for Edit slide with AI when its reply does not fit. */
+function deckFitFollowUp(deck: SlideDeck, issues: DeckFitIssue[]): string {
+  return [
+    `${DECK_FIT_PROMPT_PREFIX}: the editor laid out your reply exactly as PowerPoint will, and some text does not fit its box:`,
+    "",
+    describeDeckFitIssues(deck, issues),
+    "",
+    "Fix only those fields: tighter wording that keeps the facts, or a roomier layout when the slide holds too much.",
+    'Return the full corrected {"slides":[...]} JSON in the same format, nothing else.',
+  ].join("\n");
+}
+
+/** Puts the model's fixed slides back into the deck through the one deck
+ * validator. Slides it did not return keep their current version, and kept
+ * slides keep their pictures, backgrounds, and moved boxes. */
+function applyDeckFitReply(
+  reply: string,
+  deck: SlideDeck,
+  slideIds: string[],
+): { ok: true; deck: SlideDeck } | { ok: false; error: string } {
+  const block = extractDeckJsonBlock(reply);
+  if (!block) return { ok: false, error: "The reply contained no slide JSON." };
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(block);
+  } catch {
+    return { ok: false, error: "The reply's JSON could not be parsed." };
+  }
+  const record = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? (candidate as Record<string, unknown>)
+    : null;
+  const list = Array.isArray(candidate) ? candidate : Array.isArray(record?.slides) ? (record.slides as unknown[]) : null;
+  if (!list?.length) return { ok: false, error: "The reply did not include any slides." };
+  const wanted = new Set(slideIds);
+  const replacements = new Map<string, Record<string, unknown>>();
+  for (const item of list) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entry = { ...(item as Record<string, unknown>) };
+    if (typeof entry.id !== "string" || !wanted.has(entry.id)) continue;
+    const original = deck.slides.find((slide) => slide.id === entry.id);
+    if (!original) continue;
+    if (typeof entry.layout !== "string") entry.layout = original.layout;
+    if (typeof entry.notes !== "string") entry.notes = original.notes;
+    replacements.set(entry.id, restoreKeptSlideFields(entry, original));
+  }
+  if (!replacements.size) return { ok: false, error: "The reply did not return any of the slides to fix." };
+  const raw = JSON.parse(serializeSlideDeck(deck)) as Record<string, unknown> & { slides: Array<Record<string, unknown>> };
+  raw.slides = raw.slides.map((slide) => replacements.get(slide.id as string) ?? slide);
+  const parsed = parseSlideDeck(raw);
+  return parsed.ok ? { ok: true, deck: parsed.deck } : { ok: false, error: parsed.error };
+}
+
+/** A fit fix has to keep the slide's substance: on the same layout every
+ * region that had words keeps some, and the slide keeps most of its words —
+ * or, for a slide holding several times what its layout fits, at least a
+ * fifth of what the layout can hold (a modest, readable slide). */
+function deckFitFixKeepsContent(before: DeckSlide, after: DeckSlide): boolean {
+  const regions = (slide: DeckSlide) => Object.keys(slideTextRegions(slide.layout));
+  const text = (slide: DeckSlide, region: string) => deckRegionPlainText(deckSlideRegionContent(slide, region)).trim();
+  const size = (slide: DeckSlide) => regions(slide).reduce((total, region) => total + text(slide, region).length, 0);
+  if (before.layout === after.layout && regions(before).some((region) => text(before, region) && !text(after, region))) {
+    return false;
+  }
+  const capacity = Object.entries(slideTextRegions(before.layout)).reduce((total, [region, spec]) => {
+    const { lines, charsPerLine } = deckRegionCapacity(spec, region);
+    return total + lines * charsPerLine;
+  }, 0);
+  return size(after) >= Math.min(size(before) * 0.4, capacity * 0.2);
+}
+
+/** Keeps each candidate slide whose fit score beats the current one. */
+function acceptDeckFitFixes(current: SlideDeck, candidate: SlideDeck, slideIds: string[]) {
+  const before = auditDeckLayout(current, { slideIds });
+  const after = auditDeckLayout(candidate, { slideIds });
+  const accepted: string[] = [];
+  const slides = current.slides.map((slide) => {
+    if (!slideIds.includes(slide.id)) return slide;
+    const replacement = candidate.slides.find((item) => item.id === slide.id);
+    if (!replacement || !deckFitFixKeepsContent(slide, replacement)) return slide;
+    const scoreBefore = deckFitScore(before.filter((issue) => issue.slideId === slide.id));
+    const scoreAfter = deckFitScore(after.filter((issue) => issue.slideId === slide.id));
+    if (scoreAfter >= scoreBefore) return slide;
+    accepted.push(slide.id);
+    return replacement;
+  });
+  return { deck: accepted.length ? { ...current, slides } : current, accepted };
+}
+
+type DeckFitReview = {
+  deck: SlideDeck;
+  /** Issues measured before any fix. */
+  found: DeckFitIssue[];
+  /** Issues left after the model's fixes. */
+  remaining: DeckFitIssue[];
+  rounds: number;
+  /** Rounds whose reply failed the deck validator. */
+  invalidReplies: number;
+  fixedSlides: number;
+  error: string | null;
+};
+
+/** The deck assistant's look at its own work: measure the slides and send any
+ * that do not fit back to the model with the measurements, keeping only fixes
+ * that measure better. */
+async function reviewDeckFit(
+  deck: SlideDeck,
+  scope: string[],
+  ask: (prompt: string) => Promise<string>,
+  onRound?: (round: number, issues: DeckFitIssue[]) => void,
+): Promise<DeckFitReview> {
+  let working = deck;
+  let issues = auditDeckLayout(working, { slideIds: scope });
+  const found = issues;
+  const fixed = new Set<string>();
+  let rounds = 0;
+  let invalidReplies = 0;
+  let error: string | null = null;
+  while (issues.length && rounds < DECK_FIT_MAX_ROUNDS) {
+    rounds += 1;
+    onRound?.(rounds, issues);
+    const ids = [...new Set(issues.map((issue) => issue.slideId))];
+    let reply: string;
+    try {
+      reply = await ask(providerDeckFitPrompt(working, issues));
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "the model did not answer";
+      break;
+    }
+    const applied = applyDeckFitReply(reply, working, ids);
+    if (!applied.ok) {
+      invalidReplies += 1;
+      continue;
+    }
+    const result = acceptDeckFitFixes(working, applied.deck, ids);
+    if (!result.accepted.length) break;
+    result.accepted.forEach((id) => fixed.add(id));
+    working = result.deck;
+    issues = auditDeckLayout(working, { slideIds: scope });
+  }
+  return {
+    deck: working,
+    found,
+    remaining: auditDeckLayout(working, { slideIds: scope }),
+    rounds,
+    invalidReplies,
+    fixedSlides: fixed.size,
+    error,
+  };
+}
+
+function deckSlideList(numbers: number[]): string {
+  const labels = numbers.map(String);
+  if (labels.length <= 1) return `slide ${labels[0] ?? ""}`.trim();
+  return `slides ${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
+/** What the fit check did, for the activity log. */
+function deckFitSummary(review: DeckFitReview, agentName: string): string {
+  if (!review.found.length) return "Fit check: every slide's text fits its boxes.";
+  const count = review.found.length;
+  const parts = [`Fit check found ${count} text field${count === 1 ? "" : "s"} too large for ${deckSlideList(deckFitIssueSlides(review.found))}`];
+  if (review.fixedSlides) {
+    parts.push(
+      `${agentName} rewrote ${review.fixedSlides} slide${review.fixedSlides === 1 ? "" : "s"} to fit in ${review.rounds} round${
+        review.rounds === 1 ? "" : "s"
+      }`,
+    );
+  } else if (review.rounds && review.invalidReplies === review.rounds && !review.error) {
+    parts.push(`${agentName}'s rewrite failed validation, so the slides were kept`);
+  } else if (review.rounds && !review.error) {
+    parts.push(`${agentName}'s rewrite did not fit better, so the slides were kept`);
+  }
+  if (review.error) parts.push(`the fix request failed (${review.error})`);
+  parts.push(
+    review.remaining.length
+      ? `still too large: ${review.remaining
+          .map((issue) => `slide ${issue.slideIndex + 1} ${issue.label.toLowerCase()}`)
+          .join(", ")} — shorten ${review.remaining.length === 1 ? "it" : "them"} or pick a roomier layout`
+      : "every slide now fits",
+  );
+  return `${parts.join("; ")}.`;
+}
+
 function deckAgentTraceSteps({
   agentName,
   request,
@@ -18178,6 +20079,11 @@ function deckAgentTraceSteps({
       id: "generate",
       label: revising ? "Revising slide content" : "Writing slide content and speaker notes",
       detail: "Slides return as structured JSON and pass validation before anything renders.",
+    },
+    {
+      id: "fit",
+      label: "Checking slide fit",
+      detail: "Each slide is laid out as PowerPoint will and measured against its text boxes; text that does not fit goes back to the model with the measurements.",
     },
     {
       id: "apply",

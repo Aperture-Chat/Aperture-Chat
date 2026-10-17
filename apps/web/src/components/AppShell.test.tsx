@@ -318,7 +318,7 @@ test("local account drawer can submit a password update", async () => {
   expect(await screen.findByText("Password updated.")).toBeInTheDocument();
 });
 
-test("tenant icon url drives the sidebar mark before logo url", () => {
+test("sidebar shows the full logo when expanded and the icon when collapsed", () => {
   const data = cloneData();
   data.currentTenant.icon_url = "/tenant-icon.svg";
   data.currentTenant.logo_url = "/tenant-logo.svg";
@@ -328,7 +328,10 @@ test("tenant icon url drives the sidebar mark before logo url", () => {
   const logo = screen.getByLabelText("Aperture Chat");
   const mark = logo.querySelector<HTMLImageElement>("img.custom-logo-mark");
   expect(mark).toBeInTheDocument();
-  expect(mark).toHaveAttribute("src", "/tenant-icon.svg");
+  expect(mark).toHaveAttribute("src", "/tenant-logo.svg");
+  expect(logo).toHaveClass("has-logo-image");
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  expect(screen.getByLabelText("Aperture Chat").querySelector("img")).toHaveAttribute("src", "/tenant-icon.svg");
 });
 
 test("account drawer sign out action calls the provided callback", () => {

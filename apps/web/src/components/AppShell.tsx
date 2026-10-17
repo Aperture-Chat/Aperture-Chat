@@ -1119,11 +1119,7 @@ function UserAppShell({
         tabIndex={-1}
       >
         <div className="sidebar-top">
-          <Logo
-            compact={collapsed}
-            brandName={data.currentTenant.chat_brand_name ?? "Aperture Chat"}
-            logoUrl={data.currentTenant.icon_url || data.currentTenant.logo_url}
-          />
+          <Logo compact={collapsed} brand={data.currentTenant} />
           {isDrawer && (
             <button className="icon-button" type="button" aria-label="Close navigation" onClick={closeDrawer}>
               <X size={18} />

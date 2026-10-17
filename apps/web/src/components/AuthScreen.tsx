@@ -40,7 +40,8 @@ import type {
   AuthOptionsResponse,
   AuthProviderOption,
 } from "../lib/types";
-import { ApertureMark } from "./Primitives";
+import { BrandArtwork } from "./Primitives";
+import { DEFAULT_BRAND_NAME, brandLockup, type BrandAssets } from "../lib/brandIcon";
 
 const AccessGuideVideo = lazy(() => import("./trainingDecks/user").then((module) => ({ default: module.AccessGuideVideo })));
 
@@ -115,7 +116,9 @@ export type AuthScreenProps = {
   options?: AuthOptionsResponse | null;
   authOptions?: AuthOptionsResponse | null;
   tenantName?: string;
-  tenantLogoUrl?: string | null;
+  /** Name, logo, and icon for the brand lockup; an empty name shows the
+   * logo alone. */
+  tenantBrand?: BrandAssets | null;
   initialEmail?: string;
   initialDisplayName?: string;
   loading?: boolean;
@@ -134,8 +137,8 @@ export type AuthScreenProps = {
 export function AuthScreen({
   options,
   authOptions,
-  tenantName = "Aperture Chat",
-  tenantLogoUrl = null,
+  tenantName = DEFAULT_BRAND_NAME,
+  tenantBrand = null,
   initialEmail = "",
   initialDisplayName = "",
   loading = false,
@@ -400,8 +403,8 @@ export function AuthScreen({
   const effectiveProviderId = selectedProvider?.id ?? "";
   const statusMessage = validationError ?? error ?? null;
   const busy = loading || isLoading || isSubmitting;
-  const brandName = tenantName.trim() || "Aperture Chat";
-  const brandLogoUrl = tenantLogoUrl?.trim() || "";
+  const brandName = tenantName.trim() || DEFAULT_BRAND_NAME;
+  const brandMark = brandLockup({ ...tenantBrand, chat_brand_name: tenantBrand?.chat_brand_name ?? brandName });
   const hasConfiguredSso = providers.length > 0;
   const canUseSso = providers.length > 0 && !busy && !bootstrapRequired;
   const canUsePassword = passwordAuthEnabled && !busy && !bootstrapRequired;
@@ -914,16 +917,16 @@ export function AuthScreen({
     <main className="auth-screen auth-refresh">
       <section className="auth-shell" aria-labelledby="auth-title">
         <div className="auth-panel" aria-busy={mfa ? mfa.pending : busy || accessPending}>
-          <div className="auth-brand">
-            {brandLogoUrl ? (
+          <div className={`auth-brand${brandMark.source === "logo" ? " has-logo-image" : ""}`} aria-label={brandName}>
+            {brandMark.imageUrl ? (
               <span className="auth-brand-mark">
-                <img src={brandLogoUrl} alt="" />
+                <BrandArtwork lockup={brandMark} label={brandName} />
               </span>
             ) : (
-              <ApertureMark size={34} title={brandName} />
+              <BrandArtwork lockup={brandMark} label={brandName} markSize={34} />
             )}
             <div>
-              <span>{brandName}</span>
+              {brandMark.name && <span>{brandMark.name}</span>}
               {(mfa || accessMode || bootstrapRequired) && (
                 <strong>{mfa ? "Two-step verification" : accessMode ? "Access request" : "Workspace setup"}</strong>
               )}

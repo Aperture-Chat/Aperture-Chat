@@ -231,6 +231,83 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.11
+
+- **Deck panels slide out from the left.** In the Drafts deck editor, **Add
+  slide**, **Change layout**, **Slide picture**, and **Edit slide with AI**
+  open as one panel along the editor's left edge instead of popping up from
+  the bottom. Each has a close button and closes on Escape, the slide moves
+  over so it stays in view, the panel's width can be dragged and is
+  remembered, and on phones the panel fills the screen. The layout gallery
+  shows live previews with jump buttons for each group. Themes, brand
+  templates, deck starters, and slide backgrounds are unchanged.
+- **Slide text formatting toolbar.** Clicking into slide text shows a small
+  toolbar above the box: Ask AI, font size steps and a size list, bold,
+  italic, underline, strikethrough, theme colors, list level, and clear
+  formatting. Highlighted text formats only that text; with nothing
+  highlighted the whole box is formatted. Shift+Cmd/Ctrl+> and < step the
+  size, Alt+F10 moves into the toolbar, and the toolbar warns when text no
+  longer fits its box. Formatting carries into the PowerPoint export.
+- **Slide pictures.** The picture panel previews the picture in its slide,
+  takes uploads, drag and drop, or a description to search the web with
+  and choose from the results, and has editable alt text that is exported to
+  PowerPoint. A slide whose layout has no picture is offered layouts with a
+  picture that keep its text.
+- **Text shrinks to fit, and AI decks check their own fit.** A text box that
+  holds more than it can show shrinks its text on the slide, and the
+  PowerPoint export opens with the same shrink. After the AI writes or revises
+  a deck, and before an **Edit slide with AI** suggestion is shown, every box
+  is measured the way the editor and export draw it; overflowing slides go
+  back to the model with what is too large (at most two rounds, kept only when
+  they measure better). Deck prompts now state each box's capacity, and every
+  deck prompt is kept free of long-document instructions.
+- **Open in editor keeps Word and PDF formatting.** A Word or PDF file opened
+  as a draft keeps its paper size, margins, fonts and sizes, line and
+  paragraph spacing, alignment, indents, tab stops, tables, lists, and its
+  headers, footers, and page numbers, including a different first page. Word
+  files are read in the browser. PDFs are converted by the new authenticated
+  `POST /api/drafts/document-import/pdf` route, which stores nothing and is
+  capped at `APERTURE_DOCUMENT_IMPORT_UPLOAD_MAX_MB` (default 40). Headers and
+  footers are drawn on every page of the editor, and the Word download and
+  print use the document's own page setup.
+- **Real document templates.** Drafts templates are set in proper formats
+  (legal agreement, letter, memorandum, court filing, business report,
+  academic paper, screenplay, and standard document) with numbered clauses,
+  signature blocks, and exhibits where they belong. **Legal Contract** is now
+  a complete services agreement, and **Mutual NDA** and **Contract
+  Amendment** are new. Choosing a template on a blank draft places it;
+  choosing one on an existing draft restyles its layout without changing its
+  text.
+- **Layout in plain English.** Asking the assistant for a layout such as
+  "Times New Roman 12 pt, double spaced, 1-inch margins, page numbers at the
+  bottom center" sets the page exactly. A request that asks only for layout is
+  applied in the editor without a model call.
+- **Platform Branding takes a separate logo and icon.** **Platform → Org
+  Settings → Platform Branding** has Logo and Icon cards (upload, drop, or an
+  https URL, and Remove). Full-width spaces show the logo; the browser tab,
+  collapsed sidebar, and home-screen install icon show the icon. Wide art is
+  never squeezed into an icon, and the platform name is optional so a logo
+  that contains the name can stand alone.
+- **New default Aperture Chat wordmark and icon** for the sidebar, sign-in,
+  favicon, and install icons, and a warmer single-tone light palette. Dark
+  mode is unchanged. Existing uploaded branding is kept.
+- Fixes: a Markdown line of four or more underscores is a fill-in line, not a
+  page break; `###` headings keep their level; template matching uses whole
+  words; signature lines follow margin changes; pages no longer keep
+  repaginating after edits; Word exports no longer end with a blank page after
+  a final table; editing a bulleted slide box keeps its bullets and levels;
+  and PDF processing is serialized so knowledge OCR and PDF imports cannot
+  crash each other.
+- No database migrations and no deck or draft schema change. Draft saves now
+  accept table column widths and the spacing, border, and indent styles that
+  imported documents carry; rolling the API back to v0.5.11 would make stored
+  draft revisions that contain them fail its content check.
+- Training videos, PDF guides, and README screenshots still show the previous
+  deck panels and logo; they are recaptured separately.
+- API and web images publish as `v0.5.12-dev`, `v0.5.12-test`, and
+  `v0.5.12-main`. Stable `v0.5.12` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.10
 
 - **Diagrams render reliably everywhere.** Chat, hover previews, Drafts,

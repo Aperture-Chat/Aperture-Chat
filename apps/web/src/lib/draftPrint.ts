@@ -16,8 +16,20 @@
  */
 
 import { sanitizeDocumentHtml } from "./draftRedline";
+import {
+  PREVIEW_PX_PER_PT,
+  cssVariablesText,
+  documentSheetGeometry,
+  headerFooterHtmlForPage,
+  pageChromeHtml,
+  sourceLayoutCssVariables,
+  splitPageSetup,
+  type DocumentPageSetup,
+} from "./documentPageSetup";
 
 export const DRAFT_PRINT_ROOT_ID = "aperture-draft-print-root";
+/** Page-size rule injected while a source-layout document prints. */
+export const DRAFT_PRINT_PAGE_STYLE_ID = "aperture-draft-print-page";
 export const DRAFT_PRINT_BODY_CLASS = "is-draft-printing";
 /** Bounded fallback in case a browser never fires afterprint. */
 export const DRAFT_PRINT_CLEANUP_TIMEOUT_MS = 60_000;
@@ -31,7 +43,63 @@ export type DraftPrintOutcome = { ok: true } | { ok: false; error: string };
 /** Removes any existing print surface and print body state. Idempotent. */
 export function removeDraftPrintSurface(doc: Document = document) {
   doc.getElementById(DRAFT_PRINT_ROOT_ID)?.remove();
+  doc.getElementById(DRAFT_PRINT_PAGE_STYLE_ID)?.remove();
   doc.body.classList.remove(DRAFT_PRINT_BODY_CLASS);
+}
+
+/** A document opened from Word or PDF prints on its own paper: one printed
+ * page per editor sheet, at the source's page size and margins, with its
+ * running header and footer (page numbers filled in) on every page. Sheet
+ * geometry is in preview px, so the pages are zoomed to true points. */
+function buildSourceLayoutPrintPages(doc: Document, root: HTMLElement, setup: DocumentPageSetup, bodyHtml: string) {
+  const pages = doc.createElement("div");
+  pages.className = "draft-print-pages";
+  pages.innerHTML = sanitizeDocumentHtml(bodyHtml);
+  pages.querySelectorAll(".document-page-label").forEach((node) => node.remove());
+  let sheets = Array.from(pages.querySelectorAll<HTMLElement>(":scope > section.document-page"));
+  if (!sheets.length) {
+    // An unpaginated body still prints on the source paper as one flow.
+    const sheet = doc.createElement("section");
+    sheet.className = "document-page";
+    sheet.append(...Array.from(pages.childNodes));
+    pages.appendChild(sheet);
+    sheets = [sheet];
+  }
+  const geometry = documentSheetGeometry(setup);
+  const safeChrome = {
+    ...setup,
+    headerHtml: sanitizeDocumentHtml(setup.headerHtml),
+    footerHtml: sanitizeDocumentHtml(setup.footerHtml),
+    firstHeaderHtml: setup.firstHeaderHtml === null ? null : sanitizeDocumentHtml(setup.firstHeaderHtml),
+    firstFooterHtml: setup.firstFooterHtml === null ? null : sanitizeDocumentHtml(setup.firstFooterHtml),
+  };
+  sheets.forEach((sheet, index) => {
+    const chrome = pageChromeHtml(safeChrome, index);
+    const place = (html: string, kind: "header" | "footer") => {
+      if (!html.trim()) return;
+      const box = doc.createElement("div");
+      box.className = `draft-print-chrome is-${kind}`;
+      box.style.left = `${geometry.padLeftPx}px`;
+      box.style.width = `${geometry.contentWidthPx}px`;
+      if (kind === "header") box.style.top = `${geometry.headerTopPx}px`;
+      else box.style.bottom = `${geometry.footerBottomPx}px`;
+      box.innerHTML = headerFooterHtmlForPage(html, index + 1, sheets.length);
+      sheet.appendChild(box);
+    };
+    place(chrome.header, "header");
+    place(chrome.footer, "footer");
+  });
+  root.classList.add("is-source-layout");
+  root.setAttribute(
+    "style",
+    `${cssVariablesText(sourceLayoutCssVariables(setup))}; --source-print-zoom: ${(96 / 72 / PREVIEW_PX_PER_PT).toFixed(5)}`,
+  );
+  root.appendChild(pages);
+  const pageStyle = doc.createElement("style");
+  pageStyle.id = DRAFT_PRINT_PAGE_STYLE_ID;
+  pageStyle.textContent = `@media print { @page { size: ${setup.widthPt}pt ${setup.heightPt}pt; margin: 0; } }`;
+  doc.head.appendChild(pageStyle);
+  return pages;
 }
 
 function firstHeadingText(container: Element): string {
@@ -116,15 +184,15 @@ export async function printSavedDraftVersion(options: {
     // Repeated print actions must not stack print roots.
     removeDraftPrintSurface(doc);
 
-    const sanitized = sanitizeDocumentHtml(contentHtml);
-    const pages = doc.createElement("div");
-    pages.className = "draft-print-pages";
-    pages.innerHTML = sanitized;
+    const { setup: sourceSetup, bodyHtml } = splitPageSetup(contentHtml);
+    const sanitized = sanitizeDocumentHtml(bodyHtml);
+    const probe = doc.createElement("div");
+    probe.innerHTML = sanitized;
     // The on-screen "Page N" pills are app chrome, not document content.
-    pages.querySelectorAll(".document-page-label").forEach((node) => node.remove());
+    probe.querySelectorAll(".document-page-label").forEach((node) => node.remove());
 
-    const hasText = Boolean(pages.textContent?.trim());
-    const hasVisual = Boolean(pages.querySelector("img"));
+    const hasText = Boolean(probe.textContent?.trim());
+    const hasVisual = Boolean(probe.querySelector("img"));
     if (!hasText && !hasVisual) {
       return { ok: false, error: "This saved version has no printable content yet." };
     }
@@ -136,19 +204,26 @@ export async function printSavedDraftVersion(options: {
     // for the print stylesheet.
     root.setAttribute("aria-hidden", "true");
 
-    const normalizedTitle = title.replace(/\s+/g, " ").trim();
-    // Avoid printing the title twice when the document already opens with it.
-    if (
-      !pages.querySelector(".document-mla-text") &&
-      normalizedTitle &&
-      firstHeadingText(pages).toLowerCase() !== normalizedTitle.toLowerCase()
-    ) {
-      const titleElement = doc.createElement("h1");
-      titleElement.className = "draft-print-doc-title";
-      titleElement.textContent = normalizedTitle;
-      root.appendChild(titleElement);
+    if (sourceSetup) {
+      buildSourceLayoutPrintPages(doc, root, sourceSetup, bodyHtml);
+    } else {
+      const pages = doc.createElement("div");
+      pages.className = "draft-print-pages";
+      pages.append(...Array.from(probe.childNodes));
+      const normalizedTitle = title.replace(/\s+/g, " ").trim();
+      // Avoid printing the title twice when the document already opens with it.
+      if (
+        !pages.querySelector(".document-mla-text") &&
+        normalizedTitle &&
+        firstHeadingText(pages).toLowerCase() !== normalizedTitle.toLowerCase()
+      ) {
+        const titleElement = doc.createElement("h1");
+        titleElement.className = "draft-print-doc-title";
+        titleElement.textContent = normalizedTitle;
+        root.appendChild(titleElement);
+      }
+      root.appendChild(pages);
     }
-    root.appendChild(pages);
 
     const previousFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
 

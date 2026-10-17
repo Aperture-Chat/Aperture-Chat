@@ -34,6 +34,30 @@ export type DeckTextRegionSpec = {
 
 export type DeckDecorationSpec = { box: DeckBox; colorRole: DeckColorRole };
 
+/** Regions that hold bullets; every other region is flat rich text. */
+export const DECK_LIST_REGIONS: ReadonlySet<string> = new Set(["bullets", "left", "right"]);
+
+/** How the editor names each region to authors and to the AI fit check. */
+export const DECK_REGION_LABELS: Record<string, string> = {
+  title: "Title",
+  subtitle: "Subtitle",
+  bullets: "Bullets",
+  left: "Left column",
+  right: "Right column",
+  quote: "Quote",
+  attribution: "Attribution",
+  caption: "Caption",
+  body: "Closing message",
+};
+
+/** PowerPoint's default text box insets (0.1in sides, 0.05in top and
+ * bottom), which the exported text boxes keep; the fit check measures inside
+ * them so text that fits there fits on the stage too. */
+export const DECK_TEXT_INSET_X = 7.2;
+export const DECK_TEXT_INSET_Y = 3.6;
+/** The stage's slide text line height, as a multiple of the font size. */
+export const DECK_LINE_HEIGHT = 1.28;
+
 /** Bottom-right logo slot, drawn identically on screen and in the export. */
 export const DECK_LOGO_BOX: DeckBox = { x: 844, y: 494, w: 86, h: 30 };
 
