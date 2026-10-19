@@ -84,7 +84,10 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
       continue;
     }
 
-    if (isRuleLine(trimmed)) {
+    // A run of underscores on its own line is a fill-in line (the rule a
+    // signature goes on), not a divider: it stays text with the lines
+    // around it so the name under it stays with it.
+    if (isRuleLine(trimmed) && !/^_{4,}$/.test(trimmed)) {
       flushParagraph();
       blocks.push({ kind: "rule" });
       index += 1;
@@ -465,7 +468,9 @@ export function markdownToDocumentHtml(source: string): string {
   return parseMarkdownBlocks(unwrapFullDocumentFence(source))
     .map((block, index) => {
       if (block.kind === "heading") {
-        const tag = index === 0 && block.level <= 2 ? "h1" : block.level <= 3 ? "h2" : "h3";
+        // A leading # or ## is the document title. After it, ## and ###
+        // stay distinct levels (an Article and its Sections in a contract).
+        const tag = index === 0 && block.level <= 2 ? "h1" : block.level <= 2 ? "h2" : block.level === 3 ? "h3" : "h4";
         return `<${tag}>${inlineMarkdownToHtml(block.text)}</${tag}>`;
       }
       if (block.kind === "list") {

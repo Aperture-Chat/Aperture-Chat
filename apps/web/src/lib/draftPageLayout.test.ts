@@ -22,3 +22,21 @@ test("account saves rejoin paragraphs split only by automatic layout", () => {
   const html = '<section class="document-page"><p>The original </p></section><section class="document-page"><p data-split-continuation="true"><strong>paragraph</strong> continues.</p></section>';
   expect(draftHtmlForAccount(html)).toBe('<p>The original <strong>paragraph</strong> continues.</p>');
 });
+
+test("text in a document opened from Word or PDF is authored, never a page label", () => {
+  const html =
+    '<div class="document-page-setup" style="width: 612pt"><div class="document-page-footer"><p>Page <span class="document-field-page">2</span> of 9</p></div></div>' +
+    '<section class="document-page"><span class="document-page-label">Page 1</span><p>Page 10</p></section>';
+  const cleaned = removeDraftPageLabels(html);
+  expect(cleaned).not.toContain("document-page-label");
+  expect(cleaned).toContain("<p>Page 10</p>");
+  expect(cleaned).toContain('Page <span class="document-field-page">2</span> of 9');
+  expect(draftHtmlForAccount(html).startsWith('<div class="document-page-setup"')).toBe(true);
+});
+
+test("re-joining a split paragraph drops empty formatting shells", () => {
+  const html =
+    '<section class="document-page"><p>The <span style="font-weight: 500">original</span><span style="font-weight: 500"></span></p></section>' +
+    '<section class="document-page"><p data-split-continuation="true"><span style="font-weight: 500"></span> continues.</p></section>';
+  expect(draftHtmlForAccount(html)).toBe('<p>The <span style="font-weight: 500">original</span> continues.</p>');
+});

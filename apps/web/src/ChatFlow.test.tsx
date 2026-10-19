@@ -316,6 +316,25 @@ function chooseChatRowAction(sidebar: HTMLElement, action: string, title?: strin
   fireEvent.click(screen.getByRole("menuitem", { name: action }));
 }
 
+test("image-only branding keeps the wordmark in the welcome area and a separate reply icon", async () => {
+  const tenant = sampleData.currentTenant;
+  sampleData.currentTenant = { ...tenant, chat_brand_name: "", logo_url: "/wordmark.png", icon_url: "/square.png" };
+  try {
+    await renderApp();
+    const identity = document.querySelector(".empty-brand-identity") as HTMLElement;
+    expect(identity.textContent).toBe("");
+    expect(identity.querySelector("img")).toHaveAttribute("src", "/wordmark.png");
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Review this policy." } });
+    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter" });
+    expect(await screen.findByText(CANNED)).toBeInTheDocument();
+    expect(document.querySelector(".message-brand-logo")).toHaveAttribute("src", "/square.png");
+    const assistant = document.querySelector(".assistant-message") as HTMLElement;
+    expect(assistant.querySelector(".message-meta strong")).toBeNull();
+  } finally {
+    sampleData.currentTenant = tenant;
+  }
+});
+
 test("real chat flow: send, render assistant reply, list in Recent, and persist", async () => {
   await renderApp();
 

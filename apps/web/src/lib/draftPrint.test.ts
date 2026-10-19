@@ -182,3 +182,31 @@ test('MLA print never prepends the file title ahead of the student heading', asy
   expect(root.textContent?.startsWith('Alex Example')).toBe(true);
   expect(root.textContent).not.toContain('Internal filename');
 });
+
+test("a document opened from Word or PDF prints on its own paper with running headers", async () => {
+  const marker =
+    '<div class="document-page-setup" style="width: 612pt; height: 1008pt; padding-top: 72pt; padding-right: 90pt; padding-bottom: 72pt; padding-left: 90pt; margin-top: 36pt; margin-bottom: 30pt; font-family: Calibri; font-size: 16.21px; line-height: 1.22; color: #000000">' +
+    '<div class="document-page-footer"><p>Page <span class="document-field-page">1</span> of <span class="document-field-pages">1</span></p></div>' +
+    '<div class="document-page-header-first"><p>LETTERHEAD</p></div></div>';
+  const body =
+    '<section class="document-page"><h1>Agreement</h1><p>First page.</p></section>' +
+    '<section class="document-page"><p>Second page.</p></section>';
+
+  const outcome = await printSavedDraftVersion({ title: "Something Else", contentHtml: `${marker}${body}` });
+
+  expect(outcome).toEqual({ ok: true });
+  const root = printRoot();
+  expect(root?.classList.contains("is-source-layout")).toBe(true);
+  expect(root?.style.getPropertyValue("--source-sheet-height")).toBe("1485.77px");
+  expect(document.getElementById("aperture-draft-print-page")?.textContent).toContain("size: 612pt 1008pt");
+  // No title heading is added in front of an imported document.
+  expect(root?.querySelector(".draft-print-doc-title")).toBeNull();
+  const sheets = root?.querySelectorAll(".document-page") ?? [];
+  expect(sheets).toHaveLength(2);
+  expect(sheets[0].querySelector(".draft-print-chrome.is-header")?.textContent).toBe("LETTERHEAD");
+  expect(sheets[1].querySelector(".draft-print-chrome.is-footer")?.textContent).toBe("Page 2 of 2");
+  expect(root?.querySelector(".document-page-setup")).toBeNull();
+
+  removeDraftPrintSurface();
+  expect(document.getElementById("aperture-draft-print-page")).toBeNull();
+});

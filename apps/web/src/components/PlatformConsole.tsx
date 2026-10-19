@@ -41,7 +41,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { PlatformSection } from "../lib/appRoute";
 import { SearchIndexCard } from "./SearchIndexCard";
 
@@ -105,7 +105,15 @@ import {
 } from "../lib/api/platform";
 import { modelLabLabel } from "../lib/modelAccess";
 import { userIdentityTooltip } from "../lib/userIdentity";
-import { ApertureMark, Panel, Pill, StableLabel, Toggle } from "./Primitives";
+import { BrandIcon, Logo, Panel, Pill, StableLabel, Toggle } from "./Primitives";
+import {
+  brandDisplayName,
+  compactBrandSources,
+  isCompactBrandImage,
+  type BrandAssets,
+} from "../lib/brandIcon";
+import { BRAND_IMAGE_ACCEPT, describeBrandImageProblem, prepareBrandImage } from "../lib/brandImage";
+import { normalizeHexColor } from "../lib/brandTheme";
 import { UserAvatar } from "./UserAvatar";
 import {
   EMPTY_SECTION_SCOPE,
@@ -426,41 +434,12 @@ const DEFAULT_BRANDING: BrandingDraftState = {
 
 const HEX_COLOR_INPUT_RE = /^#[0-9a-fA-F]{6}$/;
 
-// Keep uploaded marks small enough to live inline in tenant state: the mark is
-// rendered at 24-34px, so 256px is plenty and keeps the data URL a few KB.
-const BRANDING_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
-const BRANDING_MARK_MAX_EDGE = 256;
-// A raw (non-resized) data URL must stay inside the API's 400k-char branding
-// cap; base64 inflates ~4/3, so 250 KB of PNG is the safe ceiling.
-const BRANDING_RAW_FALLBACK_MAX_BYTES = 250 * 1024;
-
-async function downscalePngToDataUrl(file: File): Promise<string | null> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, BRANDING_MARK_MAX_EDGE / Math.max(bitmap.width, bitmap.height, 1));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
-  }
-}
-
-function readFileAsDataUrl(file: File): Promise<string | null> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      resolve(typeof reader.result === "string" && reader.result ? reader.result : null);
-    });
-    reader.addEventListener("error", () => resolve(null));
-    reader.readAsDataURL(file);
-  });
-}
+type BrandingImageField = "logo_url" | "icon_url";
+/** A finished upload; Apply folds it in if the two raced. */
+type BrandingUpload = { field: BrandingImageField; url: string };
+const BRANDING_IMAGE_FIELDS: readonly BrandingImageField[] = ["logo_url", "icon_url"];
+// Mirrors the API: hosted images must be HTTPS; uploads are inline data URLs.
+const BRANDING_IMAGE_URL_RE = /^(https:\/\/|data:image\/)/i;
 
 type OwnerSsoDraftState = {
   name: string;
@@ -734,9 +713,13 @@ export function PlatformConsole({
   /* Branding feedback renders inside the branding panel: the console-level
    * notice sits above the tab stack, off-screen when the panel is in view. */
   const [brandingStatus, setBrandingStatus] = useState<ActionStatus | null>(null);
-  const [brandingUploadPending, setBrandingUploadPending] = useState(false);
-  // In-flight PNG processing; Apply awaits this so the image is never dropped.
-  const brandingUploadRef = useRef<Promise<string | null> | null>(null);
+  const [brandingUploadsPending, setBrandingUploadsPending] = useState<readonly BrandingImageField[]>([]);
+  // In-flight image processing per field; Apply awaits these so an image is
+  // never dropped.
+  const brandingUploads = useRef(new Map<BrandingImageField, Promise<BrandingUpload | null>>());
+  // Bumped whenever a field's upload is superseded (a newer upload, a typed
+  // address, Remove, or Reset) so a late result cannot overwrite it.
+  const brandingUploadGeneration = useRef<Record<BrandingImageField, number>>({ logo_url: 0, icon_url: 0 });
   // Mirrors committed data so an optimistic owner-console change can be undone
   // when the server refuses it. These controls govern provider credentials,
   // roles and model availability, so showing an un-persisted value as applied
@@ -2184,22 +2167,43 @@ export function PlatformConsole({
     }
   }
 
+  function cancelBrandingUpload(field: BrandingImageField) {
+    brandingUploadGeneration.current[field] += 1;
+    brandingUploads.current.delete(field);
+    setBrandingUploadsPending((current) => current.filter((pending) => pending !== field));
+  }
+
   async function applyBranding() {
-    // A just-picked PNG may still be resizing; wait for it and fold the result
-    // in so Apply never silently saves without the image. A failed upload has
-    // its warning showing — stop so "saved" does not replace it.
-    const pendingUpload = brandingUploadRef.current;
+    // A just-picked image may still be processing; wait for it and fold the
+    // result in so Apply never silently saves without it. A failed or
+    // superseded upload has its own status showing — stop so "saved" does
+    // not replace it.
     let draft = brandingDraft;
-    if (pendingUpload) {
-      const uploadedMark = await pendingUpload;
-      if (!uploadedMark) return;
-      draft = { ...brandingDraft, logo_url: uploadedMark, icon_url: uploadedMark };
+    const pendingUploads = [...brandingUploads.current.entries()];
+    if (pendingUploads.length) {
+      const generations = pendingUploads.map(([field]) => brandingUploadGeneration.current[field]);
+      const uploads = await Promise.all(pendingUploads.map(([, upload]) => upload));
+      const superseded = pendingUploads.some(
+        ([field], index) => brandingUploadGeneration.current[field] !== generations[index],
+      );
+      if (superseded || uploads.some((upload) => !upload)) return;
+      draft = uploads.reduce<BrandingDraftState>(
+        (current, upload) => (upload ? { ...current, [upload.field]: upload.url } : current),
+        draft,
+      );
     }
 
-    const brandName = draft.chat_brand_name.trim() || DEFAULT_BRANDING.chat_brand_name;
+    // Optional: an empty name lets a logo that already spells it stand alone.
+    const brandName = draft.chat_brand_name.trim();
     const logoUrl = draft.logo_url.trim();
     const iconUrl = draft.icon_url.trim();
-    const markUrl = iconUrl || logoUrl;
+    if ([logoUrl, iconUrl].some((url) => url && !BRANDING_IMAGE_URL_RE.test(url))) {
+      setBrandingStatus({
+        tone: "warning",
+        message: "Image addresses must start with https://. Upload the file instead if it is not hosted.",
+      });
+      return;
+    }
     const accentColor = draft.primary_color.trim() || DEFAULT_BRANDING.primary_color;
     const gradientStart = draft.gradient_start.trim();
     const gradientEnd = draft.gradient_end.trim();
@@ -2227,7 +2231,7 @@ export function PlatformConsole({
       chat_brand_name: brandName,
       logo_url: logoUrl || null,
       icon_url: iconUrl || null,
-      logo_mark: markUrl ? "custom" : "aperture",
+      logo_mark: logoUrl || iconUrl ? "custom" : "aperture",
       primary_color: accentColor,
       custom_domain: draft.custom_domain.trim() || DEFAULT_BRANDING.custom_domain,
       gradient_start: gradientStart || null,
@@ -2239,12 +2243,12 @@ export function PlatformConsole({
       ...current,
       currentTenant: { ...current.currentTenant, ...patch },
     }));
-    await persistBranding(patch, `${brandName} branding`);
+    await persistBranding(patch, brandName ? `${brandName} branding` : "Image-only branding");
   }
 
   async function resetBranding() {
-    // Discard any in-flight PNG so the next Apply cannot resurrect it.
-    brandingUploadRef.current = null;
+    // Discard in-flight uploads so the next Apply cannot resurrect them.
+    BRANDING_IMAGE_FIELDS.forEach(cancelBrandingUpload);
     setBrandingDraft(DEFAULT_BRANDING);
     const patch = {
       chat_brand_name: DEFAULT_BRANDING.chat_brand_name,
@@ -2293,65 +2297,47 @@ export function PlatformConsole({
     }
   }
 
-  function uploadBrandingImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
-    if (file.type !== "image/png") {
-      setBrandingStatus({ tone: "warning", message: "Upload a PNG image for the platform logo and browser icon." });
-      return;
-    }
-    if (file.size > BRANDING_UPLOAD_MAX_BYTES) {
-      setBrandingStatus({
-        tone: "warning",
-        message: "That PNG is larger than 4 MB. Export a smaller logo and try again.",
-      });
-      return;
-    }
-
-    setBrandingUploadPending(true);
+  function uploadBrandingImage(file: File, field: BrandingImageField) {
+    const generation = ++brandingUploadGeneration.current[field];
+    setBrandingUploadsPending((current) => (current.includes(field) ? current : [...current, field]));
     setBrandingStatus({ tone: "info", message: `Preparing ${file.name}…` });
-    const upload = (async (): Promise<string | null> => {
-      // Downscale before storing: the mark renders at 24-34px, and the result
-      // is persisted inline with tenant state, so keep the data URL small.
-      let result: string | null = null;
-      if (typeof createImageBitmap === "function") {
-        result = await downscalePngToDataUrl(file);
-      }
-      if (!result) {
-        // No bitmap/canvas support here: only accept files whose raw data URL
-        // already fits within the server-side branding size cap.
-        if (file.size > BRANDING_RAW_FALLBACK_MAX_BYTES) {
-          setBrandingStatus({
-            tone: "warning",
-            message: "This browser cannot resize the PNG. Upload a logo under 250 KB instead.",
-          });
-          return null;
-        }
-        result = await readFileAsDataUrl(file);
-      }
-      if (!result) {
-        setBrandingStatus({ tone: "warning", message: "The PNG upload could not be read." });
+    const upload = (async (): Promise<BrandingUpload | null> => {
+      const result = await prepareBrandImage(file, field === "icon_url" ? "icon" : "logo");
+      if (brandingUploadGeneration.current[field] !== generation) return null;
+      if (!result.ok) {
+        setBrandingStatus({ tone: "warning", message: describeBrandImageProblem(result.problem, file.name) });
         return null;
       }
-      setBrandingDraft((state) => ({
-        ...state,
-        logo_url: result,
-        icon_url: result,
-      }));
-      setBrandingStatus({ tone: "info", message: `${file.name} is ready. Apply branding to update the platform shell and favicon.` });
-      return result;
+      const url = result.image.dataUrl;
+      setBrandingDraft((state) => ({ ...state, [field]: url }));
+      setBrandingStatus({
+        tone: "info",
+        message: `${file.name} is ready. Apply branding to update the ${
+          field === "logo_url" ? "platform logo" : "browser tab and compact icon"
+        }.`,
+      });
+      return { field, url };
     })();
-    brandingUploadRef.current = upload;
+    brandingUploads.current.set(field, upload);
     void upload.finally(() => {
-      // The draft now holds the data URL (or the upload failed); later manual
-      // edits to the URL fields must win over this finished upload.
-      if (brandingUploadRef.current === upload) {
-        brandingUploadRef.current = null;
+      // The draft now holds the image (or the upload failed); later edits to
+      // this field must win over the finished upload.
+      if (brandingUploads.current.get(field) === upload) {
+        brandingUploads.current.delete(field);
+        setBrandingUploadsPending((current) => current.filter((pending) => pending !== field));
       }
-      setBrandingUploadPending(false);
     });
+  }
+
+  function removeBrandingImage(field: BrandingImageField) {
+    cancelBrandingUpload(field);
+    setBrandingDraft((state) => ({ ...state, [field]: "" }));
+  }
+
+  function setBrandingImageUrl(field: BrandingImageField, value: string) {
+    // A typed address wins over an upload still processing for this field.
+    if (brandingUploads.current.has(field)) cancelBrandingUpload(field);
+    setBrandingDraft((state) => ({ ...state, [field]: value }));
   }
 
   async function saveOwnerSsoSettings() {
@@ -3500,11 +3486,13 @@ export function PlatformConsole({
               setBrandingDraft={setBrandingDraft}
               onApplyBranding={applyBranding}
               onResetBranding={resetBranding}
-              onUploadBrandingImage={uploadBrandingImage}
+              onUploadImage={uploadBrandingImage}
+              onRemoveImage={removeBrandingImage}
+              onImageUrlChange={setBrandingImageUrl}
               status={brandingStatus}
               onDismissStatus={() => setBrandingStatus(null)}
               saving={pendingAction === "branding:save"}
-              uploadPending={brandingUploadPending}
+              uploadsPending={brandingUploadsPending}
             />
             <TenantPolicyPanel
               policies={tenantPolicies}
@@ -5372,31 +5360,237 @@ function BrandingColorField({
   );
 }
 
+type BrandingImageSize = { src: string; width: number; height: number };
+
+/** The draft branding exactly as the shell will render it: the logo on the
+ * light and dark sidebars, and the icon in a browser tab and compact rail. */
+function BrandingLivePreview({ draft }: { draft: BrandingDraftState }) {
+  const brand: BrandAssets = draft;
+  const iconSources = compactBrandSources(brand);
+  const gradientStart = normalizeHexColor(draft.gradient_start);
+  const gradientEnd = normalizeHexColor(draft.gradient_end);
+  const darkRailStyle =
+    gradientStart && gradientEnd
+      ? { background: `linear-gradient(165deg, ${gradientStart} 0%, ${gradientEnd} 100%)` }
+      : undefined;
+  const textColor = normalizeHexColor(draft.text_color);
+  const lightRailStyle = textColor ? ({ "--text-strong": textColor } as CSSProperties) : undefined;
+  return (
+    <div className="branding-preview" role="group" aria-label="Branding preview">
+      <figure className="branding-preview-tile">
+        <div className="branding-preview-rail is-light" style={lightRailStyle}>
+          <div className="sidebar-top">
+            <Logo brand={brand} />
+          </div>
+        </div>
+        <figcaption>Light sidebar</figcaption>
+      </figure>
+      <figure className="branding-preview-tile">
+        <div className="branding-preview-rail sidebar-dark" style={darkRailStyle}>
+          <div className="sidebar-top">
+            <Logo brand={brand} />
+          </div>
+        </div>
+        <figcaption>Dark sidebar and dark mode</figcaption>
+      </figure>
+      <figure className="branding-preview-tile">
+        <div className="branding-preview-icons">
+          <span className="branding-preview-tab">
+            <BrandIcon sources={iconSources} size={16} title="Browser tab icon" />
+            <span>{brandDisplayName(brand)}</span>
+            <X size={12} aria-hidden />
+          </span>
+          <span className="branding-preview-compact sidebar-dark" style={darkRailStyle}>
+            <BrandIcon sources={iconSources} size={26} title="Collapsed sidebar icon" />
+          </span>
+        </div>
+        <figcaption>Browser tab and compact icon</figcaption>
+      </figure>
+    </div>
+  );
+}
+
+function formatDataUrlSize(dataUrl: string): string {
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const kilobytes = Math.max(1, Math.round((base64.length * 3) / 4 / 1024));
+  return `${kilobytes} KB`;
+}
+
+/** One brand image: preview, upload (button or drop), remove, and an
+ * optional hosted address. Uploaded data URLs never fill the address box. */
+function BrandingImageField({
+  field,
+  title,
+  description,
+  emptyNote,
+  value,
+  urlLabel,
+  urlPlaceholder = "https://…",
+  pending,
+  warning,
+  size,
+  onSize,
+  onUpload,
+  onRemove,
+  onUrlChange,
+}: {
+  field: BrandingImageField;
+  title: string;
+  description: string;
+  emptyNote: ReactNode;
+  value: string;
+  urlLabel: string;
+  urlPlaceholder?: string;
+  pending: boolean;
+  warning?: string | null;
+  size: BrandingImageSize | null;
+  onSize: (field: BrandingImageField, size: BrandingImageSize) => void;
+  onUpload: (file: File, field: BrandingImageField) => void;
+  onRemove: (field: BrandingImageField) => void;
+  onUrlChange: (field: BrandingImageField, value: string) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const src = value.trim();
+  const uploaded = src.startsWith("data:");
+  const lowerTitle = title.toLowerCase();
+  const meta = pending
+    ? "Preparing…"
+    : !src
+      ? emptyNote
+      : [uploaded ? "Uploaded" : "Linked", size ? `${size.width} × ${size.height}` : null, uploaded ? formatDataUrlSize(src) : null]
+          .filter(Boolean)
+          .join(" · ");
+  return (
+    <section
+      className={`branding-image-field${dragging ? " is-dragging" : ""}`}
+      aria-label={title}
+      onDragOver={(event) => {
+        if (pending || !event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (pending) return;
+        event.preventDefault();
+        setDragging(false);
+        const file = event.dataTransfer.files[0];
+        if (file) onUpload(file, field);
+      }}
+    >
+      <div className="branding-image-heading">
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </div>
+      <div className="branding-image-stage">
+        {src ? (
+          <img
+            key={src}
+            src={src}
+            alt={`${title} preview`}
+            onLoad={(event) =>
+              onSize(field, { src, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+            }
+          />
+        ) : (
+          <span className="branding-image-drop-hint">
+            <Upload size={16} aria-hidden /> Drop an image here
+          </span>
+        )}
+      </div>
+      <small className="branding-image-meta">{meta}</small>
+      {warning && <small className="branding-image-warning">{warning}</small>}
+      <div className="branding-image-actions">
+        <label
+          className={`secondary-button branding-file-button${pending ? " is-disabled" : ""}`}
+          data-tooltip={`Choose a PNG, JPEG, WebP, or SVG file for the ${lowerTitle}`}
+        >
+          <Upload size={15} /> {pending ? "Preparing…" : src ? "Replace" : "Upload"}
+          <input
+            type="file"
+            aria-label={`Upload ${lowerTitle}`}
+            accept={BRAND_IMAGE_ACCEPT}
+            disabled={pending}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) onUpload(file, field);
+            }}
+          />
+        </label>
+        {src && (
+          <button
+            className="secondary-button"
+            type="button"
+            aria-label={`Remove ${lowerTitle}`}
+            data-tooltip={`Clear the ${lowerTitle}; Apply branding to save`}
+            onClick={() => onRemove(field)}
+          >
+            <Trash2 size={15} /> Remove
+          </button>
+        )}
+      </div>
+      <label className="branding-image-url">
+        {urlLabel}
+        <input
+          aria-label={urlLabel}
+          value={uploaded ? "" : value}
+          placeholder={uploaded ? "Using the uploaded image" : urlPlaceholder}
+          onChange={(event) => onUrlChange(field, event.target.value)}
+        />
+      </label>
+    </section>
+  );
+}
+
 function PlatformBrandingPanel({
   brandingDraft,
   setBrandingDraft,
   onApplyBranding,
   onResetBranding,
-  onUploadBrandingImage,
+  onUploadImage,
+  onRemoveImage,
+  onImageUrlChange,
   status,
   onDismissStatus,
   saving,
-  uploadPending,
+  uploadsPending,
 }: {
   brandingDraft: BrandingDraftState;
   setBrandingDraft: (updater: (current: BrandingDraftState) => BrandingDraftState) => void;
   onApplyBranding: () => void;
   onResetBranding: () => void;
-  onUploadBrandingImage: (event: ChangeEvent<HTMLInputElement>) => void;
+  onUploadImage: (file: File, field: BrandingImageField) => void;
+  onRemoveImage: (field: BrandingImageField) => void;
+  onImageUrlChange: (field: BrandingImageField, value: string) => void;
   status: ActionStatus | null;
   onDismissStatus: () => void;
   saving: boolean;
-  uploadPending: boolean;
+  uploadsPending: readonly BrandingImageField[];
 }) {
-  const previewName = brandingDraft.chat_brand_name || DEFAULT_BRANDING.chat_brand_name;
-  const previewText = HEX_COLOR_INPUT_RE.test(brandingDraft.text_color.trim())
-    ? brandingDraft.text_color.trim()
-    : undefined;
+  const [imageSizes, setImageSizes] = useState<Partial<Record<BrandingImageField, BrandingImageSize>>>({});
+  const recordImageSize = useCallback((field: BrandingImageField, size: BrandingImageSize) => {
+    setImageSizes((current) => ({ ...current, [field]: size }));
+  }, []);
+  // A size describes the image only while that image is still the value.
+  const sizeOf = (field: BrandingImageField) => {
+    const size = imageSizes[field];
+    return size && size.src === brandingDraft[field].trim() ? size : null;
+  };
+  const logoSize = sizeOf("logo_url");
+  const iconSize = sizeOf("icon_url");
+  const hasLogo = Boolean(brandingDraft.logo_url.trim());
+  const logoIsSquare = logoSize ? isCompactBrandImage(logoSize.width, logoSize.height) : false;
+  const iconIsWide = iconSize ? !isCompactBrandImage(iconSize.width, iconSize.height) : false;
+  const imageFieldProps = {
+    onSize: recordImageSize,
+    onUpload: onUploadImage,
+    onRemove: onRemoveImage,
+    onUrlChange: onImageUrlChange,
+  };
   return (
     <Panel
       className="platform-branding-panel"
@@ -5405,46 +5599,20 @@ function PlatformBrandingPanel({
       defaultCollapsed
     >
       <div className="owner-section owner-section-connected">
-        <div className="branding-preview">
-          <span className="brand-logo-preview">
-            {brandingDraft.icon_url || brandingDraft.logo_url ? (
-              <img src={brandingDraft.icon_url || brandingDraft.logo_url} alt="" />
-            ) : (
-              <ApertureMark size={24} />
-            )}
-          </span>
-          <span>
-            <strong style={previewText ? { color: previewText } : undefined}>{previewName}</strong>
-            <small className="branding-preview-text" style={previewText ? { color: previewText } : undefined}>
-              Interface text
-            </small>
-          </span>
-        </div>
+        <BrandingLivePreview draft={brandingDraft} />
         <div className="owner-form-grid">
           <label>
             Platform name
             <input
+              aria-label="Platform name"
               value={brandingDraft.chat_brand_name}
               maxLength={60}
               onChange={(event) => setBrandingDraft((state) => ({ ...state, chat_brand_name: event.target.value }))}
             />
-          </label>
-          <label>
-            Platform logo URL
-            <input
-              aria-label="Platform logo URL"
-              value={brandingDraft.logo_url}
-              onChange={(event) => setBrandingDraft((state) => ({ ...state, logo_url: event.target.value }))}
-              placeholder="https://..."
-            />
-          </label>
-          <label>
-            Browser icon URL
-            <input
-              value={brandingDraft.icon_url}
-              onChange={(event) => setBrandingDraft((state) => ({ ...state, icon_url: event.target.value }))}
-              placeholder="https://.../favicon.svg"
-            />
+            <small className="muted-note">
+              Optional with a logo: leave it blank when the logo already spells the name. Browser tabs then show
+              Aperture Chat.
+            </small>
           </label>
           <label>
             Platform domain
@@ -5459,6 +5627,32 @@ function PlatformBrandingPanel({
               change routing.
             </small>
           </label>
+          <div className="branding-image-grid wide-field">
+            <BrandingImageField
+              {...imageFieldProps}
+              field="logo_url"
+              title="Logo"
+              description="Square or horizontal artwork for the sidebar, sign-in, and chat. PNG, JPEG, WebP, or SVG; transparent edges are trimmed."
+              emptyNote="Not set: the Aperture Chat logo is used."
+              value={brandingDraft.logo_url}
+              urlLabel="Platform logo URL"
+              pending={uploadsPending.includes("logo_url")}
+              size={logoSize}
+            />
+            <BrandingImageField
+              {...imageFieldProps}
+              field="icon_url"
+              title="Icon"
+              description="A square mark for browser tabs, the collapsed sidebar, chat replies, and home-screen installs. Padded to a square automatically."
+              emptyNote={hasLogo && logoIsSquare ? "Not set: your square logo is used." : "Not set: the Aperture Chat icon is used."}
+              value={brandingDraft.icon_url}
+              urlLabel="Browser icon URL"
+              urlPlaceholder="https://…/favicon.svg"
+              pending={uploadsPending.includes("icon_url")}
+              warning={iconIsWide ? "Too wide for an icon, so compact spaces show the Aperture Chat icon instead." : null}
+              size={iconSize}
+            />
+          </div>
           <div className="branding-theme-fields wide-field">
             <strong className="branding-theme-heading">Theme colors</strong>
             <small className="muted-note">
@@ -5512,33 +5706,26 @@ function PlatformBrandingPanel({
             </div>
           )}
           <div className="branding-actions wide-field">
-            <label
-              className="secondary-button branding-file-button"
-              data-tooltip="Choose a PNG to use as the platform logo and browser icon"
-            >
-              <Upload size={15} /> {uploadPending ? "Preparing…" : "Upload PNG"}
-              <input type="file" accept="image/png" onChange={onUploadBrandingImage} disabled={uploadPending} />
-            </label>
             <button
               className="secondary-button"
               type="button"
-              data-tooltip="Restore the default Aperture Chat name, logo, color, and domain"
+              data-tooltip="Restore the default Aperture Chat name, logo, icon, colors, and domain"
               onClick={onResetBranding}
               disabled={saving}
             >
               <RotateCcw size={15} /> Reset defaults
             </button>
+            <button
+              className="primary-button"
+              type="button"
+              data-tooltip="Save this branding so it appears everywhere across the platform"
+              onClick={onApplyBranding}
+              disabled={saving || uploadsPending.length > 0}
+              aria-busy={saving}
+            >
+              <Save size={15} /> {saving ? "Saving…" : "Apply branding"}
+            </button>
           </div>
-          <button
-            className="primary-button form-submit-button"
-            type="button"
-            data-tooltip="Save this branding so it appears everywhere across the platform"
-            onClick={onApplyBranding}
-            disabled={saving}
-            aria-busy={saving}
-          >
-            <Save size={15} /> {saving ? "Saving…" : "Apply branding"}
-          </button>
         </div>
       </div>
     </Panel>

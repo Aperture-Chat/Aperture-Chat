@@ -118,7 +118,8 @@ import { DictationControl } from "./DictationControl";
 import { isMediaUploadFile } from "../lib/mediaUploads";
 import { Markdown } from "./Markdown";
 import { renderConcealed } from "./ConcealedText";
-import { ApertureMark, Pill } from "./Primitives";
+import { BrandArtwork, BrandIcon, Pill } from "./Primitives";
+import { DEFAULT_BRAND_NAME, brandLockup, compactBrandSources, type BrandAssets } from "../lib/brandIcon";
 import { UserAvatar } from "./UserAvatar";
 import { PromptImproveIcon, PromptImproveRail } from "./PromptEditorField";
 import { cleanImprovedPrompt, promptImproverSystemPrompt } from "../lib/promptImprover";
@@ -984,7 +985,7 @@ export function ChatWorkspace({
   data,
   chat,
   brandName,
-  brandLogoUrl,
+  brand,
   requestedAgentId,
   onRequestedAgentConsumed,
   onTransferToDraft,
@@ -993,7 +994,8 @@ export function ChatWorkspace({
   data: BootstrapData;
   chat: ChatStore;
   brandName?: string | null;
-  brandLogoUrl?: string | null;
+  /** Logo and icon; defaults to the current tenant's. */
+  brand?: BrandAssets | null;
   requestedAgentId?: string | null;
   onRequestedAgentConsumed?: () => void;
   onTransferToDraft?: (message: ChatMessage) => void;
@@ -1196,8 +1198,12 @@ export function ChatWorkspace({
   );
   const citations = messages.flatMap((message) => messageWithActiveResponseVersion(message).citations ?? []);
   const hasCitations = citations.length > 0;
-  const assistantBrandName = brandName?.trim() || "Aperture Chat";
-  const assistantLogoUrl = brandLogoUrl?.trim() || "";
+  // Empty for image-only branding, where the logo already spells the name.
+  const assistantBrandName = (brandName ?? data.currentTenant.chat_brand_name ?? DEFAULT_BRAND_NAME).trim();
+  const assistantLabel = assistantBrandName || DEFAULT_BRAND_NAME;
+  const assistantBrand = brand ?? data.currentTenant;
+  const assistantLockup = brandLockup({ ...assistantBrand, chat_brand_name: assistantBrandName });
+  const assistantIconSources = compactBrandSources(assistantBrand);
   const agentProfiles = agentProfileOptions(data);
   const selectedAgent = selectedAgentId ? agentProfiles.find((agent) => agent.id === selectedAgentId) : undefined;
   const selectedModel = chat.enabledModels.find((model) => model.id === chat.model);
@@ -3112,20 +3118,19 @@ export function ChatWorkspace({
           {!hasMessages && (
             <>
               <div className="empty-chat">
-                <div className="empty-brand-identity">
+                <div
+                  className={`empty-brand-identity${assistantLockup.source === "logo" ? " has-logo-image" : ""}`}
+                  aria-label={assistantLabel}
+                >
                   <div className="empty-mark">
-                    {assistantLogoUrl ? (
-                      <img className="empty-brand-logo" src={assistantLogoUrl} alt="" />
-                    ) : (
-                      <ApertureMark size={72} />
-                    )}
+                    <BrandArtwork lockup={assistantLockup} label={assistantLabel} className="empty-brand-logo" markSize={72} />
                   </div>
-                  <span>{assistantBrandName}</span>
+                  {assistantLockup.name && <span>{assistantLockup.name}</span>}
                 </div>
                 <h2>{timeOfDayGreeting(new Date().getHours(), data.me.display_name)}</h2>
                 <p className="empty-tagline">
-                  Your approved models, your sources, your guardrails — ask {assistantBrandName}{" "}
-                  anything.
+                  Your approved models, your sources, your guardrails — ask
+                  {assistantBrandName ? ` ${assistantBrandName}` : ""} anything.
                 </p>
               </div>
             </>
@@ -3141,7 +3146,7 @@ export function ChatWorkspace({
                   userName={data.me.display_name}
                   userAvatarUrl={data.me.avatar_url}
                   brandName={assistantBrandName}
-                  brandLogoUrl={assistantLogoUrl}
+                  brandIconSources={assistantIconSources}
                   onTransferToDraft={onTransferToDraft}
                   onBranchFromMessage={(targetMessage) => chat.branchFromMessage(targetMessage.id)}
                   onRegenerateResponse={(targetMessage) => chat.regenerateResponse(targetMessage.id)}
@@ -3796,7 +3801,7 @@ function MessageBubble({
   userName,
   userAvatarUrl,
   brandName,
-  brandLogoUrl,
+  brandIconSources,
   onTransferToDraft,
   onBranchFromMessage,
   onRegenerateResponse,
@@ -3822,7 +3827,7 @@ function MessageBubble({
   userName: string;
   userAvatarUrl?: string | null;
   brandName: string;
-  brandLogoUrl: string;
+  brandIconSources: readonly string[];
   onTransferToDraft?: (message: ChatMessage) => void;
   onBranchFromMessage?: (message: ChatMessage) => ChatThread | null;
   onRegenerateResponse?: (message: ChatMessage) => boolean;
@@ -3968,12 +3973,12 @@ function MessageBubble({
         <UserMessageAvatar name={userName} avatarUrl={userAvatarUrl} />
       ) : (
         <div className="avatar aperture">
-          {brandLogoUrl ? <img className="message-brand-logo" src={brandLogoUrl} alt="" /> : <ApertureMark size={36} />}
+          <BrandIcon sources={brandIconSources} size={36} title={brandName || "Assistant"} className="message-brand-logo" />
         </div>
       )}
       <div className="message-body">
         <div className="message-meta">
-          <strong>{isUser ? "You" : brandName}</strong>
+          {(isUser || brandName) && <strong>{isUser ? "You" : brandName}</strong>}
           <time dateTime={timestamp.dateTime} data-tooltip={timestamp.title}>
             {timestamp.label}
           </time>
@@ -4357,6 +4362,7 @@ function ActivityTrace({
 }) {
   const [now, setNow] = useState(Date.now());
   const [expanded, setExpanded] = useState(false);
+  const assistantName = brandName || "The assistant";
   const startedAt = message.startedAtMs ?? now;
   const elapsedMs = Math.max(0, now - startedAt);
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
@@ -4378,7 +4384,7 @@ function ActivityTrace({
   const isAgentWorkflow =
     Boolean(runtime?.agentEnabled) ||
     steps.some((step) => step.id === "tools" && /agent/i.test(`${step.label} ${step.detail ?? ""}`));
-  const traceLabel = isPending ? `${brandName} is working` : isAgentWorkflow ? "Agent work trace" : "Work trace";
+  const traceLabel = isPending ? `${assistantName} is working` : isAgentWorkflow ? "Agent work trace" : "Work trace";
   const hasThinkingTraces = thinkingTraces.length > 0;
 
   useEffect(() => {
@@ -4392,7 +4398,7 @@ function ActivityTrace({
       className={`pending-trace ${isPending ? "" : "is-complete"} ${expanded ? "is-expanded" : "is-collapsed"}`}
       role={isPending ? "status" : "region"}
       aria-live={isPending ? "polite" : undefined}
-      aria-label={`${brandName} activity trace`}
+      aria-label={`${assistantName} activity trace`}
     >
       <div className="pending-trace-header">
         <button
@@ -4440,7 +4446,7 @@ function ActivityTrace({
       </div>
       {isPending && (
         <p className="pending-trace-note">
-          Complex requests can take longer. {brandName} keeps working while long-form answers are assembled and checked.
+          Complex requests can take longer. {assistantName} keeps working while long-form answers are assembled and checked.
         </p>
       )}
       {visibleSteps.length > 0 && (

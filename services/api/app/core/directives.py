@@ -181,10 +181,20 @@ def extract_directives(prompt: str, standing_instructions: list[str] | None = No
     return directives[:MAX_DIRECTIVES]
 
 
+# Every prompt the Drafts deck editor sends opens with one of these: whole-deck
+# drafts and revisions, Edit slide with AI, and the slide fit check
+# (apps/web/src/components/DocumentAssistantWorkspace.tsx). Their JSON contract
+# names pictures, bullets, and slide counts, which must not read as requirements.
+_DECK_PROMPT = re.compile(
+    r"\AYou are (?:a presentation writer\b|revising an existing slide deck\b|"
+    r"editing slide \d+ of \d+ in the presentation\b|fixing slide layout\b)"
+)
+
+
 def extract_draft_directives(prompt: str, standing_instructions: list[str] | None = None) -> list[Directive]:
     # Deck output is validated against its JSON contract in the deck pipeline.
     # The editor adds artwork afterward; prose/image verifiers are inapplicable.
-    if prompt.startswith(("You are a presentation writer producing a slide deck", "You are revising an existing slide deck")):
+    if _DECK_PROMPT.match(prompt):
         return []
     match = re.search(r"\AUser request: (.*?)\n\nDraft type:", prompt, re.DOTALL)
     return extract_directives(match.group(1) if match else prompt, standing_instructions)

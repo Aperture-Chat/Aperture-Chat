@@ -149,3 +149,63 @@ test("identical versions produce an accessible no-change summary", () => {
     "Visual redline: the selected versions are identical at every compared block.",
   );
 });
+
+test("formatting carried by documents opened from Word or PDF survives storage", () => {
+  const imported =
+    '<div class="document-page-setup" style="width: 612pt; height: 792pt; padding-top: 72pt; margin-top: 36pt; font-family: \'Times New Roman\', serif; line-height: 1.241"></div>' +
+    '<p dir="rtl" style="margin-top: 17.69px; margin-bottom: 0px; margin-left: -12px; text-indent: -53.06px; line-height: 22.11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 0.75px solid #000000; padding-bottom: 2px">' +
+    '<span class="document-tab document-tab-right document-tab-at-9360" style="display: inline-block; width: 580px; border-bottom: 1.5px dotted currentcolor">\t</span>' +
+    '<span style="font-variant: small-caps; font-family: Calibri, Carlito, Arial, sans-serif">Firm</span></p>' +
+    '<table style="width: 515.89px; border-collapse: collapse; table-layout: fixed; margin: 0px auto"><colgroup><col style="width: 294.8px" span="1"></colgroup>' +
+    '<tbody><tr style="height: 19.31px"><td colspan="2" style="padding: 0px 7.96px; vertical-align: middle; border-top: 1px solid rgb(0, 0, 0)">x</td></tr></tbody></table>' +
+    '<ol start="3" type="a"><li value="5">item</li></ol>';
+  const sanitized = sanitizeDocumentHtml(imported);
+
+  for (const fragment of [
+    "width: 612pt",
+    "padding-top: 72pt",
+    "margin-top: 36pt",
+    "font-family: 'Times New Roman', serif",
+    "line-height: 1.241",
+    'dir="rtl"',
+    "margin-left: -12px",
+    "text-indent: -53.06px",
+    "font-weight: 600",
+    "text-transform: uppercase",
+    "letter-spacing: 0.5px",
+    "border-bottom: 0.75px solid #000000",
+    "display: inline-block",
+    "border-bottom: 1.5px dotted currentcolor",
+    "font-variant: small-caps",
+    "font-family: Calibri, Carlito, Arial, sans-serif",
+    "table-layout: fixed",
+    "margin: 0px auto",
+    'span="1"',
+    "height: 19.31px",
+    "vertical-align: middle",
+    "border-top: 1px solid rgb(0, 0, 0)",
+    'start="3"',
+    'type="a"',
+    'value="5"',
+  ]) {
+    expect(sanitized).toContain(fragment);
+  }
+});
+
+test("layout properties outside the allowlist or with unsafe values are dropped", () => {
+  expect(sanitizeStyleAttribute("display: none; position: absolute; width: 10px")).toBe("width: 10px");
+  expect(sanitizeStyleAttribute("border: 1px solid url(x); margin-left: expression(1)")).toBe("");
+  expect(sanitizeStyleAttribute("line-height: 99; padding: 1px 2px 3px 4px 5px")).toBe("");
+  const html = sanitizeDocumentHtml('<p dir="sideways">x</p><ol start="1e9" type="z"><li>y</li></ol>');
+  expect(html).toBe("<p>x</p><ol><li>y</li></ol>");
+});
+
+test("borders re-serialized by the browser without a color stay intact", () => {
+  // Chrome writes "1.5px dotted" for a currentcolor border after any CSSOM
+  // edit to the element's style (tab spacers are resized that way).
+  expect(sanitizeStyleAttribute("display: inline-block; width: 580px; border-bottom: 1.5px dotted")).toBe(
+    "display: inline-block; width: 580px; border-bottom: 1.5px dotted",
+  );
+  expect(sanitizeStyleAttribute("border-top: solid")).toBe("border-top: solid");
+  expect(sanitizeStyleAttribute("border-top: 1px wavy red")).toBe("");
+});

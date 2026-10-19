@@ -81,6 +81,9 @@ type Props = {
   onRetry: () => void;
   onStop: () => void;
   onClose: () => void;
+  /** Renders in place inside a host panel (the deck blade) instead of
+   * floating beside its anchor. */
+  embedded?: boolean;
 };
 
 const ACTION_ICONS: Record<string, LucideIcon> = {
@@ -119,6 +122,7 @@ export function AiEditComposer({
   onRetry,
   onStop,
   onClose,
+  embedded = false,
 }: Props) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -141,6 +145,7 @@ export function AiEditComposer({
   // Follow the target through scrolling and resizing. Capture-phase scroll
   // catches the page scroller as well as the window.
   useLayoutEffect(() => {
+    if (embedded) return undefined;
     let frame = 0;
     const place = () => {
       frame = 0;
@@ -175,7 +180,7 @@ export function AiEditComposer({
       window.removeEventListener("scroll", schedule, true);
       window.removeEventListener("resize", schedule);
     };
-  }, [getAnchor, phase]);
+  }, [getAnchor, phase, embedded]);
 
   // Focus follows the phase: the instruction box to start, Accept once there
   // is something to accept, so Enter always does the expected thing.
@@ -269,7 +274,9 @@ export function AiEditComposer({
   }
 
   const activeEntryId = activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined;
-  const style = position.docked
+  const style = embedded
+    ? undefined
+    : position.docked
     ? { left: position.left, width: position.width, bottom: position.bottom, maxHeight: position.maxHeight }
     : {
         left: position.left,
@@ -283,7 +290,7 @@ export function AiEditComposer({
   const composer = (
     <div
       ref={rootRef}
-      className={`ai-composer is-${phase} ${position.docked ? "is-docked" : ""}`}
+      className={`ai-composer is-${phase} ${embedded ? "is-embedded" : position.docked ? "is-docked" : ""}`}
       role="dialog"
       aria-label={title}
       tabIndex={-1}
@@ -518,5 +525,5 @@ export function AiEditComposer({
     </div>
   );
 
-  return typeof document === "undefined" ? composer : createPortal(composer, document.body);
+  return typeof document === "undefined" || embedded ? composer : createPortal(composer, document.body);
 }

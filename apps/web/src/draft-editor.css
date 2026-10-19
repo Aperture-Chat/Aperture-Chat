@@ -1331,7 +1331,9 @@
 
 .slide-ai-compare figure {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
+  min-width: 0;
   margin: 0;
 }
 
@@ -1345,6 +1347,7 @@
 
 .slide-ai-after {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -1369,7 +1372,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  transform: scale(calc(196 / 960));
+  transform: scale(var(--slide-ai-scale, calc(196 / 960)));
   transform-origin: top left;
   pointer-events: none;
 }
@@ -1500,7 +1503,7 @@
 }
 
 /* ---------- Deck: slide sorter ---------- */
-.deck-editor-body.is-sorting > .deck-filmstrip,
+.deck-editor-body.is-sorting > .deck-filmstrip-pane,
 .deck-editor-body.is-sorting > .deck-stage-column {
   display: none;
 }
@@ -2006,4 +2009,1319 @@ figure.document-media-align-right {
   .document-selection-toolbar button[aria-label="Strike through selected text"] {
     display: none;
   }
+}
+
+
+/* ---------- Source layout: documents opened from Word or PDF ----------
+   The sheet takes the source page's size and margins and the source's Normal
+   text (see lib/documentPageSetup.ts). Imported blocks carry their own
+   resolved formatting inline, so the editor's design-system spacing, heading
+   scale, list indents, and table chrome step aside rather than restyle the
+   original. Blocks added after import (typing, AI, toolbar) follow the
+   source's Normal paragraph instead. */
+.document-page-setup {
+  display: none !important;
+}
+
+/* The sheet is always the source's width; small screens scale it to fit
+   (zoom set by the editor) rather than narrowing it and rewrapping lines. */
+.document-canvas.is-source-layout,
+.document-canvas.is-paginated.is-source-layout {
+  width: var(--source-sheet-width);
+  max-width: none;
+  font-family: var(--source-font-family);
+  font-size: var(--source-font-size);
+  line-height: var(--source-line-height);
+  color: var(--source-color);
+  letter-spacing: normal;
+  overflow-wrap: break-word;
+}
+
+.document-canvas.is-paginated.is-source-layout .document-page {
+  /* Word adds space-after and space-before instead of collapsing them;
+     a column flex container keeps block margins from collapsing. */
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: auto;
+  min-height: var(--source-sheet-height);
+  padding: var(--source-pad-top) calc(var(--source-pad-right) + var(--doc-indent-right, 0px))
+    var(--source-pad-bottom) calc(var(--source-pad-left) + var(--doc-indent-left, 0px));
+  /* The outline is a shadow, not a border: a border takes layout space and
+     is snapped to whole device pixels when the sheet is zoomed to fit a
+     small screen, which narrows the text column and rewraps tab-aligned
+     lines. */
+  border: 0;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 74%, transparent),
+    0 1px 2px rgba(15, 35, 45, 0.04),
+    0 20px 60px rgba(15, 35, 45, 0.08);
+  color: var(--source-color);
+}
+
+.document-canvas.is-source-layout :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, table) {
+  margin: var(--source-block-before, 0px) 0 var(--source-block-after, 0px);
+}
+
+.document-canvas.is-source-layout td :is(p, h1, h2, h3, h4, h5, h6, ul, ol) {
+  margin: 0;
+}
+
+/* As in Word, a page that continues the text (not the first page and not one
+   after a manual break) starts at its top margin: the space before the block
+   that lands there is dropped. */
+.document-canvas.is-source-layout
+  .document-page:not(:first-of-type):not([data-page-break-before="manual"])
+  > :first-child {
+  /* Outranks the block's own inline spacing, which still applies mid-page. */
+  margin-top: 0 !important;
+}
+
+.document-canvas.is-source-layout :is(h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+  font-weight: 700;
+  line-height: inherit;
+  letter-spacing: normal;
+}
+
+.document-canvas.is-source-layout h1 {
+  font-size: 1.45em;
+}
+
+.document-canvas.is-source-layout h2 {
+  font-size: 1.25em;
+}
+
+.document-canvas.is-source-layout h3 {
+  font-size: 1.1em;
+}
+
+.document-canvas.is-source-layout :is(h4, h5, h6) {
+  font-size: 1em;
+}
+
+.document-canvas.is-source-layout :is(ul, ol) {
+  padding-left: 2.5em;
+}
+
+.document-canvas.is-source-layout li {
+  margin: 0;
+  padding-left: 0;
+}
+
+.document-canvas.is-source-layout ol > li::marker {
+  font-weight: inherit;
+}
+
+.document-canvas.is-source-layout blockquote {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+}
+
+.document-canvas.is-source-layout table {
+  width: auto;
+  max-width: none;
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+.document-canvas.is-source-layout :is(td, th) {
+  border: 0;
+  padding: 0 7.96px;
+  vertical-align: top;
+  text-align: inherit;
+  font-weight: inherit;
+  background: transparent;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* Word draws super/subscripts at about two-thirds size without opening up
+   the line they sit on. */
+.document-canvas.is-source-layout :is(sup, sub),
+.document-page-chrome-content :is(sup, sub) {
+  font-size: 0.65em;
+  line-height: 0;
+}
+
+/* Links keep the run formatting the source gave them. */
+.document-canvas.is-source-layout a[href] {
+  color: inherit;
+  text-decoration-line: none;
+}
+
+/* A Word tab: a fixed-width spacer that reaches the source's tab stop. */
+.document-canvas.is-source-layout .document-tab,
+.document-page-chrome .document-tab,
+.draft-print-root .document-tab {
+  display: inline-block;
+  white-space: pre;
+  text-indent: 0;
+}
+
+.document-canvas.is-source-layout .document-blank {
+  text-decoration: inherit;
+}
+
+/* Formatted drafts (lib/documentFormats.ts): the rule under a memo's
+   TO/FROM block, and borderless signature blocks and header/footer rows. */
+.document-canvas.is-source-layout hr.document-memo-rule {
+  height: 0;
+  margin: 0 0 var(--source-block-after, 12px);
+  border: 0;
+  border-top: 1px solid currentColor;
+  background: none;
+}
+
+.document-canvas.is-source-layout :is(.document-signature-table, .document-running-table) :is(td, th),
+.document-page-chrome .document-running-table td {
+  border: 0;
+}
+
+/* A table in a formatted document is set in the document's type; its cells
+   carry the format's borders and header shading inline. */
+.document-canvas.is-source-layout .document-data-table,
+.draft-print-root.is-source-layout .document-data-table {
+  font-size: inherit;
+}
+
+.document-canvas.is-source-layout .document-data-table th,
+.draft-print-root.is-source-layout .document-data-table th {
+  color: inherit;
+  background: transparent;
+  font-weight: 700;
+}
+
+/* Running headers and footers drawn in each sheet's margins. */
+.document-page-chrome {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+.document-page-chrome-box {
+  position: absolute;
+  overflow: visible;
+}
+
+.document-page-chrome-box.is-footer {
+  transform: translateY(-100%);
+}
+
+.document-page-chrome-content :is(p, h1, h2, h3, h4, h5, h6, table) {
+  margin: 0;
+}
+
+.document-page-chrome-content table {
+  border-collapse: collapse;
+}
+
+.document-page-chrome-content :is(td, th) {
+  padding: 0 7.96px;
+  vertical-align: top;
+}
+
+.document-page-chrome-content img {
+  max-width: 100%;
+}
+
+.document-page-chrome-content a[href] {
+  color: inherit;
+  text-decoration-line: none;
+}
+
+/* Source-layout print: one printed page per sheet at the source paper size
+   (the @page size is injected by lib/draftPrint.ts), drawn in preview px and
+   zoomed to true points, with the header/footer in each page's margins. */
+@media print {
+  body.is-draft-printing .draft-print-root.is-source-layout {
+    font-family: var(--source-font-family);
+    font-size: var(--source-font-size);
+    line-height: var(--source-line-height);
+    color: var(--source-color);
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout .draft-print-pages {
+    zoom: var(--source-print-zoom);
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout .document-page {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: var(--source-sheet-width);
+    height: var(--source-sheet-height);
+    padding: var(--source-pad-top) var(--source-pad-right) var(--source-pad-bottom) var(--source-pad-left);
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout .document-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, table) {
+    margin: var(--source-block-before, 0px) 0 var(--source-block-after, 0px);
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout td :is(p, h1, h2, h3, h4, h5, h6, ul, ol) {
+    margin: 0;
+  }
+
+  body.is-draft-printing
+    .draft-print-root.is-source-layout
+    .document-page:not(:first-of-type):not([data-page-break-before="manual"])
+    > :first-child {
+    margin-top: 0 !important;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout :is(h1, h2, h3, h4, h5, h6) {
+    color: inherit;
+    font-weight: 700;
+    line-height: inherit;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout table {
+    width: auto;
+    border-collapse: collapse;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout :is(th, td) {
+    border: 0;
+    padding: 0 7.96px;
+    text-align: inherit;
+    vertical-align: top;
+    font-weight: inherit;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout :is(li, tr, img, blockquote) {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout img {
+    max-width: none;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout :is(sup, sub) {
+    font-size: 0.65em;
+    line-height: 0;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout hr.document-page-break {
+    display: none;
+  }
+
+  body.is-draft-printing .draft-print-root.is-source-layout hr.document-memo-rule {
+    height: 0;
+    margin: 0 0 var(--source-block-after, 12px);
+    border: 0;
+    border-top: 1px solid currentColor;
+  }
+
+  body.is-draft-printing .draft-print-root .draft-print-chrome {
+    position: absolute;
+  }
+
+  body.is-draft-printing .draft-print-root .draft-print-chrome :is(p, table) {
+    margin: 0;
+  }
+}
+
+@media print {
+  body.is-draft-printing .draft-print-root.is-source-layout .document-blank {
+    text-decoration: inherit;
+  }
+}
+
+/* ---------- Deck: the side blade ---------- */
+/* Layouts, pictures, and AI slide edits slide out from the editor's left
+   seam, like the assistant drawer; the stage steps clear so the slide stays
+   in view. Below the assistant drawer and its backdrop, which cover it. */
+@keyframes deck-blade-in {
+  from {
+    transform: translateX(-100%);
+    clip-path: inset(0 -80px 0 100%);
+  }
+  to {
+    transform: none;
+    clip-path: inset(0 -80px 0 0);
+  }
+}
+
+@keyframes deck-blade-out {
+  from {
+    transform: none;
+    clip-path: inset(0 -80px 0 0);
+  }
+  to {
+    transform: translateX(-100%);
+    clip-path: inset(0 -80px 0 100%);
+  }
+}
+
+.deck-blade {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 83;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+  animation: deck-blade-in 360ms var(--ease) both;
+}
+
+.deck-blade[data-state="closing"] {
+  pointer-events: none;
+  animation: deck-blade-out 240ms var(--ease) both;
+}
+
+.deck-blade[data-full="true"] {
+  border-right: 0;
+}
+
+.deck-blade.is-resizing {
+  user-select: none;
+}
+
+.deck-blade-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.deck-blade-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.deck-blade-heading {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 1px;
+}
+
+.deck-blade-heading strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 14.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-blade-heading span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-blade-close {
+  display: grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    border-color var(--speed) var(--ease),
+    background-color var(--speed) var(--ease),
+    color var(--speed) var(--ease);
+}
+
+.deck-blade-close:hover:not(:disabled),
+.deck-blade-close:focus-visible {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+  outline: none;
+}
+
+.deck-blade-close:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.deck-blade-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 16px;
+  scrollbar-width: thin;
+}
+
+/* Its contents settle in just behind the panel, as in the assistant drawer. */
+.deck-blade[data-state="open"] .deck-blade-body > * {
+  animation: draft-rail-settle 420ms var(--ease) 60ms backwards;
+}
+
+.deck-blade-foot {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.deck-blade-done {
+  min-width: 88px;
+  height: 34px;
+  border: 1px solid var(--teal);
+  border-radius: var(--radius-sm);
+  background: var(--teal);
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.deck-blade-done:hover:not(:disabled) {
+  background: var(--teal-strong);
+}
+
+/* Adjustable from its right edge: a hairline that lights up, with a grip. */
+.deck-blade-resize {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  z-index: 2;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.deck-blade-resize::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  background: var(--teal);
+  opacity: 0;
+  transition: opacity var(--speed) var(--ease);
+}
+
+.deck-blade-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 6px;
+  height: 40px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  transform: translateY(-50%);
+  transition:
+    border-color var(--speed) var(--ease),
+    background-color var(--speed) var(--ease);
+}
+
+.deck-blade-resize:hover::before,
+.deck-blade-resize:focus-visible::before,
+.deck-blade.is-resizing .deck-blade-resize::before {
+  opacity: 0.8;
+}
+
+.deck-blade-resize:hover::after,
+.deck-blade-resize:focus-visible::after,
+.deck-blade.is-resizing .deck-blade-resize::after {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+/* The AI composer fills a bare blade. */
+.deck-blade.is-bare .deck-blade-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ai-composer.is-embedded {
+  position: relative;
+  z-index: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+/* In the blade the action list and review fill the height instead of
+   stopping at the floating composer's caps. */
+.ai-composer.is-embedded .ai-composer-list {
+  max-height: none;
+}
+
+.ai-composer.is-embedded .ai-composer-stream,
+.ai-composer.is-embedded .ai-composer-preview {
+  max-height: min(560px, 62vh);
+}
+
+.ai-composer.is-embedded .ai-composer-head {
+  min-height: 60px;
+  padding: 14px 12px 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Group jumps stay on top while the gallery scrolls under them. */
+.deck-blade-jumps {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 -16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.deck-blade-jumps button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.deck-blade-jumps button:hover,
+.deck-blade-jumps button:focus-visible {
+  border-color: var(--teal);
+  color: var(--teal-strong);
+  outline: none;
+}
+
+/* Add a slide / change layout: every template layout as a live miniature
+   with its placeholders, sized to the blade's width. */
+.deck-layout-menu {
+  display: block;
+  outline: none;
+}
+
+.deck-layout-menu-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  padding-top: 14px;
+  /* A group jumped to lands below the sticky group chips. */
+  scroll-margin-top: 96px;
+}
+
+.deck-layout-menu-heading {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deck-layout-option {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 6px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--speed) var(--ease),
+    background-color var(--speed) var(--ease);
+}
+
+.deck-layout-option:hover,
+.deck-layout-option:focus-visible {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--border));
+  background: color-mix(in srgb, var(--teal-soft) 35%, var(--surface));
+  outline: none;
+}
+
+.deck-layout-option:focus-visible {
+  box-shadow: 0 0 0 2px var(--teal-ring);
+}
+
+.deck-layout-option[aria-current="true"] {
+  border-color: var(--teal-2, var(--teal));
+  background: color-mix(in srgb, var(--teal-soft) 50%, var(--surface));
+}
+
+.deck-layout-option-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: 3px;
+  background: #ffffff;
+}
+
+.deck-layout-option-preview .deck-thumb-scale .deck-slide-canvas {
+  transform: scale(var(--deck-option-scale, 0.15));
+  transform-origin: top left;
+}
+
+.deck-layout-option-label {
+  display: -webkit-box;
+  min-height: 2.6em;
+  overflow: hidden;
+  padding-inline: 2px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.deck-layout-option.is-in-deck .deck-layout-option-preview {
+  opacity: 0.55;
+}
+
+.deck-layout-menu-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--teal);
+}
+
+/* Pictures: the placeholder chooser, a preview in the placeholder's own
+   shape (also a drop zone), and the ways to fill it. */
+.deck-picture-panel {
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+}
+
+.deck-picture-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deck-picture-slots button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deck-picture-slots button svg {
+  color: var(--muted);
+}
+
+.deck-picture-slots button[aria-selected="true"] {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
+.deck-picture-slots button[aria-selected="true"] svg,
+.deck-picture-slots button svg[aria-label] {
+  color: var(--teal);
+}
+
+.deck-picture-drop {
+  position: relative;
+  display: grid;
+  justify-self: center;
+  place-items: center;
+  overflow: hidden;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  transition:
+    border-color var(--speed) var(--ease),
+    background-color var(--speed) var(--ease);
+}
+
+.deck-picture-drop.has-image {
+  border-style: solid;
+  border-color: var(--border);
+  background: #ffffff;
+}
+
+.deck-picture-drop.is-over {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.deck-picture-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.deck-picture-drop img.is-icon {
+  object-fit: contain;
+  padding: 12px;
+}
+
+.deck-picture-drop-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  max-width: 80%;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.deck-blade-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.deck-blade-field {
+  display: grid;
+  gap: 6px;
+}
+
+.deck-blade-field span {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.deck-blade-field input {
+  height: 36px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.deck-blade-field input:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-ring);
+  outline: none;
+}
+
+.deck-blade-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.deck-blade-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.deck-blade-actions button:hover:not(:disabled) {
+  border-color: var(--teal);
+  color: var(--teal-strong);
+}
+
+.deck-blade-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.deck-blade-hint,
+.deck-blade-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.deck-blade-note {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.deck-web-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.deck-web-result {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.deck-web-result:hover:not(:disabled),
+.deck-web-result:focus-visible {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px var(--teal-ring);
+  outline: none;
+}
+
+.deck-web-result img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  object-fit: cover;
+}
+
+.deck-web-result span {
+  overflow: hidden;
+  padding-inline: 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-blade-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, #d0453a 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: #b8392f;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.deck-blade-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #d0453a 8%, var(--surface));
+}
+
+.theme-dark .deck-blade-danger {
+  color: #ff8a80;
+}
+
+/* Moving between slides: the stage settles in, and a new thumbnail grows
+   into the filmstrip, so an added slide is noticed where it lands. */
+@keyframes deck-stage-in {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes deck-thumb-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.deck-stage {
+  animation: deck-stage-in 170ms ease-out;
+}
+
+.deck-thumb {
+  animation: deck-thumb-in 200ms var(--ease);
+}
+
+/* ---------- Deck: slide text format toolbar ---------- */
+.deck-text-toolbar {
+  position: fixed;
+  z-index: 90;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  animation: ai-composer-in 120ms var(--ease);
+}
+
+.deck-text-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 12px;
+  background: #102530;
+  color: #e5f1f4;
+  box-shadow:
+    0 14px 34px -12px rgb(4 20 28 / 55%),
+    0 2px 6px rgb(4 20 28 / 20%);
+}
+
+.deck-text-toolbar.is-below {
+  grid-auto-flow: row;
+}
+
+.deck-text-toolbar-row button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deck-text-toolbar-row button:hover:not(:disabled),
+.deck-text-toolbar-row button:focus-visible {
+  background: rgb(255 255 255 / 12%);
+  outline: none;
+}
+
+.deck-text-toolbar-row button[aria-pressed="true"] {
+  background: rgb(10 164 181 / 26%);
+  color: #7fe3ef;
+}
+
+.deck-text-toolbar-row button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.deck-text-toolbar-ai {
+  padding: 0 10px 0 8px !important;
+  color: #7fe3ef !important;
+}
+
+.deck-text-toolbar-ai svg {
+  color: #b9a8ff;
+}
+
+.deck-text-toolbar-size {
+  min-width: 52px !important;
+  justify-content: space-between !important;
+  border: 1px solid rgb(255 255 255 / 16%) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.deck-text-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: rgb(255 255 255 / 16%);
+}
+
+.deck-text-toolbar-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.deck-text-toolbar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 1;
+  display: grid;
+  min-width: 150px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.deck-text-toolbar-menu.is-up {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+.deck-text-toolbar-menu.is-sizes {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  min-width: 196px;
+}
+
+.deck-text-toolbar-menu button {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.deck-text-toolbar-menu button:hover,
+.deck-text-toolbar-menu button:focus-visible {
+  background: var(--surface-sunken);
+  outline: none;
+}
+
+.deck-text-toolbar-menu button[aria-checked="true"] {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+  font-weight: 700;
+}
+
+.deck-text-toolbar-menu .is-reset {
+  grid-column: 1 / -1;
+  text-align: left;
+  font-weight: 600;
+}
+
+.deck-text-toolbar-menu.is-swatches {
+  grid-template-columns: repeat(5, 28px);
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.deck-text-toolbar-menu.is-swatches button:not(.is-reset) {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgb(0 0 0 / 14%);
+  border-radius: 50%;
+}
+
+.deck-text-toolbar-menu.is-swatches .is-reset {
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.deck-text-toolbar-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: calc(100vw - 16px);
+}
+
+.deck-text-toolbar-scope {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(16 37 48 / 82%);
+  color: #cfe9ee;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.deck-text-toolbar-scope.is-warning {
+  background: #8a4b0b;
+  color: #fff4e5;
+}
+
+.deck-text-toolbar.is-below .deck-text-toolbar-notes {
+  order: -1;
+}
+
+/* Fingers need bigger targets; the row wraps on narrow screens. */
+@media (pointer: coarse) {
+  .deck-text-toolbar-row button {
+    min-width: 36px;
+    height: 36px;
+  }
+}
+
+.theme-dark .deck-text-toolbar-row {
+  border-color: var(--border-strong);
+  background: #16323d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck-blade,
+  .deck-blade[data-state="closing"],
+  .deck-blade[data-state="open"] .deck-blade-body > *,
+  .deck-text-toolbar,
+  .deck-stage,
+  .deck-thumb {
+    animation: none;
+  }
+}
+
+.deck-image-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deck-image-upload:hover:not(:disabled) {
+  border-color: var(--teal);
+  color: var(--teal-strong);
+}
+
+/* The layouts-and-themes strip folds away to give the slide the height; its
+   chevron leads the Layouts / Themes switch. */
+.deck-design-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.deck-design-fold {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.deck-design-fold:hover,
+.deck-design-fold:focus-visible {
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  outline: none;
+}
+
+.deck-design-chevron {
+  transition: transform var(--speed) var(--ease);
+}
+
+.deck-design-fold[aria-expanded="false"] .deck-design-chevron {
+  transform: rotate(-90deg);
+}
+
+/* The version chip shares a narrow header row; its words truncate. */
+.document-version-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.document-editor-topbar > .document-version-label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.document-version-label > svg {
+  flex: 0 0 auto;
 }

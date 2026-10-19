@@ -26,3 +26,10 @@ test("plain text pastes as paragraphs, and a single line stays inline", () => {
     "<p>First para<br>same para</p><p>Second</p>",
   );
 });
+
+test("pasting never brings another document's page setup along", () => {
+  const pasted =
+    '<div class="document-page-setup" style="width: 612pt"><div class="document-page-footer"><p>Page 1</p></div></div><p>Copied clause.</p>';
+  const cleaned = cleanPastedHtml(pasted);
+  expect(cleaned).toBe("<p>Copied clause.</p>");
+});

@@ -63,13 +63,14 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.11](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.11)**:
-> diagrams render reliably in chat, Drafts, exports, and automations, with one
-> visual theme across charts, timelines, and mind maps; Graphviz, PlantUML,
-> and text drawings are drawn as diagrams; and drafts keep their diagrams
-> through save and Transfer to Drafts. v0.5.10 added personal data protection
-> and training datasets.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0510) and
+> **Current release: [v0.5.12](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.12)**:
+> the Drafts deck editor gains slide-out panels, a text formatting toolbar,
+> slide pictures, shrink-to-fit text, and AI decks that check their own fit;
+> Word and PDF files open with their formatting kept, templates are set in
+> real document formats, and layouts can be asked for in plain English; and
+> Platform Branding takes a separate logo and icon. v0.5.11 made diagrams
+> render reliably everywhere.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0511) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -167,7 +168,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.11
+#   APERTURE_IMAGE_TAG=v0.5.12
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -188,7 +189,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.11 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.12 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -223,10 +224,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.11` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.12` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.11-dev`, `v0.5.11-test`, `v0.5.11-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.12-dev`, `v0.5.12-test`, `v0.5.12-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

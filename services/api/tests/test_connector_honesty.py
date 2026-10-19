@@ -425,6 +425,26 @@ def test_branding_route_persists_theme_fields_and_exposes_them_pre_auth() -> Non
     assert cleared.json()["text_color"] is None
 
 
+def test_branding_route_accepts_an_empty_name_for_image_only_branding() -> None:
+    response = client.patch(
+        "/api/platform/tenants/tenant-example/branding",
+        headers=headers("user-owner"),
+        json={
+            "chat_brand_name": "",
+            "logo_url": "https://assets.example.com/wordmark.png",
+            "icon_url": "https://assets.example.com/icon.png",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["chat_brand_name"] == ""
+    branding = client.get("/api/auth/options").json()["tenant_branding"]
+    assert branding["chat_brand_name"] == ""
+    assert branding["logo_url"] == "https://assets.example.com/wordmark.png"
+    assert branding["icon_url"] == "https://assets.example.com/icon.png"
+    # Text that needs a name falls back to the product name.
+    assert client.get("/api/pwa/manifest.webmanifest").json()["name"] == "Aperture Chat"
+
+
 def test_branding_route_rejects_invalid_values() -> None:
     bad_color = client.patch(
         "/api/platform/tenants/tenant-example/branding",
