@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends
 
 from app.core import clock
+from app.core.connector_availability import connector_enabled_for_tenant
 from app.core.memory import memory_state_for
 from app.core.policy import (
+    api_source_authoring_allowed,
+    hermes_locked_for,
     is_platform_owner,
     is_tenant_admin,
     knowledge_authoring_allowed,
@@ -63,6 +66,8 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
     snapshot["authoringState"] = {
         "knowledge_enabled": knowledge_authoring_allowed(actor, store.groups),
         "tools_enabled": tool_authoring_allowed(actor, store.groups),
+        "api_sources_enabled": api_source_authoring_allowed(actor, store.groups),
+        "hermes_enabled": not hermes_locked_for(actor, store.groups),
     }
     if actor.role in {Role.PLATFORM_OWNER, Role.TENANT_ADMIN}:
         # Pending per-model access requests the actor may review; users never
@@ -113,15 +118,15 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
             record for record in store.prompt_templates.values() if record.tenant_id == actor.tenant_id
         ]
         if not is_tenant_admin(actor):
-            # The owner console's connector switches are workspace kill
-            # switches: a disabled connector removes the capability from user
-            # payloads entirely — off is off, not merely hidden. Admins keep
-            # the records so their consoles stay coherent.
-            if not _workspace_connector_enabled(store, "mcp"):
+            # The Connections tab switches are workspace kill switches: a
+            # disabled connector removes the capability from user payloads
+            # entirely — off is off, not merely hidden. Admins keep the
+            # records so they can manage and re-enable them.
+            if not connector_enabled_for_tenant(store, "mcp", actor.tenant_id):
                 snapshot["toolConfigs"] = [
                     record for record in snapshot["toolConfigs"] if record.tool_type != "mcp"
                 ]
-            if not _workspace_connector_enabled(store, "prompt-library"):
+            if not connector_enabled_for_tenant(store, "prompt-library", actor.tenant_id):
                 snapshot["promptTemplates"] = []
         snapshot["skillFiles"] = [
             record for record in store.skill_files.values() if record.tenant_id == actor.tenant_id
@@ -154,11 +159,6 @@ def _data_protection_state(actor: User, store: SeedStore) -> dict[str, object]:
         training_capture_enabled=training.enabled,
     )
     return state
-
-
-def _workspace_connector_enabled(store: SeedStore, connector_id: str) -> bool:
-    connector = store.connectors.get(connector_id)
-    return connector is not None and connector.platform_enabled and connector.tenant_enabled
 
 
 def visible_automations_for(actor: User, store: SeedStore) -> list[object]:

@@ -231,6 +231,51 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.12
+
+- **Connectors move to Admin → Connections.** Workspace admins manage their
+  own workspace's connectors there (the switch, credentials, Test, and the
+  Google Drive workspace sign-in), and platform owners use the same panel.
+  The Connectors panel is no longer in **Platform → Org Settings**.
+- **Hide a cloud source without turning it off.** Each of Google Drive,
+  OneDrive / SharePoint, Box, and iManage has a **Hide** button that takes it
+  out of the chat and Drafts attach menus for that workspace. Knowledge sync
+  keeps working on its credentials, and the cloud attachment API refuses a
+  hidden source. When every source is hidden, the attach menu drops its
+  "Attach from source" heading.
+- **The owner keeps the deployment ceiling.** Turning a connector off in the
+  platform catalog still turns it off for every workspace: tenant admins see
+  "Off for all workspaces" and cannot reopen it, and owners get an **Off for
+  all / Allow all** control on each row. Web search, MCP, and Prompt Library
+  switches are read per workspace everywhere, including the OpenAI-compatible
+  `/v1` routes and automation steps.
+- **Risky self-service is off for regular users by default.** Adding their
+  own MCP connections (**Can build tools**), API sources (the new **Can add
+  API sources** grant, which also needs **Can build knowledge bases**), and
+  Hermes agents and connections (**Can use Hermes companion**) stay off for
+  standard users until a tenant admin grants them per group. Ungranted
+  controls are shown locked with an explanation. MCP connections shared by
+  admins stay usable, and admins and owners keep Hermes access to build and
+  test profiles. Revoking API sources pauses their refreshes and keeps what
+  was already indexed.
+- **Tighter boundaries.** A user's own knowledge base can no longer sync
+  through a workspace connector's account; custom script tools, including
+  test runs, are admin-only, and a standard user's older script can be paused
+  or renamed but only an admin turns it back on; Hermes memory authors see
+  and delete only memories from their own chats, and a private Hermes profile
+  keeps what it learns as its own memories instead of tenant-wide skills.
+- Fixes: editing an automation's steps no longer returns a 500 error.
+- No database migrations. The connector `hidden` flag and the
+  `api_source_authoring` group permission are forward-only: an older image
+  rejects records that contain them, so rolling back to v0.5.12 needs the data
+  volume backup taken before the upgrade as well as the older images.
+- The owner "Policies, budget, and connectors" lesson and the admin
+  Connections lesson still show connectors under Org Settings until the next
+  training recapture.
+- API and web images publish as `v0.5.13-dev`, `v0.5.13-test`, and
+  `v0.5.13-main`. Stable `v0.5.13` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.11
 
 - **Deck panels slide out from the left.** In the Drafts deck editor, **Add

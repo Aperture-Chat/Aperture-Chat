@@ -1456,7 +1456,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     setupSteps: [
       "Choose Admin console › Policies. Its sections start collapsed; expand Policy Controls.",
       "If your service team limits anything you cannot change here, a Service policy note at the bottom of Policy Controls says so. No note means nothing is limited.",
-      "Switch on the Default users capabilities you want: downstream API, build agents, build knowledge bases, build tools, and use memory. Each saves with \"Default user policy saved.\"",
+      "Switch on the Default users capabilities you want: downstream API, build agents, build knowledge bases, add API sources, build tools (their own MCP connections), use Hermes agents, and use memory. All except memory start off. Each saves with \"Default user policy saved.\"",
       "Confirm the change in Groups › Default Users › Permissions.",
       "Expand Personalization Memory. Set Memory for this organization and Learn from conversations automatically.",
       "Type Retention (days), 1 to 3650, or Maximum memories per user, 1 to 2000, and press Enter. The status reads \"Memory policy saved.\"",

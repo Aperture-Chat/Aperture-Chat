@@ -27,6 +27,7 @@ from app.core.automation_runner import (
 from app.core.automation_schedule import Schedule, upcoming_runs, validate_schedule
 from app.core.model_gateway import ModelGatewayError, get_model_gateway_client
 from app.core.policy import (
+    assert_hermes_agent_unlocked,
     assert_model_access,
     is_platform_owner,
     is_tenant_admin,
@@ -128,6 +129,7 @@ def _validate_shape(
     actor: User,
     store: SeedStore,
     tenant_id: str,
+    check_hermes: bool = True,
 ) -> None:
     if surface not in VALID_SURFACES:
         raise HTTPException(
@@ -153,6 +155,10 @@ def _validate_shape(
             )
         # Only models the actor is approved to use may be chained in.
         assert_model_access(actor, model)
+        if check_hermes:
+            # A user without the Hermes grant can't add or re-enable a Hermes
+            # step; pausing or renaming one they already have stays possible.
+            assert_hermes_agent_unlocked(actor, store.groups, model)
 
 
 @router.get("")
@@ -279,7 +285,14 @@ def update_automation(
     updates = payload.model_dump(exclude_unset=True)
     if "timezone" in updates:
         updates["timezone"] = (updates["timezone"] or "").strip() or None
-    merged = automation.model_copy(update=updates)
+    if "steps" in updates and payload.steps is None:
+        # An explicit null keeps the current steps.
+        updates.pop("steps")
+    # model_copy does not validate, so hand it the steps as models rather than
+    # the plain dicts model_dump produced (those stay in the audit record).
+    merged = automation.model_copy(
+        update={**updates, "steps": payload.steps} if "steps" in updates else updates
+    )
     _validate_shape(
         surface=merged.surface,
         trigger_type=merged.trigger_type,
@@ -287,6 +300,9 @@ def update_automation(
         actor=actor,
         store=store,
         tenant_id=automation.tenant_id,
+        # The edit form always echoes the steps, so only a real change to them
+        # (or switching the automation on) re-checks the Hermes grant.
+        check_hermes=merged.steps != automation.steps or updates.get("enabled") is True,
     )
     # A schedule is checked when it changes or is switched on, so a schedule
     # that can never fire is refused rather than left silently idle. Pausing

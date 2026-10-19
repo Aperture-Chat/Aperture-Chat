@@ -1,7 +1,8 @@
-import { CheckCircle2, KeyRound, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
+import { Ban, CheckCircle2, Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { ConnectorTestResult } from "../lib/api/admin";
+import { connectorDeploymentAllowed, connectorSwitchedOn } from "../lib/connectors";
 import type {
   AdminConnectorConfigUpdateRequest,
   BootstrapData,
@@ -11,10 +12,12 @@ import type {
 import { Panel, Pill, StableLabel, Toggle } from "./Primitives";
 import { SelectControl } from "./SelectControl";
 
-/* Platform-owner surface for every connector in the deployment: the on/off
- * switch that governs chat pickers, the / palette, the tool library, and the
- * API, plus the vendor credentials that power knowledge sync. It lives in the
- * owner console's Org Settings; tenant admins no longer manage connectors. */
+/* Workspace surface for every connector: the on/off switch that governs chat
+ * pickers, the / palette, the tool library, and the API; the vendor
+ * credentials that power knowledge sync; and whether a cloud file source is
+ * offered in the attach menus at all. It lives in the admin console's
+ * Connections tab and writes the current workspace's own connector records.
+ * The catalog flags above them stay the platform owner's ceiling. */
 
 export type ConnectorsPanelStatus = {
   tone: "success" | "warning" | "info";
@@ -32,9 +35,16 @@ export class ConnectorUpdateError extends Error {
 }
 
 export type ConnectorsPanelApi = {
-  /** Flips the deployment-wide switch (platform + workspace flags) and keeps
-   * any saved tenant credential record in step. */
+  /** Flips this workspace's switch on its connector record, creating the
+   * record when needed. A platform owner turning a connector on also lifts a
+   * closed deployment ceiling. */
   setConnectorEnabled?: (connector: Connector, enabled: boolean) => Promise<Partial<Connector> | void>;
+  /** Hides a cloud file source from this workspace's attach menus, or shows it
+   * again, without changing whether it is on. */
+  setConnectorHidden?: (connector: Connector, hidden: boolean) => Promise<Partial<Connector> | void>;
+  /** Platform owner only: opens or closes the deployment ceiling, which turns
+   * a connector off in every workspace until the owner allows it again. */
+  setConnectorCeiling?: (connector: Connector, allowed: boolean) => Promise<Partial<Connector> | void>;
   saveConnectorConfig?: (
     connector: Connector,
     payload: ConnectorConfigSavePayload,
@@ -196,17 +206,13 @@ export const CONNECTOR_FORM_PROFILES: Record<string, ConnectorFormProfile> = {
   },
 };
 
-/** Connectors whose "enabled" state also lives on a tenant credential record
- * (the catalog switch alone cannot say "on but needs credentials"). */
-export function connectorUsesCredentialRecord(connectorId: string): boolean {
+/** Cloud file sources behind the chat and Drafts attach menus; only these can
+ * be hidden. Mirrors ATTACHABLE_CONNECTOR_IDS in the API. */
+export function connectorCanBeHidden(connectorId: string): boolean {
   return connectorId in CONNECTOR_FORM_PROFILES;
 }
 
-/** The single owner-facing switch: a connector is reachable only when both
- * catalog flags are on, so the toggle reads and writes them together. */
-export function connectorSwitchedOn(connector: Connector): boolean {
-  return connector.platform_enabled && connector.tenant_enabled;
-}
+export { connectorSwitchedOn };
 
 function errorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -250,13 +256,15 @@ export function ConnectorsPanel({
     const previous: Partial<Connector> = {
       platform_enabled: connector.platform_enabled,
       tenant_enabled: connector.tenant_enabled,
+      deployment_enabled: connector.deployment_enabled,
       sync_status: connector.sync_status,
       auth_status: connector.auth_status,
     };
     setPendingAction(`connector-${connector.id}`);
     applyConnectorPatch(connector.id, {
-      platform_enabled: next,
       tenant_enabled: next,
+      // An owner turning a connector on also reopens the deployment ceiling.
+      ...(next && data.me.role === "PLATFORM_OWNER" ? { deployment_enabled: true } : {}),
       sync_status: next ? connector.sync_status ?? "idle" : "idle",
     });
     try {
@@ -265,7 +273,7 @@ export function ConnectorsPanel({
       applyConnectorPatch(connector.id, remote);
       report({
         tone: "success",
-        message: `${connector.name} is now ${next ? "on" : "off"} for everyone in this deployment.`,
+        message: `${connector.name} is now ${next ? "on" : "off"} for everyone in this workspace.`,
       });
     } catch (error) {
       if (error instanceof ConnectorUpdateError) {
@@ -275,6 +283,62 @@ export function ConnectorsPanel({
         applyConnectorPatch(connector.id, previous);
         report({ tone: "warning", message: `${connector.name} was not changed. ${errorMessage(error)}` });
       }
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function toggleConnectorHidden(connector: Connector, hidden: boolean) {
+    if (pendingAction) return;
+    if (!api?.setConnectorHidden) {
+      report({ tone: "warning", message: `${connector.name} was not changed; the connector API is not connected.` });
+      return;
+    }
+    setPendingAction(`connector-hidden-${connector.id}`);
+    try {
+      const remote = await api.setConnectorHidden(connector, hidden);
+      if (!remote) throw new Error("The connector API did not confirm the saved state.");
+      applyConnectorPatch(connector.id, remote);
+      report({
+        tone: "success",
+        message: hidden
+          ? `${connector.name} is hidden. People in this workspace no longer see it in the attach menu.`
+          : `${connector.name} is back in the attach menu for people in this workspace.`,
+      });
+    } catch (error) {
+      report({ tone: "warning", message: `${connector.name} was not changed. ${errorMessage(error)}` });
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function setConnectorCeiling(connector: Connector, allowed: boolean) {
+    if (pendingAction) return;
+    if (!api?.setConnectorCeiling) {
+      report({ tone: "warning", message: `${connector.name} was not changed; the connector API is not connected.` });
+      return;
+    }
+    if (
+      !allowed &&
+      !window.confirm(
+        `Turn ${connector.name} off for every workspace? Workspace admins can't turn it back on until you allow it again.`,
+      )
+    ) {
+      return;
+    }
+    setPendingAction(`connector-ceiling-${connector.id}`);
+    try {
+      const remote = await api.setConnectorCeiling(connector, allowed);
+      if (!remote) throw new Error("The connector API did not confirm the saved state.");
+      applyConnectorPatch(connector.id, remote);
+      report({
+        tone: "success",
+        message: allowed
+          ? `${connector.name} is allowed in every workspace again. Each workspace's own switch decides whether it is on.`
+          : `${connector.name} is off for every workspace.`,
+      });
+    } catch (error) {
+      report({ tone: "warning", message: `${connector.name} was not changed. ${errorMessage(error)}` });
     } finally {
       setPendingAction(null);
     }
@@ -377,100 +441,154 @@ export function ConnectorsPanel({
     }
   }
 
-  if (data.me.role !== "PLATFORM_OWNER") return null;
+  const isOwner = data.me.role === "PLATFORM_OWNER";
+  if (!isOwner && data.me.role !== "TENANT_ADMIN") return null;
 
   return (
     <Panel
       title="Connectors"
-      subtitle="Deployment-wide switches and credentials for the sources and tools users can reach. Off removes the capability for every user — chat, pickers, the tool library, and the API included."
+      subtitle="Sources and tools for this workspace. Off removes a connector everywhere: chat, pickers, the tool library, and the API. Hide only takes a cloud source out of the attach menu, so people don't see it as an option."
       defaultCollapsed={defaultCollapsed}
     >
-      {data.connectors.map((connector) => {
-        const profile = CONNECTOR_FORM_PROFILES[connector.id];
-        const isWebSearch = connector.id === "web";
-        const record = data.connectorConfigs.find((config) => config.id === connector.tenant_config_id);
-        const expanded = expandedConnectorId === connector.id;
-        const switchedOn = connectorSwitchedOn(connector);
-        return (
-          <div className="connector-config-block" key={connector.id}>
-            <div className="permission-row">
-              <span>
-                <KeyRound size={15} />
-                <strong className="connector-row-name">{connector.name}</strong>
-                {profile && (
-                  <Pill tone={connector.auth_status === "configured" ? "success" : "warning"}>
-                    {connector.auth_status === "configured"
-                      ? "Credentials saved"
-                      : record?.secret_set
-                        ? "Saved · disabled"
-                        : "Needs credentials"}
-                  </Pill>
-                )}
-                {isWebSearch && (
-                  <Pill tone={webSearchEnginePill(record).tone}>{webSearchEnginePill(record).label}</Pill>
-                )}
-              </span>
-              <span className="row-actions">
-                {(profile || isWebSearch) && (
-                  <button
-                    className="secondary-button compact"
-                    type="button"
-                    disabled={Boolean(pendingAction)}
-                    aria-expanded={expanded}
-                    data-tooltip={
-                      expanded
-                        ? `Hide the ${connector.name} configuration form`
-                        : `Set up credentials and connection settings for ${connector.name}`
+      {/* One list child keeps the panel's body padding from repeating on every row. */}
+      <div className="connector-config-list">
+        {data.connectors.map((connector) => {
+          const profile = CONNECTOR_FORM_PROFILES[connector.id];
+          const isWebSearch = connector.id === "web";
+          const record = data.connectorConfigs.find((config) => config.id === connector.tenant_config_id);
+          const expanded = expandedConnectorId === connector.id;
+          const switchedOn = connectorSwitchedOn(connector);
+          const ceilingClosed = !connectorDeploymentAllowed(connector);
+          const hideable = connectorCanBeHidden(connector.id);
+          const hidden = Boolean(connector.hidden);
+          return (
+            <div className="connector-config-block" key={connector.id}>
+              <div className="permission-row">
+                <span>
+                  <KeyRound size={15} />
+                  <strong className="connector-row-name">{connector.name}</strong>
+                  {profile && (
+                    <Pill tone={connector.auth_status === "configured" ? "success" : "warning"}>
+                      {connector.auth_status === "configured"
+                        ? "Credentials saved"
+                        : record?.secret_set
+                          ? "Saved · disabled"
+                          : "Needs credentials"}
+                    </Pill>
+                  )}
+                  {isWebSearch && (
+                    <Pill tone={webSearchEnginePill(record).tone}>{webSearchEnginePill(record).label}</Pill>
+                  )}
+                  {ceilingClosed && <Pill tone="neutral">Off for all workspaces</Pill>}
+                  {hidden && <Pill tone="info">Hidden</Pill>}
+                </span>
+                <span className="row-actions">
+                  {(profile || isWebSearch) && (
+                    <button
+                      className="secondary-button compact"
+                      type="button"
+                      disabled={Boolean(pendingAction)}
+                      aria-expanded={expanded}
+                      data-tooltip={
+                        expanded
+                          ? `Hide the ${connector.name} configuration form`
+                          : `Set up credentials and connection settings for ${connector.name}`
+                      }
+                      onClick={() =>
+                        setExpandedConnectorId((current) => (current === connector.id ? null : connector.id))
+                      }
+                    >
+                      <Wrench size={14} /> Configure
+                    </button>
+                  )}
+                  {hideable && (
+                    <button
+                      className="secondary-button compact connector-visibility-button"
+                      type="button"
+                      disabled={Boolean(pendingAction)}
+                      aria-pressed={hidden}
+                      aria-label={
+                        hidden ? `Show ${connector.name} in the attach menu` : `Hide ${connector.name} from the attach menu`
+                      }
+                      data-tooltip={
+                        hidden
+                          ? `Offer ${connector.name} in the attach menu again for people in this workspace`
+                          : `Take ${connector.name} out of the attach menu so people in this workspace don't see it. Its on/off switch and credentials stay as they are.`
+                      }
+                      onClick={() => void toggleConnectorHidden(connector, !hidden)}
+                    >
+                      {hidden ? <Eye size={14} /> : <EyeOff size={14} />}{" "}
+                      <StableLabel label={hidden ? "Show" : "Hide"} reserve={["Hide", "Show"]} />
+                    </button>
+                  )}
+                  {isOwner && (
+                    <button
+                      className="secondary-button compact connector-ceiling-button"
+                      type="button"
+                      disabled={Boolean(pendingAction)}
+                      aria-label={
+                        ceilingClosed
+                          ? `Allow ${connector.name} in every workspace`
+                          : `Turn ${connector.name} off for every workspace`
+                      }
+                      data-tooltip={
+                        ceilingClosed
+                          ? `Let workspace admins use ${connector.name} again. Each workspace's own switch still decides.`
+                          : `Turn ${connector.name} off in every workspace. Workspace admins can't turn it back on until you allow it again.`
+                      }
+                      onClick={() => void setConnectorCeiling(connector, ceilingClosed)}
+                    >
+                      {ceilingClosed ? <ShieldCheck size={14} /> : <Ban size={14} />}{" "}
+                      <StableLabel label={ceilingClosed ? "Allow all" : "Off for all"} reserve={["Allow all", "Off for all"]} />
+                    </button>
+                  )}
+                  <Toggle
+                    checked={switchedOn}
+                    disabled={Boolean(pendingAction) || (ceilingClosed && !isOwner)}
+                    label={`Enable ${connector.name}`}
+                    tooltip={
+                      ceilingClosed && !isOwner
+                        ? `The platform owner has turned ${connector.name} off for every workspace`
+                        : switchedOn
+                          ? `Turn off ${connector.name} for everyone in this workspace`
+                          : ceilingClosed
+                            ? `Turn on ${connector.name} for this workspace and allow it across the deployment`
+                            : `Turn on ${connector.name} as a source for everyone in this workspace`
                     }
-                    onClick={() =>
-                      setExpandedConnectorId((current) => (current === connector.id ? null : connector.id))
-                    }
-                  >
-                    <Wrench size={14} /> Configure
-                  </button>
-                )}
-                <Toggle
-                  checked={switchedOn}
-                  disabled={Boolean(pendingAction)}
-                  label={`Enable ${connector.name}`}
-                  tooltip={
-                    switchedOn
-                      ? `Turn off ${connector.name} for everyone in this deployment`
-                      : `Turn on ${connector.name} as a source for everyone in this deployment`
-                  }
-                  onChange={(next) => void toggleConnector(connector, next)}
+                    onChange={(next) => void toggleConnector(connector, next)}
+                  />
+                </span>
+              </div>
+              {isWebSearch && expanded && (
+                <WebSearchConfigForm
+                  connector={connector}
+                  record={record}
+                  saving={pendingAction === `connector-config-${connector.id}`}
+                  testing={pendingAction === `connector-test-${connector.id}`}
+                  busy={Boolean(pendingAction)}
+                  testResult={testResults[connector.id] ?? null}
+                  onSave={(payload) => saveConnectorConfiguration(connector, payload)}
+                  onTest={() => void testConnectorConfiguration(connector)}
                 />
-              </span>
+              )}
+              {profile && expanded && (
+                <ConnectorConfigForm
+                  connector={connector}
+                  profile={profile}
+                  record={record}
+                  saving={pendingAction === `connector-config-${connector.id}`}
+                  testing={pendingAction === `connector-test-${connector.id}`}
+                  busy={Boolean(pendingAction)}
+                  testResult={testResults[connector.id] ?? null}
+                  onSave={(payload) => saveConnectorConfiguration(connector, payload)}
+                  onTest={() => void testConnectorConfiguration(connector)}
+                  onOAuthConnect={() => void startConnectorOAuth(connector)}
+                />
+              )}
             </div>
-            {isWebSearch && expanded && (
-              <WebSearchConfigForm
-                connector={connector}
-                record={record}
-                saving={pendingAction === `connector-config-${connector.id}`}
-                testing={pendingAction === `connector-test-${connector.id}`}
-                busy={Boolean(pendingAction)}
-                testResult={testResults[connector.id] ?? null}
-                onSave={(payload) => saveConnectorConfiguration(connector, payload)}
-                onTest={() => void testConnectorConfiguration(connector)}
-              />
-            )}
-            {profile && expanded && (
-              <ConnectorConfigForm
-                connector={connector}
-                profile={profile}
-                record={record}
-                saving={pendingAction === `connector-config-${connector.id}`}
-                testing={pendingAction === `connector-test-${connector.id}`}
-                busy={Boolean(pendingAction)}
-                testResult={testResults[connector.id] ?? null}
-                onSave={(payload) => saveConnectorConfiguration(connector, payload)}
-                onTest={() => void testConnectorConfiguration(connector)}
-                onOAuthConnect={() => void startConnectorOAuth(connector)}
-              />
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </Panel>
   );
 }
@@ -886,7 +1004,7 @@ function WebSearchConfigForm({
       <p className="muted-note">
         Applies to models whose provider has no hosted web search of its own. OpenRouter-backed models always use
         OpenRouter&apos;s built-in web search (native provider search where the model family supports it) regardless
-        of this engine choice. The enable toggle on this row turns web search on or off for the whole deployment.
+        of this engine choice. The enable toggle on this row turns web search on or off for this workspace.
       </p>
       {validationError && (
         <p className="connector-config-error" role="alert">
@@ -897,7 +1015,7 @@ function WebSearchConfigForm({
         <button
           className="secondary-button compact"
           type="button"
-          data-tooltip="Save the search engine choice and result limit for this deployment"
+          data-tooltip="Save the search engine choice and result limit for this workspace"
           disabled={busy}
           onClick={submit}
         >

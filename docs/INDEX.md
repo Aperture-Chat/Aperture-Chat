@@ -42,12 +42,13 @@ source files, narrated walkthroughs, and verification procedure.
 
 ## Roles
 
-- `PLATFORM_OWNER` manages platform-wide providers, model availability,
-  connector switches and credentials, organization settings, tenant boundaries,
+- `PLATFORM_OWNER` manages platform-wide providers, model availability, the
+  deployment-wide connector ceiling, organization settings, tenant boundaries,
   audit controls, and branding. The Platform console opens in **Org Settings**.
   Its **Documentation** center provides the owner PDF, narrated walkthroughs,
   and an Interactive platform guide for configuration advice.
-- `TENANT_ADMIN` manages tenant users, groups, knowledge bases, tools, response actions, policies,
+- `TENANT_ADMIN` manages tenant users, groups, connectors (switches,
+  credentials, and Hide), knowledge bases, tools, response actions, policies,
   analytics, and model access.
 - `USER` uses the models, knowledge, tools, and workflows assigned to them.
 

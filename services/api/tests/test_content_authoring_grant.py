@@ -190,15 +190,21 @@ def test_owner_scoped_tool_stays_private_to_its_author() -> None:
 
 
 def test_bootstrap_reports_resolved_authoring_state() -> None:
+    locked = {"api_sources_enabled": False, "hermes_enabled": False}
     payload = client.get("/api/bootstrap", headers=headers(USER_ID)).json()
-    assert payload["authoringState"] == {"knowledge_enabled": False, "tools_enabled": False}
+    assert payload["authoringState"] == {"knowledge_enabled": False, "tools_enabled": False, **locked}
 
     _grant("knowledge_authoring", True)
     payload = client.get("/api/bootstrap", headers=headers(USER_ID)).json()
-    assert payload["authoringState"] == {"knowledge_enabled": True, "tools_enabled": False}
+    assert payload["authoringState"] == {"knowledge_enabled": True, "tools_enabled": False, **locked}
 
     admin_payload = client.get("/api/bootstrap", headers=headers(ADMIN_ID)).json()
-    assert admin_payload["authoringState"] == {"knowledge_enabled": True, "tools_enabled": True}
+    assert admin_payload["authoringState"] == {
+        "knowledge_enabled": True,
+        "tools_enabled": True,
+        "api_sources_enabled": True,
+        "hermes_enabled": True,
+    }
 
 
 def test_admins_remain_unaffected_by_the_grants() -> None:

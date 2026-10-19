@@ -5,7 +5,6 @@ import { sampleData } from "../data/sampleData";
 import { CHAT_FEEDBACK_STORAGE_KEY, type ChatFeedbackEvent } from "../lib/chatFeedback";
 import type {
   BootstrapData,
-  Connector,
   ElasticConnectionTestRequest,
   ElasticExportSettingsUpdateRequest,
   ElasticStatus,
@@ -256,22 +255,12 @@ test("expired provider keys are visibly expired and cannot reveal or enable mode
   expect(revealProviderKey).not.toHaveBeenCalled();
 });
 
-test("platform connector switches persist through platform connector action", async () => {
-  const data = platformOwnerData();
-  const setConnectorEnabled = vi.fn(async (connector: Connector, enabled: boolean) => {
-    return { ...connector, platform_enabled: enabled, tenant_enabled: enabled };
-  });
-
-  renderPlatform(data, { setConnectorEnabled });
+test("connectors moved to the admin console's Connections tab, out of Org Settings", async () => {
+  renderPlatform(platformOwnerData(), {});
   selectTab("Org Settings");
-  await screen.findByRole("tabpanel", { name: "Org Settings" });
-  expect(screen.queryByRole("switch", { name: "Enable Box" })).not.toBeInTheDocument();
-  expandPanel("Connectors");
-  fireEvent.click(screen.getByRole("switch", { name: "Enable Box" }));
-
-  expect(await screen.findByText("Box is now off for everyone in this deployment.")).toBeInTheDocument();
-  expect(setConnectorEnabled).toHaveBeenCalledWith(expect.objectContaining({ id: "box" }), false);
-  expect(screen.getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "false");
+  const orgSettings = await screen.findByRole("tabpanel", { name: "Org Settings" });
+  expect(within(orgSettings).queryByRole("heading", { name: "Connectors" })).not.toBeInTheDocument();
+  expect(within(orgSettings).queryByRole("switch", { name: "Enable Box" })).not.toBeInTheDocument();
 });
 
 
@@ -1406,7 +1395,6 @@ test("platform owner side panels manage users, policies, branding, and elastic s
   expandPanel("Single Sign-On");
   expandPanel("Platform Branding");
   expandPanel("Policy Controls");
-  expandPanel("Connectors");
   expandPanel("Elastic Analytics");
   const soleOwnerRow = screen.getByText("owner@aperture.local").closest(".owner-user-row") as HTMLElement;
   expect(within(soleOwnerRow).getByLabelText("Role for Aperture Platform Owner")).toBeDisabled();
@@ -1504,10 +1492,8 @@ test("platform owner side panels manage users, policies, branding, and elastic s
     expect(updatePlatformSettings).toHaveBeenCalledWith({ users_can_create_models: true }),
   );
   expect(screen.queryByText("Production Gate")).not.toBeInTheDocument();
-  expect(screen.getByText("Web Search")).toBeInTheDocument();
-  expect(screen.getByText("Prompt Library")).toBeInTheDocument();
-  expect(screen.getByText("Document Templates")).toBeInTheDocument();
-  expect(screen.getByText("Audit and Analytics Export")).toBeInTheDocument();
+  // Connector rows live in the admin console's Connections tab now.
+  expect(screen.queryByText("Audit and Analytics Export")).not.toBeInTheDocument();
 
   expect(screen.getByText("Authenticator enrollment QR")).toBeInTheDocument();
   expect(screen.getByLabelText("Client secret")).toBeInTheDocument();

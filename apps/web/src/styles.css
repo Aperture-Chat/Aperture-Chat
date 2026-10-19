@@ -17455,13 +17455,21 @@ button.retention-tagged-title:focus-visible strong {
 
 /* --- Connector configuration forms ----------------------------------------- */
 
+.connector-config-list,
 .connector-config-block {
   display: grid;
   gap: 8px;
 }
 
-.connector-config-block + .connector-config-block {
-  margin-top: 8px;
+@media (max-width: 640px) {
+  /* Owners get an extra "Off for all" action; let the row's actions wrap
+     instead of pushing the switch off a phone screen. */
+  .connector-config-block .permission-row > .row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
 }
 
 .connector-config-form {

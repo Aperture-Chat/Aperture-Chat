@@ -94,6 +94,9 @@ import {
 import {
   approveMcpTool,
   ChatRequestError,
+  hermesLocked,
+  isHermesAgent,
+  isHermesTool,
   toolUsableBy,
   getCloudAttachmentAuthorizeUrl,
   importCloudAttachments,
@@ -107,7 +110,7 @@ import {
   type ChatRuntimeOptions,
 } from "../lib/api";
 import { supportsReasoningEffort, visibleAgentProfiles, webSearchSupportedForModel } from "../lib/modelAccess";
-import { connectorEnabled, isMcpRuntimeTool } from "../lib/connectors";
+import { connectorEnabled, connectorHidden, isMcpRuntimeTool } from "../lib/connectors";
 import { formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { feedbackRatingForMessage, recordChatFeedback } from "../lib/chatFeedback";
 import { markdownToPlainText } from "../lib/markdown";
@@ -146,6 +149,8 @@ function revealComposerMenu(node: HTMLDivElement | null) {
 
 type ConnectorDef = {
   id: string;
+  /** Catalog connector behind this source; admins can hide it per workspace. */
+  connectorId: string;
   label: string;
   icon: ConnectorIcon;
   blurb: string;
@@ -201,30 +206,35 @@ type ContextWindowStatus = {
 const CONNECTORS: ConnectorDef[] = [
   {
     id: "google-drive",
+    connectorId: "google-drive",
     label: "Google Drive",
     icon: GoogleDriveIcon,
     blurb: "Attach and cite documents from Google Drive.",
   },
   {
     id: "onedrive",
+    connectorId: "microsoft-graph",
     label: "OneDrive",
     icon: OneDriveIcon,
     blurb: "Bring in files from Microsoft OneDrive.",
   },
   {
     id: "sharepoint",
+    connectorId: "microsoft-graph",
     label: "SharePoint",
     icon: SharePointIcon,
     blurb: "Pull from SharePoint document libraries.",
   },
   {
     id: "box",
+    connectorId: "box",
     label: "Box",
     icon: BoxIcon,
     blurb: "Connect Box folders for matter files.",
   },
   {
     id: "imanage",
+    connectorId: "imanage",
     label: "iManage",
     icon: IManageIcon,
     blurb: "Reference work product from iManage.",
@@ -789,7 +799,8 @@ function runtimeOptionsFromState(
   reasoningEffort: "minimal" | "high" | null = null,
 ): ChatRuntimeOptions {
   const knowledgeEnabled = composerTools.Knowledge;
-  const selectedAgent = composerTools.Agent && selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
+  const selectedAgent =
+    composerTools.Agent && selectedAgentId ? agentProfileOptions(data).find((model) => model.id === selectedAgentId) : undefined;
   const agentKnowledgeIds = selectedAgent ? modelKnowledgeIds(selectedAgent) : [];
   const agentToolIds = selectedAgent ? modelToolIds(selectedAgent) : [];
   const enabledKnowledgeBases = data.knowledgeBases.filter((knowledge) => knowledge.enabled);
@@ -799,8 +810,10 @@ function runtimeOptionsFromState(
   // Only tools this user may actually run: turned on, shared with one of
   // their groups (or theirs), and not behind a switched-off MCP connector.
   // Sending anything else made the server refuse the whole Agent-mode turn.
+  const lockHermes = hermesLocked(data);
   const usableTools = data.tools.filter((tool) => toolUsableBy(data.me, tool)
-    && (!isMcpRuntimeTool(tool) || connectorEnabled(data.connectors, "mcp")));
+    && (!isMcpRuntimeTool(tool) || connectorEnabled(data.connectors, "mcp"))
+    && !(lockHermes && isHermesTool(tool)));
   const usableToolIds = new Set(usableTools.map((tool) => tool.id));
   const requestedToolIds = selectedToolIds.filter((id) => usableToolIds.has(id));
   const agentEnabled = composerTools.Agent || requestedToolIds.length > 0;
@@ -861,7 +874,8 @@ function pendingMcpApprovalFromState(
     .filter((tool): tool is ToolConfig => Boolean(tool))
     .filter((tool) => toolUsableBy(data.me, tool) && tool.approval_required && isMcpRuntimeTool(tool));
   if (approvalTools.length === 0) return null;
-  const selectedAgent = composerTools.Agent && selectedAgentId ? data.models.find((model) => model.id === selectedAgentId) : undefined;
+  const selectedAgent =
+    composerTools.Agent && selectedAgentId ? agentProfileOptions(data).find((model) => model.id === selectedAgentId) : undefined;
   return {
     toolIds: [...new Set(approvalTools.map((tool) => tool.id))],
     toolNames: approvalTools.map((tool) => tool.name),
@@ -1049,6 +1063,11 @@ export function ChatWorkspace({
   const [pendingToolApproval, setPendingToolApproval] = useState<PendingToolApproval | null>(null);
   const [toolApprovalNotice, setToolApprovalNotice] = useState<string | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // Sources this workspace's admins hid never appear; the API refuses them too.
+  const attachSources = useMemo(
+    () => CONNECTORS.filter((source) => !connectorHidden(data.connectors, source.connectorId)),
+    [data.connectors],
+  );
   const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [cloudPicker, setCloudPicker] = useState<CloudPickerState | null>(null);
   const [commandToken, setCommandToken] = useState<ComposerCommandToken | null>(null);
@@ -1160,8 +1179,8 @@ export function ChatWorkspace({
   const inspectorOverlay = width <= BREAKPOINTS.inspectorOverlay;
 
   const customScriptTools = useMemo(
-    () => data.tools.filter((tool) => tool.type === "custom_script" && tool.enabled),
-    [data.tools],
+    () => data.tools.filter((tool) => tool.type === "custom_script" && toolUsableBy(data.me, tool)),
+    [data.me, data.tools],
   );
 
   useEffect(() => {
@@ -1205,6 +1224,7 @@ export function ChatWorkspace({
   const assistantLockup = brandLockup({ ...assistantBrand, chat_brand_name: assistantBrandName });
   const assistantIconSources = compactBrandSources(assistantBrand);
   const agentProfiles = agentProfileOptions(data);
+  const lockedHermesAgents = lockedHermesAgentProfiles(data);
   const selectedAgent = selectedAgentId ? agentProfiles.find((agent) => agent.id === selectedAgentId) : undefined;
   const selectedModel = chat.enabledModels.find((model) => model.id === chat.model);
   const contextWindowStatus = buildContextWindowStatus(messages, selectedModel);
@@ -1214,9 +1234,7 @@ export function ChatWorkspace({
   // MCP servers this workspace can actually run. The workspace connector is a
   // real kill switch, so an admin turning MCP off empties this and disables
   // the composer switch rather than offering a control that cannot work.
-  const availableMcpServers = connectorEnabled(data.connectors, "mcp")
-    ? data.tools.filter((tool) => tool.enabled && isMcpRuntimeTool(tool))
-    : [];
+  const availableMcpServers = usableMcpTools(data);
   const selectedKnowledgeBase = selectedKnowledgeBaseId
     ? enabledKnowledgeBases.find((knowledge) => knowledge.id === selectedKnowledgeBaseId)
     : undefined;
@@ -1468,9 +1486,7 @@ export function ChatWorkspace({
       const prompts = connectorEnabled(data.connectors, "prompt-library")
         ? data.promptTemplates.filter((prompt) => prompt.enabled)
         : [];
-      const mcpTools = connectorEnabled(data.connectors, "mcp")
-        ? data.tools.filter((tool) => isMcpRuntimeTool(tool) && tool.enabled)
-        : [];
+      const mcpTools = usableMcpTools(data);
       return [
         ...rankCommandMatches(prompts, (prompt) => prompt.name, query).map((prompt) => ({
           kind: "prompt" as const,
@@ -2583,9 +2599,13 @@ export function ChatWorkspace({
                     <small>Fetch up to {MAX_FETCH_URLS} pages as sources</small>
                   </span>
                 </button>
-                <div className="attach-menu-divider" />
-                <span className="attach-menu-label">Attach from source</span>
-                {CONNECTORS.map((source) => {
+                {attachSources.length > 0 && (
+                  <>
+                    <div className="attach-menu-divider" />
+                    <span className="attach-menu-label">Attach from source</span>
+                  </>
+                )}
+                {attachSources.map((source) => {
                   const { id, label, icon: Icon } = source;
                   return (
                     <button
@@ -2834,6 +2854,11 @@ export function ChatWorkspace({
                       {agentProfiles.map((agent) => (
                         <option key={agent.id} value={agent.id}>
                           {agent.name}
+                        </option>
+                      ))}
+                      {lockedHermesAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id} disabled>
+                          {agent.name} (needs Hermes approval)
                         </option>
                       ))}
                     </SelectControl>
@@ -4492,7 +4517,23 @@ function ActivityTrace({
 }
 
 function agentProfileOptions(data: BootstrapData): ModelConfig[] {
-  return visibleAgentProfiles(data);
+  const locked = hermesLocked(data);
+  return visibleAgentProfiles(data).filter((agent) => !(locked && isHermesAgent(agent)));
+}
+
+/** MCP connections this user can actually run, mirroring the server's skip
+ * rules, so the composer never offers a connection the send would drop. */
+function usableMcpTools(data: BootstrapData): ToolConfig[] {
+  if (!connectorEnabled(data.connectors, "mcp")) return [];
+  const lockHermes = hermesLocked(data);
+  return data.tools.filter(
+    (tool) => isMcpRuntimeTool(tool) && toolUsableBy(data.me, tool) && !(lockHermes && isHermesTool(tool)),
+  );
+}
+
+/** Hermes agents the viewer can see but not use until an admin grants Hermes. */
+function lockedHermesAgentProfiles(data: BootstrapData): ModelConfig[] {
+  return hermesLocked(data) ? visibleAgentProfiles(data).filter(isHermesAgent) : [];
 }
 
 function modelKnowledgeIds(model: ModelConfig): string[] {

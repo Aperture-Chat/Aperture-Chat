@@ -224,6 +224,13 @@
   border-top: 1px solid var(--border);
 }
 .ws-card-foot .ws-spacer { flex: 1 1 auto; }
+/* Locked actions (e.g. a Hermes agent awaiting approval) must read as locked,
+   matching the tools library's disabled buttons. */
+:is(.ws-card-foot, .agent-editor-head-actions) :is(.primary-button, .secondary-button):disabled {
+  opacity: 0.5;
+  box-shadow: none;
+  cursor: not-allowed;
+}
 /* Narrow cards (any screen): the status badge takes its own line so the
    actions stay on one row. Keyed to the card's width, not the viewport. */
 .agent-card { container-type: inline-size; }

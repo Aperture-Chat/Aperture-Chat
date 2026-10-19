@@ -2,8 +2,9 @@
 
 Two flows land here, distinguished by the signed OIDC-style state token:
 
-- Workspace flow (Google Drive knowledge sync): started by a platform owner from the
-  connector configuration; the outcome redirects back to the web app.
+- Workspace flow (Google Drive knowledge sync): started by a workspace admin or
+  platform owner from the connector configuration; the outcome redirects back
+  to the web app.
 - Per-user flow (chat attachments): started by any user from the attach menu
   in a popup window; tokens are stored per (config, user) so each user only
   ever lists their own files. The outcome renders a small page that closes
@@ -29,7 +30,7 @@ from app.core.connector_auth import (
     user_oauth_provider,
 )
 from app.core.sessions import verify_oidc_state
-from app.models.schemas import Role
+from app.models.schemas import Role, User
 from app.repositories.deps import get_store
 from app.repositories.seed import SeedStore
 
@@ -62,10 +63,11 @@ def _workspace_callback(
     if config is None or config.connector_id != "google-drive":
         return _error_redirect("The OAuth callback does not match a Google Drive connector configuration.")
     # Signed state proves who started consent, but their current privilege may
-    # have changed before the provider returned. Shared credentials stay owner-only.
+    # have changed before the provider returned. Recheck that they still
+    # administer the workspace that owns these credentials.
     actor = store.users.get(str(payload.get("actor_id") or ""))
-    if actor is None or not actor.active or actor.role != Role.PLATFORM_OWNER:
-        return _error_redirect("Only an active platform owner can connect workspace credentials.")
+    if actor is None or not actor.active or not _administers_tenant(actor, config.tenant_id):
+        return _error_redirect("Only an active admin of this workspace can connect its credentials.")
     if not code:
         return _error_redirect("The provider did not return an authorization code.")
 
@@ -85,6 +87,12 @@ def _workspace_callback(
     )
     store.save_runtime_state()
     return RedirectResponse(url=f"{_web_origin()}/?connector_oauth=success", status_code=302)
+
+
+def _administers_tenant(actor: User, tenant_id: str) -> bool:
+    if actor.role == Role.PLATFORM_OWNER:
+        return True
+    return actor.role == Role.TENANT_ADMIN and actor.tenant_id == tenant_id
 
 
 def _user_callback(payload: dict, code: str | None, error: str | None, store: SeedStore) -> HTMLResponse:
