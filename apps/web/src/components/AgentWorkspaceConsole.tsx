@@ -32,6 +32,9 @@ import {
   createAdminAgentProfile,
   deleteAdminAgentProfile,
   deleteHermesMemory,
+  HERMES_LOCKED_MESSAGE,
+  hermesLocked,
+  isHermesAgent,
   listHermesMemories,
   mapModelConfigRecordToDisplay,
   syncAdminModelAccess,
@@ -217,6 +220,9 @@ export function AgentWorkspaceConsole({
   // and a standard user needs the organization ceiling plus an explicit group
   // grant. The API enforces the same gate on create, update, and delete.
   const isAgentAdmin = data.me.role === "PLATFORM_OWNER" || data.me.role === "TENANT_ADMIN";
+  // Standard users without the Hermes grant see Hermes agents but can't run them.
+  const lockHermesAgents = hermesLocked(data);
+  const selectedAgentHermesLocked = lockHermesAgents && Boolean(selectedAgent && isHermesAgent(selectedAgent));
   const canAuthorAgents =
     isAgentAdmin ||
     (Boolean(data.platformSettings?.users_can_create_models) &&
@@ -617,10 +623,15 @@ export function AgentWorkspaceConsole({
                 <button
                   className="secondary-button compact-button"
                   type="button"
-                  data-tooltip="Start a chat with this agent answering your messages"
+                  disabled={selectedAgentHermesLocked}
+                  data-tooltip={
+                    selectedAgentHermesLocked
+                      ? HERMES_LOCKED_MESSAGE
+                      : "Start a chat with this agent answering your messages"
+                  }
                   onClick={() => onUseInChat(draft.id!)}
                 >
-                  <MessageSquare size={15} /> Use in Chat
+                  {selectedAgentHermesLocked ? <Lock size={15} /> : <MessageSquare size={15} />} Use in Chat
                 </button>
               )}
               {draft.id && selectedAgent && (canAuthorAgents || canEditSelectedAgent) && (
@@ -1249,6 +1260,7 @@ export function AgentWorkspaceConsole({
               hermesToolId={hermesTool?.id}
               canEdit={canAuthorProfile(agent)}
               canDuplicate={canAuthorAgents}
+              hermesLocked={lockHermesAgents && isHermesAgent(agent)}
               deleteLocked={agentDeleteLockedForAdmin(agent, data)}
               isDeleting={pendingAction === `agent:delete:${agent.id}` || pendingAction === "agent:clear"}
               openMenu={openMenu}
@@ -1272,6 +1284,7 @@ function AgentCard({
   hermesToolId,
   canEdit,
   canDuplicate,
+  hermesLocked: locked = false,
   deleteLocked,
   isDeleting,
   openMenu,
@@ -1287,6 +1300,8 @@ function AgentCard({
   hermesToolId?: string;
   canEdit: boolean;
   canDuplicate: boolean;
+  /** A Hermes agent the viewer can see but not chat with yet. */
+  hermesLocked?: boolean;
   deleteLocked: boolean;
   isDeleting: boolean;
   openMenu: string | null;
@@ -1347,6 +1362,11 @@ function AgentCard({
               <Sparkles size={13} /> Hermes
             </li>
           )}
+          {locked && (
+            <li className="ws-fact">
+              <Lock size={13} /> Needs Hermes approval from your administrator
+            </li>
+          )}
         </ul>
         {issues.length > 0 && (
           <ul className="agent-card-issues">
@@ -1363,11 +1383,11 @@ function AgentCard({
         <button
           className="primary-button compact-button"
           type="button"
-          data-tooltip={`Jump into a chat with ${agent.name} answering your messages`}
+          data-tooltip={locked ? HERMES_LOCKED_MESSAGE : `Jump into a chat with ${agent.name} answering your messages`}
           onClick={onChat}
-          disabled={isDeleting}
+          disabled={isDeleting || locked}
         >
-          <MessageSquare size={15} /> Chat
+          {locked ? <Lock size={15} /> : <MessageSquare size={15} />} Chat
         </button>
         {canEdit && (
           <button

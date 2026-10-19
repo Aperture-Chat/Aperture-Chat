@@ -2470,6 +2470,26 @@ test("composer web links ride as fetch_urls and surface returned web citations",
   expect(within(panel).getByText("Fetched page excerpt.")).toBeInTheDocument();
 });
 
+test("sources hidden by workspace admins never appear in the chat attach menu", async () => {
+  const connectors = sampleData.connectors;
+  sampleData.connectors = connectors.map((connector) =>
+    ["imanage", "microsoft-graph"].includes(connector.id) ? { ...connector, hidden: true } : connector,
+  );
+  try {
+    await renderApp();
+    const composer = document.querySelector(".composer") as HTMLElement;
+    fireEvent.click(within(composer).getByRole("button", { name: "Add attachment" }));
+    const menu = screen.getByRole("menu", { name: "Add attachment" });
+    expect(within(menu).getByRole("menuitem", { name: "Google Drive" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Box" })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "iManage" })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "OneDrive" })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "SharePoint" })).not.toBeInTheDocument();
+  } finally {
+    sampleData.connectors = connectors;
+  }
+});
+
 test("the composer rejects invalid links and more than three links with honest copy", async () => {
   await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));

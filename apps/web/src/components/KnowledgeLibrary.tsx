@@ -9,6 +9,7 @@ import {
   Globe,
   KeyRound,
   Loader2,
+  Lock,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -120,6 +121,8 @@ export function KnowledgeLibrary({
   // Tenant policy grants let standard users author private, self-owned
   // knowledge bases; the server enforces the same grants and ownership.
   const canCreate = canConfigure || Boolean(data.authoringState?.knowledge_enabled);
+  // API sources call an endpoint on every sync, so they need their own grant.
+  const apiSourcesAllowed = canConfigure || Boolean(data.authoringState?.api_sources_enabled);
   const canManage = useCallback(
     (item: KnowledgeBase) => canConfigure || (canCreate && item.owner_user_id === userId),
     [canConfigure, canCreate, userId],
@@ -645,6 +648,7 @@ export function KnowledgeLibrary({
     <CreateKnowledgeDialog
       data={data}
       canShare={canConfigure}
+      apiAllowed={apiSourcesAllowed}
       initialStart={creating}
       saving={pending === "create"}
       onCancel={() => setCreating(null)}
@@ -663,6 +667,7 @@ export function KnowledgeLibrary({
           onTabChange={setDetailTab}
           canManage={canManage(openBase)}
           canShare={canConfigure}
+          apiAllowed={apiSourcesAllowed}
           documents={documents[openBase.id]}
           documentError={documentErrors[openBase.id]}
           indexStatus={indexStatus[openBase.id]}
@@ -806,8 +811,16 @@ export function KnowledgeLibrary({
               <div className="ws-starters" role="group" aria-label="Ways to start">
                 {(Object.keys(START_OPTIONS) as StartWith[]).map((key) => {
                   const option = START_OPTIONS[key];
+                  const blocked = key === "api" && !apiSourcesAllowed;
                   return (
-                    <button key={key} type="button" className="ws-starter" onClick={() => setCreating(key)}>
+                    <button
+                      key={key}
+                      type="button"
+                      className="ws-starter"
+                      disabled={blocked}
+                      data-tooltip={blocked ? API_SOURCES_LOCKED_MESSAGE : undefined}
+                      onClick={() => setCreating(key)}
+                    >
                       <span className="ws-starter-icon">{option.icon}</span>
                       <span>
                         <strong>{option.label}</strong>
@@ -975,6 +988,7 @@ function KnowledgeDetail({
   onTabChange,
   canManage,
   canShare,
+  apiAllowed,
   documents,
   documentError,
   indexStatus,
@@ -1004,6 +1018,7 @@ function KnowledgeDetail({
   onTabChange: (tab: DetailTab) => void;
   canManage: boolean;
   canShare: boolean;
+  apiAllowed: boolean;
   documents: KnowledgeDocument[] | undefined;
   documentError: string | undefined;
   indexStatus: KnowledgeIndexStatus | undefined;
@@ -1236,7 +1251,8 @@ function KnowledgeDetail({
                     <button
                       className="secondary-button compact-button"
                       type="button"
-                      disabled={pending === `authorize:${item.id}`}
+                      disabled={!apiAllowed || pending === `authorize:${item.id}`}
+                      data-tooltip={apiAllowed ? undefined : API_SOURCES_LOCKED_MESSAGE}
                       onClick={onAuthorize}
                     >
                       Sign in with provider
@@ -1244,7 +1260,13 @@ function KnowledgeDetail({
                   )}
                 </div>
               ))}
-              {canManage && (
+              {canManage && !apiAllowed && (
+                <div className="ws-notice" role="note">
+                  <Lock size={15} />
+                  <span>{API_SOURCES_LOCKED_MESSAGE} API data already indexed here stays searchable.</span>
+                </div>
+              )}
+              {canManage && apiAllowed && (
                 <ApiSourceForm
                   knowledgeId={item.id}
                   callbackBase={limits?.oauth_callback_base}
@@ -1986,6 +2008,9 @@ function SettingsForm({
 
 // ===================================================================== create
 
+const API_SOURCES_LOCKED_MESSAGE =
+  "Connecting APIs needs approval. Ask your administrator to turn on Can add API sources for one of your groups.";
+
 type CreateDraft = { name: string; description: string; startWith: StartWith; groupIds: string[] };
 
 const START_OPTIONS: Record<StartWith, { label: string; helper: string; icon: ReactNode; source: string; description: string; next: string }> = {
@@ -2018,6 +2043,7 @@ const START_OPTIONS: Record<StartWith, { label: string; helper: string; icon: Re
 function CreateKnowledgeDialog({
   data,
   canShare,
+  apiAllowed,
   initialStart,
   saving,
   onCancel,
@@ -2025,6 +2051,7 @@ function CreateKnowledgeDialog({
 }: {
   data: BootstrapData;
   canShare: boolean;
+  apiAllowed: boolean;
   initialStart: StartWith;
   saving: boolean;
   onCancel: () => void;
@@ -2032,7 +2059,12 @@ function CreateKnowledgeDialog({
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
-  const [draft, setDraft] = useState<CreateDraft>({ name: "", description: "", startWith: initialStart, groupIds: [] });
+  const [draft, setDraft] = useState<CreateDraft>({
+    name: "",
+    description: "",
+    startWith: initialStart === "api" && !apiAllowed ? "files" : initialStart,
+    groupIds: [],
+  });
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLInputElement>("input")?.focus();
     const onKey = (event: KeyboardEvent) => {
@@ -2082,16 +2114,21 @@ function CreateKnowledgeDialog({
           <fieldset className="knowledge-start-options">
             <legend>Start with</legend>
             <div className="ws-segmented" role="group" aria-label="Start with">
-              {(Object.keys(START_OPTIONS) as StartWith[]).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={draft.startWith === key}
-                  onClick={() => setDraft((current) => ({ ...current, startWith: key }))}
-                >
-                  {START_OPTIONS[key].icon} {START_OPTIONS[key].label}
-                </button>
-              ))}
+              {(Object.keys(START_OPTIONS) as StartWith[]).map((key) => {
+                const blocked = key === "api" && !apiAllowed;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={draft.startWith === key}
+                    disabled={blocked}
+                    data-tooltip={blocked ? API_SOURCES_LOCKED_MESSAGE : undefined}
+                    onClick={() => setDraft((current) => ({ ...current, startWith: key }))}
+                  >
+                    {blocked ? <Lock size={16} /> : START_OPTIONS[key].icon} {START_OPTIONS[key].label}
+                  </button>
+                );
+              })}
             </div>
             <small>{START_OPTIONS[draft.startWith].helper}</small>
           </fieldset>

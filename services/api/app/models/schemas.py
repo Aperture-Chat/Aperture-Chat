@@ -61,6 +61,9 @@ DEFAULT_GROUP_PERMISSIONS = {
     # stay admin-only.
     "knowledge_authoring": False,
     "tool_authoring": False,
+    # API sources make credentialed outbound requests on the user's behalf,
+    # so they need their own grant on top of knowledge_authoring.
+    "api_source_authoring": False,
     # Personalization memory is on by group default, but inert until both the
     # platform owner and the tenant admin have switched memory on.
     "memory_access": True,
@@ -1206,6 +1209,9 @@ class ConnectorConfig(TenantScopedSecretRecord):
     connector_id: str
     auth_type: str = "oauth"
     scopes: list[str] = Field(default_factory=list)
+    # Workspace admins hide a cloud file source from the attach menus without
+    # turning it off; see app.core.connector_availability.
+    hidden: bool = False
 
 
 class ConnectorConfigCreateRequest(BaseModel):
@@ -1213,6 +1219,7 @@ class ConnectorConfigCreateRequest(BaseModel):
     tenant_id: str | None = None
     connector_id: str
     enabled: bool = True
+    hidden: bool = False
     auth_type: str = "oauth"
     scopes: list[str] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
@@ -1225,6 +1232,7 @@ class ConnectorConfigCreateRequest(BaseModel):
 class ConnectorConfigUpdateRequest(BaseModel):
     connector_id: str | None = None
     enabled: bool | None = None
+    hidden: bool | None = None
     auth_type: str | None = None
     scopes: list[str] | None = None
     settings: dict[str, Any] | None = None

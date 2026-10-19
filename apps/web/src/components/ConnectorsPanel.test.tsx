@@ -23,12 +23,118 @@ function connectorBlock(name: string): HTMLElement {
   return screen.getByText(name).closest(".connector-config-block") as HTMLElement;
 }
 
-test.each(["TENANT_ADMIN", "USER"] as const)("%s has no connector management controls", (role) => {
+test("USER has no connector management controls", () => {
   const data = cloneData();
-  data.me.role = role;
+  data.me.role = "USER";
   renderPanel({}, data);
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Configure/ })).not.toBeInTheDocument();
+});
+
+test("TENANT_ADMIN manages switches, credentials, and attach-menu visibility", () => {
+  const data = cloneData();
+  data.me.role = "TENANT_ADMIN";
+  renderPanel({}, data);
+  expect(screen.getByRole("heading", { name: "Connectors" })).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Enable Box" })).toBeInTheDocument();
+  expect(within(connectorBlock("Google Drive")).getByRole("button", { name: /Configure/ })).toBeInTheDocument();
+  for (const name of ["Google Drive", "OneDrive / SharePoint / Outlook", "Box", "iManage"]) {
+    expect(within(connectorBlock(name)).getByRole("button", { name: `Hide ${name} from the attach menu` })).toBeInTheDocument();
+  }
+  // Only cloud file sources live in the attach menu, so only they can hide.
+  for (const name of ["Web Search", "MCP Servers", "Prompt Library"]) {
+    expect(within(connectorBlock(name)).queryByRole("button", { name: /attach menu/ })).not.toBeInTheDocument();
+  }
+});
+
+test("hiding a source keeps its switch and reports what people will see", async () => {
+  const data = cloneData();
+  data.me.role = "TENANT_ADMIN";
+  const box = data.connectors.find((connector) => connector.id === "box") as Connector;
+  const switchedOn = connectorSwitchedOn(box);
+  const setConnectorHidden = vi.fn(async (_connector: Connector, hidden: boolean) => ({ hidden }));
+  const statuses: ConnectorsPanelStatus[] = [];
+  renderPanel({ setConnectorHidden }, data, (status) => statuses.push(status));
+
+  fireEvent.click(screen.getByRole("button", { name: "Hide Box from the attach menu" }));
+  await waitFor(() =>
+    expect(statuses.at(-1)).toEqual({
+      tone: "success",
+      message: "Box is hidden. People in this workspace no longer see it in the attach menu.",
+    }),
+  );
+  expect(setConnectorHidden).toHaveBeenCalledWith(expect.objectContaining({ id: "box" }), true);
+  const block = connectorBlock("Box");
+  expect(within(block).getByText("Hidden")).toBeInTheDocument();
+  expect(within(block).getByRole("button", { name: "Show Box in the attach menu" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(block).getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", String(switchedOn));
+
+  fireEvent.click(within(block).getByRole("button", { name: "Show Box in the attach menu" }));
+  await waitFor(() => expect(setConnectorHidden).toHaveBeenLastCalledWith(expect.objectContaining({ id: "box" }), false));
+  await waitFor(() => expect(within(connectorBlock("Box")).queryByText("Hidden")).not.toBeInTheDocument());
+});
+
+test("a refused hide leaves the source visible and reports the failure", async () => {
+  const data = cloneData();
+  data.me.role = "TENANT_ADMIN";
+  const statuses: ConnectorsPanelStatus[] = [];
+  renderPanel(
+    { setConnectorHidden: async () => { throw new Error("Configuration is outside your tenant."); } },
+    data,
+    (status) => statuses.push(status),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Hide iManage from the attach menu" }));
+  await waitFor(() =>
+    expect(statuses.at(-1)).toEqual({ tone: "warning", message: "iManage was not changed. Configuration is outside your tenant." }),
+  );
+  expect(within(connectorBlock("iManage")).queryByText("Hidden")).not.toBeInTheDocument();
+});
+
+test("a closed platform ceiling locks the tenant admin switch but not the owner's", () => {
+  const data = cloneData();
+  data.me.role = "TENANT_ADMIN";
+  data.connectors = data.connectors.map((connector) =>
+    connector.id === "web" ? { ...connector, deployment_enabled: false } : connector,
+  );
+  const adminView = renderPanel({}, data);
+  expect(within(connectorBlock("Web Search")).getByText("Off for all workspaces")).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Enable Web Search" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Enable Web Search" })).toHaveAttribute("aria-checked", "false");
+  adminView.unmount();
+
+  data.me.role = "PLATFORM_OWNER";
+  renderPanel({}, data);
+  expect(screen.getByRole("switch", { name: "Enable Web Search" })).toBeEnabled();
+});
+
+test("only the owner closes and reopens the ceiling for every workspace", async () => {
+  const adminData = cloneData();
+  adminData.me.role = "TENANT_ADMIN";
+  const adminView = renderPanel({}, adminData);
+  expect(screen.queryByRole("button", { name: /for every workspace|in every workspace/ })).not.toBeInTheDocument();
+  adminView.unmount();
+
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+  const setConnectorCeiling = vi.fn(async (_connector: Connector, allowed: boolean) => ({
+    platform_enabled: allowed,
+    deployment_enabled: allowed,
+  }));
+  const statuses: ConnectorsPanelStatus[] = [];
+  renderPanel({ setConnectorCeiling }, cloneData(), (status) => statuses.push(status));
+
+  const close = within(connectorBlock("Box")).getByRole("button", { name: "Turn Box off for every workspace" });
+  fireEvent.click(close);
+  expect(setConnectorCeiling).not.toHaveBeenCalled();
+  fireEvent.click(close);
+  await waitFor(() => expect(setConnectorCeiling).toHaveBeenCalledWith(expect.objectContaining({ id: "box" }), false));
+  await waitFor(() => expect(within(connectorBlock("Box")).getByText("Off for all workspaces")).toBeInTheDocument());
+  expect(statuses.at(-1)).toEqual({ tone: "success", message: "Box is off for every workspace." });
+
+  fireEvent.click(within(connectorBlock("Box")).getByRole("button", { name: "Allow Box in every workspace" }));
+  await waitFor(() => expect(setConnectorCeiling).toHaveBeenLastCalledWith(expect.objectContaining({ id: "box" }), true));
+  await waitFor(() => expect(within(connectorBlock("Box")).queryByText("Off for all workspaces")).not.toBeInTheDocument());
+  expect(confirm).toHaveBeenCalledTimes(2);
+  confirm.mockRestore();
 });
 
 test("missing and unconfirmed switch APIs do not fabricate a saved change", async () => {
@@ -114,12 +220,11 @@ test("a failed configuration clear retains the current credential draft", async 
   expect(within(form).getByLabelText(/OAuth client secret/)).toHaveValue("draft-secret");
 });
 
-test("the switch writes both catalog flags and reconciles with the server response", async () => {
+test("the switch writes this workspace's switch and reconciles with the server response", async () => {
   const data = cloneData();
   const box = data.connectors.find((connector) => connector.id === "box") as Connector;
   expect(connectorSwitchedOn(box)).toBe(true);
   const setConnectorEnabled = vi.fn(async (connector: Connector, enabled: boolean) => ({
-    platform_enabled: enabled,
     tenant_enabled: enabled,
     auth_status: enabled ? connector.auth_status : ("not-configured" as const),
   }));
@@ -133,7 +238,7 @@ test("the switch writes both catalog flags and reconciles with the server respon
   expect(setConnectorEnabled.mock.calls[0][1]).toBe(false);
   expect(screen.getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "false");
   await waitFor(() =>
-    expect(statuses.at(-1)).toEqual({ tone: "success", message: "Box is now off for everyone in this deployment." }),
+    expect(statuses.at(-1)).toEqual({ tone: "success", message: "Box is now off for everyone in this workspace." }),
   );
 });
 

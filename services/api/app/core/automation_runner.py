@@ -28,6 +28,7 @@ from app.core.automation_schedule import (
     parse_instant,
     resolve_zone,
 )
+from app.core.connector_availability import connector_enabled_for_tenant
 from app.core.markdown_document import markdown_to_document_html
 from app.core.model_gateway import (
     DEFAULT_COMPLETION_TOKEN_BUDGET,
@@ -38,6 +39,7 @@ from app.core.model_gateway import (
 from app.core.personal_data import conceal
 from app.core.policy import (
     assert_agent_profile_access,
+    assert_hermes_agent_unlocked,
     assert_model_access,
     hermes_companion_allowed,
     is_workspace_agent_profile,
@@ -139,7 +141,7 @@ def _step_token_budget(model: ModelConfig) -> int:
 
 
 def _step_web_search_tools(
-    store: SeedStore, route: ModelGatewayRoute
+    store: SeedStore, route: ModelGatewayRoute, tenant_id: str | None
 ) -> list[dict[str, Any]] | None:
     """OpenRouter's server-side web search tool for OpenRouter chain steps.
 
@@ -148,16 +150,7 @@ def _step_web_search_tools(
     Non-OpenRouter routes run without live search here — the platform search
     engine is a chat-request pipeline and is not wired into chain steps.
     """
-    web_connector = store.connectors.get("web")
-    web_config = next(
-        (config for config in store.connector_configs.values() if config.connector_id == "web"),
-        None,
-    )
-    disabled = (
-        web_connector is not None
-        and not (web_connector.platform_enabled and web_connector.tenant_enabled)
-    ) or (web_config is not None and not web_config.enabled)
-    if disabled:
+    if not connector_enabled_for_tenant(store, "web", tenant_id):
         return None
     if route.provider_kind.strip().lower() != "openrouter":
         return None
@@ -226,6 +219,7 @@ def _step_context(
     try:
         if is_agent:
             assert_agent_profile_access(actor, model)
+            assert_hermes_agent_unlocked(actor, store.groups, model)
         if model.system_prompt and model.system_prompt.strip():
             sections.append(model.system_prompt.strip())
         if model.meta_prompt and model.meta_prompt.strip():
@@ -372,7 +366,7 @@ def execute_chain(
         if system_sections:
             messages.append({"role": "system", "content": "\n\n".join(system_sections)})
         messages.append({"role": "user", "content": step_input})
-        web_tools = _step_web_search_tools(store, route)
+        web_tools = _step_web_search_tools(store, route, automation.tenant_id)
         try:
             usage_context = orchestrator.begin_request(
                 actor=actor,

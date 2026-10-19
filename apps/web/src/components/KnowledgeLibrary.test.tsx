@@ -100,8 +100,12 @@ function stubFetch(...handlers: FetchHandler[]) {
   return fetchMock;
 }
 
-function renderLibrary(bases: KnowledgeBase[], role: BootstrapData["me"]["role"] = "TENANT_ADMIN") {
-  let current: BootstrapData = { ...sampleData, me: { ...sampleData.me, role }, knowledgeBases: bases };
+function renderLibrary(
+  bases: KnowledgeBase[],
+  role: BootstrapData["me"]["role"] = "TENANT_ADMIN",
+  extra: Partial<BootstrapData> = {},
+) {
+  let current: BootstrapData = { ...sampleData, me: { ...sampleData.me, role }, knowledgeBases: bases, ...extra };
   function Harness() {
     const [data, setData] = useState(current);
     return (
@@ -449,4 +453,22 @@ test("people without authoring rights see shared knowledge read-only", async () 
   expect(screen.queryByText(/Drag files here/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove brief.pdf" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: /Settings/ })).not.toBeInTheDocument();
+});
+
+test("knowledge authors without the API grant see API sources locked, not missing", async () => {
+  stubFetch((url) => (url.includes("/documents") ? json([]) : undefined));
+  renderLibrary([knowledgeBase()], "USER", {
+    authoringState: { knowledge_enabled: true, tools_enabled: false, api_sources_enabled: false },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: /New knowledge base/ }));
+  const apiChoice = screen.getByRole("button", { name: /Connect an API/ });
+  expect(apiChoice).toBeDisabled();
+  expect(apiChoice).toHaveAttribute("data-tooltip", expect.stringMatching(/Can add API sources/));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.mouseDown(await screen.findByRole("tab", { name: /API/ }));
+  expect(await screen.findByText(/turn on Can add API sources/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Fetch and add/ })).not.toBeInTheDocument();
 });

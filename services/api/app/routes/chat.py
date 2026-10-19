@@ -52,6 +52,12 @@ from app.core.cloud_sources import (
     get_imanage_client,
     get_microsoft_graph_client,
 )
+from app.core.connector_availability import (
+    connector_allowed_for_deployment,
+    connector_enabled_for_tenant,
+    connector_hidden_for_tenant,
+    tenant_connector_configs,
+)
 from app.core.connector_auth import (
     acquire_connector_token,
     acquire_user_connector_token,
@@ -137,9 +143,12 @@ from app.core.policy import (
     assert_agent_profile_access,
     assert_api_access,
     assert_group_permission,
+    assert_hermes_agent_unlocked,
     assert_knowledge_access,
     assert_model_access,
     hermes_companion_allowed,
+    hermes_locked_for,
+    is_hermes_tool,
     model_access_allowed,
     tool_access_allowed,
 )
@@ -250,11 +259,12 @@ CONNECTOR_LABELS = {
     "box": "Box",
     "imanage": "iManage",
 }
-def _require_workspace_connector(store: SeedStore, connector_id: str, message: str) -> None:
-    """Workspace kill switch: both the platform owner and tenant admin must
-    have the connector enabled before the runtime will use the capability."""
-    connector = store.connectors.get(connector_id)
-    if connector is None or not (connector.platform_enabled and connector.tenant_enabled):
+def _require_workspace_connector(
+    store: SeedStore, connector_id: str, tenant_id: str | None, message: str
+) -> None:
+    """Workspace kill switch: the platform ceiling and the workspace's own
+    switch must both be on before the runtime will use the capability."""
+    if not connector_enabled_for_tenant(store, connector_id, tenant_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
@@ -1225,7 +1235,9 @@ def complete(
             actor=actor,
             usage_context=usage_context,
         )
-    _attach_platform_web_search(request, route, runtime_context, store)
+    _attach_platform_web_search(
+        request, route, runtime_context, store, _gateway_tenant_id(store, actor, tenant_slug)
+    )
     _record_chat_audit(
         store, actor, model, route, "chat.completion", request.stream, runtime_context
     )
@@ -1328,7 +1340,9 @@ def openai_chat_completions(
             actor=actor,
             usage_context=usage_context,
         )
-    _attach_platform_web_search(request, route, runtime_context, store)
+    _attach_platform_web_search(
+        request, route, runtime_context, store, _gateway_tenant_id(store, actor, tenant_slug)
+    )
     _record_chat_audit(
         store, actor, model, route, "gateway.chat_completion", request.stream, runtime_context
     )
@@ -1388,7 +1402,9 @@ def openai_responses(
         model,
         tenant_id=_gateway_tenant_id(store, actor, tenant_slug),
     )
-    _attach_platform_web_search(request, route, runtime_context, store)
+    _attach_platform_web_search(
+        request, route, runtime_context, store, _gateway_tenant_id(store, actor, tenant_slug)
+    )
     _record_chat_audit(
         store,
         actor,
@@ -1845,8 +1861,13 @@ def _enabled_cloud_connector_config(
             detail=f"Cloud attachments do not support connector '{connector_id}'.",
         )
     label = CONNECTOR_LABELS.get(source_id, backend_id)
-    connector = store.connectors.get(backend_id)
-    if connector is None or not (connector.platform_enabled and connector.tenant_enabled):
+    if connector_hidden_for_tenant(store, backend_id, tenant_id):
+        # Hidden sources are not offered in this workspace at all.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{label} is not available in this workspace.",
+        )
+    if not connector_allowed_for_deployment(store, backend_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{label} is not enabled for this workspace.",
@@ -3271,6 +3292,7 @@ def _attach_platform_web_search(
     route: ModelGatewayRoute,
     runtime_context: dict[str, object],
     store: SeedStore,
+    tenant_id: str | None,
 ) -> None:
     """Run the platform-hosted web search for providers without native search.
 
@@ -3286,22 +3308,14 @@ def _attach_platform_web_search(
     """
     if not runtime_context.get("web_enabled"):
         return
-    # The admin toggle writes a "web" connector-config record; the catalog
-    # entry itself carries the platform-level kill switch. No record at all
+    # The admin toggle writes the workspace's "web" connector-config record;
+    # the catalog entry carries the platform-level ceiling. No record at all
     # means the keyless platform default applies (web search on).
-    web_connector = store.connectors.get("web")
-    web_config = next(
-        (config for config in store.connector_configs.values() if config.connector_id == "web"),
-        None,
-    )
-    disabled = (
-        web_connector is not None
-        and not (web_connector.platform_enabled and web_connector.tenant_enabled)
-    ) or (web_config is not None and not web_config.enabled)
-    if disabled:
+    web_config = next(iter(tenant_connector_configs(store, "web", tenant_id)), None)
+    if not connector_enabled_for_tenant(store, "web", tenant_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Web search is turned off for this workspace. An admin can enable the Web Search connector under Admin → Tools.",
+            detail="Web search is turned off for this workspace. An admin can enable the Web Search connector under Admin → Connections.",
         )
     if _route_provider_kind(route) == "openrouter":
         # OpenRouter's server tool searches on OpenRouter's side for every
@@ -4534,14 +4548,18 @@ def _resolve_runtime_context(
 ) -> dict[str, object]:
     execution_started_at = clock.now_iso()
     agent_profile = _resolve_agent_profile(store, actor, request, model)
+    # Standard users without the hermes_companion grant can't open a Hermes
+    # agent at all, so the refusal names the policy instead of quietly
+    # running the agent without its companion.
+    assert_hermes_agent_unlocked(actor, store.groups, agent_profile or model)
     agentic_companion = _agentic_companion(agent_profile, model)
     if agentic_companion == hermes.HERMES_COMPANION and not hermes_companion_allowed(
         actor, store.groups
     ):
-        # Admin approval gate: until an admin grants the hermes_companion
-        # group permission, Hermes stays fully inert for this user — no
-        # prompt instructions, no memory injection, no capture, no
-        # companion tool auto-attach.
+        # Admin approval gate: an administrator without the grant can still
+        # test the profile, but Hermes stays fully inert — no prompt
+        # instructions, no memory injection, no capture, no companion tool
+        # auto-attach.
         agentic_companion = None
     # Hermes learning loop: resolve the profile the loop reads from and writes
     # to, plus its saved memories for prompt injection. None when inactive.
@@ -4658,7 +4676,7 @@ def _resolve_runtime_context(
     fetched_urls = _fetch_chat_urls(request.fetch_urls)
     if any(tool.tool_type == "mcp" for tool in tool_configs):
         _require_workspace_connector(
-            store, "mcp", "MCP servers are turned off for this workspace."
+            store, "mcp", actor.tenant_id, "MCP servers are turned off for this workspace."
         )
     mcp_servers = _runtime_mcp_servers(store, tool_configs, request.agent_enabled)
     mcp_tool_results = _runtime_mcp_tool_results(
@@ -5052,7 +5070,10 @@ def _resolve_prompt_templates(
 ) -> list[PromptTemplate]:
     if _dedupe(template_ids):
         _require_workspace_connector(
-            store, "prompt-library", "The Prompt Library is turned off for this workspace."
+            store,
+            "prompt-library",
+            actor.tenant_id,
+            "The Prompt Library is turned off for this workspace.",
         )
     templates: list[PromptTemplate] = []
     for template_id in _dedupe(template_ids):
@@ -5119,10 +5140,7 @@ def _companion_tool_ids(store: SeedStore, actor: User, agentic_companion: str | 
     for tool in store.tool_configs.values():
         if actor.tenant_id is not None and tool.tenant_id != actor.tenant_id:
             continue
-        if (
-            tool.settings.get("hermes_companion") is not True
-            and tool.settings.get("mcp_server") != "hermes-agent"
-        ):
+        if not is_hermes_tool(tool):
             continue
         if tool_access_allowed(actor, tool):
             tool_ids.append(tool.id)
@@ -6415,11 +6433,16 @@ def _resolve_usable_tool_configs(
     if not config_ids:
         return [], []
     assert_group_permission(actor, store.groups, "tools_access", "Tool access")
+    hermes_locked = hermes_locked_for(actor, store.groups)
     usable: list[ToolConfig] = []
     skipped: list[str] = []
     for config_id in config_ids:
         config = store.tool_configs.get(config_id)
-        if config is None or not tool_access_allowed(actor, config):
+        if (
+            config is None
+            or not tool_access_allowed(actor, config)
+            or (hermes_locked and is_hermes_tool(config))
+        ):
             skipped.append(config_id)
             continue
         usable.append(config)

@@ -79,6 +79,10 @@ export function mapConnectorConfigRecordToConnector(record: ConnectorConfigRecor
     scopes: record.scopes.length > 0 ? record.scopes : (connector?.scopes ?? []),
     secret_visible_to_admin: false,
     auth_status: authStatus,
+    // A mapped connector already carries the ceiling; its tenant_enabled is
+    // the workspace switch, not the catalog flag.
+    deployment_enabled: connector?.deployment_enabled ?? (connector ? connectorAllowedForDeployment(connector) : true),
+    hidden: record.hidden ?? false,
     sync_status: connectorSyncStatus(record.settings) ?? (record.enabled ? "synced" : "idle"),
     last_sync: stringSetting(record.settings, "last_sync") ?? (record.enabled ? "Loaded from API" : "Not synced"),
     description:
@@ -100,10 +104,16 @@ const SWITCH_CONNECTOR_IDS = new Set([
   "audit-analytics",
 ]);
 
+/** The platform owner's ceiling over every workspace: both catalog flags. */
+export function connectorAllowedForDeployment(connector: Pick<Connector, "platform_enabled" | "tenant_enabled">) {
+  return connector.platform_enabled && connector.tenant_enabled;
+}
+
 export function mapConnectorCatalogWithConfigs(connectors: Connector[], configs: ConnectorConfigRecord[]): Connector[] {
   const configByConnector = new Map(configs.map((config) => [config.connector_id, config]));
   const seen = new Set<string>();
-  const mapped = connectors.map((connector) => {
+  const mapped = connectors.map((rawConnector) => {
+    const connector = { ...rawConnector, deployment_enabled: connectorAllowedForDeployment(rawConnector), hidden: false };
     const config = configByConnector.get(connector.id);
     if (!config) {
       // Web search is keyless and available by default: without a tenant
@@ -285,6 +295,7 @@ export function mapToolConfigRecordToDisplay(record: ToolConfigRecord): ToolConf
     skill_files: stringArraySetting(record.settings, "skill_files"),
     prompt_templates: stringArraySetting(record.settings, "prompt_templates"),
     hermes_companion: Boolean(record.settings.hermes_companion),
+    hermes_server: record.settings.mcp_server === "hermes-agent",
     runtime_invocations: runtimeInvocationsSetting(record.settings, "runtime_invocations"),
     script: stringSetting(record.settings, "script"),
     timeout_seconds:
@@ -331,9 +342,14 @@ export function normalizeBootstrap(data: BootstrapWireData): BootstrapData {
   const users = data.users ?? sampleData.users;
   const visibleUsers = data.visibleUsers ?? users ?? sampleData.visibleUsers;
   const connectorConfigs = Array.isArray(data.connectorConfigs) ? data.connectorConfigs : [];
+  // Owners receive every tenant's records; the workspace view reads only the
+  // current tenant's so one workspace's switch never shows as another's.
+  const workspaceConnectorConfigs = data.currentTenant
+    ? connectorConfigs.filter((config) => config.tenant_id === data.currentTenant?.id)
+    : connectorConfigs;
   const connectors =
     data.connectorConfigs !== undefined
-      ? mapConnectorCatalogWithConfigs(data.connectors ?? sampleData.connectors, connectorConfigs)
+      ? mapConnectorCatalogWithConfigs(data.connectors ?? sampleData.connectors, workspaceConnectorConfigs)
       : (data.connectors ?? sampleData.connectors);
 
   return {

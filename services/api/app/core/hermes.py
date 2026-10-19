@@ -127,6 +127,30 @@ def capture_artifacts(
             memories_saved += 1
         elif kind == "skill" and len(skills_saved) < MAX_SKILLS_PER_TURN:
             name, content = _split_skill(body)
+            if (profile.visibility or "tenant").lower() == "private":
+                # A skill file with no groups is open to the whole tenant, so
+                # a private profile keeps what it learns as its own memory.
+                if memories_saved >= MAX_MEMORIES_PER_TURN:
+                    continue
+                memory = CompanionMemory(
+                    id=f"hermes-mem-{uuid4().hex[:12]}",
+                    tenant_id=tenant_id,
+                    profile_id=profile.id,
+                    content=f"Skill — {name}:\n{content}"[:MEMORY_MAX_CHARS],
+                    created_by=actor.id,
+                    created_at=clock.now_iso(),
+                    source_thread_id=source_thread_id,
+                )
+                store.companion_memories[memory.id] = memory
+                _prune_profile_memories(store, profile.id)
+                store.record_audit(
+                    actor,
+                    "hermes.memory_saved",
+                    memory.id,
+                    {"profile_id": profile.id, "chars": len(memory.content), "from_skill": True},
+                )
+                memories_saved += 1
+                continue
             skill = SkillFile(
                 id=f"skill-hermes-{uuid4().hex[:12]}",
                 tenant_id=tenant_id,

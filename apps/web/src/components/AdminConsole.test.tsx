@@ -2,8 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { useState } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { sampleData } from "../data/sampleData";
-import type { BootstrapData, Group, ModelConfig, SecurityAlert, User, UserPromptRecord } from "../lib/types";
+import type { BootstrapData, Connector, Group, ModelConfig, SecurityAlert, User, UserPromptRecord } from "../lib/types";
 import { AdminConsole, type AdminConsoleApi } from "./AdminConsole";
+import type { ConnectorsPanelApi } from "./ConnectorsPanel";
 
 vi.mock("@remotion/player", async () => {
   const React = await import("react");
@@ -1048,20 +1049,24 @@ test("prompt preview loads and shows the clicked thread's full conversation", as
   expect(within(secondExchange).getByText("Selected exchange")).toBeInTheDocument();
 });
 
-test("admin connections keeps response actions but exposes no deployment connector controls", () => {
-  const setConnectorEnabled = vi.fn();
-  const saveConnectorConfig = vi.fn();
-  renderAdmin({ setConnectorEnabled, saveConnectorConfig });
+test("admin connections leads with workspace connectors, then response actions", async () => {
+  const setConnectorHidden = vi.fn(async (_connector: Connector, hidden: boolean) => ({ hidden }));
+  renderAdmin({}, cloneData(), { setConnectorHidden });
   selectTab("Connections");
 
   const connections = screen.getByRole("tabpanel", { name: "Connections" });
-  expect(within(connections).getByRole("heading", { name: "Chat output actions" })).toBeInTheDocument();
+  const headings = within(connections).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+  expect(headings.indexOf("Connectors")).toBeGreaterThanOrEqual(0);
+  expect(headings.indexOf("Connectors")).toBeLessThan(headings.indexOf("Chat output actions"));
   expect(within(connections).getByRole("button", { name: "New response action" })).toBeInTheDocument();
-  expect(within(connections).queryByRole("heading", { name: "Connectors" })).not.toBeInTheDocument();
-  expect(within(connections).queryByRole("switch", { name: "Enable Box" })).not.toBeInTheDocument();
-  expect(connections.querySelector(".connector-config-block")).toBeNull();
-  expect(setConnectorEnabled).not.toHaveBeenCalled();
-  expect(saveConnectorConfig).not.toHaveBeenCalled();
+  expect(within(connections).getByRole("switch", { name: "Enable Box" })).toBeInTheDocument();
+
+  fireEvent.click(within(connections).getByRole("button", { name: "Hide iManage from the attach menu" }));
+  await waitFor(() => expect(setConnectorHidden).toHaveBeenCalledWith(expect.objectContaining({ id: "imanage" }), true));
+  expect(
+    await within(connections).findByRole("button", { name: "Show iManage in the attach menu" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(await screen.findByText(/iManage is hidden/)).toBeInTheDocument();
 });
 
 test("SSO forms keep field labels aligned", () => {
@@ -1531,10 +1536,10 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   expect(screen.queryByRole("dialog", { name: "Admin console documentation" })).not.toBeInTheDocument();
 });
 
-function renderAdmin(adminApi: AdminConsoleApi, initialData = cloneData()) {
+function renderAdmin(adminApi: AdminConsoleApi, initialData = cloneData(), connectorApi?: ConnectorsPanelApi) {
   function Harness() {
     const [data, setData] = useState<BootstrapData>(() => initialData);
-    return <AdminConsole data={data} onDataChange={setData} adminApi={adminApi} />;
+    return <AdminConsole data={data} onDataChange={setData} adminApi={adminApi} connectorApi={connectorApi} />;
   }
 
   return render(<Harness />);

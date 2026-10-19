@@ -817,6 +817,11 @@ export type Connector = {
   sync_status?: "idle" | "syncing" | "synced" | "error";
   last_sync?: string;
   description?: string;
+  /** The platform owner's ceiling: both catalog flags. When off, no
+   * workspace can use the connector whatever its own switch says. */
+  deployment_enabled?: boolean;
+  /** Workspace admins hid this cloud file source from the attach menus. */
+  hidden?: boolean;
 };
 
 export type SsoConfig = {
@@ -944,6 +949,8 @@ export type ToolConfig = {
   skill_files?: string[];
   prompt_templates?: string[];
   hermes_companion?: boolean;
+  /** The connection points at the Hermes agent server itself. */
+  hermes_server?: boolean;
   runtime_invocations?: McpRuntimeInvocation[];
   script?: string;
   timeout_seconds?: number;
@@ -1160,6 +1167,7 @@ export type ConnectorConfigRecord = TenantScopedConfigRecord & {
   connector_id: string;
   auth_type: string;
   scopes: string[];
+  hidden?: boolean;
 };
 
 export type SsoConfigRecord = TenantScopedConfigRecord & {
@@ -1192,6 +1200,7 @@ export type AdminConnectorConfigCreateRequest = {
   tenant_id?: string | null;
   connector_id: string;
   enabled?: boolean;
+  hidden?: boolean;
   auth_type?: string;
   scopes?: string[];
   settings?: ConfigSettings;
@@ -1202,6 +1211,7 @@ export type AdminConnectorConfigCreateRequest = {
 export type AdminConnectorConfigUpdateRequest = {
   connector_id?: string | null;
   enabled?: boolean | null;
+  hidden?: boolean | null;
   auth_type?: string | null;
   scopes?: string[] | null;
   settings?: ConfigSettings | null;
@@ -1730,6 +1740,10 @@ export type TrainingTaxonomy = {
 export type AuthoringState = {
   knowledge_enabled: boolean;
   tools_enabled: boolean;
+  /** API sources inside the caller's own knowledge bases (api_source_authoring). */
+  api_sources_enabled?: boolean;
+  /** False when Hermes agents and connections are locked for the caller. */
+  hermes_enabled?: boolean;
 };
 
 export type AutomationStep = {

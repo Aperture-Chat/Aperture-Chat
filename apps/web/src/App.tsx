@@ -161,6 +161,7 @@ import {
   type MobilePlatform,
 } from "./lib/pwa";
 import type {
+  AdminConnectorConfigUpdateRequest,
   AccountPasswordUpdateRequest,
   AccountProfileUpdateRequest,
   AccountApiKeyCreateResponse,
@@ -176,7 +177,7 @@ import type {
   Role,
   User,
 } from "./lib/types";
-import { ConnectorUpdateError, connectorUsesCredentialRecord } from "./components/ConnectorsPanel";
+import { ConnectorUpdateError, type ConnectorsPanelApi } from "./components/ConnectorsPanel";
 import { applyBrandTheme, cacheBrandBoot, type BrandBootCache } from "./lib/brandTheme";
 import {
   DEFAULT_BRAND_NAME,
@@ -1012,6 +1013,96 @@ export function App() {
     [data.me.id],
   );
 
+  // Connectors belong to the workspace: every write lands on the current
+  // tenant's own connector record, created on first use. The catalog flags
+  // stay the platform owner's ceiling, and an owner turning a connector on
+  // reopens it for the deployment.
+  const connectorActions = useMemo<ConnectorsPanelApi>(() => {
+    const tenantId = data.currentTenant.id;
+    const isOwner = data.me.role === "PLATFORM_OWNER";
+    const saveWorkspaceRecord = (connector: Connector, patch: AdminConnectorConfigUpdateRequest) =>
+      connector.tenant_config_id
+        ? updateAdminConnectorConfig(data.me.id, connector.tenant_config_id, patch)
+        : createAdminConnectorConfig(data.me.id, {
+            connector_id: connector.id,
+            tenant_id: tenantId,
+            enabled: patch.enabled ?? connector.tenant_enabled,
+            hidden: patch.hidden ?? false,
+            auth_type: "oauth",
+            scopes: connector.scopes,
+            settings: { description: connector.description, ...(patch.settings ?? {}) },
+          });
+    return {
+      setConnectorEnabled: async (connector, enabled) => {
+        let ceiling: Partial<Connector> = {};
+        const ceilingClosed = !(connector.deployment_enabled ?? (connector.platform_enabled && connector.tenant_enabled));
+        if (enabled && isOwner && ceilingClosed) {
+          const saved = await updatePlatformConnector(data.me.id, connector.id, {
+            platform_enabled: true,
+            tenant_enabled: true,
+          });
+          ceiling = {
+            platform_enabled: saved.platform_enabled,
+            deployment_enabled: saved.platform_enabled && saved.tenant_enabled,
+          };
+        }
+        try {
+          const record = await saveWorkspaceRecord(connector, {
+            enabled,
+            settings: { last_sync: enabled ? "Saved now" : "Disabled now" },
+          });
+          return { ...mapConnectorConfigRecordToConnector(record, { ...connector, ...ceiling }), ...ceiling };
+        } catch (error) {
+          if (!ceiling.deployment_enabled) throw error;
+          // The ceiling write already committed; show it even though the
+          // workspace switch failed, so a retry can finish the change.
+          throw new ConnectorUpdateError(
+            `${connector.name} is allowed across the deployment again, but this workspace's switch could not be saved. ${error instanceof Error ? error.message : "Retry the change to finish saving."}`,
+            ceiling,
+          );
+        }
+      },
+      setConnectorHidden: async (connector, hidden) => {
+        const record = await saveWorkspaceRecord(connector, { hidden });
+        return mapConnectorConfigRecordToConnector(record, connector);
+      },
+      setConnectorCeiling: async (connector, allowed) => {
+        const saved = await updatePlatformConnector(
+          data.me.id,
+          connector.id,
+          allowed ? { platform_enabled: true, tenant_enabled: true } : { platform_enabled: false },
+        );
+        // Only the ceiling changes; this workspace's own switch stays as saved.
+        return {
+          platform_enabled: saved.platform_enabled,
+          deployment_enabled: saved.platform_enabled && saved.tenant_enabled,
+        };
+      },
+      saveConnectorConfig: async (connector, payload) => {
+        const record = connector.tenant_config_id
+          ? await updateAdminConnectorConfig(data.me.id, connector.tenant_config_id, payload)
+          : await createAdminConnectorConfig(data.me.id, {
+              connector_id: connector.id,
+              tenant_id: tenantId,
+              enabled: payload.enabled ?? connector.tenant_enabled,
+              auth_type: payload.auth_type ?? undefined,
+              settings: payload.settings ?? undefined,
+              secret_value: payload.secret_value ?? undefined,
+              service_password: payload.service_password ?? undefined,
+            });
+        return {
+          connector: mapConnectorConfigRecordToConnector(record, connector),
+          record,
+        };
+      },
+      testConnectorConfig: (configId) => testAdminConnectorConfig(data.me.id, configId),
+      connectorOAuthUrl: async (configId) => {
+        const result = await connectorOAuthStartUrl(data.me.id, configId);
+        return result.url;
+      },
+    };
+  }, [data.me.id, data.me.role, data.currentTenant.id]);
+
   const platformActions = useMemo<PlatformConsoleActions>(
     () => ({
       createProvider: (provider) =>
@@ -1044,80 +1135,6 @@ export function App() {
       rotateProviderKey: (keyId) => rotateProviderKey(data.me.id, keyId),
       deleteProviderKey: (keyId) => deleteProviderKey(data.me.id, keyId),
       deleteProvider: (providerId, confirm) => deletePlatformProvider(data.me.id, providerId, confirm),
-      // Connectors are owner-managed. The switch writes the catalog flags the
-      // API enforces (chat, tools, bootstrap all read platform_enabled AND
-      // tenant_enabled) and keeps the tenant credential record, when one
-      // exists, in step so the displayed state cannot drift from the server.
-      setConnectorEnabled: async (connector, enabled) => {
-        const saved = await updatePlatformConnector(data.me.id, connector.id, {
-          platform_enabled: enabled,
-          tenant_enabled: enabled,
-        });
-        const patch: Partial<Connector> = {
-          platform_enabled: saved.platform_enabled,
-          tenant_enabled: saved.tenant_enabled,
-        };
-        try {
-          if (connector.tenant_config_id) {
-            const record = await updateAdminConnectorConfig(data.me.id, connector.tenant_config_id, {
-              enabled,
-              settings: { last_sync: enabled ? "Saved now" : "Disabled now" },
-            });
-            return { ...mapConnectorConfigRecordToConnector(record, { ...connector, ...patch }), ...patch };
-          }
-          if (enabled && connectorUsesCredentialRecord(connector.id)) {
-            // Credential connectors need a tenant record to hold "on, awaiting
-            // credentials"; without one the bootstrap mapping reads them as off.
-            const record = await createAdminConnectorConfig(data.me.id, {
-              connector_id: connector.id,
-              tenant_id: data.currentTenant.id,
-              enabled: true,
-              auth_type: "oauth",
-              scopes: connector.scopes,
-              settings: { description: connector.description, last_sync: "Saved now" },
-            });
-            return { ...mapConnectorConfigRecordToConnector(record, { ...connector, ...patch }), ...patch };
-          }
-          return patch;
-        } catch (error) {
-          // The catalog write already committed. Show the persisted state
-          // even when saving its credential record fails; retry can repair it.
-          let persisted: Partial<Connector> = patch;
-          try {
-            const refreshed = await loadBootstrap(data.me.id);
-            persisted = refreshed.connectors.find((item) => item.id === connector.id) ?? patch;
-          } catch {
-            // Preserve the fields confirmed by the first response, and leave
-            // credentials unchanged until the user can retry or reload.
-          }
-          throw new ConnectorUpdateError(
-            `${connector.name} availability was saved, but its credential settings could not be synchronized. ${error instanceof Error ? error.message : "Retry the change to finish saving."}`,
-            persisted,
-          );
-        }
-      },
-      saveConnectorConfig: async (connector, payload) => {
-        const record = connector.tenant_config_id
-          ? await updateAdminConnectorConfig(data.me.id, connector.tenant_config_id, payload)
-          : await createAdminConnectorConfig(data.me.id, {
-              connector_id: connector.id,
-              tenant_id: data.currentTenant.id,
-              enabled: payload.enabled ?? connector.tenant_enabled,
-              auth_type: payload.auth_type ?? undefined,
-              settings: payload.settings ?? undefined,
-              secret_value: payload.secret_value ?? undefined,
-              service_password: payload.service_password ?? undefined,
-            });
-        return {
-          connector: mapConnectorConfigRecordToConnector(record, connector),
-          record,
-        };
-      },
-      testConnectorConfig: (configId) => testAdminConnectorConfig(data.me.id, configId),
-      connectorOAuthUrl: async (configId) => {
-        const result = await connectorOAuthStartUrl(data.me.id, configId);
-        return result.url;
-      },
       createUser: (payload) => createAdminUser(data.me.id, payload),
       updateUser: (userId, patch) => updateAdminUser(data.me.id, userId, patch),
       deactivateUser: async (userId) => {
@@ -1285,6 +1302,7 @@ export function App() {
           data={effectiveData}
           onDataChange={setData}
           adminApi={adminApi}
+          connectorApi={connectorActions}
           section={route.section}
           onSectionChange={(section) => navigate({ kind: "admin", section })}
           openDocumentationRequestKey={adminDocumentationRequestKey}
@@ -1350,6 +1368,7 @@ export function App() {
     );
   }, [
     adminApi,
+    connectorActions,
     effectiveData,
     platformActions,
     route,

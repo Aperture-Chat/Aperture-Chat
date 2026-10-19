@@ -13,7 +13,11 @@ import { approvedWorkspaceModels } from "../lib/modelAccess";
 import type { Automation, BootstrapData } from "../lib/types";
 import { AutomationsConsole, describeCron, scheduleSummary } from "./AutomationsConsole";
 
-vi.mock("../lib/api", () => ({
+vi.mock("../lib/api", async () => {
+  const policy = await vi.importActual<typeof import("../lib/api/tools")>("../lib/api/tools");
+  return {
+  hermesLocked: policy.hermesLocked,
+  isHermesAgent: policy.isHermesAgent,
   createAutomation: vi.fn(),
   deleteAutomation: vi.fn(),
   runAutomation: vi.fn(),
@@ -23,7 +27,8 @@ vi.mock("../lib/api", () => ({
     error: null,
     next_runs: ["2026-09-28T14:00:00+00:00", "2026-10-05T14:00:00+00:00"],
   })),
-}));
+  };
+});
 
 const modelId = approvedWorkspaceModels(sampleData)[0]?.id ?? "";
 
@@ -224,4 +229,18 @@ test("common cron schedules read in plain words", () => {
   expect(
     scheduleSummary({ trigger_type: "cron", cron_expression: "0 9 1 1 *", timezone: "America/Chicago" }),
   ).toBe("Custom schedule (0 9 1 1 *) · America/Chicago");
+});
+
+test("Hermes agents are listed as locked steps for users without the Hermes grant", () => {
+  const jane = sampleData.users.find((user) => user.id === "user-jane")!;
+  const locked = { ...sampleData, me: { ...jane, role: "USER" as const }, automations: [], authoringState: { knowledge_enabled: false, tools_enabled: false, hermes_enabled: false } };
+  const { unmount } = renderConsole(locked);
+  fireEvent.click(screen.getByRole("button", { name: /New automation/ }));
+  const hermesStep = screen.getByRole("option", { name: /Client Update Agent \(agent, needs Hermes approval\)/ });
+  expect(hermesStep).toBeDisabled();
+  unmount();
+
+  renderConsole({ ...locked, authoringState: { ...locked.authoringState, hermes_enabled: true } });
+  fireEvent.click(screen.getByRole("button", { name: /New automation/ }));
+  expect(screen.getByRole("option", { name: "Client Update Agent (agent)" })).not.toBeDisabled();
 });

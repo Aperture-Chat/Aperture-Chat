@@ -1118,7 +1118,15 @@ test("owner persona shortcut opens the platform owner workspace", async () => {
   });
 });
 
-test.each([true, false])("owner connector partial saves preserve confirmed state when bootstrap reload succeeds=%s", async (reloadSucceeds) => {
+async function openAdminConnections() {
+  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByText("Management"));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Admin console/ }));
+  fireEvent.keyDown(await screen.findByRole("tab", { name: "Connections" }), { key: "Enter" });
+  return (await screen.findByRole("heading", { name: "Connectors", exact: true })).closest(".panel") as HTMLElement;
+}
+
+test("an owner turning a connector on reopens a closed ceiling and keeps it when the workspace switch fails", async () => {
   vi.stubEnv("DEV", false);
   vi.stubEnv("VITE_ENABLE_DEMO_FALLBACK", "false");
   window.localStorage.setItem(SESSION_STORAGE_KEY, "user-owner");
@@ -1130,16 +1138,9 @@ test.each([true, false])("owner connector partial saves preserve confirmed state
     currentTenant: { ...sampleData.currentTenant, id: "tenant-target" }, providers: [], models: [], providerKeys: [],
     connectors: [box], connectorConfigs: [credential] };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-  let bootstrapRequests = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.endsWith("/api/bootstrap")) {
-      bootstrapRequests += 1;
-      if (bootstrapRequests === 1) return json(bootstrap);
-      return reloadSucceeds
-        ? json({ ...bootstrap, connectors: [{ ...box, name: "Box from server", platform_enabled: true }] })
-        : json({ detail: "Bootstrap reload unavailable." }, 503);
-    }
+    if (url.endsWith("/api/bootstrap")) return json(bootstrap);
     if (url.endsWith("/api/platform/updates")) return json({ detail: "Updater unavailable in this synthetic test." }, 503);
     if (url.endsWith("/api/platform/connectors/box") && init?.method === "PATCH") {
       return json({ ...box, platform_enabled: true, tenant_enabled: true });
@@ -1151,76 +1152,107 @@ test.each([true, false])("owner connector partial saves preserve confirmed state
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByText("Management"));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Platform owner console/ }));
-  fireEvent.keyDown(await screen.findByRole("tab", { name: "Org Settings" }), { key: "Enter" });
-  const panel = (await screen.findByRole("heading", { name: "Connectors", exact: true })).closest(".panel") as HTMLElement;
-  fireEvent.click(within(panel).getByRole("button", { name: "Expand panel" }));
-  fireEvent.click(within(panel).getByRole("switch", { name: "Enable Box" }));
+  const panel = await openAdminConnections();
+  const boxBlock = within(panel).getByText("Box").closest(".connector-config-block") as HTMLElement;
+  expect(within(boxBlock).getByText("Off for all workspaces")).toBeInTheDocument();
+  fireEvent.click(within(boxBlock).getByRole("switch", { name: "Enable Box" }));
 
-  expect(await screen.findByText("Box availability was saved, but its credential settings could not be synchronized. Credential store unavailable.")).toBeInTheDocument();
-  expect(bootstrapRequests).toBe(2);
-  expect(within(panel).getByRole("switch", { name: reloadSucceeds ? "Enable Box from server" : "Enable Box" }))
-    .toHaveAttribute("aria-checked", reloadSucceeds ? "false" : "true");
-  expect(screen.queryByText(/Box was not changed/)).not.toBeInTheDocument();
+  expect(await screen.findByText("Box is allowed across the deployment again, but this workspace's switch could not be saved. Credential store unavailable.")).toBeInTheDocument();
+  expect(within(boxBlock).getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "false");
+  expect(within(boxBlock).queryByText("Off for all workspaces")).not.toBeInTheDocument();
   const mutations = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH");
   expect(mutations.map(([input]) => String(input))).toEqual([
     expect.stringContaining("/api/platform/connectors/box"),
     expect.stringContaining("/api/admin/connector-configs/conncfg-box-existing"),
   ]);
   expect(JSON.parse(String(mutations[0][1]?.body))).toEqual({ platform_enabled: true, tenant_enabled: true });
+  expect(JSON.parse(String(mutations[1][1]?.body))).toMatchObject({ enabled: true });
   expect(mutations[0][1]?.headers).toMatchObject({ "x-aperture-user": "user-owner" });
 });
 
-test("owner connector creation uses the current tenant for switch and configuration saves", async () => {
+test("an owner closing the ceiling writes only the catalog flag and leaves the workspace record alone", async () => {
   vi.stubEnv("DEV", false);
   vi.stubEnv("VITE_ENABLE_DEMO_FALLBACK", "false");
   window.localStorage.setItem(SESSION_STORAGE_KEY, "user-owner");
-  const connectors = sampleData.connectors.filter((connector) => ["box", "google-drive"].includes(connector.id))
-    .map((connector) => ({ ...connector, platform_enabled: false, tenant_enabled: false, tenant_config_id: undefined }));
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const box = { ...sampleData.connectors.find((connector) => connector.id === "box")!,
+    platform_enabled: true, tenant_enabled: true, tenant_config_id: undefined };
   const bootstrap = { ...sampleData, me: { ...sampleData.users.find((user) => user.id === "user-owner")!, first_run_guide_seen_at: "2026-09-04T12:00:00Z" },
-    currentTenant: { ...sampleData.currentTenant, id: "tenant-target" }, providers: [], models: [], providerKeys: [], connectors, connectorConfigs: [] };
+    currentTenant: { ...sampleData.currentTenant, id: "tenant-target" }, providers: [], models: [], providerKeys: [],
+    connectors: [box], connectorConfigs: [] };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/api/bootstrap")) return json(bootstrap);
     if (url.endsWith("/api/platform/updates")) return json({ detail: "Updater unavailable in this synthetic test." }, 503);
     if (url.endsWith("/api/platform/connectors/box") && init?.method === "PATCH") {
-      return json({ ...connectors.find((connector) => connector.id === "box"), platform_enabled: true, tenant_enabled: true });
-    }
-    if (url.endsWith("/api/admin/connector-configs") && init?.method === "POST") {
-      const payload = JSON.parse(String(init.body));
-      return json({ ...payload, id: `conncfg-${payload.connector_id}-created`, scopes: payload.scopes ?? [],
-        settings: payload.settings ?? {}, secret_set: Boolean(payload.secret_value), masked_secret: payload.secret_value ? "saved" : null }, 201);
+      return json({ ...box, platform_enabled: false, tenant_enabled: false });
     }
     return json({ detail: "Unavailable in this synthetic test." }, 503);
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByText("Management"));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Platform owner console/ }));
-  fireEvent.keyDown(await screen.findByRole("tab", { name: "Org Settings" }), { key: "Enter" });
-  const panel = (await screen.findByRole("heading", { name: "Connectors", exact: true })).closest(".panel") as HTMLElement;
-  fireEvent.click(within(panel).getByRole("button", { name: "Expand panel" }));
+  const panel = await openAdminConnections();
+  const boxBlock = within(panel).getByText("Box").closest(".connector-config-block") as HTMLElement;
+  fireEvent.click(within(boxBlock).getByRole("button", { name: "Turn Box off for every workspace" }));
+
+  expect(await within(boxBlock).findByText("Off for all workspaces")).toBeInTheDocument();
+  const mutations = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== "GET");
+  expect(mutations.map(([input]) => String(input))).toEqual([expect.stringContaining("/api/platform/connectors/box")]);
+  expect(JSON.parse(String(mutations[0][1]?.body))).toEqual({ platform_enabled: false });
+});
+
+test("a workspace admin's switch, hide, and credentials all write the current tenant's records", async () => {
+  vi.stubEnv("DEV", false);
+  vi.stubEnv("VITE_ENABLE_DEMO_FALLBACK", "false");
+  window.localStorage.setItem(SESSION_STORAGE_KEY, "user-admin");
+  const connectors = sampleData.connectors.filter((connector) => ["box", "google-drive"].includes(connector.id))
+    .map((connector) => ({ ...connector, platform_enabled: true, tenant_enabled: true, tenant_config_id: undefined }));
+  const bootstrap = { ...sampleData, me: { ...sampleData.users.find((user) => user.id === "user-admin")!, first_run_guide_seen_at: "2026-09-04T12:00:00Z" },
+    currentTenant: { ...sampleData.currentTenant, id: "tenant-target" }, providers: [], models: [], providerKeys: [], connectors, connectorConfigs: [] };
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/bootstrap")) return json(bootstrap);
+    if (url.endsWith("/api/admin/connector-configs") && init?.method === "POST") {
+      const payload = JSON.parse(String(init.body));
+      return json({ ...payload, id: `conncfg-${payload.connector_id}-created`, hidden: payload.hidden ?? false, scopes: payload.scopes ?? [],
+        settings: payload.settings ?? {}, secret_set: Boolean(payload.secret_value), masked_secret: payload.secret_value ? "saved" : null }, 201);
+    }
+    if (url.includes("/api/admin/connector-configs/conncfg-google-drive-created") && init?.method === "PATCH") {
+      const payload = JSON.parse(String(init.body));
+      return json({ id: "conncfg-google-drive-created", tenant_id: "tenant-target", connector_id: "google-drive", enabled: false,
+        hidden: true, auth_type: payload.auth_type, scopes: [], settings: payload.settings ?? {}, secret_set: true, masked_secret: "saved" });
+    }
+    return json({ detail: "Unavailable in this synthetic test." }, 503);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  const panel = await openAdminConnections();
   fireEvent.click(within(panel).getByRole("switch", { name: "Enable Box" }));
-  await waitFor(() => expect(within(panel).getByRole("switch", { name: "Enable Box" })).not.toBeDisabled());
-  expect(within(panel).getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "true");
+  await waitFor(() => expect(within(panel).getByRole("switch", { name: "Enable Box" })).toHaveAttribute("aria-checked", "true"));
 
   const drive = within(panel).getByText("Google Drive").closest(".connector-config-block") as HTMLElement;
+  fireEvent.click(within(drive).getByRole("button", { name: "Hide Google Drive from the attach menu" }));
+  expect(await within(drive).findByRole("button", { name: "Show Google Drive in the attach menu" })).toBeInTheDocument();
+
   fireEvent.click(within(drive).getByRole("button", { name: "Configure" }));
   fireEvent.change(within(drive).getByLabelText(/OAuth client ID/), { target: { value: "synthetic-client" } });
   fireEvent.change(within(drive).getByLabelText(/OAuth client secret/), { target: { value: "synthetic-secret" } });
   fireEvent.click(within(drive).getByRole("button", { name: "Save configuration" }));
   expect(await screen.findByText("Google Drive configuration saved.")).toBeInTheDocument();
+
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/platform/"))).toBe(false);
   const creates = fetchMock.mock.calls.filter(([input, init]) => String(input).endsWith("/api/admin/connector-configs") && init?.method === "POST");
-  expect(creates).toHaveLength(2);
   expect(creates.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
-    expect.objectContaining({ connector_id: "box", tenant_id: "tenant-target", enabled: true }),
-    expect.objectContaining({ connector_id: "google-drive", tenant_id: "tenant-target", secret_value: "synthetic-secret" }),
+    expect.objectContaining({ connector_id: "box", tenant_id: "tenant-target", enabled: true, hidden: false }),
+    expect.objectContaining({ connector_id: "google-drive", tenant_id: "tenant-target", enabled: false, hidden: true }),
   ]);
-  expect(creates.every(([, init]) => (init?.headers as Record<string, string>)["x-aperture-user"] === "user-owner")).toBe(true);
+  const updates = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH");
+  expect(updates).toHaveLength(1);
+  expect(JSON.parse(String(updates[0][1]?.body))).toMatchObject({ secret_value: "synthetic-secret" });
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method).every(([, init]) =>
+    (init?.headers as Record<string, string>)["x-aperture-user"] === "user-admin")).toBe(true);
 });
 
 test("restoring a saved session never paints the sample placeholder account", async () => {
