@@ -453,3 +453,34 @@ def test_imanage_chat_never_falls_back_to_a_shared_manual_token() -> None:
     )
     assert response.status_code == 409
     assert "requires delegated per-user OAuth" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("user_id", ["user-admin", "user-jane"])
+def test_hidden_source_is_not_offered_even_when_configured(user_id: str) -> None:
+    store = get_store()
+    box_config = store.connector_configs["conncfg-box-example"]
+    box_config.enabled = True
+    box_config.hidden = True
+    box_config.settings.update({"auth_mode": "client-credentials", "client_id": "box-client-id"})
+    store.set_configuration_secret("connector", box_config.id, "box-client-secret")
+    store.connectors["box"].platform_enabled = True
+    store.connectors["box"].tenant_enabled = True
+
+    listed = client.get("/api/chat/cloud-attachments/box/items?tenant_id=tenant-example", headers=headers(user_id))
+    assert listed.status_code == 404
+    assert listed.json()["detail"] == "Box is not available in this workspace."
+    authorize = client.get(
+        "/api/chat/cloud-attachments/box/authorize-url?tenant_id=tenant-example", headers=headers(user_id)
+    )
+    assert authorize.status_code == 404
+    imported = client.post(
+        "/api/chat/cloud-attachments/box/attachments",
+        headers=headers(user_id),
+        json={"tenant_id": "tenant-example", "item_ids": ["file-1"]},
+    )
+    assert imported.status_code == 404
+
+    # Showing it again restores the normal per-user connect flow.
+    box_config.hidden = False
+    restored = client.get("/api/chat/cloud-attachments/box/items?tenant_id=tenant-example", headers=headers(user_id))
+    assert restored.status_code == 428

@@ -54,6 +54,8 @@ from app.core.usage_budget_runtime import (
 )
 from app.core.web_fetch import WebFetchError, fetch_web_source
 from app.core.policy import (
+    api_source_authoring_allowed,
+    assert_api_source_authoring,
     assert_group_permission,
     assert_knowledge_access,
     is_tenant_admin,
@@ -94,6 +96,7 @@ def api_source_oauth_authorize_url(
     an attacker cannot poison the stored API-source token for a known config id.
     """
     config = _get_operable_config(config_id, actor, store)
+    assert_api_source_authoring(actor, store.groups)
     oauth_settings = _api_source_oauth_settings(config)
     authorization_url = str(oauth_settings.get("authorization_url") or "").strip()
     client_id = str(oauth_settings.get("client_id") or "").strip()
@@ -378,7 +381,7 @@ def sync(
     store: SeedStore = Depends(get_store),
 ) -> KnowledgeSyncResponse:
     config = _get_operable_config(config_id, actor, store)
-    if config.source_type not in _CONNECTOR_SOURCE_TYPES:
+    if config.source_type not in CONNECTOR_SOURCE_TYPES:
         return _refresh_linked_sources(config, actor, store, force=bool(payload and payload.force))
     sync_documents, sync_chunks, provider_status, provider_message = _provider_sync_documents(
         config, store
@@ -688,6 +691,7 @@ def add_api_source(
     the OAuth callback fetches them once a token is stored.
     """
     config = _get_operable_config(config_id, actor, store)
+    assert_api_source_authoring(actor, store.groups)
     base_url = payload.base_url.strip()
     if not base_url:
         raise HTTPException(
@@ -919,7 +923,7 @@ def _fail_knowledge_media_usage(context: UsageBudgetRequestContext) -> None:
         return
 
 
-_CONNECTOR_SOURCE_TYPES = frozenset({"box", "microsoft-graph", "google-drive", "imanage"})
+CONNECTOR_SOURCE_TYPES = frozenset({"box", "microsoft-graph", "google-drive", "imanage"})
 _API_AUTH_TYPES = frozenset({"none", "api-key", "bearer-token", "oauth-client"})
 _LINKED_SOURCES_KEY = "linked_sources"
 
@@ -979,17 +983,38 @@ def _refresh_linked_sources(
     refreshed in place; a failed refresh keeps that source's previous content.
     """
     sources = _linked_sources(config)
+    # Revoking the API-source grant stops the outbound calls without deleting
+    # what was already indexed.
+    api_paused = not api_source_authoring_allowed(actor, store.groups)
+    paused = [
+        source
+        for source in sources
+        if api_paused and source.get("kind") == "api" and source.get("refresh")
+    ]
     refreshable = [
         source
         for source in sources
         if source.get("refresh")
         and (source.get("kind") == "web" or source.get("kind") == "api")
         and not source.get("awaiting_authorization")
+        and source not in paused
     ]
-    waiting = [source for source in sources if source.get("awaiting_authorization")]
+    waiting = [
+        source
+        for source in sources
+        if source.get("awaiting_authorization") and source not in paused
+    ]
+    paused_note = (
+        f"{len(paused)} API source{'' if len(paused) == 1 else 's'} skipped: API sources are "
+        "turned off for your groups, so their last content is kept."
+        if paused
+        else ""
+    )
     if not refreshable:
         message = (
-            "Waiting for the provider sign-in before this API can be fetched."
+            paused_note
+            if paused
+            else "Waiting for the provider sign-in before this API can be fetched."
             if waiting
             else "Nothing to sync. Uploaded files and pasted text are indexed when you add "
             "them; add a web page or API to keep content refreshed automatically."
@@ -1052,6 +1077,8 @@ def _refresh_linked_sources(
         status_value = "synced"
         provider_status = "live"
         message = f"Refreshed {refreshed} linked source{'' if refreshed == 1 else 's'}."
+    if paused_note:
+        message = f"{message} {paused_note}"
     config, documents, synced_at = store.record_knowledge_sync(
         config,
         status=status_value,

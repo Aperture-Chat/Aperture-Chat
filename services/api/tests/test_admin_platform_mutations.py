@@ -1630,6 +1630,7 @@ def test_default_user_group_is_seeded_protected_and_used_for_fast_provisioning()
         "agent_authoring": False,
         "knowledge_authoring": False,
         "tool_authoring": False,
+        "api_source_authoring": False,
         "memory_access": True,
     }
 

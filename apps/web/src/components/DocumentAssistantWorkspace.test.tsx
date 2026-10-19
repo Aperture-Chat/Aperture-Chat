@@ -3681,6 +3681,35 @@ test("exposes chat connector sources from the draft attach menu", () => {
   expect(screen.getByLabelText(/Box Matter Knowledge/)).toBeChecked();
 });
 
+test("sources hidden by workspace admins never appear in the draft attach menu", () => {
+  const data = {
+    ...sampleData,
+    connectors: sampleData.connectors.map((connector) =>
+      ["microsoft-graph", "google-drive"].includes(connector.id) ? { ...connector, hidden: true } : connector,
+    ),
+  };
+  render(<DocumentAssistantWorkspace data={data} brandName="Aperture Chat" />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+
+  expect(screen.queryByRole("menuitem", { name: /Google Drive/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: /OneDrive/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: /SharePoint/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: /Box/ })).toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: /iManage/ })).toBeInTheDocument();
+});
+
+test("the draft attach menu drops its source heading when every source is hidden", () => {
+  const data = { ...sampleData, connectors: sampleData.connectors.map((connector) => ({ ...connector, hidden: true })) };
+  render(<DocumentAssistantWorkspace data={data} brandName="Aperture Chat" />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+
+  const menu = screen.getByRole("menu", { name: "Add draft attachment" });
+  expect(within(menu).getByRole("menuitem", { name: /Open in editor/ })).toBeInTheDocument();
+  expect(within(menu).queryByText("Connect a source")).not.toBeInTheDocument();
+});
+
 test("opens a Word file as the draft itself instead of attaching it", async () => {
   render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
 

@@ -1,3 +1,4 @@
+import { connectorHidden } from "../lib/connectors";
 import { draftHtmlForAccount, removeDraftPageLabels } from "../lib/draftPageLayout";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
 import { DeckBlade, DECK_BLADE_DEFAULT_WIDTH } from "./DeckBlade";
@@ -2116,6 +2117,14 @@ export function DocumentAssistantWorkspace({
   const redlineChangeRefs = useRef(new Map<number, HTMLElement>());
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // Sources this workspace's admins hid never appear; the API refuses them too.
+  const draftAttachSources = useMemo(
+    () =>
+      DRAFT_ATTACHMENT_CONNECTORS.filter(
+        (option) => !option.connectorIds.some((connectorId) => connectorHidden(data.connectors, connectorId)),
+      ),
+    [data.connectors],
+  );
   const [templateContextEnabled, setTemplateContextEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [textColor, setTextColor] = useState(TEXT_COLOR_SWATCHES[0]);
@@ -11075,9 +11084,13 @@ export function DocumentAssistantWorkspace({
                         </span>
                       </button>
                     </div>
-                    <div className="attach-menu-divider" />
-                    <span className="attach-menu-label">Connect a source</span>
-                    {DRAFT_ATTACHMENT_CONNECTORS.map((connector) => {
+                    {draftAttachSources.length > 0 && (
+                      <>
+                        <div className="attach-menu-divider" />
+                        <span className="attach-menu-label">Connect a source</span>
+                      </>
+                    )}
+                    {draftAttachSources.map((connector) => {
                       const Icon = connector.icon;
                       const sourceCount = draftConnectorSourceCount(data, connector);
                       return (

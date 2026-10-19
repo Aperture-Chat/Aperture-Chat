@@ -82,6 +82,31 @@ def test_automation_crud_lifecycle() -> None:
     )
 
 
+def test_automation_edit_form_payload_updates_steps() -> None:
+    """The console's edit form re-sends every field, steps included."""
+    from app.models.schemas import AutomationStep
+
+    model_id = _approved_model_id()
+    created = client.post("/api/automations", json=_base_payload(model_id), headers=headers())
+    assert created.status_code == 201
+    automation_id = created.json()["id"]
+    form = {key: value for key, value in _base_payload(model_id).items() if key != "tenant_id"}
+    form["name"] = "Edited digest"
+    form["steps"] = [{"model_id": model_id, "instruction": "Use bullet points."}]
+
+    patched = client.patch(f"/api/automations/{automation_id}", json=form, headers=headers())
+
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "Edited digest"
+    assert patched.json()["steps"] == [{"model_id": model_id, "instruction": "Use bullet points."}]
+    stored = get_store().automations[automation_id]
+    assert all(isinstance(step, AutomationStep) for step in stored.steps)
+
+    kept = client.patch(f"/api/automations/{automation_id}", json={"steps": None}, headers=headers())
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["steps"] == [{"model_id": model_id, "instruction": "Use bullet points."}]
+
+
 def test_automation_requires_at_least_one_step() -> None:
     model_id = _approved_model_id()
     payload = _base_payload(model_id)

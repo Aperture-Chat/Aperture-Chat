@@ -445,6 +445,42 @@ def hermes_companion_allowed(user: User, groups: Mapping[str, Group]) -> bool:
     )
 
 
+def is_hermes_agent(model: ModelConfig) -> bool:
+    return (model.agentic_companion or "").strip().lower() == "hermes"
+
+
+def is_hermes_tool(config: ToolConfig) -> bool:
+    """A connection to the Hermes agent server, not an ordinary MCP tool."""
+    return (
+        config.settings.get("hermes_companion") is True
+        or config.settings.get("mcp_server") == "hermes-agent"
+    )
+
+
+def hermes_locked_for(user: User, groups: Mapping[str, Group]) -> bool:
+    """Standard users without the hermes_companion grant can't use Hermes at all.
+
+    Their agents, chats, and automations refuse Hermes agent profiles and skip
+    Hermes connections instead of running them with the companion switched
+    off. Administrators keep access so they can build and test a profile
+    before granting it; for them an ungranted companion stays inert.
+    """
+    if user.role in {Role.PLATFORM_OWNER, Role.TENANT_ADMIN}:
+        return False
+    return not hermes_companion_allowed(user, groups)
+
+
+def assert_hermes_agent_unlocked(user: User, groups: Mapping[str, Group], model: ModelConfig) -> None:
+    if is_hermes_agent(model) and hermes_locked_for(user, groups):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"{model.name} uses the Hermes companion, which your administrator "
+                "hasn't turned on for your groups."
+            ),
+        )
+
+
 def assert_api_access(
     user: User,
     groups: Mapping[str, Group],
@@ -513,6 +549,34 @@ def assert_knowledge_authoring(user: User, groups: Mapping[str, Group]) -> None:
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="User-created knowledge bases are disabled for your platform groups by tenant policy.",
+    )
+
+
+def api_source_authoring_allowed(user: User, groups: Mapping[str, Group]) -> bool:
+    """API sources need their own grant on top of knowledge authoring.
+
+    An API source sends a request, often carrying a stored key or OAuth token,
+    to an endpoint the user picks, and again on every sync. Admins and
+    platform owners always add them. A standard user needs knowledge_authoring
+    plus an explicit api_source_authoring group grant, both off by default.
+    """
+    if user.role in {Role.PLATFORM_OWNER, Role.TENANT_ADMIN}:
+        return True
+    if not knowledge_authoring_allowed(user, groups):
+        return False
+    return any(
+        bool(groups[group_id].permissions.get("api_source_authoring", False))
+        for group_id in user.group_ids
+        if group_id in groups
+    )
+
+
+def assert_api_source_authoring(user: User, groups: Mapping[str, Group]) -> None:
+    if api_source_authoring_allowed(user, groups):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="API sources are disabled for your platform groups by tenant policy.",
     )
 
 

@@ -1,5 +1,6 @@
 import { apiBase, apiRequest, pathId, type ApiMutationOptions } from "./http";
 import type {
+  BootstrapData,
   CustomScriptRunResult,
   McpHealthResult,
   McpToolCallRequest,
@@ -88,6 +89,28 @@ export function clearToolSecret(userId: string, configId: string): Promise<ToolC
  * change such as a provider sign-in finishing in another window. */
 export function listAdminToolConfigs(userId: string): Promise<ToolConfigRecord[]> {
   return apiRequest<ToolConfigRecord[]>(userId, "/api/admin/tool-configs");
+}
+
+export function isHermesTool(tool: Pick<ToolConfig, "hermes_companion" | "hermes_server">): boolean {
+  return Boolean(tool.hermes_companion || tool.hermes_server);
+}
+
+export function isHermesAgent(model: { agentic_companion?: string | null }): boolean {
+  return (model.agentic_companion ?? "").trim().toLowerCase() === "hermes";
+}
+
+export const HERMES_LOCKED_MESSAGE =
+  "Hermes needs approval. Ask your administrator to turn on Can use Hermes companion for one of your groups.";
+
+/** Client mirror of the API's hermes_locked_for policy (app/core/policy.py):
+ * standard users without the hermes_companion grant can't open Hermes agents
+ * or connections. Administrators are never locked out of what they manage. */
+export function hermesLocked(data: Pick<BootstrapData, "me" | "groups" | "authoringState">): boolean {
+  if (data.me.role === "PLATFORM_OWNER" || data.me.role === "TENANT_ADMIN") return false;
+  if (typeof data.authoringState?.hermes_enabled === "boolean") return !data.authoringState.hermes_enabled;
+  return !(data.me.group_ids ?? []).some((groupId) =>
+    Boolean(data.groups.find((group) => group.id === groupId)?.permissions.hermes_companion),
+  );
 }
 
 /** Client mirror of the API's tool_access_allowed policy (app/core/policy.py):
