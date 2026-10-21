@@ -2414,6 +2414,8 @@ def _generate_completion(
             thread_id=request.thread_id,
         )
         response = _translate_response(payload, request.model, runtime_context)
+        if request.surface == "draft" and _provider_filtered(response):
+            raise _provider_filter_exception(route, payload)
         completed = _continue_completion_if_needed(
             client,
             route,
@@ -4261,6 +4263,9 @@ def _continue_completion_if_needed(
                 exc,
             )
             raise
+        if _provider_filtered(continuation):
+            # The provider's stock refusal is never the rest of the answer.
+            break
         combined = _merge_completion_response(combined, continuation)
     return combined
 
@@ -4324,6 +4329,10 @@ def _validate_and_revise_completion_if_needed(
                 route.provider_name,
                 exc,
             )
+            break
+        if _provider_filtered(revision):
+            # A filtered revision carries the provider's stock refusal, never a
+            # better answer; keep the one already in hand.
             break
         combined = _replace_completion_response(combined, revision)
     revision_issues = [
@@ -4475,6 +4484,40 @@ def _response_text(response: ChatCompletionResponse) -> str:
         return ""
     content = response.choices[0].message.get("content", "")
     return str(content or "")
+
+
+def _provider_filtered(response: ChatCompletionResponse) -> bool:
+    """True when the provider's content filter replaced the reply.
+
+    The upstream then returns stock text ("I'm sorry, but I cannot assist with
+    that request.") that reads like the model's own answer but is not one.
+    """
+    if not response.choices:
+        return False
+    return response.choices[0].finish_reason.strip().lower() == "content_filter"
+
+
+def _provider_filter_exception(
+    route: ModelGatewayRoute, payload: Mapping[str, Any]
+) -> HTTPException:
+    """Fail a filtered draft honestly instead of delivering the stock refusal.
+
+    OpenRouter names the upstream that served the call; Azure, for one, runs
+    its own content filter over the OpenAI models it hosts.
+    """
+    served_by = payload.get("provider") if isinstance(payload, Mapping) else None
+    source = served_by.strip() if isinstance(served_by, str) and served_by.strip() else None
+    if source and source != route.provider_name:
+        withheld = (
+            f"{source}'s content filter withheld the model's reply "
+            f"({route.provider_name} sent the request to {source})."
+        )
+    else:
+        withheld = f"{source or route.provider_name}'s content filter withheld the model's reply."
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=f"{withheld} Choose a different model or try again.",
+    )
 
 
 def _needs_continuation(response: ChatCompletionResponse) -> bool:

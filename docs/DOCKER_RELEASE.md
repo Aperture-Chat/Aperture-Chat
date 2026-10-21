@@ -231,6 +231,68 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.13
+
+- **Problem reports become support tickets.** **Help › Report a problem**
+  files a problem, idea, question, feedback, or security concern with an
+  optional screenshot (choose, paste, drop, or capture the screen) and
+  opt-in technical details that show exactly what they add. Each
+  organization numbers its tickets, and the reporter's unfinished draft
+  survives closing the drawer.
+- **A Reports tab to work them.** Admins (in the Admin console) and owners
+  (in the Platform console) set status, priority, type, and assignee, reply
+  publicly, add internal notes reporters never see, and filter to **Needs
+  reply**. Tenant admins see only the people they administer. Every change is
+  audited under `support.*`, and the new **Support-reports template** in
+  **Alerts** emails admins about new tickets, replies, and reopens.
+- **Reporters follow their tickets.** **Help › My reports** shows public
+  replies, status changes, and GitHub progress, with a dot on **Help** for
+  news. Reporters can reply while a ticket is open and reopen it once it is
+  resolved or closed. With SMTP configured they are also emailed.
+- **Optional sharing with the maintainers.** Owners can send a redacted copy
+  of a ticket to the community hub, which files it as a GitHub issue on the
+  project repository and reports its status back, so no deployment needs a
+  GitHub token. **Review each report** is the default: nothing leaves until
+  an owner reviews and sends it. **Share automatically** and **Off** are in
+  **Platform console › Reports › Settings**. Personal data, people and
+  organization names, private hostnames, and token-like strings are replaced
+  with placeholders before sending; security concerns and screenshots never
+  leave. See [Support tickets](SUPPORT_TICKETS.md).
+- **Write in Drafts from chat.** When a chat message asks for a document or a
+  slide deck, an inline card offers **Write in Drafts** or **Continue in
+  chat**. Drafts starts the document or deck with the same model, web,
+  knowledge, files, and earlier conversation, with no retyping.
+- **Inline AI edits keep the formatting.** When an instruction does not ask
+  for a new look or shape, such as "fill the blank lines", only the changed
+  words are written back into the original text, so tab stops, underlines,
+  and blank-line fields from imported Word documents survive. The **Edit with
+  AI** composer follows the workspace accent.
+- **Tactile controls.** Buttons and toggles across the platform share the
+  Drafts Document/Deck rail style: choices sit in a recessed track with the
+  selected one lit, primary actions are lit keys, and everyday buttons press
+  in. Panels, menus, and dialogs have crisp edges. Layout is unchanged.
+- Fixes: Drafts with a long, request-derived title no longer stay **Local
+  only — server save failed** (titles are clamped to the 240-character
+  limit, and subjects stop at the first sentence); Word exports with long
+  titles no longer save as empty files from Chrome's save picker; a reply a
+  provider withholds with its content filter is reported as an error that
+  names the provider instead of being saved as the document; and history
+  papers are no longer formatted as legal instruments.
+- New setting: `APERTURE_SUPPORT_HUB_URL` (default
+  `https://chat.aperturechat.com`) names the community hub. Leave it blank to
+  turn hub sharing off; nothing is sent while sharing is in review mode until
+  an owner approves a report.
+- Database migration `20261021_0027` adds the ticket fields, ticket timeline,
+  hub link, support settings, and hub intake queue. Existing reports become
+  **Received** tickets marked as seen. Back up the data volume before
+  upgrading; rolling back to v0.5.13 needs that backup as well as the older
+  images.
+- Training videos and guide PDFs show the earlier report form and control
+  style until the next training recapture.
+- API and web images publish as `v0.5.14-dev`, `v0.5.14-test`, and
+  `v0.5.14-main`. Stable `v0.5.14` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.12
 
 - **Connectors move to Admin → Connections.** Workspace admins manage their

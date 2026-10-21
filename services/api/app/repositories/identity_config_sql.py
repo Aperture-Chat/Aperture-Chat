@@ -1402,6 +1402,7 @@ def _prepare_secret(
     elif parsed.resource_kind not in (
         ConfigurationSecretResourceKind.PLATFORM_EMAIL,
         ConfigurationSecretResourceKind.PLATFORM_ELASTIC,
+        ConfigurationSecretResourceKind.PLATFORM_SUPPORT,
     ):
         raise IdentityConfigImportConflict("Configuration secret has an unsupported owner type.")
 
