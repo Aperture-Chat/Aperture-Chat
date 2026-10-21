@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.core import attachment_previews
+from app.core.rate_limit import ProcessLocalTokenBucket
 from app.main import app
+from app.routes import issue_reports
 from app.repositories.deps import get_store
 
 client = TestClient(app)
@@ -23,6 +25,8 @@ def reset_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
         "get_settings",
         lambda: SimpleNamespace(runtime_state_path=str(tmp_path / "runtime_state.json")),
     )
+    # Per-person submit limits are process-wide; give every test a fresh budget.
+    monkeypatch.setattr(issue_reports, "_REPORT_BUCKETS", ProcessLocalTokenBucket(max_entries=100, idle_ttl_seconds=60))
     get_store.cache_clear()
     yield
     get_store.cache_clear()

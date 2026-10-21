@@ -59,7 +59,9 @@ from app.db.orm import (
     ChatRetentionTombstoneRow,
     ChatThreadTagRow,
     ElasticExportCursorRow,
+    IssueReportEventRow,
     IssueReportRow,
+    IssueReportUpstreamRow,
     SearchIndexEntryRow,
     MatterRow,
     MfaPreauthChallengeRow,
@@ -4433,6 +4435,13 @@ class ApplicationStateRepository:
                 session.execute(
                     select(IssueReportRow.id).where(IssueReportRow.tenant_id == tenant_id)
                 ).scalars()
+            )
+            # Ticket timelines and hub links go before their tickets.
+            session.execute(
+                delete(IssueReportEventRow).where(IssueReportEventRow.tenant_id == tenant_id)
+            )
+            session.execute(
+                delete(IssueReportUpstreamRow).where(IssueReportUpstreamRow.tenant_id == tenant_id)
             )
             removed_issue_reports = (
                 session.execute(

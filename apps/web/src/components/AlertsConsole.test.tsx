@@ -104,3 +104,12 @@ test("test email is blocked while SMTP edits are unsaved", async () => {
   fireEvent.click(sendButton);
   await waitFor(() => expect(api.sendEmailTest).toHaveBeenCalledWith("soc@example.com"));
 });
+
+test("support-reports template prefills a rule for new reports and replies", async () => {
+  render(<AlertsConsole variant="admin" api={ownerApi()} actorOptions={[]} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /Support-reports template/ }));
+  expect(screen.getByLabelText("Action patterns")).toHaveValue(
+    "support.issue_reported, support.issue_reporter_replied, support.issue_reopened",
+  );
+});

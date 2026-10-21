@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   BellRing,
+  Bug,
   Download,
   ListChecks,
   Mail,
@@ -66,7 +67,7 @@ const SEVERITY_OPTIONS = [
 ] as const;
 
 const ACTION_PATTERN_HINT =
-  "Exact actions or prefixes: security.*, admin.*, auth.*, chat.*, platform.*, agent.*, automation.*, knowledge.*, tool.*, scim.*, hermes.*";
+  "Exact actions or prefixes: security.*, admin.*, auth.*, chat.*, platform.*, agent.*, automation.*, knowledge.*, tool.*, scim.*, hermes.*, support.*";
 
 // Mirrors DLP_RULES in services/api/app/core/dlp.py. The API rejects any id
 // outside that list, so drift surfaces as a save error, never a dead rule.
@@ -113,6 +114,18 @@ const PROMPT_INJECTION_TEMPLATE: RuleTemplate = {
   thresholdCount: "1",
   windowMinutes: "60",
   cooldownMinutes: "10",
+};
+
+// People's problem reports from Help, plus their replies and reopens, so
+// administrators hear about new tickets without watching the Reports tab.
+const SUPPORT_REPORTS_TEMPLATE: RuleTemplate = {
+  name: "New support reports",
+  description: "Problem reports, ideas, and questions people send from Help, and their replies.",
+  actionPatterns: "support.issue_reported, support.issue_reporter_replied, support.issue_reopened",
+  minSeverity: "info",
+  thresholdCount: "1",
+  windowMinutes: "60",
+  cooldownMinutes: "0",
 };
 
 type RuleDraft = {
@@ -799,6 +812,14 @@ export function AlertsConsole({
               onClick={() => openCreateForm(SUSPICIOUS_TEMPLATE)}
             >
               <ShieldAlert size={14} /> Suspicious-activity template
+            </button>
+            <button
+              className="secondary-button compact"
+              type="button"
+              data-tooltip="Prefill a rule that emails on every new support report and reporter reply"
+              onClick={() => openCreateForm(SUPPORT_REPORTS_TEMPLATE)}
+            >
+              <Bug size={14} /> Support-reports template
             </button>
             <button
               className="primary-button compact"

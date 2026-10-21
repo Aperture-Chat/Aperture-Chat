@@ -60,6 +60,7 @@ import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { PersonalDataProtectionPanel } from "./PersonalDataProtectionPanel";
 import { TrainingDatasetsConsole } from "./TrainingDatasetsConsole";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
+import { SupportTicketsConsole, type SupportTicketsApi } from "./SupportTicketsConsole";
 import { AuditSummaryBoard, type AuditSummaryGroup, type AuditSummaryItem } from "./AuditSummaryCard";
 import { AuditInsights } from "./AuditInsights";
 import {
@@ -719,6 +720,7 @@ export function AdminConsole({
   onDataChange,
   adminApi,
   connectorApi,
+  supportApi,
   openDocumentationRequestKey,
   section,
   onSectionChange,
@@ -726,6 +728,8 @@ export function AdminConsole({
   data: BootstrapData;
   onDataChange: (updater: (current: BootstrapData) => BootstrapData) => void;
   adminApi?: AdminConsoleApi;
+  /** Support tickets people send from Help › Report a problem. */
+  supportApi?: SupportTicketsApi;
   /** Workspace connector switches, visibility, and credentials. */
   connectorApi?: ConnectorsPanelApi;
   openDocumentationRequestKey?: number;
@@ -987,12 +991,13 @@ export function AdminConsole({
       "Connections",
       "SSO",
       "Analytics",
+      ...(supportApi ? ["Reports"] : []),
       "Policies",
       "Datasets",
       "Audit",
       "Alerts",
     ],
-    [],
+    [supportApi],
   );
   const adminAuditUsers = useMemo(
     () =>
@@ -3609,7 +3614,17 @@ export function AdminConsole({
 
               {filteredIssueReports.length > 0 && (
                 <>
-                  <h3 className="feedback-subsection-title">Reported platform issues</h3>
+                  <div className="feedback-subsection-head">
+                    <h3 className="feedback-subsection-title">Reported platform issues</h3>
+                    {supportApi && (
+                      <button className="link-button" type="button" onClick={() => {
+                          setLocalSection("reports");
+                          onSectionChange?.("reports");
+                        }}>
+                        Manage in Reports
+                      </button>
+                    )}
+                  </div>
                   <div className="feedback-event-list scrollable-log-list" aria-label="Admin platform issue reports">
                     {filteredIssueReports.map((item) => (
                       <button
@@ -4562,6 +4577,12 @@ export function AdminConsole({
             </Panel>
           </div>
         </Tabs.Content>
+
+        {supportApi && (
+          <Tabs.Content value="reports" className="tab-content">
+            <SupportTicketsConsole variant="admin" api={supportApi} />
+          </Tabs.Content>
+        )}
 
         <Tabs.Content value="alerts" className="tab-content">
           <AlertsConsole variant="admin" api={alertsApi} actorOptions={alertActorOptions} />

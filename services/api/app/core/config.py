@@ -240,6 +240,19 @@ class Settings(BaseSettings):
     platform_update_releases_url: str = ""
     platform_update_check_interval_seconds: float = Field(default=6 * 3600.0, ge=300.0)
     platform_update_request_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+
+    # Community issue reporting. Any deployment can share a redacted support
+    # ticket with this intake hub, which files it as a GitHub issue on the
+    # project repository and reports the issue status back. Owners choose Off,
+    # Review each report (default: nothing leaves until an owner approves the
+    # exact text), or Automatic in the console. Empty disables hub sharing;
+    # prefilled GitHub issue links keep working either way.
+    support_hub_url: str = "https://chat.aperturechat.com"
+    support_hub_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
+    # How often a shared ticket asks the hub for its GitHub status.
+    support_hub_poll_interval_seconds: float = Field(default=3 * 3600.0, ge=300.0)
+    # Hub side: how often published issues are re-read from GitHub.
+    support_hub_github_sync_interval_seconds: float = Field(default=3600.0, ge=300.0)
     # Deprecated compatibility input; update checks use app/version.py so stale
     # deployment environment files cannot override the running image identity.
     release_version: str = ""

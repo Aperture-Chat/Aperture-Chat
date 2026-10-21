@@ -32,6 +32,8 @@ from app.core.automation_runner import (
 from app.core.config import Settings, get_settings
 from app.core.elastic_export import run_elastic_export
 from app.core.search_index import search_index_pass
+from app.core.support_hub import support_hub_pass
+from app.core.support_upstream import support_upstream_pass
 from app.core.model_gateway import ModelGatewayError, get_model_gateway_client
 from app.core.platform_updates import reconcile_updater_outcome, refresh_platform_update_check
 from app.models.schemas import Automation, PlatformSettings, User
@@ -482,6 +484,16 @@ def scheduler_pass(store: SeedStore, settings: Settings) -> None:
             search_index_pass(store)
         except Exception:  # noqa: BLE001
             logger.exception("Search index maintenance failed")
+    # Shared support tickets: send queued ones, refresh stale hub statuses.
+    try:
+        support_upstream_pass(store, settings)
+    except Exception:  # noqa: BLE001
+        logger.exception("Support hub sharing failed")
+    # Hub side (no-op unless this deployment is the community intake hub).
+    try:
+        support_hub_pass(store, settings)
+    except Exception:  # noqa: BLE001
+        logger.exception("Community hub maintenance failed")
 
 
 async def scheduler_loop() -> None:
