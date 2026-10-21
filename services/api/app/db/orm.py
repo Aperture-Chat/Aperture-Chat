@@ -47,9 +47,13 @@ from app.models.schemas import (
     ChatMessage,
     ChatThread,
     ChatThreadTag,
+    IssueReportEvent,
     IssueReportRecord,
+    IssueReportUpstream,
     ModelAccessRequest,
     RetentionHold,
+    SupportHubReport,
+    SupportSettings,
     TenantDailyUsage,
     TenantUsageBudget,
     TenantUsageCompletionEvent,
@@ -1611,10 +1615,15 @@ class SearchIndexStateRow(Base):
 
 
 class IssueReportRow(Base):
-    """Server-side issue report with an optional separately stored image preview."""
+    """Server-side support ticket with an optional separately stored image preview."""
 
     __tablename__ = "issue_reports"
-    __table_args__ = (Index("ix_issue_reports_tenant_created", "tenant_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_issue_reports_tenant_created", "tenant_id", "created_at"),
+        Index("ix_issue_reports_tenant_number", "tenant_id", "number", unique=True),
+        Index("ix_issue_reports_tenant_status", "tenant_id", "status"),
+        Index("ix_issue_reports_user_created", "user_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -1626,6 +1635,20 @@ class IssueReportRow(Base):
     screenshot_mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     screenshot_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="bug")
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, server_default="normal")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="new")
+    assignee_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    assignee_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_public_activity_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_activity_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    reporter_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
     @classmethod
     def from_model(cls, report: IssueReportRecord) -> IssueReportRow:
@@ -1637,12 +1660,182 @@ class IssueReportRow(Base):
             tenant_id=self.tenant_id,
             user_id=self.user_id,
             user_name=self.user_name,
+            number=self.number,
+            kind=self.kind,
+            priority=self.priority,
+            status=self.status,
             subject=self.subject,
             body=self.body,
             screenshot_filename=self.screenshot_filename,
             screenshot_mime_type=self.screenshot_mime_type,
             screenshot_size_bytes=self.screenshot_size_bytes,
+            assignee_user_id=self.assignee_user_id,
+            assignee_name=self.assignee_name,
+            diagnostics=self.diagnostics,
             created_at=self.created_at,
+            updated_at=self.updated_at or self.created_at,
+            resolved_at=self.resolved_at,
+            last_public_activity_at=self.last_public_activity_at or self.created_at,
+            last_activity_by=self.last_activity_by,
+            reporter_seen_at=self.reporter_seen_at,
+        )
+
+
+class IssueReportEventRow(Base):
+    """Ticket timeline entry; internal notes never reach the reporter."""
+
+    __tablename__ = "issue_report_events"
+    __table_args__ = (
+        Index("ix_issue_report_events_report_created", "report_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    report_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("issue_reports.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    actor_name: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    from_value: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    to_value: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    @classmethod
+    def from_model(cls, event: IssueReportEvent) -> IssueReportEventRow:
+        return cls(**event.model_dump())
+
+    def to_model(self) -> IssueReportEvent:
+        return IssueReportEvent.model_validate(
+            {column.key: getattr(self, column.key) for column in self.__table__.columns}
+        )
+
+
+class IssueReportUpstreamRow(Base):
+    """One ticket's submission to the community intake hub (instance side)."""
+
+    __tablename__ = "issue_report_upstream"
+    __table_args__ = (
+        Index("ix_issue_report_upstream_state_next", "state", "next_attempt_at"),
+    )
+
+    report_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("issue_reports.id", ondelete="CASCADE"), primary_key=True
+    )
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    hub_url: Mapped[str] = mapped_column(Text, nullable=False)
+    hub_report_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    receipt_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    issue_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    issue_state_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    maintainer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shared_by_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    shared_by_name: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_title: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_body: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    queued_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    @classmethod
+    def from_model(cls, link: IssueReportUpstream) -> IssueReportUpstreamRow:
+        return cls(**link.model_dump())
+
+    def to_model(self) -> IssueReportUpstream:
+        return IssueReportUpstream.model_validate(
+            {column.key: getattr(self, column.key) for column in self.__table__.columns}
+        )
+
+
+class SupportSettingsRow(Base):
+    """Deployment-wide support settings; the hub GitHub token lives in the vault."""
+
+    __tablename__ = "support_settings"
+    __table_args__ = (CheckConstraint("singleton_id = 1", name="singleton_id_one"),)
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    upstream_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    ai_model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notify_reporters: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    hub_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    hub_repository: Mapped[str] = mapped_column(String(255), nullable=False)
+    hub_auto_publish: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    hub_ai_triage: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    def to_model(self) -> SupportSettings:
+        return SupportSettings(
+            upstream_mode=self.upstream_mode,
+            instance_id=self.instance_id,
+            ai_model_id=self.ai_model_id,
+            notify_reporters=self.notify_reporters,
+            hub_enabled=self.hub_enabled,
+            hub_repository=self.hub_repository,
+            hub_auto_publish=self.hub_auto_publish,
+            hub_ai_triage=self.hub_ai_triage,
+            updated_at=self.updated_at,
+        )
+
+
+class SupportHubReportRow(Base):
+    """A report received by this deployment acting as the community intake hub.
+
+    Only the SHA-256 of the receipt token and of the sender address are kept,
+    so a database copy cannot be used to read or spoof another sender.
+    """
+
+    __tablename__ = "support_hub_reports"
+    __table_args__ = (
+        Index("ix_support_hub_reports_status_received", "status", "received_at"),
+        Index("ix_support_hub_reports_instance_received", "instance_id", "received_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    receipt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    instance_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    diagnostics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    issue_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    issue_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    issue_state_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    issue_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    triage: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    maintainer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+    @classmethod
+    def from_model(cls, report: SupportHubReport) -> SupportHubReportRow:
+        return cls(**report.model_dump())
+
+    def to_model(self) -> SupportHubReport:
+        return SupportHubReport.model_validate(
+            {column.key: getattr(self, column.key) for column in self.__table__.columns}
         )
 
 

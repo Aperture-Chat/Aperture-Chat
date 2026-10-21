@@ -41,6 +41,7 @@ from app.routes import (
     review,
     scim,
     search,
+    support,
     tools,
 )
 
@@ -237,6 +238,7 @@ app.include_router(admin.router)
 app.include_router(data_protection.router)
 app.include_router(chat.router)
 app.include_router(issue_reports.router)
+app.include_router(support.router)
 app.include_router(memory.router)
 app.include_router(knowledge.router)
 app.include_router(connector_oauth.router)
