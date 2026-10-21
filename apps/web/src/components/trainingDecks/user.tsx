@@ -2707,6 +2707,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       "To create your own: your administrator grants Can build knowledge bases to one of your groups. Without it, you use the knowledge bases shared with you.",
       "Files up to 250 MB each: PDF, Word, Excel, PowerPoint, email (.eml, .msg), text, Markdown, CSV, JSON, images, audio, and video.",
       "For web pages: public addresses. For pages behind a sign-in, paste the text instead.",
+      "To connect an API: your administrator also grants Can add API sources. Until then, Connect an API is shown locked.",
       "Connected sources such as SharePoint, Box, Google Drive, and iManage are set up by administrators and shared with you.",
     ],
     setupSteps: [
@@ -2850,7 +2851,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     outcomes: ["Connections, Prompts, and Skills found", "A saved prompt read and used", "Private connection form understood"],
     prerequisites: [
       "Prompts and skill files are created by administrators; you can read and use them.",
-      "To add your own connection: your administrator grants Can build tools to one of your groups, and you have the MCP server's address.",
+      "To add your own connection: your administrator grants Can build tools to one of your groups, and you have the MCP server's address. Until then, Add connection is shown locked.",
     ],
     setupSteps: [
       "Choose Library in the sidebar, then Tools.",

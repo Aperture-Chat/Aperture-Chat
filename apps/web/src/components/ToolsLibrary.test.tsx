@@ -328,7 +328,10 @@ test("standard users see connections they can use without management controls", 
   };
   renderTools();
   expect(screen.getByText(/Connections are managed by your administrators/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Add connection" })).not.toBeInTheDocument();
+  // Discoverable but grayed out until an administrator grants Can build tools.
+  const add = screen.getByRole("button", { name: "Add connection" });
+  expect(add).toBeDisabled();
+  expect(add).toHaveAttribute("data-tooltip", expect.stringMatching(/Can build tools/));
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /More actions/ })).not.toBeInTheDocument();
@@ -422,4 +425,41 @@ test("approval copy describes what actually happens", () => {
   fireEvent.click(screen.getByRole("button", { name: "Access token" }));
   expect(screen.getByLabelText("Access token")).toHaveAttribute("placeholder", "Paste the access token");
   expect(screen.getByText("Not saved")).toBeInTheDocument();
+});
+
+test("Hermes connections stay visible but locked for users without the Hermes grant", () => {
+  const me = { ...sampleData.users.find((user) => user.id === "user-jane")!, role: "USER" as const };
+  const hermes = { ...httpTool, id: "tool-hermes-shared", name: "Hermes Server", enabled: true, hermes_server: true };
+  currentData = {
+    ...currentData,
+    me,
+    authoringState: { knowledge_enabled: false, tools_enabled: false, hermes_enabled: false },
+    tools: [...currentData.tools, hermes],
+  };
+  const { unmount } = renderTools();
+  expect(within(card("Hermes Server")).getByText("Locked")).toBeInTheDocument();
+  expect(within(card("Hermes Server")).getByText(/Needs Hermes approval/)).toBeInTheDocument();
+  unmount();
+
+  currentData = { ...currentData, authoringState: { knowledge_enabled: false, tools_enabled: false, hermes_enabled: true } };
+  renderTools();
+  expect(within(card("Hermes Server")).queryByText("Locked")).not.toBeInTheDocument();
+});
+
+test("a standard user's older script can be switched off but only an admin turns it back on", () => {
+  const jane = sampleData.users.find((user) => user.id === "user-jane")!;
+  const script = { ...httpTool, type: "custom_script" as const, endpoint: undefined, transport: undefined, owner_user_id: jane.id };
+  currentData = {
+    ...currentData,
+    me: { ...jane, role: "USER", group_ids: ["group-finance"] },
+    authoringState: { knowledge_enabled: false, tools_enabled: true },
+    tools: [
+      ...currentData.tools,
+      { ...script, id: "tool-old-script", name: "Old script", enabled: false },
+      { ...script, id: "tool-live-script", name: "Live script", enabled: true },
+    ],
+  };
+  renderTools();
+  expect(within(card("Old script")).getByRole("switch", { name: "Turn Old script on or off" })).toBeDisabled();
+  expect(within(card("Live script")).getByRole("switch", { name: "Turn Live script on or off" })).toBeEnabled();
 });

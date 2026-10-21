@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from app.core import clock
 from app.core.config import get_settings
+from app.core.connector_availability import connector_enabled_for_tenant
 from app.core.generated_artifacts import generated_artifact_file
 from app.core.mcp_runtime import call_mcp_tool, check_mcp_server, mcp_env_from_auth
 from app.core.net_guard import EgressBlocked, validate_public_url
@@ -234,8 +235,7 @@ def approve_mcp_tool(
     tool = _get_configurable_tool(config_id, actor, store)
     if tool.tool_type != "mcp":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only MCP tools require approval.")
-    mcp_connector = store.connectors.get("mcp")
-    if mcp_connector is None or not (mcp_connector.platform_enabled and mcp_connector.tenant_enabled):
+    if not connector_enabled_for_tenant(store, "mcp", tool.tenant_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="MCP servers are turned off for this workspace.",

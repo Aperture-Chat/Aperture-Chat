@@ -44,6 +44,7 @@ from app.core.script_tools import (
     validate_custom_script,
 )
 from app.core.model_discovery import DiscoveredModel, ModelDiscoveryError, discover_provider_models
+from app.core.connector_availability import ATTACHABLE_CONNECTOR_IDS
 from app.core.net_guard import EgressBlocked, validate_public_url
 from app.core.policy import (
     agent_profile_authored_by,
@@ -53,11 +54,11 @@ from app.core.policy import (
     assert_knowledge_authoring,
     assert_tool_authoring,
     hermes_companion_allowed,
+    hermes_locked_for,
     is_platform_owner,
     is_temp_user_model,
     is_workspace_agent_profile,
     require_admin_or_owner,
-    require_platform_owner,
     same_tenant,
 )
 from app.core.sessions import sign_oidc_state
@@ -147,6 +148,7 @@ from app.repositories.seed import (
 )
 from app.repositories.usage_budgets import TenantUsageBudgetRepository
 from app.routes.dependencies import current_user
+from app.routes.knowledge import CONNECTOR_SOURCE_TYPES
 
 router = APIRouter(prefix="/api/admin", tags=["tenant-admin"])
 
@@ -1502,10 +1504,18 @@ def hermes_memories(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[CompanionMemory]:
-    """Memories the Hermes companion saved for this profile, newest first."""
-    require_admin_or_owner(actor)
-    model = _get_agent_profile_for_admin(model_id, actor, store)
-    return hermes.profile_memories(store, model.id)
+    """Memories the Hermes companion saved for this profile, newest first.
+
+    Admins review any profile in scope; a granted author reviews their own,
+    so a private agent never keeps memories its author can't see or remove.
+    An author only sees what Hermes learned from their own chats: once an
+    admin publishes the profile it also learns from other people's.
+    """
+    model = _get_hermes_memory_profile(model_id, actor, store)
+    memories = hermes.profile_memories(store, model.id)
+    if _is_agent_profile_admin(actor):
+        return memories
+    return [memory for memory in memories if memory.created_by == actor.id]
 
 
 @router.delete("/agent-profiles/{model_id}/hermes-memories/{memory_id}")
@@ -1515,10 +1525,13 @@ def delete_hermes_memory(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> dict[str, str]:
-    require_admin_or_owner(actor)
-    model = _get_agent_profile_for_admin(model_id, actor, store)
+    model = _get_hermes_memory_profile(model_id, actor, store)
     memory = store.companion_memories.get(memory_id)
-    if memory is None or memory.profile_id != model.id:
+    if (
+        memory is None
+        or memory.profile_id != model.id
+        or (not _is_agent_profile_admin(actor) and memory.created_by != actor.id)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="That Hermes memory does not exist for this profile.",
@@ -1543,13 +1556,14 @@ def connectors(
 
 
 @router.get("/connector-configs")
-# These established URLs remain compatible with saved clients, while shared
-# credentials and connector administration belong to the platform owner.
+# Workspace admins manage their own tenant's connector records: credentials,
+# the workspace on/off switch, and whether a source is hidden from the attach
+# menus. The catalog flags above them stay the platform owner's ceiling.
 def connector_configs(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[ConnectorConfig]:
-    require_platform_owner(actor)
+    require_admin_or_owner(actor)
     return _visible_tenant_records(store.connector_configs, actor)
 
 
@@ -1559,15 +1573,14 @@ def create_connector_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> ConnectorConfig:
-    require_platform_owner(actor)
+    require_admin_or_owner(actor)
     connector = store.connectors.get(payload.connector_id)
     if connector is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown connector.")
-    if not connector.platform_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Connector is disabled by platform policy.",
-        )
+    # A record below a closed platform ceiling is still saved, so an admin can
+    # hide a source or stage credentials; the runtime keeps it off until the
+    # platform owner allows the connector again.
+    _assert_hideable_connector(payload.connector_id, payload.hidden)
     tenant_id = _tenant_id_for_config(actor, payload.tenant_id, store)
     config_id = payload.id or f"conncfg-{uuid4()}"
     _assert_new_config_id(config_id, store.connector_configs)
@@ -1576,6 +1589,7 @@ def create_connector_config(
         tenant_id=tenant_id,
         connector_id=payload.connector_id,
         enabled=payload.enabled,
+        hidden=payload.hidden,
         auth_type=payload.auth_type,
         scopes=payload.scopes,
         settings=payload.settings,
@@ -1601,9 +1615,10 @@ def update_connector_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> ConnectorConfig:
-    require_platform_owner(actor)
+    require_admin_or_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     updates = payload.model_dump(exclude_unset=True)
+    _assert_hideable_connector(payload.connector_id or config.connector_id, payload.hidden)
     replace_settings = bool(updates.pop("replace_settings", False))
     clear_secret = bool(updates.pop("clear_secret", False))
     clear_oauth = bool(updates.pop("clear_oauth", False))
@@ -1639,7 +1654,7 @@ def delete_connector_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> dict[str, str]:
-    require_platform_owner(actor)
+    require_admin_or_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     linked_knowledge = [
         knowledge.name
@@ -1693,7 +1708,7 @@ def connector_oauth_authorize_url(
 
 
 def _google_oauth_authorize_url(config_id: str, actor: User, store: SeedStore) -> str:
-    require_platform_owner(actor)
+    require_admin_or_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     if config.connector_id != "google-drive":
         raise HTTPException(
@@ -1746,7 +1761,7 @@ def test_connector_config(
     store: SeedStore = Depends(get_store),
 ) -> dict[str, Any]:
     """Live-verify connector credentials: required fields, token acquisition, API probe."""
-    require_platform_owner(actor)
+    require_admin_or_owner(actor)
     config = _get_tenant_record(config_id, store.connector_configs, actor)
     result = connector_auth.run_connector_test(store, config)
     settings = dict(config.settings)
@@ -2010,6 +2025,7 @@ def create_knowledge_config(
         payload.tenant_id = None
         payload.acl_group_ids = []
         payload.owner_user_id = actor.id
+        _assert_user_knowledge_source(payload.source_type, payload.connector_config_id)
     tenant_id = _tenant_id_for_config(actor, payload.tenant_id, store)
     _assert_group_scope(actor, payload.acl_group_ids, store, tenant_id=tenant_id)
     _assert_connector_config_scope(payload.connector_config_id, tenant_id, store)
@@ -2039,6 +2055,21 @@ def create_knowledge_config(
     return config
 
 
+def _assert_user_knowledge_source(source_type: str | None, connector_config_id: str | None) -> None:
+    """A user-built knowledge base can't sync through a workspace connector.
+
+    Box, SharePoint, Google Drive, and iManage bases sync with the workspace
+    connector's own credentials, so binding one would hand a standard user
+    whatever that account can read. Those stay admin-configured and shared.
+    """
+    if connector_config_id or (source_type or "").strip().lower() in CONNECTOR_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Connected sources such as Box, SharePoint, Google Drive, and iManage "
+            "are set up by administrators.",
+        )
+
+
 @router.patch("/knowledge-configs/{config_id}")
 def update_knowledge_config(
     config_id: str,
@@ -2061,6 +2092,7 @@ def update_knowledge_config(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Knowledge base ownership is managed by administrators.",
             )
+        _assert_user_knowledge_source(payload.source_type, payload.connector_config_id)
     updates = payload.model_dump(exclude_unset=True)
     if payload.acl_group_ids is not None:
         _assert_group_scope(actor, payload.acl_group_ids, store, tenant_id=config.tenant_id)
@@ -2156,6 +2188,29 @@ def _stdio_command_change_requested(
     return proposed != current
 
 
+def _assert_user_tool_shape(
+    actor: User, store: SeedStore, tool_type: str | None, settings: dict | None
+) -> None:
+    """What a granted standard user may author: their own MCP connections.
+
+    Custom scripts run code on the API host (with network access), so they
+    stay with administrators, and marking a connection as a Hermes companion
+    needs the Hermes grant like every other Hermes surface.
+    """
+    if tool_type is not None and tool_type != "mcp":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can create or change custom script tools; you can add MCP connections.",
+        )
+    settings = settings if isinstance(settings, dict) else {}
+    marks_hermes = settings.get("hermes_companion") is True or settings.get("mcp_server") == "hermes-agent"
+    if marks_hermes and hermes_locked_for(actor, store.groups):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hermes companion is disabled for your platform groups by tenant policy.",
+        )
+
+
 def _without_stdio_command_keys(settings: dict) -> dict:
     return {key: value for key, value in settings.items() if key not in ("command", "args")}
 
@@ -2192,6 +2247,8 @@ def create_tool_config(
     store: SeedStore = Depends(get_store),
 ) -> ToolConfig:
     assert_tool_authoring(actor, store.groups)
+    if not _is_agent_profile_admin(actor):
+        _assert_user_tool_shape(actor, store, payload.tool_type, payload.settings)
     if not is_platform_owner(actor):
         if _stdio_command_change_requested(payload.settings):
             raise HTTPException(
@@ -2252,6 +2309,17 @@ def update_tool_config(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Sharing a tool with groups is managed by administrators.",
+            )
+        if payload.settings is not None:
+            # Switching an older user-owned script off, or renaming it, stays
+            # possible; changing what it runs does not.
+            _assert_user_tool_shape(actor, store, config.tool_type, payload.settings)
+        if payload.enabled is True and not config.enabled and config.tool_type != "mcp":
+            # Custom scripts are admin-only now. One that is still on keeps
+            # working, but once off only an administrator turns it back on.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can turn custom script tools back on.",
             )
     updates = payload.model_dump(exclude_unset=True)
     if payload.tool_type is not None and payload.tool_type != config.tool_type:
@@ -2341,7 +2409,7 @@ def preview_tool_script(
 ) -> CustomScriptRunResponse:
     """Test-run a custom tool script before saving it. Runs in the same
     sandbox as saved tools; nothing is persisted."""
-    assert_tool_authoring(actor, store.groups)
+    require_admin_or_owner(actor)
     try:
         validate_custom_script(payload.script, payload.timeout_seconds)
     except ValueError as exc:
@@ -3763,6 +3831,13 @@ def _assert_agent_profile_authoring_scope(actor: User, model: ModelConfig) -> No
         )
 
 
+def _get_hermes_memory_profile(model_id: str, actor: User, store: SeedStore) -> ModelConfig:
+    assert_agent_authoring(actor, store.groups, store.platform_settings)
+    model = _get_agent_profile_for_admin(model_id, actor, store)
+    _assert_agent_profile_authoring_scope(actor, model)
+    return model
+
+
 def _get_agent_profile_for_admin(model_id: str, actor: User, store: SeedStore) -> ModelConfig:
     model = _resolve_model_identifier(model_id, store)
     if model is None:
@@ -4635,6 +4710,14 @@ def _save_secret_if_present(
     if secret_value is None:
         return None
     return store.set_configuration_secret(namespace, record_id, secret_value)
+
+
+def _assert_hideable_connector(connector_id: str, hidden: bool | None) -> None:
+    if hidden and connector_id not in ATTACHABLE_CONNECTOR_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only cloud file sources can be hidden from the attach menu.",
+        )
 
 
 def _apply_config_updates(record: Any, updates: dict[str, Any]) -> None:

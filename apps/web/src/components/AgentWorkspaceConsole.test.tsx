@@ -775,3 +775,21 @@ test("an empty workspace offers agent templates", () => {
   fireEvent.click(screen.getByRole("button", { name: /Policy Q&A/ }));
   expect(screen.getByLabelText("Agent name")).toHaveValue("Policy Q&A");
 });
+
+test("Hermes agents stay visible but locked for users without the Hermes grant", () => {
+  const hermesAgent = currentData.models.find((model) => model.agentic_companion === "hermes")!;
+  const jane = currentData.users.find((user) => user.id === "user-jane")!;
+  currentData = {
+    ...currentData,
+    me: { ...jane, role: "USER" },
+    authoringState: { knowledge_enabled: false, tools_enabled: false, hermes_enabled: false },
+  };
+  const onUseInChat = vi.fn();
+  renderAgentWorkspace(onUseInChat);
+
+  const hermesCard = screen.getByRole("article", { name: hermesAgent.name });
+  const chat = within(hermesCard).getByRole("button", { name: /Chat/ });
+  expect(chat).toBeDisabled();
+  expect(chat).toHaveAttribute("data-tooltip", expect.stringMatching(/Can use Hermes companion/));
+  expect(within(hermesCard).getByText(/Needs Hermes approval/)).toBeInTheDocument();
+});

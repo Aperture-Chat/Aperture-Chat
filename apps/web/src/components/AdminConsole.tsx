@@ -1,4 +1,5 @@
 import { SelectControl } from "./SelectControl";
+import { ConnectorsPanel, type ConnectorsPanelApi } from "./ConnectorsPanel";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   Ban,
@@ -78,7 +79,6 @@ import { ModelFilterDialog, type ModelFilterDialogApi } from "./ModelFilterDialo
 import { CustomToolBuilder, type CustomToolBuilderApi } from "./CustomToolBuilder";
 
 import type {
-  AdminConnectorConfigUpdateRequest,
   AdminContentFilterCreateRequest,
   AdminContentFilterUpdateRequest,
   AdminSsoConfigCreateRequest,
@@ -87,8 +87,6 @@ import type {
   AdminToolConfigUpdateRequest,
   AuditEvent,
   BootstrapData,
-  Connector,
-  ConnectorConfigRecord,
   ContentFilter,
   ContentFilterPreviewResult,
   ContentFilterRule,
@@ -120,7 +118,7 @@ import type {
   UsageSummary,
   UserPromptRecord,
 } from "../lib/types";
-import type { ConnectorTestResult, SsoTestResult, TenantUsageBudgetSnapshot } from "../lib/api";
+import type { SsoTestResult, TenantUsageBudgetSnapshot } from "../lib/api";
 import {
   deleteAdminUsageAllocation,
   getAdminUsageAllocations,
@@ -214,7 +212,7 @@ const GROUP_PERMISSION_SECTIONS: Array<{ title: string; permissions: GroupPermis
         icon: ServerCog,
         label: "Can use Hermes companion",
         description:
-          "Build and run agent profiles with the Hermes learning companion (saves memories and skills, proposes automations). Off until approved.",
+          "Use Hermes agents and Hermes connections, and build agent profiles with the Hermes learning companion (saves memories and skills, proposes automations). Off until approved.",
       },
       {
         key: "agent_authoring",
@@ -231,11 +229,18 @@ const GROUP_PERMISSION_SECTIONS: Array<{ title: string; permissions: GroupPermis
           "Create and maintain their own private knowledge bases. Sharing with groups and organization-wide management stay admin-only.",
       },
       {
+        key: "api_source_authoring",
+        icon: KeyRound,
+        label: "Can add API sources",
+        description:
+          "Connect API endpoints, with keys or provider sign-in, to their own knowledge bases. Aperture calls them on every sync. Off until approved; needs \"Can build knowledge bases\".",
+      },
+      {
         key: "tool_authoring",
         icon: Wrench,
         label: "Can build tools",
         description:
-          "Create and maintain their own private tools. Group sharing, stdio commands, and organization-wide management stay admin-only.",
+          "Add their own private MCP connections. Off until approved. Connections you share stay usable through \"Can use tools\"; group sharing and stdio commands stay admin-only.",
       },
       {
         key: "memory_access",
@@ -282,6 +287,7 @@ const DEFAULT_GROUP_PERMISSIONS = Object.fromEntries(
         "hermes_companion",
         "agent_authoring",
         "knowledge_authoring",
+        "api_source_authoring",
         "tool_authoring",
       ].includes(permission.key),
     ]),
@@ -595,24 +601,6 @@ export type AdminConsoleApi = {
   ) => Promise<ModelConfig | void>;
   listModelAccess?: (actorUserId: string, context: AdminMutationContext) => Promise<ModelConfig[] | void>;
   syncModelAccess?: (actorUserId: string, context: AdminMutationContext) => Promise<ModelConfig[] | void>;
-  setConnectorEnabled?: (
-    actorUserId: string,
-    connectorId: string,
-    enabled: boolean,
-    context: AdminMutationContext & { connector: Connector },
-  ) => Promise<Partial<Connector> | void>;
-  saveConnectorConfig?: (
-    actorUserId: string,
-    connector: Connector,
-    payload: AdminConnectorConfigUpdateRequest & { connector_id: string },
-    context: AdminMutationContext,
-  ) => Promise<{ connector: Partial<Connector>; record: ConnectorConfigRecord } | void>;
-  testConnectorConfig?: (
-    actorUserId: string,
-    configId: string,
-    context: AdminMutationContext,
-  ) => Promise<ConnectorTestResult | void>;
-  connectorOAuthUrl?: (actorUserId: string, configId: string) => Promise<string | void>;
   setToolEnabled?: (
     actorUserId: string,
     toolId: string,
@@ -730,6 +718,7 @@ export function AdminConsole({
   data,
   onDataChange,
   adminApi,
+  connectorApi,
   openDocumentationRequestKey,
   section,
   onSectionChange,
@@ -737,6 +726,8 @@ export function AdminConsole({
   data: BootstrapData;
   onDataChange: (updater: (current: BootstrapData) => BootstrapData) => void;
   adminApi?: AdminConsoleApi;
+  /** Workspace connector switches, visibility, and credentials. */
+  connectorApi?: ConnectorsPanelApi;
   openDocumentationRequestKey?: number;
   /** Route-driven section; when provided the tabs are controlled by the URL. */
   section?: AdminSection;
@@ -3278,6 +3269,12 @@ export function AdminConsole({
 
         <Tabs.Content value="tools" className="tab-content">
           <div className="admin-tools-stack">
+            <ConnectorsPanel
+              data={data}
+              onDataChange={onDataChange}
+              api={connectorApi}
+              onStatus={setActionStatus}
+            />
             <Panel
               title="Chat output actions"
               subtitle="Add admin-approved buttons to assistant responses, like export, format, or handoff actions. This does not add MCP servers or model-callable tools."
@@ -4996,7 +4993,7 @@ function GroupPermissionsSection({
       <div className="group-editor-section">
         <header>
           <strong>Group Permissions</strong>
-          <small>Core permissions begin on. API access is opt-in for each group.</small>
+          <small>Core permissions begin on. API, MCP, API sources, Hermes, and building stay off until you turn them on.</small>
         </header>
         <div className="group-permission-grid">
           {GROUP_PERMISSION_SECTIONS.map((section) => (
@@ -6596,12 +6593,36 @@ function AdminPolicyOverviewPanel({
           onChange={(next) => onDefaultPermissionChange("knowledge_authoring", next)}
         />
         <AdminDefaultPolicyToggleRow
+          title="Default users can add API sources"
+          detail={
+            defaultPermissions.knowledge_authoring
+              ? "Allow people in Default Users to connect API endpoints, with keys or provider sign-in, to their own knowledge bases. Aperture calls them on every sync."
+              : "Turn on knowledge bases above first; API sources live inside a person's own knowledge base."
+          }
+          checked={Boolean(defaultPermissions.api_source_authoring)}
+          disabled={
+            !defaultGroup ||
+            (!defaultPermissions.knowledge_authoring && !defaultPermissions.api_source_authoring) ||
+            pendingAction === "policy-default-group-api_source_authoring"
+          }
+          label="Default users can add API sources"
+          onChange={(next) => onDefaultPermissionChange("api_source_authoring", next)}
+        />
+        <AdminDefaultPolicyToggleRow
           title="Default users can build tools"
-          detail="Allow people in Default Users to create and maintain their own private tools. Group sharing and stdio commands stay admin-only."
+          detail="Allow people in Default Users to add their own private MCP connections. Connections you share with them work either way; group sharing and stdio commands stay admin-only."
           checked={Boolean(defaultPermissions.tool_authoring)}
           disabled={!defaultGroup || pendingAction === "policy-default-group-tool_authoring"}
           label="Default users can build tools"
           onChange={(next) => onDefaultPermissionChange("tool_authoring", next)}
+        />
+        <AdminDefaultPolicyToggleRow
+          title="Default users can use Hermes agents"
+          detail="Allow people in Default Users to open Hermes agents and Hermes connections. Off, they appear locked and never run."
+          checked={Boolean(defaultPermissions.hermes_companion)}
+          disabled={!defaultGroup || pendingAction === "policy-default-group-hermes_companion"}
+          label="Default users can use Hermes agents"
+          onChange={(next) => onDefaultPermissionChange("hermes_companion", next)}
         />
         <AdminDefaultPolicyToggleRow
           title="Default users can use memory"

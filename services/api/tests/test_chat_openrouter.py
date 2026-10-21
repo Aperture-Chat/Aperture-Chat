@@ -30,6 +30,7 @@ from app.core.openrouter import OpenRouterClient, map_model
 from app.core.web_search import WebSearchError, WebSearchResult
 from app.main import app
 from app.models.schemas import (
+    ConnectorConfig,
     McpHealthResponse,
     McpToolCallResponse,
     McpToolSummary,
@@ -1601,6 +1602,30 @@ def test_web_search_respects_disabled_web_connector() -> None:
     )
 
     assert response.status_code == 400
+    assert "Web search is turned off for this workspace" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("path", ["/v1/chat/completions", "/v1/responses"])
+def test_gateway_routes_respect_the_workspace_web_switch(path: str) -> None:
+    """The OpenAI-compatible routes honor the same per-workspace switch as chat."""
+    _activate_provider("provider-openrouter")
+    store = get_store()
+    store.platform_settings.downstream_api_enabled = True
+    store.connector_configs["conncfg-web-off"] = ConnectorConfig(
+        id="conncfg-web-off", tenant_id="tenant-example", connector_id="web", enabled=False
+    )
+
+    response = client.post(
+        path,
+        json={
+            "model": "openrouter-openai-gpt-5-5",
+            "messages": [{"role": "user", "content": "Search the web."}],
+            "web_enabled": True,
+        },
+        headers=headers("user-owner"),
+    )
+
+    assert response.status_code == 400, response.text
     assert "Web search is turned off for this workspace" in response.json()["detail"]
 
 

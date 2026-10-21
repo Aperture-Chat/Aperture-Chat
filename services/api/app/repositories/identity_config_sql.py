@@ -93,6 +93,7 @@ from app.db.orm import (
 )
 from app.models.schemas import (
     AlertRule,
+    ConnectorConfig,
     ContentFilter,
     DEFAULT_GROUP_PERMISSIONS,
     EmailSettings,
@@ -2059,6 +2060,11 @@ def _model_from_payload(
         # authority. Accept only this exact legacy omission; an empty list
         # keeps the rule matching exactly what it matched before.
         canonical_payload["detector_ids"] = []
+    if model_type is ConnectorConfig and "hidden" not in canonical_payload:
+        # Hiding a source from the attach menus shipped after the identity/config
+        # SQL authority. Accept only this exact legacy omission; every existing
+        # source stays visible, so the backfill cannot change what people see.
+        canonical_payload["hidden"] = False
     if model_type is ToolConfig and "owner_user_id" not in canonical_payload:
         # User-authored tool ownership shipped after the identity/config SQL
         # authority. Rows written before the field existed are admin-created

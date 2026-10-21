@@ -1,6 +1,5 @@
 import { SelectControl } from "./SelectControl";
 import { ProviderBrandLogo } from "./providerIcons";
-import { ConnectorsPanel, type ConnectorsPanelApi } from "./ConnectorsPanel";
 import * as Tabs from "@radix-ui/react-tabs";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -591,7 +590,7 @@ function validateEnrollmentQrValue(rawValue: string): EnrollmentQrValidation {
 }
 
 // Parent code can adapt future API helpers to these hooks without importing draft endpoints here.
-export type PlatformConsoleActions = ConnectorsPanelApi & {
+export type PlatformConsoleActions = {
   createProvider?: (provider: Provider) => Promise<Provider | void> | Provider | void;
   updateProvider?: (providerId: string, patch: Partial<Provider>) => Promise<Provider | void> | Provider | void;
   createProviderKey?: (payload: PlatformProviderKeyCreateRequest) => Promise<ProviderKey | void> | ProviderKey | void;
@@ -3500,13 +3499,6 @@ export function PlatformConsole({
               onPolicyChange={(key, next) => void updateTenantPolicy(key, next)}
             />
             <DeploymentBudgetPanel userId={data.me.id} tenantSlug={data.currentTenant.slug} />
-            <ConnectorsPanel
-              data={data}
-              onDataChange={onDataChange}
-              api={platformActions}
-              onStatus={setActionStatus}
-              defaultCollapsed
-            />
             <ElasticPanel
               elasticStatus={elasticStatus}
               onStatusChange={setElasticStatus}

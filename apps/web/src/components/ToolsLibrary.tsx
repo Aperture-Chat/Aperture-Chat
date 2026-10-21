@@ -42,6 +42,9 @@ import {
   createAdminToolConfig,
   deleteAdminToolConfig,
   getToolOAuthAuthorizeUrl,
+  HERMES_LOCKED_MESSAGE,
+  hermesLocked,
+  isHermesTool,
   listAdminToolConfigs,
   mapToolConfigRecordToDisplay,
   toolOAuthRedirectUrl,
@@ -160,6 +163,23 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
   const canAuthor = isAdmin || Boolean(data.authoringState?.tools_enabled);
   const canManage = (tool: ToolConfig) => isAdmin || (canAuthor && tool.owner_user_id === me.id);
   const mcpAvailable = connectorEnabled(data.connectors, "mcp");
+  const hermesLockedForMe = hermesLocked(data);
+  // Shown to everyone so the capability is discoverable, but only usable
+  // once an administrator grants Can build tools.
+  const addBlocked = canAuthor
+    ? null
+    : "Adding your own MCP connections needs approval. Ask your administrator to turn on Can build tools for one of your groups.";
+  const addButton = (
+    <button
+      className="primary-button compact-button"
+      type="button"
+      disabled={Boolean(addBlocked)}
+      data-tooltip={addBlocked ?? undefined}
+      onClick={() => setEditor({ kind: "create" })}
+    >
+      {addBlocked ? <Lock size={16} /> : <Plus size={16} />} Add connection
+    </button>
+  );
 
   // Admins see the whole catalog so they can manage it. Everyone else sees
   // the connections they can actually use plus their own; MCP connections
@@ -610,13 +630,7 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
                 </button>
               ))}
           </div>
-          {canAuthor && (
-            <div className="ws-toolbar-actions">
-              <button className="primary-button compact-button" type="button" onClick={() => setEditor({ kind: "create" })}>
-                <Plus size={16} /> Add connection
-              </button>
-            </div>
-          )}
+          <div className="ws-toolbar-actions">{addButton}</div>
         </div>
       )}
 
@@ -631,13 +645,7 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
               ? "A connection lets agents call an external tool server through the Model Context Protocol (MCP). Add the server's address, test it, then choose who can use it. Nothing is saved until you add it."
               : "When an administrator shares a connection with one of your groups, it appears here and in Agent mode."}
           </p>
-          {canAuthor && (
-            <div className="ws-empty-actions">
-              <button className="primary-button compact-button" type="button" onClick={() => setEditor({ kind: "create" })}>
-                <Plus size={16} /> Add connection
-              </button>
-            </div>
-          )}
+          <div className="ws-empty-actions">{addButton}</div>
         </div>
       ) : visibleRows.length === 0 ? (
         <p className="ws-no-results">No connections match your search.</p>
@@ -649,6 +657,7 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
               tool={tool}
               data={data}
               canManage={canManage(tool)}
+              hermesLocked={hermesLockedForMe && isHermesTool(tool)}
               health={healthResults[tool.id]}
               busy={Boolean(pending?.endsWith(`:${tool.id}`))}
               openMenu={openMenu}
@@ -668,6 +677,7 @@ function ConnectionCard({
   tool,
   data,
   canManage,
+  hermesLocked: locked = false,
   health,
   busy,
   openMenu,
@@ -679,6 +689,8 @@ function ConnectionCard({
   tool: ToolConfig;
   data: BootstrapData;
   canManage: boolean;
+  /** A Hermes connection the viewer can see but not use yet. */
+  hermesLocked?: boolean;
   health?: McpHealthResult;
   busy: boolean;
   openMenu: string | null;
@@ -692,9 +704,16 @@ function ConnectionCard({
   const approval = approvalSummary(tool);
   const signIn = signInSummary(tool);
   const where = connectionLocation(tool);
+  // Custom scripts are admin-only: a standard user's older script can be
+  // switched off, but only an administrator turns it back on.
+  const reenableLocked =
+    tool.type === "custom_script" &&
+    !tool.enabled &&
+    data.me.role !== "PLATFORM_OWNER" &&
+    data.me.role !== "TENANT_ADMIN";
   return (
     <article
-      className={`ws-card tools-card ${issues.length ? "is-attention" : ""} ${tool.enabled ? "" : "is-muted"}`}
+      className={`ws-card tools-card ${issues.length ? "is-attention" : ""} ${tool.enabled && !locked ? "" : "is-muted"}`}
       aria-label={tool.name}
     >
       <div className="ws-card-head">
@@ -708,7 +727,13 @@ function ConnectionCard({
             {where ? ` · ${where}` : ""}
           </p>
         </div>
-        <StatusBadge tool={tool} health={health} />
+        {locked ? (
+          <span className="ws-badge is-muted" data-tooltip={HERMES_LOCKED_MESSAGE}>
+            <Lock size={12} /> Locked
+          </span>
+        ) : (
+          <StatusBadge tool={tool} health={health} />
+        )}
       </div>
       <div className="ws-card-body">
         {description && <p className="lib-card-desc">{description}</p>}
@@ -731,6 +756,11 @@ function ConnectionCard({
               <Sparkles size={13} /> Hermes companion
             </li>
           )}
+          {locked && (
+            <li className="ws-fact">
+              <Lock size={13} /> Needs Hermes approval from your administrator
+            </li>
+          )}
         </ul>
         {issues.length > 0 && (
           <ul className="lib-card-issues">
@@ -747,9 +777,15 @@ function ConnectionCard({
           <span className="lib-switch-inline">
             <Toggle
               checked={tool.enabled}
-              disabled={busy}
+              disabled={busy || reenableLocked}
               label={`Turn ${tool.name} on or off`}
-              tooltip={tool.enabled ? `Turn off ${tool.name}` : `Turn on ${tool.name}`}
+              tooltip={
+                reenableLocked
+                  ? "Only administrators can turn custom script tools back on"
+                  : tool.enabled
+                    ? `Turn off ${tool.name}`
+                    : `Turn on ${tool.name}`
+              }
               onChange={onToggle}
             />
             <span aria-hidden="true">{tool.enabled ? "On" : "Off"}</span>
@@ -968,6 +1004,7 @@ function ConnectionEditor({
 }) {
   const { isOwner, isAdmin, canManage } = perms;
   const readOnly = !canManage;
+  const hermesLockedForEditor = hermesLocked(data);
   const isMcp = isMcpRuntimeTool(tool);
   const built = buildUpdatePayload(tool, draft, { isOwner, isAdmin });
   const dirty = built.dirty;
@@ -1416,13 +1453,18 @@ function ConnectionEditor({
               <div className="lib-switch-row">
                 <Toggle
                   checked={draft.hermesCompanion}
-                  disabled={readOnly}
+                  disabled={readOnly || (hermesLockedForEditor && !draft.hermesCompanion)}
                   label="Available to Hermes companion"
+                  tooltip={hermesLockedForEditor && !draft.hermesCompanion ? HERMES_LOCKED_MESSAGE : undefined}
                   onChange={(next) => onDraft({ hermesCompanion: next })}
                 />
                 <span>
                   <strong>Available to Hermes companion</strong>
-                  <small>Agents that use the Hermes companion get this connection automatically, for people allowed to use it.</small>
+                  <small>
+                    {hermesLockedForEditor && !draft.hermesCompanion
+                      ? HERMES_LOCKED_MESSAGE
+                      : "Agents that use the Hermes companion get this connection automatically, for people allowed to use it."}
+                  </small>
                   {draft.hermesCompanion && draft.approvalRequired && (
                     <small className="lib-field-hint is-warning">
                       Because it asks before each use, Hermes uses it only in agents that list it as a tool, after the person

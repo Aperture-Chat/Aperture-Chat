@@ -28,6 +28,8 @@ import type { Automation, AutomationRunRecord, AutomationRunResult, BootstrapDat
 import {
   createAutomation,
   deleteAutomation,
+  hermesLocked,
+  isHermesAgent,
   previewAutomationSchedule,
   runAutomation,
   updateAutomation,
@@ -54,7 +56,8 @@ type FormState = {
   enabled: boolean;
 };
 
-type StepOption = { id: string; label: string; agent: boolean };
+/** `locked`: a Hermes agent the viewer may see but not run until an admin grants Hermes. */
+type StepOption = { id: string; label: string; agent: boolean; locked?: boolean };
 
 type Filter = "all" | "active" | "paused" | "attention";
 
@@ -409,7 +412,7 @@ export function AutomationsConsole({
   function openCreate(recipe?: Recipe) {
     setEditingId(null);
     const base = emptyForm(defaultModelId);
-    const agentId = stepOptions.find((option) => option.agent)?.id;
+    const agentId = stepOptions.find((option) => option.agent && !option.locked)?.id;
     setForm(
       recipe
         ? {
@@ -1013,8 +1016,12 @@ function AutomationEditor({
                     <option value={step.model_id}>{step.model_id ? `${step.model_id} (unavailable)` : "Choose a model or agent"}</option>
                   )}
                   {stepOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.agent ? `${option.label} (agent)` : option.label}
+                    <option key={option.id} value={option.id} disabled={option.locked}>
+                      {option.locked
+                        ? `${option.label} (agent, needs Hermes approval)`
+                        : option.agent
+                          ? `${option.label} (agent)`
+                          : option.label}
                     </option>
                   ))}
                 </SelectControl>
@@ -1270,9 +1277,10 @@ function automationStepOptions(data: BootstrapData): StepOption[] {
     .filter((model) => !isAgentProfile(model))
     .map((model) => ({ id: model.id, label: model.name, agent: false }))
     .sort((a, b) => a.label.localeCompare(b.label));
+  const lockHermes = hermesLocked(data);
   const agents = visibleAgentProfiles(data)
     .filter(connected)
-    .map((model) => ({ id: model.id, label: model.name, agent: true }))
+    .map((model) => ({ id: model.id, label: model.name, agent: true, locked: lockHermes && isHermesAgent(model) }))
     .sort((a, b) => a.label.localeCompare(b.label));
   return [...agents, ...models];
 }

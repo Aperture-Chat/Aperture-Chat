@@ -17,8 +17,8 @@ relational database is available.
 - Chat, model selection, attachments, connected sources, work traces, history, and session details.
 - Drafts with document/deck switching, grouped formatting controls, templates, version comparison, history previews, archive/delete, and export.
 - Agents (with Automations) and Library (Knowledge and Tools) workspaces with role-aware access.
-- Tenant administration for users, groups, SSO, model restrictions, policies, knowledge, tools, and analytics.
-- Platform-owner controls for providers, credentials, organizations, model availability, connectors, audit, branding, and release updates.
+- Tenant administration for users, groups, SSO, model restrictions, policies, connectors, knowledge, tools, and analytics.
+- Platform-owner controls for providers, credentials, organizations, model availability, the connector ceiling, audit, branding, and release updates.
 - Role-specific training and downloadable guides; access/sign-in guidance is available before authentication.
 
 ### Routes and deep links
@@ -117,8 +117,9 @@ Development header authentication is limited to the environments allowed in
 `app/core/config.py` and is disabled in deployed stacks.
 
 Provider and connector credentials use encrypted secret references. Ordinary
-responses expose masked previews; explicit credential reveal and management
-require platform-owner authorization. Preserve the signing secret during
+responses expose masked previews; provider credential reveal and management
+require platform-owner authorization, and workspace admins can replace their
+own connectors' credentials without reading them back. Preserve the signing secret during
 upgrades because it also participates in protecting stored credentials.
 
 ## Persistence
