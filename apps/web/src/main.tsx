@@ -12,6 +12,8 @@ import "./data-protection.css";
 import "./draft-editor.css";
 import "./branding.css";
 import "./support-tickets.css";
+// Last: the shared tactile button and toggle language (see the file header).
+import "./tactile-controls.css";
 
 /* Capture the browser's install prompt before first render — Chromium can
  * fire beforeinstallprompt before React mounts. */
