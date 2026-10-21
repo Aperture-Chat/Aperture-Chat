@@ -306,6 +306,26 @@ function chatSidebar() {
   return document.querySelector(".sidebar") as HTMLElement;
 }
 
+/** Document and deck requests wait on an inline Drafts-or-chat choice. */
+async function keepRequestInChat() {
+  fireEvent.click(await screen.findByRole("button", { name: "Continue in chat" }));
+}
+
+function sendFromComposer(text: string) {
+  const textarea = screen.getByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: text } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+}
+
+function draftRequests() {
+  return chatRequests.filter((request) => request.surface === "draft");
+}
+
+function requestText(request: Record<string, unknown> | undefined) {
+  const messages = (request?.messages ?? []) as Array<{ content?: unknown }>;
+  return messages.map((message) => String(message.content ?? "")).join("\n");
+}
+
 /** Opens a sidebar chat row's "More actions" menu and picks one action. */
 function chooseChatRowAction(sidebar: HTMLElement, action: string, title?: string) {
   const trigger = title
@@ -433,6 +453,7 @@ test("the first completed exchange automatically receives a subject-based AI tit
     },
   });
   fireEvent.keyDown(textarea, { key: "Enter" });
+  await keepRequestInChat();
 
   await waitFor(() => {
     expect(generatedTitleRequests, observedRequests.join("\n")).toHaveLength(1);
@@ -611,6 +632,7 @@ test("a long-form prompt stays on the user-selected model", async () => {
     target: { value: "Write a detailed multi-step report on the policy." },
   });
   fireEvent.keyDown(textarea, { key: "Enter" });
+  await keepRequestInChat();
 
   expect(await screen.findByText(CANNED)).toBeInTheDocument();
   await waitFor(() => {
@@ -1706,6 +1728,7 @@ test("pending assistant response shows an activity trace for enabled tools", asy
     target: { value: "Write a 25 page paper on Artemis II" },
   });
   fireEvent.keyDown(textarea, { key: "Enter" });
+  await keepRequestInChat();
 
   const trace = await screen.findByRole("status", {
     name: "Aperture Chat activity trace",
@@ -1778,6 +1801,7 @@ test("a pending response in one chat does not block sending from a new chat", as
     target: { value: "Draft the long paper" },
   });
   fireEvent.keyDown(firstComposer, { key: "Enter" });
+  await keepRequestInChat();
 
   await waitFor(() => expect(chatRequests).toHaveLength(1));
   expect(await screen.findByRole("status", { name: "Aperture Chat activity trace" })).toBeInTheDocument();
@@ -2956,4 +2980,116 @@ test("cloud file arrow navigation moves focus and Space toggles a file without a
   expect(cloudImportRequests).toHaveLength(0);
   fireEvent.keyDown(second, { key: "Home" });
   expect(first).toHaveFocus();
+});
+
+test("a document request waits for a choice, then starts writing in Drafts", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Write an essay about remote work for distributed teams");
+
+  const offer = await screen.findByRole("region", { name: "Write this in Drafts?" });
+  expect(within(offer).getByRole("button", { name: "Write in Drafts" })).toBeEnabled();
+  expect(within(offer).getByRole("button", { name: "Continue in chat" })).toBeEnabled();
+  // Held, not sent: nothing reached a model and the composer is cleared.
+  expect(screen.getByText("Write an essay about remote work for distributed teams")).toBeInTheDocument();
+  expect(chatRequests).toHaveLength(0);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+  fireEvent.click(within(offer).getByRole("button", { name: "Write in Drafts" }));
+
+  await waitFor(() => expect(draftRequests()).toHaveLength(1));
+  expect(window.location.pathname).toBe("/drafts");
+  expect(requestText(draftRequests()[0])).toContain("User request: Write an essay about remote work for distributed teams");
+  // A new chat has no earlier conversation to carry.
+  expect(requestText(draftRequests()[0])).not.toContain("<chat_conversation>");
+  expect(chatRequests.filter((request) => request.surface !== "draft")).toHaveLength(0);
+  expect(await screen.findByText("Writing the document you asked for in chat.")).toBeInTheDocument();
+});
+
+test("a slide deck request builds in the Drafts deck editor", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("I want to see a PowerPoint on our Q3 results for the board");
+
+  const offer = await screen.findByRole("region", { name: "Build this as a slide deck?" });
+  fireEvent.click(within(offer).getByRole("button", { name: "Build in deck editor" }));
+
+  await waitFor(() => expect(draftRequests().length).toBeGreaterThan(0));
+  expect(window.location.pathname).toBe("/drafts");
+  expect(requestText(draftRequests()[0])).toContain("You are a presentation writer producing a slide deck");
+  expect(requestText(draftRequests()[0])).toContain("I want to see a PowerPoint on our Q3 results for the board");
+  expect(await screen.findByText("Building the slide deck you asked for in chat.")).toBeInTheDocument();
+  // The deck editor is active, not the document editor.
+  expect(screen.getByText("Deck Assistant")).toBeInTheDocument();
+});
+
+test("continue in chat sends the held request once, as typed", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Draft a memo to the board about the Q3 offsite");
+
+  const offer = await screen.findByRole("region", { name: "Write this in Drafts?" });
+  // Sending again while a choice is open never sends a second request.
+  sendFromComposer("Also mention the budget");
+  expect(chatRequests).toHaveLength(0);
+  expect(screen.getByLabelText("Message")).toHaveValue("Also mention the budget");
+
+  fireEvent.click(within(offer).getByRole("button", { name: "Continue in chat" }));
+
+  expect(await screen.findByText(CANNED)).toBeInTheDocument();
+  expect(chatRequests).toHaveLength(1);
+  expect(chatRequests[0].surface).toBe("chat");
+  expect(requestText(chatRequests[0])).toContain("Draft a memo to the board about the Q3 offsite");
+  expect(screen.queryByRole("region", { name: "Write this in Drafts?" })).not.toBeInTheDocument();
+  expect(window.location.pathname).not.toBe("/drafts");
+  expect(screen.getByLabelText("Message")).toHaveValue("Also mention the budget");
+});
+
+test("edit request puts the held request back in the composer", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Create a slide deck about onboarding best practices");
+
+  const offer = await screen.findByRole("region", { name: "Build this as a slide deck?" });
+  fireEvent.click(within(offer).getByRole("button", { name: "Edit request" }));
+
+  expect(screen.getByLabelText("Message")).toHaveValue("Create a slide deck about onboarding best practices");
+  expect(screen.queryByRole("region", { name: "Build this as a slide deck?" })).not.toBeInTheDocument();
+  expect(chatRequests).toHaveLength(0);
+});
+
+test("ordinary chat messages never show the Drafts offer", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("How do I write a good cover letter?");
+
+  expect(await screen.findByText(CANNED)).toBeInTheDocument();
+  expect(chatRequests).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Write in Drafts" })).not.toBeInTheDocument();
+});
+
+test("a mid-chat document request carries the earlier conversation into Drafts", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Our churn fell to 2.1% in Q3 and partner leads grew 30%.");
+  expect(await screen.findByText(CANNED)).toBeInTheDocument();
+
+  sendFromComposer("Now write a report on this for the leadership team");
+  const offer = await screen.findByRole("region", { name: "Write this in Drafts?" });
+  expect(within(offer).getByText("This conversation comes along if you pick Drafts.")).toBeInTheDocument();
+  fireEvent.click(within(offer).getByRole("button", { name: "Write in Drafts" }));
+
+  await waitFor(() => expect(draftRequests().length).toBeGreaterThan(0));
+  const prompt = requestText(draftRequests()[0]);
+  expect(prompt).toContain("User request: Now write a report on this for the leadership team");
+  expect(prompt).toContain("<chat_conversation>");
+  expect(prompt).toContain("User: Our churn fell to 2.1% in Q3 and partner leads grew 30%.");
+  expect(prompt).toContain(`Assistant: ${CANNED}`);
 });

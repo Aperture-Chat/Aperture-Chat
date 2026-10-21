@@ -26,11 +26,13 @@ import {
   Loader2,
   Lock,
   Maximize2,
+  MessageSquare,
   Minimize2,
   Paperclip,
   Pencil,
   Play,
   Plug,
+  Presentation,
   Quote,
   RefreshCw,
   ScrollText,
@@ -109,7 +111,19 @@ import {
   uploadChatAttachment,
   type ChatRuntimeOptions,
 } from "../lib/api";
-import { supportsReasoningEffort, visibleAgentProfiles, webSearchSupportedForModel } from "../lib/modelAccess";
+import {
+  approvedWorkspaceModels,
+  supportsReasoningEffort,
+  visibleAgentProfiles,
+  webSearchSupportedForModel,
+} from "../lib/modelAccess";
+import {
+  detectDraftHandoff,
+  draftHandoffAttachments,
+  draftHandoffChatContext,
+  type DraftHandoffKind,
+  type DraftHandoffRequest,
+} from "../lib/draftHandoff";
 import { connectorEnabled, connectorHidden, isMcpRuntimeTool } from "../lib/connectors";
 import { formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { feedbackRatingForMessage, recordChatFeedback } from "../lib/chatFeedback";
@@ -250,6 +264,21 @@ type PendingAttachment = ChatAttachment & {
   file?: File;
   uploadStatus?: "ready" | "uploading" | "error";
   uploadError?: string;
+};
+
+/** A document or deck request held unsent until the user picks Drafts or
+ * chat. It keeps the composer settings it was sent with. */
+type PendingDraftHandoff = {
+  id: string;
+  kind: DraftHandoffKind;
+  threadId: string;
+  text: string;
+  attachments: PendingAttachment[];
+  composerTools: ComposerTools;
+  knowledgeBaseId: string | null;
+  createdAtIso: string;
+  phase: "choosing" | "drafts" | "chat";
+  error: string | null;
 };
 
 let attachSeq = 0;
@@ -1003,6 +1032,7 @@ export function ChatWorkspace({
   requestedAgentId,
   onRequestedAgentConsumed,
   onTransferToDraft,
+  onSendToDrafts,
   onExplainModelAccess,
 }: {
   data: BootstrapData;
@@ -1013,6 +1043,8 @@ export function ChatWorkspace({
   requestedAgentId?: string | null;
   onRequestedAgentConsumed?: () => void;
   onTransferToDraft?: (message: ChatMessage) => void;
+  /** Starts a held document or deck request in Drafts instead of chat. */
+  onSendToDrafts?: (request: DraftHandoffRequest) => void;
   /** Opens "Models in your organization" (why a model is not listed). */
   onExplainModelAccess?: () => void;
 }) {
@@ -1085,6 +1117,10 @@ export function ChatWorkspace({
   const commandListId = useId();
   const dismissedCommandRef = useRef<{ value: string; caret: number } | null>(null);
   const [customToolRun, setCustomToolRun] = useState<CustomToolRunState | null>(null);
+  const [pendingHandoff, setPendingHandoff] = useState<PendingDraftHandoff | null>(null);
+  const pendingHandoffRef = useRef<PendingDraftHandoff | null>(null);
+  pendingHandoffRef.current = pendingHandoff;
+  const [handoffNudged, setHandoffNudged] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const expandedComposerRef = useRef<HTMLFormElement | null>(null);
@@ -1210,6 +1246,8 @@ export function ChatWorkspace({
 
   const messages = activeThread?.messages ?? [];
   const hasMessages = messages.length > 0;
+  // A held Drafts offer shows as the first exchange of a new chat.
+  const showConversation = hasMessages || Boolean(pendingHandoff);
   // The AI naming button appears only once the chat has a finalized exchange;
   // pending or errored replies never unlock it.
   const hasCompletedAssistantReply = messages.some(
@@ -1271,11 +1309,30 @@ export function ChatWorkspace({
   // resolved container to its true maximum (not scrollIntoView "end") keeps
   // the newest message above the sticky composer instead of behind it.
   useEffect(() => {
-    if (!hasMessages) return;
+    if (!showConversation) return;
     const target = conversationScrollerFrom(bottomRef.current);
     if (target) target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
     else bottomRef.current?.scrollIntoView?.({ block: "end", behavior: "smooth" });
-  }, [activeThread?.id, messages.length, hasMessages, isSending]);
+  }, [activeThread?.id, messages.length, showConversation, isSending, pendingHandoff?.id]);
+
+  // Opening another chat, or starting a new one, returns a held request to
+  // the composer instead of leaving it attached to the wrong conversation.
+  const handoffFocusTokenRef = useRef(composerFocusToken);
+  useEffect(() => {
+    const newChatStarted = handoffFocusTokenRef.current !== composerFocusToken;
+    handoffFocusTokenRef.current = composerFocusToken;
+    const pending = pendingHandoffRef.current;
+    if (!pending || (pending.threadId === chat.activeId && !newChatStarted)) return;
+    setPendingHandoff(null);
+    restoreHandoffToComposer(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat.activeId, composerFocusToken]);
+
+  useEffect(() => {
+    if (!handoffNudged) return;
+    const timer = window.setTimeout(() => setHandoffNudged(false), 900);
+    return () => window.clearTimeout(timer);
+  }, [handoffNudged]);
 
   // While a reply streams in, keep the reader hard-pinned to the bottom
   // every frame so the text never runs past their view. Pausing is driven
@@ -1703,6 +1760,11 @@ export function ChatWorkspace({
   async function submitDraft(toolOverrides?: Partial<ComposerTools>, approvedToolConfigIds: string[] = []) {
     const text = draft.trim();
     const queuedAutomations = pendingAutomations;
+    // One request at a time: the held one needs an answer first.
+    if (pendingHandoff) {
+      setHandoffNudged(true);
+      return;
+    }
     if (
       (!text && attachments.length === 0 && queuedAutomations.length === 0) ||
       isSending ||
@@ -1726,6 +1788,40 @@ export function ChatWorkspace({
       }
       setDraft((current) => current === draft ? "" : current);
       setOriginalDraft(null);
+      return;
+    }
+    // A document or deck request waits for the user to pick Drafts or chat.
+    // Agent mode, tools, and fetched links only work in chat, so those stay.
+    const handoffKind =
+      onSendToDrafts &&
+      !toolOverrides &&
+      approvedToolConfigIds.length === 0 &&
+      !composerTools.Agent &&
+      selectedToolIds.length === 0 &&
+      fetchUrls.length === 0 &&
+      approvedWorkspaceModels(data).length > 0
+        ? detectDraftHandoff(text)
+        : null;
+    if (handoffKind) {
+      const createdAtIso = new Date().toISOString();
+      setPendingHandoff({
+        id: `handoff-${Date.now()}`,
+        kind: handoffKind,
+        threadId: chat.activeId,
+        text,
+        attachments,
+        composerTools,
+        knowledgeBaseId: selectedKnowledgeBaseId,
+        createdAtIso,
+        phase: "choosing",
+        error: null,
+      });
+      setDraft("");
+      setOriginalDraft(null);
+      setAttachments([]);
+      setCommandToken(null);
+      setSendMenuOpen(false);
+      setUploadError(null);
       return;
     }
     setUploadError(null);
@@ -1755,8 +1851,6 @@ export function ChatWorkspace({
     let uploadedAttachments: ChatAttachment[] = [];
     try {
       if (attachments.length > 0) {
-        const localAttachments = attachments.filter((pending) => pending.file);
-        const existingAttachments = attachments.filter((pending) => !pending.file);
         setIsUploadingAttachments(true);
         setAttachments((prev) =>
           prev.map((file) => ({
@@ -1765,20 +1859,7 @@ export function ChatWorkspace({
             uploadError: undefined,
           })),
         );
-        const newUploads = await Promise.all(
-          localAttachments.map(async (pending) => {
-            const uploaded = await uploadChatAttachment(data.me.id, pending.file!, {
-              tenantId: data.currentTenant?.id,
-            });
-            return {
-              ...uploaded,
-              name: uploaded.name || pending.name,
-              size: uploaded.size || pending.size,
-              kind: uploaded.kind || pending.kind,
-            };
-          }),
-        );
-        uploadedAttachments = [...existingAttachments.map(toChatAttachment), ...newUploads];
+        uploadedAttachments = await uploadPendingAttachments(attachments);
       }
       const runtime = runtimeOptionsFromState(
         data,
@@ -1827,6 +1908,98 @@ export function ChatWorkspace({
       );
     } finally {
       setIsUploadingAttachments(false);
+    }
+  }
+
+  /** Uploads staged local files; already-uploaded ones pass through. */
+  async function uploadPendingAttachments(staged: PendingAttachment[]): Promise<ChatAttachment[]> {
+    const localAttachments = staged.filter((pending) => pending.file);
+    const existingAttachments = staged.filter((pending) => !pending.file);
+    const newUploads = await Promise.all(
+      localAttachments.map(async (pending) => {
+        const uploaded = await uploadChatAttachment(data.me.id, pending.file!, {
+          tenantId: data.currentTenant?.id,
+        });
+        return {
+          ...uploaded,
+          name: uploaded.name || pending.name,
+          size: uploaded.size || pending.size,
+          kind: uploaded.kind || pending.kind,
+        };
+      }),
+    );
+    return [...existingAttachments.map(toChatAttachment), ...newUploads];
+  }
+
+  /** Puts a held request back in the composer, ahead of anything typed since. */
+  function restoreHandoffToComposer(pending: PendingDraftHandoff) {
+    setDraft((current) => (current.trim() ? `${pending.text}\n\n${current}` : pending.text));
+    setAttachments((current) => [...pending.attachments, ...current]);
+  }
+
+  function editPendingHandoff() {
+    const pending = pendingHandoffRef.current;
+    if (!pending || pending.phase !== "choosing") return;
+    setPendingHandoff(null);
+    restoreHandoffToComposer(pending);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  /** "Continue in chat": send the held request exactly as it was sent. */
+  async function continuePendingHandoffInChat() {
+    const pending = pendingHandoffRef.current;
+    if (!pending || pending.phase !== "choosing" || isSending) return;
+    setPendingHandoff({ ...pending, phase: "chat", error: null });
+    try {
+      const uploaded = await uploadPendingAttachments(pending.attachments);
+      // The user opened another chat while files uploaded; the request went back to the composer.
+      if (pendingHandoffRef.current?.id !== pending.id) return;
+      const runtime = runtimeOptionsFromState(
+        data,
+        pending.composerTools,
+        uploaded,
+        selectedAgentId,
+        pending.knowledgeBaseId,
+        [],
+        reasoningEffortForSend,
+      );
+      runtime.approvedToolConfigIds = [];
+      runtime.approvalTokens = [];
+      setPendingHandoff(null);
+      chat.sendMessage(pending.text, uploaded, runtime);
+    } catch (error) {
+      if (pendingHandoffRef.current?.id !== pending.id) return;
+      setPendingHandoff({ ...pending, phase: "choosing", error: readableError(error, "Could not upload the attachment.") });
+    }
+  }
+
+  /** "Write in Drafts" / "Build in deck editor": hand the request, its files,
+   * its settings, and the earlier conversation to Drafts, which starts it. */
+  async function openPendingHandoffInDrafts() {
+    const pending = pendingHandoffRef.current;
+    if (!pending || pending.phase !== "choosing" || !onSendToDrafts) return;
+    setPendingHandoff({ ...pending, phase: "drafts", error: null });
+    try {
+      const uploaded = await uploadPendingAttachments(pending.attachments);
+      if (pendingHandoffRef.current?.id !== pending.id) return;
+      const knowledgeBase = pending.composerTools.Knowledge
+        ? enabledKnowledgeBases.find((knowledge) => knowledge.id === pending.knowledgeBaseId) ?? enabledKnowledgeBases[0]
+        : undefined;
+      const request: DraftHandoffRequest = {
+        id: pending.id,
+        kind: pending.kind,
+        prompt: pending.text,
+        webSearch: pending.composerTools.Web,
+        modelId: chat.model || null,
+        knowledgeIds: knowledgeBase ? [knowledgeBase.id] : [],
+        attachments: draftHandoffAttachments(uploaded, messages),
+        chatContext: draftHandoffChatContext(messages),
+      };
+      setPendingHandoff(null);
+      onSendToDrafts(request);
+    } catch (error) {
+      if (pendingHandoffRef.current?.id !== pending.id) return;
+      setPendingHandoff({ ...pending, phase: "choosing", error: readableError(error, "Could not upload the attachment.") });
     }
   }
 
@@ -2200,7 +2373,8 @@ export function ChatWorkspace({
     !isSending &&
     !isImproving &&
     !isComposerExpanded &&
-    !isUploadingAttachments;
+    !isUploadingAttachments &&
+    !pendingHandoff;
   const canOpenSendOptions =
     chat.enabledModels.length > 0 && !isSending && !isUploadingAttachments && !isComposerExpanded;
   const hasDraftText = draft.trim().length > 0;
@@ -2235,7 +2409,7 @@ export function ChatWorkspace({
     <form
       ref={expandedComposerRef}
       tabIndex={isComposerExpanded ? -1 : undefined}
-      className={`composer ${hasMessages ? "" : "composer-empty"}${isImproving ? " is-improving" : ""}${isComposerExpanded ? " is-expanded" : ""}`}
+      className={`composer ${showConversation ? "" : "composer-empty"}${isImproving ? " is-improving" : ""}${isComposerExpanded ? " is-expanded" : ""}`}
       aria-busy={isImproving}
       role={isComposerExpanded ? "dialog" : undefined}
       aria-modal={isComposerExpanded ? "true" : undefined}
@@ -2726,7 +2900,9 @@ export function ChatWorkspace({
             data-tooltip={
               isComposerExpanded
                 ? "Collapse the prompt editor before sending"
-                : "Send your message to the selected model"
+                : pendingHandoff
+                  ? "Choose Drafts or chat for the request above first"
+                  : "Send your message to the selected model"
             }
             disabled={!canSend}
           >
@@ -3139,8 +3315,8 @@ export function ChatWorkspace({
           </div>
         </header>
 
-        <div className={`conversation ${hasMessages ? "" : "is-empty"}`}>
-          {!hasMessages && (
+        <div className={`conversation ${showConversation ? "" : "is-empty"}`}>
+          {!showConversation && (
             <>
               <div className="empty-chat">
                 <div
@@ -3161,7 +3337,7 @@ export function ChatWorkspace({
             </>
           )}
 
-          {hasMessages && (
+          {showConversation && (
             <div className="message-list">
               {messages.map((message) => (
                 <MessageBubble
@@ -3201,6 +3377,38 @@ export function ChatWorkspace({
                   trainingCaptureEnabled={Boolean(data.dataProtection?.training_capture_enabled)}
                 />
               ))}
+              {pendingHandoff && (
+                <>
+                  <MessageBubble
+                    key={pendingHandoff.id}
+                    message={{
+                      id: pendingHandoff.id,
+                      role: "user",
+                      content: pendingHandoff.text,
+                      createdAt: formatTimeLabel(pendingHandoff.createdAtIso),
+                      createdAtIso: pendingHandoff.createdAtIso,
+                      status: "ok",
+                      attachments: pendingHandoff.attachments.map(toChatAttachment),
+                    }}
+                    userId={data.me.id}
+                    userName={data.me.display_name}
+                    userAvatarUrl={data.me.avatar_url}
+                    brandName={assistantBrandName}
+                    brandIconSources={assistantIconSources}
+                  />
+                  <DraftHandoffCard
+                    handoff={pendingHandoff}
+                    brandName={assistantBrandName}
+                    brandIconSources={assistantIconSources}
+                    carriesConversation={hasMessages}
+                    nudged={handoffNudged}
+                    chatDisabled={isSending}
+                    onOpenDrafts={() => void openPendingHandoffInDrafts()}
+                    onContinueInChat={() => void continuePendingHandoffInChat()}
+                    onEdit={editPendingHandoff}
+                  />
+                </>
+              )}
               {contextWindowStatus.isFull ? (
                 <div className="context-window-chat-notice" role="status">
                   Context window full. This session may stop using earlier details reliably.
@@ -3219,7 +3427,7 @@ export function ChatWorkspace({
               <div className="composer-expanded-backdrop" aria-hidden="true" />,
               document.body,
             )}
-          {hasMessages ? (
+          {showConversation ? (
             <div className="composer-dock">
               {composerForm}
               {disclaimer}
@@ -3317,6 +3525,123 @@ export function ChatWorkspace({
         <CustomToolRunModal run={customToolRun} onClose={() => setCustomToolRun(null)} />
       )}
     </div>
+  );
+}
+
+/** The inline "Drafts or chat?" offer that answers a held document or deck
+ * request. It reads as the assistant's reply, not a dialog. */
+function DraftHandoffCard({
+  handoff,
+  brandName,
+  brandIconSources,
+  carriesConversation,
+  nudged,
+  chatDisabled,
+  onOpenDrafts,
+  onContinueInChat,
+  onEdit,
+}: {
+  handoff: PendingDraftHandoff;
+  brandName: string;
+  brandIconSources: readonly string[];
+  carriesConversation: boolean;
+  nudged: boolean;
+  chatDisabled: boolean;
+  onOpenDrafts: () => void;
+  onContinueInChat: () => void;
+  onEdit: () => void;
+}) {
+  const headingId = useId();
+  const detailId = useId();
+  const deck = handoff.kind === "deck";
+  const busy = handoff.phase !== "choosing";
+  const KindIcon = deck ? Presentation : FileText;
+  const fileCount = handoff.attachments.length;
+  const carried = [
+    fileCount ? `${fileCount === 1 ? "Your file" : `Your ${fileCount} files`}` : "",
+    carriesConversation ? "this conversation" : "",
+  ].filter(Boolean);
+  return (
+    <article className={`message assistant-message draft-handoff${nudged ? " is-nudged" : ""}`} data-kind={handoff.kind}>
+      <div className="avatar aperture">
+        <BrandIcon sources={brandIconSources} size={36} title={brandName || "Assistant"} className="message-brand-logo" />
+      </div>
+      <div className="message-body">
+        {brandName && (
+          <div className="message-meta">
+            <strong>{brandName}</strong>
+          </div>
+        )}
+        <section className="draft-handoff-card" aria-labelledby={headingId} aria-describedby={detailId}>
+          <span className="sr-only" role="status">
+            {deck
+              ? "This looks like a slide deck. Choose the deck editor in Drafts or chat."
+              : "This looks like a document. Choose Drafts or chat."}
+          </span>
+          <div className="draft-handoff-head">
+            <span className="draft-handoff-icon" aria-hidden="true">
+              <KindIcon size={20} />
+            </span>
+            <div className="draft-handoff-copy">
+              <h3 id={headingId}>{deck ? "Build this as a slide deck?" : "Write this in Drafts?"}</h3>
+              <p id={detailId}>
+                {deck
+                  ? "The deck editor in Drafts builds real slides with layouts, themes, and speaker notes that export to PowerPoint. Or draft the slide content here in chat."
+                  : "Drafts writes it as a full document you can edit, format, and export to Word or PDF. Or keep it here in chat."}
+              </p>
+            </div>
+          </div>
+          <div className="draft-handoff-actions">
+            <button
+              type="button"
+              className="draft-handoff-choice is-primary"
+              disabled={busy}
+              aria-busy={handoff.phase === "drafts"}
+              data-tooltip={deck ? "Open the deck editor in Drafts and start building these slides" : "Open Drafts and start writing this document"}
+              onClick={onOpenDrafts}
+            >
+              {handoff.phase === "drafts" ? <Loader2 size={17} className="is-spinning" aria-hidden="true" /> : <KindIcon size={17} aria-hidden="true" />}
+              <span>
+                {handoff.phase === "drafts"
+                  ? deck ? "Opening the deck editor…" : "Opening Drafts…"
+                  : deck ? "Build in deck editor" : "Write in Drafts"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="draft-handoff-choice"
+              disabled={busy || chatDisabled}
+              aria-busy={handoff.phase === "chat"}
+              data-tooltip={deck ? "Have the assistant write out the slides here in chat" : "Send this to the assistant here in chat"}
+              onClick={onContinueInChat}
+            >
+              {handoff.phase === "chat" ? <Loader2 size={17} className="is-spinning" aria-hidden="true" /> : <MessageSquare size={17} aria-hidden="true" />}
+              <span>{deck ? "Draft slides in chat" : "Continue in chat"}</span>
+            </button>
+            <button
+              type="button"
+              className="draft-handoff-edit"
+              disabled={busy}
+              data-tooltip="Put this request back in the composer to change it"
+              onClick={onEdit}
+            >
+              <Pencil size={14} aria-hidden="true" />
+              <span>Edit request</span>
+            </button>
+          </div>
+          {carried.length > 0 && !handoff.error && (
+            <p className="draft-handoff-note">
+              {`${carried.join(" and ")} ${carried.length > 1 || fileCount > 1 ? "come" : "comes"} along if you pick Drafts.`.replace(/^./, (letter) => letter.toUpperCase())}
+            </p>
+          )}
+          {handoff.error && (
+            <p className="draft-handoff-error" role="alert">
+              {handoff.error}
+            </p>
+          )}
+        </section>
+      </div>
+    </article>
   );
 }
 

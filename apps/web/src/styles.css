@@ -26522,3 +26522,242 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 .retention-governance :is(input, select, button):focus-visible, .retention-tag-management :is(input, select, button):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .retention-tag-management .retention-actions > select { flex:1 1 220px; width:auto; }
 .retention-preset-labels button { white-space:nowrap; }
+
+/* ---------- Chat → Drafts handoff offer ----------
+ * Shown as the assistant's reply to a held document or deck request. */
+.draft-handoff-card {
+  display: grid;
+  gap: 14px;
+  max-width: 580px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--teal) 24%, var(--border));
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--teal-soft) 52%, var(--surface)), var(--surface) 72%);
+  box-shadow: var(--shadow-sm);
+}
+
+.draft-handoff-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.draft-handoff-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--teal) 12%, var(--surface));
+  color: var(--teal);
+}
+
+.draft-handoff-copy h3 {
+  margin: 1px 0 4px;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.message .draft-handoff-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.draft-handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.draft-handoff-choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--speed) var(--ease),
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    color var(--speed) var(--ease),
+    filter var(--speed) var(--ease),
+    transform var(--speed) var(--ease);
+}
+
+.draft-handoff-choice:not(:disabled):hover {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal-soft) 60%, var(--surface));
+  color: var(--teal);
+  box-shadow: var(--shadow-sm);
+}
+
+.draft-handoff-choice.is-primary {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--teal-2), var(--teal-strong));
+  color: #ffffff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 6px 16px -8px rgba(6, 106, 120, 0.7);
+}
+
+.draft-handoff-choice.is-primary:not(:disabled):hover {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--teal-2), var(--teal-strong));
+  color: #ffffff;
+  filter: brightness(1.06);
+}
+
+.draft-handoff-choice:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.draft-handoff-choice:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.draft-handoff-choice[aria-busy="true"] {
+  opacity: 1;
+}
+
+.draft-handoff-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.draft-handoff-edit:not(:disabled):hover {
+  background: color-mix(in srgb, var(--teal-soft) 55%, transparent);
+  color: var(--teal);
+}
+
+.draft-handoff-edit:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.message .draft-handoff-note {
+  margin: -4px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.message .draft-handoff-error {
+  margin: -4px 0 0;
+  color: var(--red);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.draft-handoff.is-nudged .draft-handoff-card {
+  animation: draft-handoff-nudge 760ms var(--ease);
+}
+
+@keyframes draft-handoff-nudge {
+  0%,
+  100% {
+    box-shadow: var(--shadow-sm);
+  }
+  30% {
+    box-shadow:
+      0 0 0 4px var(--teal-ring),
+      var(--shadow-sm);
+  }
+}
+
+@media (max-width: 560px) {
+  .draft-handoff-card {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .draft-handoff-head {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .draft-handoff-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+  }
+
+  .draft-handoff-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .draft-handoff-choice {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .draft-handoff-edit {
+    justify-self: center;
+    margin-left: 0;
+    min-height: 40px;
+  }
+}
+
+/* Narrow phones: the icon sits beside the title and the description takes
+ * the card's full width instead of a column beside the icon. */
+@media (max-width: 480px) {
+  .draft-handoff-head {
+    grid-template-columns: 30px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 6px;
+  }
+
+  .draft-handoff-copy {
+    display: contents;
+  }
+
+  .draft-handoff-copy h3 {
+    margin: 0;
+  }
+
+  .message .draft-handoff-copy p {
+    grid-column: 1 / -1;
+  }
+
+  .draft-handoff-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draft-handoff.is-nudged .draft-handoff-card {
+    animation: none;
+  }
+}
