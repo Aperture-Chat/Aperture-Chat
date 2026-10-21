@@ -188,6 +188,7 @@ import {
 } from "./lib/brandIcon";
 import { appendChatCitationsForDraft } from "./lib/draftCitations";
 import type { DraftNavigationGuard } from "./lib/draftNavigation";
+import type { DraftHandoffRequest } from "./lib/draftHandoff";
 import { sampleData } from "./data/sampleData";
 
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
@@ -213,6 +214,8 @@ export function App() {
   const [data, setData] = useState<BootstrapData>(sampleData);
   const [draftSessionKey, setDraftSessionKey] = useState(0);
   const [draftImport, setDraftImport] = useState<DraftImportPayload | null>(null);
+  // A chat request the user chose to build in Drafts; Drafts starts it once.
+  const [draftHandoff, setDraftHandoff] = useState<DraftHandoffRequest | null>(null);
   const draftNavigationGuardRef = useRef<DraftNavigationGuard | null>(null);
   const registerDraftNavigationGuard = useCallback((guard: DraftNavigationGuard | null) => {
     draftNavigationGuardRef.current = guard;
@@ -813,6 +816,7 @@ export function App() {
     requestWorkspaceNavigation(label, () => {
       if (nextRoute.kind === "drafts") {
         setDraftImport(null);
+        setDraftHandoff(null);
         setDraftSessionKey((current) => current + 1);
       }
       navigate(nextRoute, options);
@@ -851,10 +855,21 @@ export function App() {
         createdAt: message.createdAt,
         createdAtIso: message.completedAt || message.createdAtIso || message.executedAt,
       });
+      setDraftHandoff(null);
       setDraftSessionKey((current) => current + 1);
       navigate({ kind: "drafts" });
     },
     [chat.activeThread?.title, navigate],
+  );
+
+  const handleSendToDrafts = useCallback(
+    (request: DraftHandoffRequest) => {
+      setDraftImport(null);
+      setDraftHandoff(request);
+      setDraftSessionKey((current) => current + 1);
+      navigate({ kind: "drafts" });
+    },
+    [navigate],
   );
 
   const adminApi = useMemo<AdminConsoleApi>(
@@ -1261,6 +1276,7 @@ export function App() {
           requestedAgentId={requestedAgentId}
           onRequestedAgentConsumed={() => setRequestedAgentId(null)}
           onTransferToDraft={handleTransferToDraft}
+          onSendToDrafts={handleSendToDrafts}
           onExplainModelAccess={() => setModelAccessExplainerOpen(true)}
         />
       );
@@ -1272,6 +1288,8 @@ export function App() {
           data={effectiveData}
           brandName={chatBrandName}
           initialDraft={route.draftId ? null : draftImport}
+          initialRequest={route.draftId ? null : draftHandoff}
+          onInitialRequestStarted={() => setDraftHandoff(null)}
           initialServerDraftId={route.draftId ?? null}
           actorUserId={effectiveData.me.id}
           onCloseDraft={() => navigate(DEFAULT_ROUTE)}
@@ -1378,8 +1396,10 @@ export function App() {
     chatBrandDisplayName,
     draftSessionKey,
     draftImport,
+    draftHandoff,
     registerDraftNavigationGuard,
     handleTransferToDraft,
+    handleSendToDrafts,
     openAdminDocumentation,
     openHelpDrawer,
     adminDocumentationRequestKey,

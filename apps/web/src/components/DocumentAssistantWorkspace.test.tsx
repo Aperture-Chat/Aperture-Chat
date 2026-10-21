@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { DocumentAssistantWorkspace } from "./DocumentAssistantWorkspace";
 import { sampleData } from "../data/sampleData";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
+import type { DraftHandoffRequest } from "../lib/draftHandoff";
 
 const LEGACY_DOCUMENT_HISTORY_STORAGE_KEY = "aperture-document-history-v1";
 // Draft history is cached per tenant AND user; sampleData signs in
@@ -6238,4 +6239,117 @@ test("restored explicit page breaks remain real boundaries without label text", 
   await waitFor(() => expect(documentBody().querySelectorAll("section.document-page")).toHaveLength(2));
   expect(documentBody().querySelectorAll("section.document-page")[1]).toHaveAttribute("data-page-break-before", "manual");
   expect(documentText()).toBe("First page.Second page.");
+});
+
+function chatHandoff(overrides: Partial<DraftHandoffRequest> = {}): DraftHandoffRequest {
+  return {
+    id: "handoff-1",
+    kind: "document",
+    prompt: "Write an essay about remote work for distributed teams",
+    webSearch: false,
+    modelId: null,
+    knowledgeIds: [],
+    attachments: [],
+    chatContext: null,
+    ...overrides,
+  };
+}
+
+function dataWithTwoDraftModels() {
+  const base = dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini");
+  const model = base.models.find((item) => item.id === "openrouter-openai-gpt-4o-mini")!;
+  return {
+    ...base,
+    models: [
+      { ...model, id: "draft-first", name: "Draft first", is_custom: false },
+      { ...model, id: "draft-second", name: "Draft second", is_custom: false },
+    ],
+  };
+}
+
+test("a request handed over from chat starts drafting once with its files and conversation", async () => {
+  const requests = installChatCompletionFetchMock(
+    "# Remote Work and the Modern Team\n\nTeams that write things down move faster.",
+  ) as Array<Record<string, unknown>>;
+  const started = vi.fn();
+  const handoff = chatHandoff({
+    attachments: [{ attachmentId: "upload-brief", name: "brief.docx", size: "2 KB", hasText: true }],
+    chatContext: "User: Our churn fell to 2.1% in Q3.\n\nAssistant: Great news.",
+  });
+  const view = render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialRequest={handoff}
+      onInitialRequestStarted={started}
+    />,
+  );
+
+  await waitFor(() => expect(documentText()).toContain("Teams that write things down move faster."));
+  expect(started).toHaveBeenCalledTimes(1);
+  expect(requests).toHaveLength(1);
+  const prompt = String((requests[0].messages as Array<{ content: string }>)[0].content);
+  expect(prompt).toContain("User request: Write an essay about remote work for distributed teams");
+  expect(prompt).toContain("<chat_conversation>\nUser: Our churn fell to 2.1% in Q3.");
+  expect(requests[0].attachment_ids).toEqual(["upload-brief"]);
+  expect(requests[0].web_enabled).toBe(false);
+  expect(screen.getByText("brief.docx")).toBeInTheDocument();
+  expect(screen.getByLabelText("Ask the document assistant")).toHaveValue("");
+
+  // The same request arriving again (a re-render) never drafts twice, and
+  // the chat conversation only shapes that first draft.
+  view.rerender(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialRequest={handoff}
+      onInitialRequestStarted={started}
+    />,
+  );
+  await act(async () => {});
+  expect(requests).toHaveLength(1);
+  expect(started).toHaveBeenCalledTimes(1);
+});
+
+test("a deck handed over from chat is built in the deck editor", async () => {
+  const requests = installChatCompletionFetchMock(fencedDeckJson()) as Array<Record<string, unknown>>;
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialRequest={chatHandoff({ kind: "deck", prompt: "Create a slide deck about our Boston expansion" })}
+    />,
+  );
+
+  await waitFor(() => expect(screen.getByText("Slide 1 of 3")).toBeInTheDocument());
+  expect(screen.getByRole("textbox", { name: /Title slide title/ })).toHaveTextContent("Boston Expansion");
+  const prompt = String((requests[0].messages as Array<{ content: string }>)[0].content);
+  expect(prompt).toContain("You are a presentation writer producing a slide deck");
+  expect(prompt).toContain("Create a slide deck about our Boston expansion");
+  expect(prompt).not.toContain("<chat_conversation>");
+});
+
+test("a handed-over request drafts with the chat's model unless a drafting default is starred", async () => {
+  const requests = installChatCompletionFetchMock("# Memo\n\nSynthetic memo body.") as Array<Record<string, unknown>>;
+  const first = render(
+    <DocumentAssistantWorkspace
+      data={dataWithTwoDraftModels()}
+      brandName="Aperture Chat"
+      initialRequest={chatHandoff({ modelId: "draft-second" })}
+    />,
+  );
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0].model).toBe("draft-second");
+  first.unmount();
+
+  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-first");
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithTwoDraftModels()}
+      brandName="Aperture Chat"
+      initialRequest={chatHandoff({ id: "handoff-2", modelId: "draft-second" })}
+    />,
+  );
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1].model).toBe("draft-first");
 });
