@@ -28,38 +28,66 @@
   }
 }
 
+/* The composer speaks the platform's tactile language (tactile-controls.css):
+   lit accent keys for the action that runs, raised keys that press in, and
+   recessed tracks for the instruction box and the view switch. Every color
+   comes from the accent tokens, so a workspace accent restyles it too. The
+   fallbacks keep the same look where the tactile sheet is not loaded. */
 .ai-composer {
+  --ai-key-lit: var(
+    --tactile-lit,
+    linear-gradient(160deg, var(--teal), color-mix(in srgb, var(--teal) 60%, #052e35))
+  );
+  --ai-key-lit-border: var(--tactile-lit-border, #ffffff35);
+  --ai-key-lit-shadow: var(--tactile-lit-shadow, 0 2px 8px #0003, inset 0 1px #ffffff40);
+  --ai-key-lit-hover: var(--tactile-lit-hover-shadow, 0 4px 12px #0000003d, inset 0 1px #ffffff4d);
+  --ai-key-lit-pressed: var(--tactile-lit-pressed, inset 0 2px 5px #0000004d);
+  --ai-key-raised: var(--tactile-raised, 0 1px 2px #0000001a, inset 0 1px 0 #ffffffb3);
+  --ai-key-raised-hover: var(--tactile-raised-hover, 0 2px 6px #0000001f, inset 0 1px 0 #ffffffb3);
+  --ai-key-pressed: var(--tactile-pressed, inset 0 2px 4px #00000029);
+  --ai-track: var(--tactile-track, var(--surface-soft));
+  --ai-track-border: var(--tactile-track-border, var(--border-strong));
+  --ai-track-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0003);
   position: fixed;
   z-index: 95;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
   font-size: 13.5px;
   box-shadow:
-    0 24px 64px -20px rgb(8 41 56 / 45%),
-    0 6px 18px -8px rgb(13 27 42 / 18%);
+    0 20px 48px -20px rgb(8 41 56 / 42%),
+    0 2px 8px -2px rgb(13 27 42 / 12%);
   animation: ai-composer-in 150ms var(--ease);
   outline: none;
 }
 
+.theme-dark .ai-composer {
+  --ai-key-raised: var(--tactile-raised, 0 1px 2px #0000004d, inset 0 1px 0 #ffffff14);
+  --ai-key-raised-hover: var(--tactile-raised-hover, 0 2px 6px #00000059, inset 0 1px 0 #ffffff1f);
+  --ai-key-pressed: var(--tactile-pressed, inset 0 2px 4px #00000059);
+  --ai-track-shadow: var(--tactile-track-shadow, inset 0 2px 5px #00000066);
+}
+
+/* A hairline of the accent marks the panel as AI without a second palette. */
 .ai-composer::before {
   content: "";
   position: absolute;
   inset: 0 0 auto;
-  height: 3px;
-  background: linear-gradient(90deg, var(--teal-2), #6d5dfc 60%, #d05ce3);
-  opacity: 0.85;
+  height: 2px;
+  background: var(--teal);
 }
 
 .ai-composer-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 13px 10px 9px 14px;
+  margin-bottom: 10px;
+  padding: 12px 8px 10px 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .ai-composer-mark {
@@ -68,10 +96,11 @@
   width: 26px;
   height: 26px;
   place-items: center;
+  border: 1px solid var(--ai-key-lit-border);
   border-radius: 8px;
   color: #fff;
-  background: linear-gradient(135deg, var(--teal-2), #6d5dfc);
-  box-shadow: 0 4px 10px -4px rgb(109 93 252 / 60%);
+  background: var(--ai-key-lit);
+  box-shadow: var(--ai-key-lit-shadow);
 }
 
 .ai-composer-head-text {
@@ -83,6 +112,8 @@
 
 .ai-composer-head-text strong {
   font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
   color: var(--text-strong);
 }
 
@@ -112,15 +143,26 @@
   color: var(--text);
 }
 
+.ai-composer-icon:active {
+  box-shadow: var(--ai-key-pressed);
+}
+
+.ai-composer-icon:focus-visible {
+  outline: 2px solid var(--teal-2);
+  outline-offset: 1px;
+}
+
+/* The instruction box is a recessed track; the send key sits in it. */
 .ai-composer-input,
 .ai-composer-refine {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 7px 7px 7px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  background: var(--surface-soft);
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--ai-track-border);
+  border-radius: 11px;
+  background: var(--ai-track);
+  box-shadow: var(--ai-track-shadow);
   transition:
     border-color var(--speed) var(--ease),
     box-shadow var(--speed) var(--ease);
@@ -133,8 +175,9 @@
 .ai-composer-input:focus-within,
 .ai-composer-refine:focus-within {
   border-color: var(--teal-2);
-  background: var(--surface);
-  box-shadow: 0 0 0 3px var(--teal-ring);
+  box-shadow:
+    var(--ai-track-shadow),
+    0 0 0 3px var(--teal-ring);
 }
 
 .ai-composer textarea {
@@ -156,27 +199,47 @@
   color: var(--faint);
 }
 
+/* Send is the lit key once there is something to send; until then it is an
+   unlit key resting in the track. */
 .ai-composer-send {
   display: grid;
   flex: none;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border: 0;
-  border-radius: 9px;
-  background: var(--teal);
+  border: 1px solid var(--ai-key-lit-border);
+  border-radius: 8px;
+  background: var(--ai-key-lit);
   color: #fff;
+  box-shadow: var(--ai-key-lit-shadow);
   cursor: pointer;
-  transition: background var(--speed) var(--ease);
+  transition:
+    filter var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    transform 90ms var(--ease);
 }
 
 .ai-composer-send:hover:not(:disabled) {
-  background: var(--teal-strong);
+  filter: brightness(1.07);
+  box-shadow: var(--ai-key-lit-hover);
+}
+
+.ai-composer-send:active:not(:disabled) {
+  filter: brightness(0.96);
+  box-shadow: var(--ai-key-lit-pressed);
+  transform: translateY(1px);
+}
+
+.ai-composer-send:focus-visible {
+  outline: 2px solid var(--teal-2);
+  outline-offset: 2px;
 }
 
 .ai-composer-send:disabled {
-  background: var(--border-strong);
-  color: var(--surface);
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--faint);
+  box-shadow: inset 0 1px 2px #0000001f;
   cursor: default;
 }
 
@@ -190,7 +253,7 @@
   flex: 1 1 auto;
   min-height: 0;
   max-height: 340px;
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   padding: 2px 8px 10px;
   overflow-y: auto;
   list-style: none;
@@ -211,9 +274,9 @@
   align-items: center;
   width: 100%;
   gap: 10px;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: 9px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -227,10 +290,12 @@
 }
 
 .ai-composer-list button[role="option"].is-active {
+  border-color: color-mix(in srgb, var(--teal) 24%, transparent);
   background: var(--teal-soft);
   color: var(--text-strong);
 }
 
+/* Tone and language picks are raised keys that press in, not oval tags. */
 .ai-composer-list li.is-chip {
   display: inline-block;
   margin: 3px 5px 3px 0;
@@ -238,10 +303,16 @@
 
 .ai-composer-list li.is-chip button[role="option"] {
   width: auto;
-  padding: 5px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--ai-key-raised);
   font-size: 12.5px;
+  font-weight: 600;
+  transition:
+    box-shadow var(--speed) var(--ease),
+    transform 90ms var(--ease);
 }
 
 .ai-composer-list li.is-chip button[role="option"] svg {
@@ -250,6 +321,13 @@
 
 .ai-composer-list li.is-chip button[role="option"].is-active {
   border-color: var(--teal-2);
+  background: var(--teal-soft);
+  box-shadow: var(--ai-key-raised-hover);
+}
+
+.ai-composer-list li.is-chip button[role="option"]:active {
+  box-shadow: var(--ai-key-pressed);
+  transform: translateY(1px);
 }
 
 .ai-composer-group + li.is-chip {
@@ -322,31 +400,40 @@
   animation: apx-spin 900ms linear infinite;
 }
 
+/* Changes / Result: the Drafts rail in miniature, lit on the chosen view. */
 .ai-composer-view {
   display: inline-flex;
   flex: none;
+  gap: 2px;
   margin-left: auto;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--surface-sunken);
+  padding: 3px;
+  border: 1px solid var(--ai-track-border);
+  border-radius: 10px;
+  background: var(--ai-track);
+  box-shadow: var(--ai-track-shadow);
 }
 
 .ai-composer-view button {
   padding: 3px 10px;
-  border: 0;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted);
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
 }
 
-.ai-composer-view button[aria-selected="true"] {
-  background: var(--surface);
+.ai-composer-view button:hover {
   color: var(--text-strong);
-  box-shadow: var(--shadow-sm);
+}
+
+.ai-composer-view button[aria-selected="true"] {
+  border-color: var(--ai-key-lit-border);
+  background: var(--ai-key-lit);
+  color: #fff;
+  box-shadow: var(--ai-key-lit-shadow);
 }
 
 .ai-composer-stream,
@@ -356,7 +443,7 @@
   overflow-y: auto;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface-soft);
   color: var(--text);
   font-size: 14.5px;
@@ -472,10 +559,33 @@
   text-align: left;
 }
 
+/* Words the edit adds, as they will land in the page. */
+.ai-composer-result .ai-composer-new {
+  border-radius: 3px;
+  background: var(--teal-soft);
+  box-shadow: inset 0 -1.5px 0 var(--teal-2);
+}
+
 .ai-composer-stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
   margin: -4px 2px 0;
   color: var(--faint);
   font-size: 11.5px;
+}
+
+.ai-composer-kept {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--teal-strong);
+  font-weight: 650;
+}
+
+.theme-dark .ai-composer-kept {
+  color: var(--teal-2);
 }
 
 .ai-composer-actions {
@@ -491,30 +601,44 @@
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 13px;
   font-weight: 600;
+  box-shadow: var(--ai-key-raised);
   cursor: pointer;
   transition:
-    background var(--speed) var(--ease),
-    border-color var(--speed) var(--ease);
+    box-shadow var(--speed) var(--ease),
+    filter var(--speed) var(--ease),
+    transform 90ms var(--ease);
 }
 
 .ai-composer-actions button:hover {
-  background: var(--surface-soft);
+  box-shadow: var(--ai-key-raised-hover);
+}
+
+.ai-composer-actions button:active {
+  box-shadow: var(--ai-key-pressed);
+  transform: translateY(1px);
 }
 
 .ai-composer-actions button.is-primary {
-  border-color: var(--teal);
-  background: var(--teal);
+  border-color: var(--ai-key-lit-border);
+  background: var(--ai-key-lit);
   color: #fff;
+  box-shadow: var(--ai-key-lit-shadow);
 }
 
 .ai-composer-actions button.is-primary:hover {
-  background: var(--teal-strong);
+  filter: brightness(1.07);
+  box-shadow: var(--ai-key-lit-hover);
+}
+
+.ai-composer-actions button.is-primary:active {
+  filter: brightness(0.96);
+  box-shadow: var(--ai-key-lit-pressed);
 }
 
 .ai-composer-actions button:focus-visible,
@@ -525,12 +649,21 @@
 }
 
 .ai-composer.is-docked {
-  border-radius: 18px;
+  border-radius: 14px;
 }
 
-/* The highlighted text stays visibly selected while focus is in the composer. */
+@media (prefers-reduced-motion: reduce) {
+  .ai-composer-send:active:not(:disabled),
+  .ai-composer-actions button:active,
+  .ai-composer-list li.is-chip button[role="option"]:active {
+    transform: none;
+  }
+}
+
+/* The highlighted text stays visibly selected while focus is in the composer,
+   tinted with the workspace accent. */
 ::highlight(aperture-ai-target) {
-  background-color: rgb(10 164 181 / 24%);
+  background-color: color-mix(in srgb, var(--teal, #0aa4b5) 24%, transparent);
 }
 
 /* ---------- Selection toolbar ---------- */
@@ -3324,4 +3457,115 @@ figure.document-media-align-right {
 
 .document-version-label > svg {
   flex: 0 0 auto;
+}
+
+/* ---------- Account save state ---------- */
+/* Shares the toolbar row with the 42px buttons: a quiet word while saving or
+   saved, and a tinted chip with its own action when the account copy is
+   behind. The full reason lives in the tooltip. */
+.document-server-save-state {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.document-server-save-state > svg {
+  flex: 0 0 auto;
+}
+
+.document-server-save-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.document-server-save-state.is-saving > svg {
+  animation: apx-spin 900ms linear infinite;
+}
+
+.document-server-save-state.is-saved {
+  color: var(--green);
+}
+
+.document-server-save-state.is-local-only,
+.document-server-save-state.is-conflict {
+  padding: 0 5px 0 12px;
+  border-color: var(--orange-border);
+  background: var(--orange-soft);
+  color: color-mix(in srgb, var(--orange) 72%, var(--text-strong));
+}
+
+/* Nothing outside this tab holds the work, so the whole warning shows and
+   wraps inside the chip. */
+.document-server-save-state.is-not-stored {
+  max-width: min(520px, 100%);
+  padding: 6px 5px 6px 12px;
+  border-color: var(--red-border);
+  background: var(--red-soft);
+  color: color-mix(in srgb, var(--red) 80%, var(--text-strong));
+  white-space: normal;
+}
+
+.document-server-save-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 30px;
+  margin-left: 2px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 720;
+  cursor: pointer;
+  transition:
+    background var(--speed) var(--ease),
+    border-color var(--speed) var(--ease);
+}
+
+.document-server-save-action:hover {
+  border-color: color-mix(in srgb, currentColor 55%, transparent);
+  background: var(--surface-soft);
+}
+
+.document-server-save-action:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+/* The status bar word matches: an account copy that is behind is not "Saved". */
+.document-toolbar .document-edits-toggle.is-local {
+  color: color-mix(in srgb, var(--orange) 72%, var(--text-strong));
+}
+
+/* Phones give the action a 44px target, so the chip grows around it; the
+   label wraps beside the action instead of pushing it to its own line. */
+@media (max-width: 640px) {
+  .document-assistant-page .document-server-save-state:not(.is-saving):not(.is-saved) {
+    padding: 4px 4px 4px 12px;
+  }
+
+  .document-assistant-page .document-server-save-label {
+    flex: 1 1 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-server-save-state.is-saving > svg {
+    animation: none;
+  }
 }

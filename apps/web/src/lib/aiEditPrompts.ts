@@ -374,7 +374,131 @@ export function aiRefineMessage(instruction: string) {
     instruction,
     "",
     "Return only the full revised replacement, in the same format rules as before. No labels or explanations.",
+    "Keep the original passage's formatting unless this follow-up asks to change it.",
   ].join("\n");
+}
+
+/** What an instruction asks of a passage beyond its words. An edit keeps the
+ * passage's formatting unless the writer asked for a different look or shape,
+ * so "fill in the blanks" never needs "and don't change the formatting". */
+export type AiEditIntent = {
+  /** A different look: bold, fonts, colors, alignment, links. */
+  restyle: boolean;
+  /** A different shape: a list, a table, headings, more paragraphs. */
+  restructure: boolean;
+  /** Fill in blanks or placeholders. */
+  fillBlanks: boolean;
+  /** Invent sample values rather than use real ones. */
+  sampleData: boolean;
+};
+
+export const NO_AI_EDIT_INTENT: AiEditIntent = {
+  restyle: false,
+  restructure: false,
+  fillBlanks: false,
+  sampleData: false,
+};
+
+/** "Keep the formatting", "don't change the style": asks for preservation,
+ * so the words in it must not read as a formatting request. */
+const KEEP_FORMAT_PHRASES = [
+  /\b(?:keep|keeping|preserve|preserving|maintain|maintaining|retain|retaining|leave|leaving|respect|match|matching|same)\b[^.;!?\n]{0,40}?\b(?:format(?:ting|s)?|styles?|styling|fonts?|layout|structure|markup|look)\b/gi,
+  /\b(?:don'?t|do not|never|without|no|not)\b[^.;!?\n]{0,40}?\b(?:format(?:ting|s)?|styles?|styling|fonts?|layout|structure|markup)\b/gi,
+];
+
+const RESTYLE_PATTERNS = [
+  /\b(?:bold(?:ed|en|er)?|un-?bold|embolden|italic(?:s|i[sz]e[sd]?)?|underlin(?:e|ed|es|ing)|strike[- ]?through|strike (?:it|them|out)|highlight(?:s|ing)?|colou?r(?:s|ed)?|fonts?|typeface|font[- ]size|text size|re-?format\w*|restyle\w*|format(?:ting)?|align\w*|justif(?:y|ied)|indent\w*|superscript|subscript|small caps|hyperlink\w*)\b/i,
+  /\bcent(?:er|re)(?:ed|ing)?\s+(?:it|this|them|the|align\w*)\b/i,
+  /\b(?:add|insert|include|remove)\s+(?:a\s+|the\s+)?links?\b/i,
+];
+
+const RESTRUCTURE_PATTERNS = [
+  /\b(?:turn|convert|make|change|rewrite|break|split|put|lay|organi[sz]e|restructure|present|format)\b[^.;!?\n]{0,30}?\b(?:into|as|in|to)\b[^.;!?\n]{0,30}?\b(?:lists?|bullet(?:s|ed)?|bullet points|numbered|checklist|tables?|columns?|headings?|sections|paragraphs|outline|steps|rows)\b/i,
+  /\b(?:add|insert|create|include|use)\b[^.;!?\n]{0,20}?\b(?:bullets?|bullet points|bulleted list|numbered list|table|headings?|subheadings?|columns?|line breaks?)\b/i,
+  /\b(?:split|merge|combine|separate|break up|restructure|reorgani[sz]e)\b/i,
+  /\b(?:one|two|three|four|five|six|\d+)\s+(?:bullets?|paragraphs|sections|columns|rows|items|steps)\b/i,
+  /\bsignature block\b/i,
+];
+
+const FILL_PATTERNS = [
+  /\b(?:fill(?:s|ed|ing)?|complete|populate|plug)\b[^.;!?\n]{0,40}?\b(?:in|out|blanks?|lines?|fields?|placeholders?|gaps?|spaces?|form|template|details)\b/i,
+  /\b(?:blanks?|placeholders?|fill-ins?)\b/i,
+];
+
+const SAMPLE_PATTERNS = [
+  /\b(?:fake|dummy|sample|example|mock|fictional|fictitious|made[- ]up|placeholder|test|realistic|random)\s+(?:data|values?|details|info(?:rmation)?|names?|text|entries|content|numbers?|figures?)\b/i,
+  /\bmake (?:something|things|it|them|names?|values?) up\b/i,
+  /\binvent\b/i,
+];
+
+export function aiEditIntent(instruction: string): AiEditIntent {
+  const asked = KEEP_FORMAT_PHRASES.reduce((text, phrase) => text.replace(phrase, " "), instruction);
+  const any = (patterns: RegExp[], text: string) => patterns.some((pattern) => pattern.test(text));
+  return {
+    restyle: any(RESTYLE_PATTERNS, asked),
+    restructure: any(RESTRUCTURE_PATTERNS, asked),
+    fillBlanks: any(FILL_PATTERNS, instruction),
+    sampleData: any(SAMPLE_PATTERNS, instruction),
+  };
+}
+
+/** A refinement adds to what the edit already asked for. */
+export function mergeAiEditIntent(left: AiEditIntent, right: AiEditIntent): AiEditIntent {
+  return {
+    restyle: left.restyle || right.restyle,
+    restructure: left.restructure || right.restructure,
+    fillBlanks: left.fillBlanks || right.fillBlanks,
+    sampleData: left.sampleData || right.sampleData,
+  };
+}
+
+/** True when the edit only changes words, so the highlight's formatting is
+ * kept exactly and the reply's words are written into it. */
+export function aiEditKeepsFormatting(intent: AiEditIntent) {
+  return !intent.restyle && !intent.restructure;
+}
+
+/** Underscore blanks, ruled lines, or bracketed placeholders like [Client Name]. */
+export function hasFillInBlanks(text: string, html = "") {
+  return /_{3,}/.test(text) || /document-(?:blank|signature-line)/.test(html) || /\[[^\]\n]{2,40}\]/.test(text);
+}
+
+/** The scope contract for an edit of highlighted text: change what was asked,
+ * keep everything else (wording, spacing, and formatting) as it is. */
+export function aiEditScopeLines({
+  instruction,
+  selectedText,
+  selectedHtml = "",
+}: {
+  instruction: string;
+  selectedText: string;
+  selectedHtml?: string;
+}) {
+  const intent = aiEditIntent(instruction);
+  const lines = [
+    "Scope rules:",
+    "- Change only what the instruction asks for. Words, numbers, punctuation, capitalization, and spacing it does not mention stay exactly as they are.",
+    "- Keep the existing formatting (bold, italics, underline, fonts, sizes, colors, alignment, tab stops, and fill-in blanks) unless the instruction explicitly asks to change it.",
+  ];
+  if (aiEditKeepsFormatting(intent)) {
+    lines.push("- This instruction asks for no formatting or layout change, so the formatting must come back exactly as it is.");
+  }
+  if (selectedHtml && !intent.restructure) {
+    lines.push(
+      "- The highlighted passage's markup is shown below. Return that same markup with the requested change made: every tag, class, and inline style stays around the text it already wraps, and only the text inside changes.",
+    );
+  }
+  if (intent.fillBlanks || (intent.sampleData && hasFillInBlanks(selectedText, selectedHtml))) {
+    lines.push(
+      '- Fill each blank or placeholder (a run of underscores, a <span class="document-blank">, a ruled <span class="document-signature-line">, or a bracketed placeholder such as [Client Name]) with a value that fits the sentence around it. Put the value where the blank was, inside the blank\'s own element, and leave every other character as it is.',
+    );
+  }
+  if (intent.sampleData) {
+    lines.push(
+      "- Invent realistic but clearly fictional values (names, places, dates, amounts) and keep them consistent: the same party, place, or project has the same name everywhere it appears.",
+    );
+  }
+  return lines;
 }
 
 /** Sentence-level context block appended to the highlighted-passage prompt. */

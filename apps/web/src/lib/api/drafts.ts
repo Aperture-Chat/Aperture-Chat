@@ -36,6 +36,20 @@ export function maxDraftContentBytes(kind: DraftKind): number {
   return kind === "deck" ? MAX_DECK_CONTENT_BYTES : MAX_DRAFT_CONTENT_BYTES;
 }
 
+/** The title as the account stores it: whitespace collapsed the way the
+ * server normalizes it, and a title past MAX_DRAFT_TITLE_CHARS shortened at a
+ * word boundary with an ellipsis, so a long title can never fail a save.
+ * Returns "" for a blank title; callers supply their own fallback. */
+export function draftTitleForAccount(title: string): string {
+  const normalized = title.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
+  // Count code points, as the server does, and never split a surrogate pair.
+  const characters = Array.from(normalized);
+  if (characters.length <= MAX_DRAFT_TITLE_CHARS) return normalized;
+  const cut = characters.slice(0, MAX_DRAFT_TITLE_CHARS - 1).join("");
+  const atWord = cut.replace(/\s+\S*$/, "");
+  return `${(atWord.length >= cut.length * 0.6 ? atWord : cut).replace(/[\s,;:.\-–—]+$/, "")}…`;
+}
+
 export type DraftDocument = {
   id: string;
   tenant_id: string;
