@@ -3494,8 +3494,8 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       "Choose the moon button beside Help for Dark mode, or the sun for Light mode.",
       "Choose the clock button (Theme schedule), turn on Switch automatically, set Light mode at and Dark mode at to different times, and choose Save schedule.",
       "Choose Help at the bottom of the sidebar for the walkthroughs and the printable User guide (PDF).",
-      "To report a problem, choose Report a problem in Help, fill in Subject and Message, optionally add a Screenshot, and choose Send report.",
-      "Wait for Report sent: an administrator can now review it in Analytics.",
+      "To report a problem, choose Report a problem in Help, pick what you are sending (Problem, Idea, Question, Feedback, or Security concern), fill in Subject and Message, optionally add a Screenshot, and choose Send report.",
+      "Wait for Report sent: your administrators can see it now, and Help › My reports shows its status and their replies.",
     ],
     paths: [
       {
@@ -3535,7 +3535,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       "Profile saved appears, and your account card shows the new details.",
       "The workspace switches between light and dark at the scheduled times on this device.",
       "The installed app opens from your home screen or app list.",
-      "Report sent confirms an administrator can review your report.",
+      "Report sent confirms your administrators received it; follow it in Help › My reports.",
     ],
     troubleshooting: [
       { symptom: "\"Use a complete http(s) website URL.\"", fix: "Enter the full website address, including https://." },
@@ -3643,8 +3643,8 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       },
       {
         title: "Report sent",
-        caption: "Report sent confirms an administrator can review it in Analytics.",
-        narration: "Report sent confirms it arrived: an administrator can now review it in Analytics. If you see an error instead, the report was not received, so send it again.",
+        caption: "Report sent confirms your administrators received it; follow it in My reports.",
+        narration: "Report sent confirms it arrived. Your administrators can see it now, and Help, then My reports, shows its status and their replies. If you see an error instead, the report was not received, so send it again.",
         durationSeconds: 12,
         focus: "helpReportReceived",
         calloutPlacement: "left-rail",

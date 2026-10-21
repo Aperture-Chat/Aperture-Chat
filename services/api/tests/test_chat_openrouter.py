@@ -2909,6 +2909,124 @@ def test_chat_completion_revises_outline_that_fails_long_form_request(monkeypatc
     assert "actual complete deliverable" in captured_bodies[1]["messages"][-1]["content"]
 
 
+def _content_filter_reply(index: int) -> dict[str, object]:
+    # OpenRouter's shape when the upstream's own content filter replaced the reply.
+    return {
+        "id": f"gen-filtered-{index}",
+        "provider": "Azure",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "I'm sorry, but I cannot assist with that request.",
+                },
+                "finish_reason": "content_filter",
+                "native_finish_reason": "content_filter",
+            }
+        ],
+        "usage": {"prompt_tokens": 900, "completion_tokens": 40, "total_tokens": 940},
+    }
+
+
+def test_a_draft_the_provider_filtered_fails_instead_of_becoming_the_document(
+    monkeypatch,
+) -> None:
+    _activate_provider("provider-openrouter")
+    store = get_store()
+    store.models["openrouter-filtered-draft"] = ModelConfig(
+        id="openrouter-filtered-draft",
+        provider_id="provider-openrouter",
+        provider_name="OpenRouter",
+        name="OpenRouter Filtered Draft",
+        upstream_model_id="openai/gpt-5.5",
+        context_window=128000,
+        group_ids=["group-litigation"],
+    )
+    captured_bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_bodies.append(json.loads(request.read().decode()))
+        return httpx.Response(200, json=_content_filter_reply(len(captured_bodies)))
+
+    fake = _gateway(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: fake)
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-filtered-draft",
+            "surface": "draft",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Write a 10 page history report on the Hundred Years' War.",
+                }
+            ],
+        },
+        headers=headers(),
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "Azure's content filter withheld the model's reply" in detail
+    assert "OpenRouter sent the request to Azure" in detail
+    assert "cannot assist" not in detail
+    # No validator revisions are spent re-asking a filtered upstream.
+    assert len(captured_bodies) == 1
+
+
+def test_a_filtered_revision_never_replaces_the_answer_in_hand(monkeypatch) -> None:
+    _activate_provider("provider-openrouter")
+    store = get_store()
+    store.models["openrouter-filtered-revision"] = ModelConfig(
+        id="openrouter-filtered-revision",
+        provider_id="provider-openrouter",
+        provider_name="OpenRouter",
+        name="OpenRouter Filtered Revision",
+        upstream_model_id="openai/gpt-5.5",
+        context_window=128000,
+        group_ids=["group-litigation"],
+    )
+    outline = "Outline\n1. Introduction\n2. Background\n3. Conclusion"
+    captured_bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_bodies.append(json.loads(request.read().decode()))
+        if len(captured_bodies) > 1:
+            return httpx.Response(200, json=_content_filter_reply(len(captured_bodies)))
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-outline",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": outline},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 20, "total_tokens": 140},
+            },
+        )
+
+    fake = _gateway(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: fake)
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-filtered-revision",
+            "messages": [{"role": "user", "content": "Write a 2 page paper on Artemis II."}],
+        },
+        headers=headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == outline
+    assert len(captured_bodies) == 2
+
+
 def test_chat_completion_never_injects_curated_image_content(monkeypatch) -> None:
     _activate_provider("provider-openrouter")
     store = get_store()

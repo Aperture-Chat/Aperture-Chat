@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { DocumentAssistantWorkspace } from "./DocumentAssistantWorkspace";
 import { sampleData } from "../data/sampleData";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
+import type { DraftHandoffRequest } from "../lib/draftHandoff";
 
 const LEGACY_DOCUMENT_HISTORY_STORAGE_KEY = "aperture-document-history-v1";
 // Draft history is cached per tenant AND user; sampleData signs in
@@ -484,6 +485,38 @@ test("keeps workspace knowledge and templates off while web search defaults on f
   ).toBeInTheDocument();
   expectDraftContext({ sources: "Off", web: "On", templates: "Off" });
   expect(screen.getByText(/drafted with provider-hosted web search/)).toBeInTheDocument();
+});
+
+test("a long request still gets a short document title", async () => {
+  installChatCompletionFetchMock(providerPagedDraft("Napoleon", 1, "Napoleon"));
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value:
+        "write a paper about Napoleon and make sure to include his most famous battles, a timeline of his rise to power, and his exile to Elba and Saint Helena",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+  await waitFor(() => expect(screen.getByLabelText("Document title")).toHaveValue("Napoleon Draft"));
+});
+
+test("a request that runs on is titled from its opening words", async () => {
+  installChatCompletionFetchMock(providerPagedDraft("Roman Empire", 1, "Roman Empire"));
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value:
+        "write a paper about the long and winding history of the Roman Empire, the fall of Constantinople, the rise of the Ottoman state, Venetian trade networks, and the Crusades",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Document title")).toHaveValue(
+      "Long and Winding History of the Roman Empire, the Fall of Constantinople Draft",
+    ),
+  );
 });
 
 test("runs long-horizon document drafting with trace steps and image slots", async () => {
@@ -2124,6 +2157,50 @@ test("a research paper keeps its inline sourcing rule", async () => {
   expect(prompt).not.toContain("This is a legal instrument");
 });
 
+test("a history report that mentions legal words is drafted as a report, not an instrument", async () => {
+  const chatRequests = installChatCompletionFetchMock("# The American Revolutionary War\n\nBody.");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: {
+      value:
+        "Write a ten-page research report on the American Revolutionary War (1775–1783). Deliver the full report in one draft. Cover the Declaration of Independence, the Treaty of Paris, and the settlement of the frontier. The report will distinguish primary sources from later interpretations and briefly explain where historians disagree.",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const prompt = String(
+    (chatRequests[0] as { messages: Array<{ content?: string }> }).messages[0]?.content ?? "",
+  );
+  expect(prompt).not.toContain("This is a legal instrument");
+  expect(prompt).not.toContain("WHEREAS");
+  expect(prompt).toContain("mark it for verification instead of inventing a citation");
+  await waitFor(() =>
+    expect(screen.getByLabelText("Document title")).toHaveValue("American Revolutionary War (1775–1783) Draft"),
+  );
+});
+
+test.each([
+  "Draft a will for my client leaving the house to her daughter.",
+  "Prepare a revocable trust for a married couple with two children.",
+  "Draft a general release of claims for a former contractor.",
+])("an instrument named in everyday words is still drafted as one: %s", async (request) => {
+  const chatRequests = installChatCompletionFetchMock("# INSTRUMENT\n\nBody.");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
+  disableWebSearch();
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), { target: { value: request } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  const prompt = String(
+    (chatRequests[0] as { messages: Array<{ content?: string }> }).messages[0]?.content ?? "",
+  );
+  expect(prompt).toContain("This is a legal instrument");
+});
+
 test("an unrelated starter template never sets the draft type for an instrument", async () => {
   const chatRequests = installChatCompletionFetchMock("# MASTER SERVICES AGREEMENT\n\nBody.");
   render(<DocumentAssistantWorkspace data={sampleData} brandName="S.F. Steward" />);
@@ -2416,6 +2493,72 @@ test("uses the save picker for each document export format when available", asyn
   expect(write).toHaveBeenCalledTimes(2);
   expect(close).toHaveBeenCalledTimes(2);
   expect(screen.getByText(/Saved to your selected location/)).toBeInTheDocument();
+});
+
+test("a save location that cannot be written loses its empty file and the export downloads instead", async () => {
+  installChatCompletionFetchMock(clientUpdateProviderDraft());
+  // Chrome creates the chosen file, empty, before anything is written; a name
+  // at the filesystem limit then fails when the browser opens it for writing.
+  const remove = vi.fn().mockResolvedValue(undefined);
+  const getFile = vi.fn().mockResolvedValue(new Blob([]));
+  const createWritable = vi
+    .fn()
+    .mockRejectedValue(new DOMException("File name too long", "InvalidStateError"));
+  const showSaveFilePicker = vi.fn().mockResolvedValue({ createWritable, getFile, remove });
+  Object.defineProperty(window, "showSaveFilePicker", {
+    configurable: true,
+    value: showSaveFilePicker,
+  });
+  const downloadSpy = installDownloadSpy();
+  try {
+    render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+    await waitFor(() => expect(documentText()).toContain("Anderson v. Northstar Logistics"));
+    openExportDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+    await waitFor(() =>
+      expect(downloadSpy.downloads[0]).toMatchObject({ filename: "client-update-draft.docx" }),
+    );
+    expect(downloadSpy.downloads[0].blob.size).toBeGreaterThan(0);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(/could not be written to the chosen location, so it was sent to your browser downloads instead/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Sent to your browser downloads/)).toBeInTheDocument();
+
+    // A chosen file that already holds content is never removed.
+    getFile.mockResolvedValueOnce(new Blob(["existing work"]));
+    fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+    await waitFor(() => expect(downloadSpy.downloads).toHaveLength(2));
+    expect(remove).toHaveBeenCalledTimes(1);
+  } finally {
+    downloadSpy.restore();
+  }
+});
+
+test("a long document title still exports under a short file name", async () => {
+  installChatCompletionFetchMock(clientUpdateProviderDraft());
+  const downloadSpy = installDownloadSpy();
+  try {
+    render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+    await waitFor(() => expect(documentText()).toContain("Anderson v. Northstar Logistics"));
+    const longTitle = `Napoleon and make sure to add a timeline of his life ${"and photos of the man ".repeat(12)}`;
+    fireEvent.change(screen.getByLabelText("Document title"), { target: { value: longTitle } });
+    openExportDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save version and export" }));
+    await waitFor(() => expect(downloadSpy.downloads[0]?.filename).toBeDefined());
+    const filename = downloadSpy.downloads[0].filename ?? "";
+    expect(filename).toMatch(/^napoleon-and-make-sure-to-add-a-timeline-of-his-life-and-photos[a-z-]*[a-z]\.docx$/);
+    expect(filename.length).toBeLessThanOrEqual(85);
+  } finally {
+    downloadSpy.restore();
+  }
 });
 
 test("keeps export single-flight while Word packaging is in progress", async () => {
@@ -2916,6 +3059,72 @@ test("keeps provider HTML formatting in the inline replacement", async () => {
   expect(suggestion?.querySelector("strong")?.textContent).toBe("deep space");
   expect(suggestion?.closest("p")).not.toBeNull();
   expect(documentBody().querySelectorAll("p.document-ai-suggestion")).toHaveLength(0);
+});
+
+test("filling blanks keeps the clause's tab stops, underline, and blanks without being told to", async () => {
+  const tab = (stop: number, width: number) =>
+    `<span class="document-tab document-tab-left document-tab-at-${stop}" style="display: inline-block; width: ${width}px">\t</span>`;
+  window.localStorage.setItem(SCOPED_DRAFT_CACHE_KEY, JSON.stringify([{
+    id: "lease-clause", title: "Ground Lease", summary: "Local changes", sourceLabel: "Local draft",
+    updatedAt: new Date().toISOString(), status: "complete",
+    content:
+      `<p style="text-align: justify">${tab(720, 48)}4.1${tab(1440, 36)}<u>SITE DESCRIPTION:</u> &nbsp;` +
+      `The site leased under this Lease is known as <span class="document-blank">______________________</span> ` +
+      `and holds <span class="document-blank">_____</span> units, managed by ` +
+      `<span class="document-blank">______________</span>Holdings LLC.</p><p>Closing paragraph stays.</p>`,
+  }]));
+  // The model answers in plain text, as it did when it reformatted the clause.
+  const chatRequests = installChatCompletionFetchMock(
+    "4.1 SITE DESCRIPTION: The site leased under this Lease is known as Juniper Point Commons and holds 96 units, managed by Juniper Point Holdings LLC.",
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Ground Lease/ }));
+  await waitFor(() => expect(documentText()).toContain("SITE DESCRIPTION:"));
+
+  const clause = Array.from(documentBody().querySelectorAll("p")).find((paragraph) =>
+    paragraph.textContent?.includes("SITE DESCRIPTION"),
+  )!;
+  const range = document.createRange();
+  range.selectNodeContents(clause);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(range);
+  fireEvent.click(screen.getByRole("button", { name: "Inline AI edit" }));
+  submitInlineAiInstruction("add fake data and fill out the blank lines");
+
+  const accept = await screen.findByRole("button", { name: "Accept AI suggestion" });
+  expect(screen.getByText("Original formatting kept")).toBeInTheDocument();
+  const prompt = (chatRequests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(prompt).toContain("formatting must come back exactly as it is");
+  expect(prompt).toContain("Fill each blank or placeholder");
+  const instructionSection = /\nUser instruction:\s*\n([\s\S]*?)\n\s*\nHighlighted passage:\s*\n/.exec(prompt);
+  expect(instructionSection?.[1].trim()).toBe("add fake data and fill out the blank lines");
+  fireEvent.click(accept);
+
+  await waitFor(() => expect(documentText()).toContain("Juniper Point Commons"));
+  const edited = Array.from(documentBody().querySelectorAll("p")).find((paragraph) =>
+    paragraph.textContent?.includes("SITE DESCRIPTION"),
+  )!;
+  expect(edited.getAttribute("style")).toContain("text-align: justify");
+  expect(edited.querySelectorAll(".document-tab")).toHaveLength(2);
+  expect(edited.querySelector("u")?.textContent).toBe("SITE DESCRIPTION:");
+  expect(Array.from(edited.querySelectorAll(".document-blank")).map((blank) => blank.textContent)).toEqual([
+    "Juniper Point Commons",
+    "96",
+    "Juniper Point",
+  ]);
+  // Only the filled values are marked as the AI's edit.
+  expect(Array.from(edited.querySelectorAll(".document-ai-suggestion")).map((mark) => mark.textContent)).toEqual([
+    "Juniper Point Commons",
+    "96",
+    "Juniper Point",
+  ]);
+  expect(edited.textContent).toContain("managed by Juniper Point Holdings LLC.");
+  expect(documentText()).toContain("Closing paragraph stays.");
+  expect(screen.getByText(/original formatting was kept/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
+  expect(documentText()).not.toContain("Juniper Point");
 });
 
 test("inline AI edit adds list items as real bullets instead of markdown text", async () => {
@@ -4565,6 +4774,40 @@ test("a failed server save reports Local only, keeps the scoped cache, and can r
   fireEvent.click(within(serverSaveIndicator()).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saved"));
   expect(storedDraftHistory()[0]).toMatchObject({ serverId: "draft-srv-2", serverRevision: 1 });
+});
+
+test("a draft whose title is past the server limit still saves, under a shortened account title", async () => {
+  const longTitle = `Napoleon and Make Sure to Include Pictures ${"of His Most Famous Battles ".repeat(12)}`.trim();
+  expect(longTitle.length).toBeGreaterThan(240);
+  window.localStorage.setItem(SCOPED_DRAFT_CACHE_KEY, JSON.stringify([{
+    id: "pending-long-title", title: longTitle, content: "<p>Napoleon notes.</p>",
+    summary: "Local changes", sourceLabel: "Local draft", updatedAt: new Date().toISOString(),
+    status: "complete", serverSavePending: true,
+  }]));
+  // The server rejects titles past 240 characters with a 422, as the API does.
+  const calls = installDraftsApiFetchMock({
+    create: (body) =>
+      String(body.title).length > 240
+        ? jsonResponse({ detail: [{ type: "string_too_long", loc: ["body", "title"] }] }, 422)
+        : jsonResponse(serverDraftSnapshot("draft-long", String(body.title), String(body.content), 1), 201),
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Napoleon and Make Sure/ }));
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Local only"));
+  fireEvent.click(within(serverSaveIndicator()).getByRole("button", { name: "Retry" }));
+
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saved"));
+  const posts = calls.filter((call) => call.method === "POST");
+  expect(posts).toHaveLength(1);
+  const sentTitle = String(posts[0].body?.title);
+  expect(Array.from(sentTitle).length).toBeLessThanOrEqual(240);
+  expect(sentTitle).toMatch(/^Napoleon and Make Sure to Include Pictures of His .+…$/);
+  expect(storedDraftHistory().find((item) => item.id === "pending-long-title")).toMatchObject({
+    serverId: "draft-long",
+    serverRevision: 1,
+  });
 });
 
 test("a concurrent server change surfaces as an explicit conflict, never a silent overwrite", async () => {
@@ -6238,4 +6481,117 @@ test("restored explicit page breaks remain real boundaries without label text", 
   await waitFor(() => expect(documentBody().querySelectorAll("section.document-page")).toHaveLength(2));
   expect(documentBody().querySelectorAll("section.document-page")[1]).toHaveAttribute("data-page-break-before", "manual");
   expect(documentText()).toBe("First page.Second page.");
+});
+
+function chatHandoff(overrides: Partial<DraftHandoffRequest> = {}): DraftHandoffRequest {
+  return {
+    id: "handoff-1",
+    kind: "document",
+    prompt: "Write an essay about remote work for distributed teams",
+    webSearch: false,
+    modelId: null,
+    knowledgeIds: [],
+    attachments: [],
+    chatContext: null,
+    ...overrides,
+  };
+}
+
+function dataWithTwoDraftModels() {
+  const base = dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini");
+  const model = base.models.find((item) => item.id === "openrouter-openai-gpt-4o-mini")!;
+  return {
+    ...base,
+    models: [
+      { ...model, id: "draft-first", name: "Draft first", is_custom: false },
+      { ...model, id: "draft-second", name: "Draft second", is_custom: false },
+    ],
+  };
+}
+
+test("a request handed over from chat starts drafting once with its files and conversation", async () => {
+  const requests = installChatCompletionFetchMock(
+    "# Remote Work and the Modern Team\n\nTeams that write things down move faster.",
+  ) as Array<Record<string, unknown>>;
+  const started = vi.fn();
+  const handoff = chatHandoff({
+    attachments: [{ attachmentId: "upload-brief", name: "brief.docx", size: "2 KB", hasText: true }],
+    chatContext: "User: Our churn fell to 2.1% in Q3.\n\nAssistant: Great news.",
+  });
+  const view = render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialRequest={handoff}
+      onInitialRequestStarted={started}
+    />,
+  );
+
+  await waitFor(() => expect(documentText()).toContain("Teams that write things down move faster."));
+  expect(started).toHaveBeenCalledTimes(1);
+  expect(requests).toHaveLength(1);
+  const prompt = String((requests[0].messages as Array<{ content: string }>)[0].content);
+  expect(prompt).toContain("User request: Write an essay about remote work for distributed teams");
+  expect(prompt).toContain("<chat_conversation>\nUser: Our churn fell to 2.1% in Q3.");
+  expect(requests[0].attachment_ids).toEqual(["upload-brief"]);
+  expect(requests[0].web_enabled).toBe(false);
+  expect(screen.getByText("brief.docx")).toBeInTheDocument();
+  expect(screen.getByLabelText("Ask the document assistant")).toHaveValue("");
+
+  // The same request arriving again (a re-render) never drafts twice, and
+  // the chat conversation only shapes that first draft.
+  view.rerender(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialRequest={handoff}
+      onInitialRequestStarted={started}
+    />,
+  );
+  await act(async () => {});
+  expect(requests).toHaveLength(1);
+  expect(started).toHaveBeenCalledTimes(1);
+});
+
+test("a deck handed over from chat is built in the deck editor", async () => {
+  const requests = installChatCompletionFetchMock(fencedDeckJson()) as Array<Record<string, unknown>>;
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialRequest={chatHandoff({ kind: "deck", prompt: "Create a slide deck about our Boston expansion" })}
+    />,
+  );
+
+  await waitFor(() => expect(screen.getByText("Slide 1 of 3")).toBeInTheDocument());
+  expect(screen.getByRole("textbox", { name: /Title slide title/ })).toHaveTextContent("Boston Expansion");
+  const prompt = String((requests[0].messages as Array<{ content: string }>)[0].content);
+  expect(prompt).toContain("You are a presentation writer producing a slide deck");
+  expect(prompt).toContain("Create a slide deck about our Boston expansion");
+  expect(prompt).not.toContain("<chat_conversation>");
+});
+
+test("a handed-over request drafts with the chat's model unless a drafting default is starred", async () => {
+  const requests = installChatCompletionFetchMock("# Memo\n\nSynthetic memo body.") as Array<Record<string, unknown>>;
+  const first = render(
+    <DocumentAssistantWorkspace
+      data={dataWithTwoDraftModels()}
+      brandName="Aperture Chat"
+      initialRequest={chatHandoff({ modelId: "draft-second" })}
+    />,
+  );
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0].model).toBe("draft-second");
+  first.unmount();
+
+  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-first");
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithTwoDraftModels()}
+      brandName="Aperture Chat"
+      initialRequest={chatHandoff({ id: "handoff-2", modelId: "draft-second" })}
+    />,
+  );
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1].model).toBe("draft-first");
 });

@@ -42,6 +42,7 @@ const ADMIN_LABELS: Record<AdminSection, string> = {
   tools: "Connections",
   sso: "SSO",
   analytics: "Analytics",
+  reports: "Reports",
   policies: "Policies",
   datasets: "Datasets",
   audit: "Audit",
@@ -53,6 +54,7 @@ const PLATFORM_LABELS: Record<PlatformSection, string> = {
   models: "Models",
   providers: "Providers",
   analytics: "Analytics",
+  reports: "Reports",
   audit: "Audit",
   alerts: "Alerts",
 };

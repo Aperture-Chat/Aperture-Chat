@@ -413,17 +413,239 @@ export type ChatFeedbackSubmitRequest = {
   model_id?: string;
 };
 
+export type IssueReportKind = "bug" | "feature" | "feedback" | "question" | "security";
+export type IssueReportStatus =
+  | "new"
+  | "in_review"
+  | "in_progress"
+  | "on_hold"
+  | "resolved"
+  | "closed";
+export type IssueReportPriority = "low" | "normal" | "high" | "urgent";
+export type IssueReportActorKind = "reporter" | "support" | "system";
+export type IssueReportUpstreamState =
+  | "queued"
+  | "failed"
+  | "sent"
+  | "published"
+  | "declined"
+  | "private";
+
+/** Technical context the browser attaches when the reporter allows it. */
+export type IssueReportDiagnostics = {
+  route?: string;
+  view?: string;
+  viewport?: string;
+  pixel_ratio?: number;
+  user_agent?: string;
+  language?: string;
+  timezone?: string;
+  color_scheme?: string;
+  online?: boolean;
+  recent_errors?: { message: string; source?: string; at?: string }[];
+  failed_requests?: { method: string; path: string; status: number; at?: string }[];
+  app_version?: string;
+  reporter_role?: string;
+};
+
 export type IssueReportRecord = {
   id: string;
   tenant_id: string;
   user_id: string;
   user_name: string;
+  number?: number | null;
+  kind?: IssueReportKind;
+  priority?: IssueReportPriority;
+  status?: IssueReportStatus;
   subject: string;
   body: string;
   screenshot_filename?: string | null;
   screenshot_mime_type?: string | null;
   screenshot_size_bytes?: number | null;
+  assignee_user_id?: string | null;
+  assignee_name?: string | null;
+  diagnostics?: IssueReportDiagnostics | null;
   created_at: string;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+  last_public_activity_at?: string | null;
+  last_activity_by?: IssueReportActorKind | null;
+  reporter_seen_at?: string | null;
+};
+
+export type IssueReportUpstreamView = {
+  state: IssueReportUpstreamState;
+  hub_url: string;
+  issue_number?: number | null;
+  issue_url?: string | null;
+  issue_state?: string | null;
+  issue_state_reason?: string | null;
+  maintainer_note?: string | null;
+  shared_by_name: string;
+  sent_title: string;
+  sent_body: string;
+  sent_diagnostics?: Record<string, unknown> | null;
+  attempts: number;
+  last_error?: string | null;
+  queued_at: string;
+  sent_at?: string | null;
+  checked_at?: string | null;
+};
+
+export type IssueReportListItem = IssueReportRecord & {
+  tenant_name?: string;
+  unread?: boolean;
+  upstream?: IssueReportUpstreamView | null;
+};
+
+export type IssueReportEvent = {
+  id: string;
+  report_id: string;
+  kind: "comment" | "status" | "priority" | "assignment" | "kind" | "upstream" | "reopened";
+  visibility: "public" | "internal";
+  actor_user_id?: string | null;
+  actor_name: string;
+  actor_kind: IssueReportActorKind;
+  body: string;
+  from_value?: string | null;
+  to_value?: string | null;
+  created_at: string;
+};
+
+export type IssueReportDetail = {
+  report: IssueReportListItem;
+  events: IssueReportEvent[];
+};
+
+export type IssueReportQueue = {
+  items: IssueReportListItem[];
+  counts: Record<string, number>;
+  assignees: { id: string; name: string }[];
+};
+
+export type IssueReportUpdateRequest = {
+  status?: IssueReportStatus;
+  priority?: IssueReportPriority;
+  kind?: IssueReportKind;
+  assignee_user_id?: string;
+  note?: string;
+};
+
+export type IssueReportSubmission = {
+  subject: string;
+  body: string;
+  kind: IssueReportKind;
+  priority: "low" | "normal" | "high";
+  screenshot?: File | null;
+  diagnostics?: IssueReportDiagnostics | null;
+};
+
+export type IssueReportUpstreamDraft = {
+  title: string;
+  body: string;
+  labels: string[];
+  diagnostics?: Record<string, unknown> | null;
+  preview_markdown: string;
+  redaction_count: number;
+  ai_drafted: boolean;
+  ai_error?: string | null;
+  github_new_issue_url: string;
+  hub_url: string;
+  hub_available: boolean;
+  blocked_reason?: string | null;
+};
+
+export type SupportUpstreamMode = "off" | "review" | "automatic";
+
+export type SupportSettings = {
+  upstream_mode: SupportUpstreamMode;
+  instance_id: string;
+  ai_model_id?: string | null;
+  ai_model_name?: string | null;
+  notify_reporters: boolean;
+  hub_url: string;
+  hub_is_self: boolean;
+  email_configured: boolean;
+  hub_enabled: boolean;
+  hub_repository: string;
+  hub_auto_publish: boolean;
+  hub_ai_triage: boolean;
+  hub_token_set: boolean;
+  hub_masked_token: string;
+  model_options: { id: string; name: string }[];
+};
+
+export type SupportSettingsUpdateRequest = Partial<{
+  upstream_mode: SupportUpstreamMode;
+  ai_model_id: string;
+  notify_reporters: boolean;
+  hub_enabled: boolean;
+  hub_repository: string;
+  hub_auto_publish: boolean;
+  hub_ai_triage: boolean;
+  hub_github_token: string;
+}>;
+
+export type SupportHubStatus = {
+  hub_url: string;
+  reachable: boolean;
+  accepting: boolean;
+  repository?: string | null;
+  detail?: string | null;
+};
+
+export type SupportHubTriage = {
+  generated_at?: string;
+  summary?: string;
+  suggested_title?: string;
+  kind?: string;
+  labels?: string[];
+  severity?: string;
+  spam_likelihood?: number;
+  contains_sensitive_data?: boolean;
+  security_sensitive?: boolean;
+  duplicate_of?: number | null;
+  notes?: string;
+  candidates?: { number: number; title: string; state?: string | null; url?: string | null }[];
+  search_error?: string;
+  ai_error?: string;
+  model_id?: string;
+};
+
+export type SupportHubReportStatus =
+  | "pending"
+  | "published"
+  | "linked"
+  | "declined"
+  | "spam"
+  | "private";
+
+export type SupportHubReport = {
+  id: string;
+  instance_id: string;
+  instance_version: string;
+  kind: IssueReportKind;
+  priority: IssueReportPriority;
+  title: string;
+  body: string;
+  diagnostics?: Record<string, unknown> | null;
+  status: SupportHubReportStatus;
+  issue_number?: number | null;
+  issue_url?: string | null;
+  issue_state?: string | null;
+  issue_state_reason?: string | null;
+  triage?: SupportHubTriage | null;
+  maintainer_note?: string | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  received_at: string;
+  updated_at: string;
+  instance_report_count: number;
+};
+
+export type SupportHubQueue = {
+  items: SupportHubReport[];
+  counts: Record<string, number>;
 };
 
 export type RetentionBatchRequest = {

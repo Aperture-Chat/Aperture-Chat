@@ -71,6 +71,9 @@ type Props = {
   proposalHtml?: string;
   /** Replaces the diff/result body for surfaces with their own preview. */
   reviewPreview?: ReactNode;
+  /** One short line about how the suggestion will land ("Original
+   * formatting kept"), shown beside the word count. */
+  reviewNote?: string;
   error?: string | null;
   disabledReason?: string | null;
   acceptLabel: string;
@@ -97,6 +100,12 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
  * the result only rather than freezing on a huge LCS table. */
 const MAX_DIFF_CELLS = 1_200_000;
 
+/** A blank written flush against a word ("____Agreement") is its own word in
+ * the diff, so filling it does not show the word beside it as rewritten. */
+function separateBlanks(value: string) {
+  return value.replace(/_{3,}/g, " $& ").replace(/\s+/g, " ").trim();
+}
+
 export function AiEditComposer({
   getAnchor,
   title,
@@ -112,6 +121,7 @@ export function AiEditComposer({
   proposalText,
   proposalHtml,
   reviewPreview,
+  reviewNote,
   error,
   disabledReason,
   acceptLabel,
@@ -226,7 +236,7 @@ export function AiEditComposer({
     if (!baseText || !proposalText) return null;
     const cells = wordTotal(baseText) * wordTotal(proposalText);
     if (cells > MAX_DIFF_CELLS) return null;
-    return diffWords(baseText, proposalText);
+    return diffWords(separateBlanks(baseText), separateBlanks(proposalText));
   }, [baseText, proposalText]);
 
   const hasChanges = Boolean(diffTokens?.some((token) => token.type !== "same"));
@@ -472,7 +482,15 @@ export function AiEditComposer({
           </div>
           {baseText && proposalText && !reviewPreview && (
             <p className="ai-composer-stat">
-              {wordTotal(baseText)} → {wordTotal(proposalText)} words
+              <span>
+                {wordTotal(baseText)} → {wordTotal(proposalText)} words
+              </span>
+              {reviewNote && (
+                <span className="ai-composer-kept">
+                  <Check size={12} aria-hidden="true" />
+                  {reviewNote}
+                </span>
+              )}
             </p>
           )}
           <div className="ai-composer-actions">

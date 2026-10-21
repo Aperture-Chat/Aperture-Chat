@@ -104,6 +104,10 @@ refused so credentials never follow them) and re-fetched on Sync. New content
 is keyword-searchable as soon as it is stored; a background worker then adds
 semantic vectors (`APERTURE_KNOWLEDGE_DENSE_BACKGROUND`).
 
+Support tickets can be shared, after redaction and owner approval, with the
+community intake hub (`APERTURE_SUPPORT_HUB_URL`), which files GitHub issues
+on the project repository; see [Support tickets](SUPPORT_TICKETS.md).
+
 Model requests, cloud-source access, and enabled web search can send data to
 external services. Outbound guards block metadata/link-local destinations and
 restrict private-network access; required internal hosts must be explicitly

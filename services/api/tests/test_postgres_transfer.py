@@ -136,6 +136,7 @@ def test_dry_run_copy_verification_idempotence_and_external_receipt(tmp_path: Pa
             "email_settings",
             "identity_config_active_import",
             "platform_settings",
+            "support_settings",
             "usage_records",
         }
         audit_manifest = dry_run.table_manifest["tables"]["audit_events"]

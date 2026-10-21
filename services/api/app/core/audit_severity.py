@@ -59,6 +59,12 @@ _WARNING_ACTIONS: dict[str, str] = {
     "platform.elastic_settings_updated": (
         "Elastic export settings were changed; they control where platform data is copied."
     ),
+    "support.settings_updated": (
+        "Support settings were changed; they control whether reports are shared off the platform."
+    ),
+    "support.issue_shared_upstream": (
+        "A support ticket was shared with the community hub; redacted text left the platform."
+    ),
     "privacy.policy_updated": "Personal-data protection settings were changed.",
     "training.policy_updated": "Training-data capture settings were changed.",
     "training.dataset_exported": (
