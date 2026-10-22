@@ -10,17 +10,15 @@
  * user-account edits the profile, switches the appearance, sets the theme
  * schedule, records the install instructions the app shows to an iPad and an
  * Android tablet browser (user-agent emulation in a 1185 x 855 window), and
- * sends a synthetic issue report from Help, verified through the admin API.
+ * opens Help (reporting a problem is its own module, user-reports).
  */
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
 const { helpers } = require("./user-common.cjs");
 const { scrollTo, composer, sendChat, waitForReply } = helpers;
 
 const FILED = "Show the stages of a vendor onboarding process";
 const PINNED = "Draft a synthetic kickoff agenda";
 const ARCHIVED = "Weekly vendor review digest";
+const RENAMED = "Weekly vendor digest (synthetic)";
 
 const row = (page, title) => page.locator(".chat-row").filter({ hasText: title }).first();
 
@@ -96,12 +94,14 @@ const userOrganize = {
     await row(page, ARCHIVED).waitFor();
     void archive;
 
-    // 4. Rename the open chat from its header.
-    await row(page, FILED).click();
+    // 4. Rename the open chat from its header. (A chat inside a folder is not
+    //    used here: renaming currently takes it out of its folder, which the
+    //    lesson teaches as troubleshooting and the report lists as a bug.)
+    await row(page, ARCHIVED).click();
     await page.getByRole("button", { name: "Rename chat", exact: true }).click();
-    await page.getByRole("textbox", { name: "Chat name" }).fill("Vendor onboarding stages (synthetic)");
+    await page.getByRole("textbox", { name: "Chat name" }).fill(RENAMED);
     await page.getByRole("button", { name: "Save chat name" }).click();
-    await row(page, "Vendor onboarding stages (synthetic)").waitFor();
+    await row(page, RENAMED).waitFor();
     await page.waitForTimeout(800);
     await shot("organize-renamed");
 
@@ -217,7 +217,7 @@ const userMemory = {
     // memory manager is the proof that the sentence was saved.
     page = await kit.app("user", "/chat");
     let before = await sendChat(page, "Remember that I review synthetic vendors every Monday morning.");
-    let reply = await waitForReply(page, before);
+    let reply = await waitForReply(page, before, { timeout: 900000 });
     await scrollTo(page, reply, "start");
     await shot("memory-saved-chat");
     const check = await openAccount(page);
@@ -231,7 +231,7 @@ const userMemory = {
     await page.getByRole("button", { name: "New chat" }).first().click();
     await composer(page).waitFor();
     before = await sendChat(page, "When do I review vendors, and how do I like summaries to start?");
-    reply = await waitForReply(page, before);
+    reply = await waitForReply(page, before, { timeout: 900000 });
     const text = await reply.innerText();
     if (!/Monday/i.test(text)) throw new Error(`The reply did not recall the saved memory: ${text.slice(0, 200)}`);
     await scrollTo(page, reply, "start");
@@ -268,102 +268,86 @@ async function tabletPage(kit, userAgent) {
 
 const userAccount = {
   role: "user",
-  description: "Profile, appearance, theme schedule, tablet install instructions, Help, and an issue report.",
+  description: "Profile, appearance, theme schedule, tablet install instructions, and Help.",
   externalOrigins: () => [],
   frames: [
-    "user/account-profile-edit", "user/account-profile-saved", "user/appearance-dark", "user/theme-schedule-set",
-    "user/install-ipad", "user/install-android", "user/help-drawer", "user/help-report-filled", "user/help-report-sent",
+    "user/chat-home", "user/account-profile-edit", "user/account-profile-saved", "user/appearance-dark", "user/theme-schedule-set",
+    "user/install-ipad", "user/install-android", "user/help-drawer",
   ],
   async run(kit) {
     const { shot } = kit;
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aperture-account-"));
+    let page = await kit.app("user", "/chat");
+
+    // 0. The workspace home a signed-in person starts from (a new chat).
+    await composer(page).waitFor();
+    await page.waitForTimeout(800);
+    await shot("chat-home");
+
+    // 1. Profile.
+    let drawer = await openAccount(page);
+    await drawer.getByRole("button", { name: /^Edit account profile for/ }).click();
+    const form = drawer.locator(".account-profile-form");
+    await form.waitFor();
+    await form.getByLabel("Firm or organization").fill("Example Corporation");
+    await form.getByLabel("Phone number").fill("+1 555 0100");
+    await shot("account-profile-edit", { keepFocus: true });
+    await form.getByRole("button", { name: "Save profile" }).click();
+    await drawer.getByText("Profile saved.").waitFor();
+    await page.waitForTimeout(500);
+    await shot("account-profile-saved");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+    if (await drawer.isVisible()) await drawer.getByRole("button", { name: /Close/ }).first().click().catch(() => {});
+
+    // 2. Appearance and the theme schedule.
+    await page.locator(".theme-schedule-button").first().click();
+    await page.waitForTimeout(800);
+    await shot("appearance-dark");
+    await page.locator(".theme-schedule-button").first().click();
+    await page.waitForTimeout(600);
+    await page.getByRole("button", { name: "Theme schedule" }).click();
+    const schedule = page.locator(".theme-schedule-modal");
+    await schedule.waitFor();
+    const toggle = schedule.getByRole("switch", { name: /Switch automatically/ }).or(schedule.getByLabel("Switch automatically")).first();
+    if ((await toggle.getAttribute("aria-checked")) !== "true" && !(await toggle.isChecked().catch(() => false))) await toggle.click();
+    await page.waitForTimeout(400);
+    await shot("theme-schedule-set", { keepFocus: true });
+    await schedule.getByRole("button", { name: "Cancel" }).click();
+
+    // 3. Install instructions the app shows to tablet browsers.
+    const installCard = async (agent) => {
+      const tablet = await tabletPage(kit, agent);
+      const modal = tablet.page.locator(".pwa-install-modal");
+      if (!(await modal.isVisible().catch(() => false))) {
+        await tablet.page.waitForTimeout(1500);
+        if (!(await modal.isVisible())) await tablet.page.getByRole("button", { name: /Install app/ }).first().click();
+      }
+      await modal.waitFor();
+      await tablet.page.waitForTimeout(800);
+      return tablet;
+    };
+    const ipad = await installCard(IPAD);
     try {
-      let page = await kit.app("user", "/chat");
-
-      // 1. Profile.
-      let drawer = await openAccount(page);
-      await drawer.getByRole("button", { name: /^Edit account profile for/ }).click();
-      const form = drawer.locator(".account-profile-form");
-      await form.waitFor();
-      await form.getByLabel("Firm or organization").fill("Example Corporation");
-      await form.getByLabel("Phone number").fill("+1 555 0100");
-      await shot("account-profile-edit", { keepFocus: true });
-      await form.getByRole("button", { name: "Save profile" }).click();
-      await drawer.getByText("Profile saved.").waitFor();
-      await page.waitForTimeout(500);
-      await shot("account-profile-saved");
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(400);
-      if (await drawer.isVisible()) await drawer.getByRole("button", { name: /Close/ }).first().click().catch(() => {});
-
-      // 2. Appearance and the theme schedule.
-      await page.locator(".theme-schedule-button").first().click();
-      await page.waitForTimeout(800);
-      await shot("appearance-dark");
-      await page.locator(".theme-schedule-button").first().click();
-      await page.waitForTimeout(600);
-      await page.getByRole("button", { name: "Theme schedule" }).click();
-      const schedule = page.locator(".theme-schedule-modal");
-      await schedule.waitFor();
-      const toggle = schedule.getByRole("switch", { name: /Switch automatically/ }).or(schedule.getByLabel("Switch automatically")).first();
-      if ((await toggle.getAttribute("aria-checked")) !== "true" && !(await toggle.isChecked().catch(() => false))) await toggle.click();
-      await page.waitForTimeout(400);
-      await shot("theme-schedule-set", { keepFocus: true });
-      await schedule.getByRole("button", { name: "Cancel" }).click();
-
-      // 3. Install instructions the app shows to tablet browsers.
-      const installCard = async (agent) => {
-        const tablet = await tabletPage(kit, agent);
-        const modal = tablet.page.locator(".pwa-install-modal");
-        if (!(await modal.isVisible().catch(() => false))) {
-          await tablet.page.waitForTimeout(1500);
-          if (!(await modal.isVisible())) await tablet.page.getByRole("button", { name: /Install app/ }).first().click();
-        }
-        await modal.waitFor();
-        await tablet.page.waitForTimeout(800);
-        return tablet;
-      };
-      const ipad = await installCard(IPAD);
-      try {
-        await shot("install-ipad", { page: ipad.page });
-      } finally {
-        await ipad.browser.close();
-      }
-      const android = await installCard(ANDROID);
-      try {
-        await shot("install-android", { page: android.page });
-      } finally {
-        await android.browser.close();
-      }
-
-      // 4. Help and an issue report.
-      page = kit.use(page);
-      await page.getByRole("button", { name: "Help", exact: true }).click();
-      const help = page.getByRole("dialog", { name: "Help" });
-      await help.waitFor();
-      await help.getByText(/guided walkthroughs/).waitFor({ timeout: 30000 });
-      await page.waitForTimeout(800);
-      await shot("help-drawer");
-      await help.getByRole("button", { name: /Report a problem/ }).click();
-      const report = page.locator(".issue-report-form");
-      await report.waitFor();
-      const screenshot = path.join(dir, "synthetic-screen.png");
-      await page.screenshot({ path: screenshot, clip: { x: 260, y: 0, width: 500, height: 300 } });
-      const subject = "Export panel closes on Escape (synthetic test report)";
-      await report.getByLabel(/Subject/).fill(subject);
-      await report.getByLabel(/Message/).fill("Steps: open Drafts, choose Export, press Escape. Expected: the panel stays open until I choose Close. Actual: it closes. This is a synthetic training report.");
-      await report.locator("input[type=file]").setInputFiles(screenshot);
-      await page.waitForTimeout(500);
-      await shot("help-report-filled", { keepFocus: true });
-      await report.getByRole("button", { name: "Send report" }).click();
-      await page.locator(".issue-report-success").waitFor();
-      await shot("help-report-sent");
-      const reports = await kit.api("admin", "GET", "/api/admin/issue-reports");
-      const list = Array.isArray(reports) ? reports : reports.reports || reports.items || [];
-      if (!list.some((item) => item.subject === subject)) throw new Error("The administrator cannot see the report.");
+      await shot("install-ipad", { page: ipad.page });
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      await ipad.browser.close();
     }
+    const android = await installCard(ANDROID);
+    try {
+      await shot("install-android", { page: android.page });
+    } finally {
+      await android.browser.close();
+    }
+
+    // 4. Help: Report a problem, My reports, and the walkthroughs.
+    page = kit.use(page);
+    await page.getByRole("button", { name: "Help", exact: true }).click();
+    const help = page.getByRole("dialog", { name: "Help" });
+    await help.waitFor();
+    await help.locator(".my-reports-entry").waitFor();
+    await help.getByText(/guided walkthroughs/).waitFor({ timeout: 30000 });
+    await page.waitForTimeout(800);
+    await shot("help-drawer");
   },
 };
 

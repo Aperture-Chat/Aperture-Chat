@@ -234,7 +234,7 @@ async function main() {
     await shot("access-request-form", { accessRequestForm: page.locator(".auth-panel") }, { accessRequestState: "unsubmitted synthetic form" });
 
     const writes = [...desktop.attemptedWrites, ...mobile.attemptedWrites, ...anonymousWrites];
-    if (writes.length) throw new Error(`Capture attempted ${writes.length} mutation requests; nothing was published.`);
+    if (writes.length) throw new Error(`Capture attempted ${writes.length} mutation requests (${[...new Set(writes.map((write) => `${write.method} ${write.path}`))].join(", ")}); nothing was published.`);
     await browser.close();
     capture.complete();
     console.log("Staged for review only; public training assets remain unchanged.");

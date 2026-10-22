@@ -180,5 +180,35 @@ async function createPerson(kit, { email, name, groups = ["group-litigation"] })
   return { ...created, password };
 }
 
-const helpers = { signInWithPassword, createPerson, scrollTo, scrollBelowHeader, dismissToasts, composer, sendChat, waitForReply, totp, freshTotp, syntheticPassword, publicApi, userRealm };
+/** Setup only: an agent profile an administrator shares with the whole
+ * organization, so a standard user has a usable (non-Hermes) agent to pick.
+ * The fixture's own agent is a Hermes agent, which a standard user's groups
+ * cannot use until an administrator grants Hermes. Returns the profile. */
+const SHARED_AGENT = "Vendor Review Agent";
+async function ensureSharedAgent(kit) {
+  const boot = await kit.api("admin", "GET", "/api/bootstrap");
+  const existing = boot.models.find((model) => model.name === SHARED_AGENT);
+  if (existing) return existing;
+  const base = boot.models.find((model) => model.provider_id === "training-local" && model.name === "Qwen3.5 9B");
+  if (!base) throw new Error("The local training model is missing.");
+  return kit.api("admin", "POST", "/api/admin/agent-profiles", {
+    provider_id: base.provider_id, name: SHARED_AGENT, upstream_model_id: base.upstream_model_id,
+    context_window: base.context_window, is_custom: true, visibility: "organization",
+    meta_prompt: "Answer in short bullet points and name the playbook sources you used.",
+    knowledge_config_ids: ["knowledge-litigation-playbook"], group_ids: base.group_ids,
+  });
+}
+
+/** Setup and teardown: connect the workspace's web search to a model, or
+ * disconnect it again. A connected model turns Web on by default in every new
+ * chat, so modules that connect it must disconnect it before they finish. */
+async function setWebSearchForModel(kit, modelId, connected) {
+  const boot = await kit.api("admin", "GET", "/api/bootstrap");
+  const tool = boot.toolConfigs.find((item) => item.id === "tool-web-search");
+  const ids = (tool.settings.connected_model_ids || []).filter((id) => id !== modelId);
+  if (connected) ids.push(modelId);
+  await kit.api("admin", "PATCH", `/api/admin/tool-configs/${tool.id}`, { settings: { ...tool.settings, connected_model_ids: ids } });
+}
+
+const helpers = { signInWithPassword, createPerson, scrollTo, scrollBelowHeader, dismissToasts, composer, sendChat, waitForReply, totp, freshTotp, syntheticPassword, publicApi, userRealm, ensureSharedAgent, SHARED_AGENT, setWebSearchForModel };
 Object.defineProperty(module.exports, "helpers", { value: helpers, enumerable: false });

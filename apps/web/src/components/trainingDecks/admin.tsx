@@ -1,4 +1,4 @@
-import { BarChart3, BellRing, Database, DatabaseZap, Lock, Mail, ShieldCheck, SlidersHorizontal, UserPlus, Users, Wrench } from "lucide-react";
+import { BarChart3, BellRing, Database, DatabaseZap, Inbox, Lock, Mail, Plug, ShieldCheck, SlidersHorizontal, UserPlus, Users, Wrench } from "lucide-react";
 import { TrainingDocumentationModal, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
@@ -103,6 +103,22 @@ export type AdminFocus =
   | "toolsDraftRow"
   | "toolsLibrary"
   | "toolsSignIn"
+  | "cnPanel"
+  | "cnWebOn"
+  | "cnWebTested"
+  | "cnWebSearxng"
+  | "cnWebKeyed"
+  | "cnDriveForm"
+  | "cnDriveTested"
+  | "cnGraphForm"
+  | "cnGraphTested"
+  | "cnBoxTested"
+  | "cnImanageTested"
+  | "cnUserAttach"
+  | "cnBoxHidden"
+  | "cnUserAttachHidden"
+  | "cnBoxShown"
+  | "cnOffForAll"
   | "anSections"
   | "anFilters"
   | "anCsv"
@@ -126,6 +142,7 @@ export type AdminFocus =
   | "alFlaggedChat"
   | "alDeliverySent"
   | "alArchived"
+  | "alSupportTemplate"
   | "retNavigation"
   | "retForever"
   | "retSourceForm"
@@ -142,6 +159,22 @@ export type AdminFocus =
   | "feedbackConversation"
   | "fbIssues"
   | "feedbackIssueReport"
+  | "fbReports"
+  | "rpUserHelp"
+  | "rpUserForm"
+  | "rpUserSecurity"
+  | "rpUserSent"
+  | "rpQueue"
+  | "rpSearch"
+  | "rpTicket"
+  | "rpTriage"
+  | "rpInternal"
+  | "rpReply"
+  | "rpUserReply"
+  | "rpNeedsReply"
+  | "rpResolved"
+  | "rpUserResolved"
+  | "rpAudit"
   | "pdpFind"
   | "pdpToggles"
   | "pdpCategories"
@@ -175,44 +208,44 @@ export type AdminFocus =
   | "dsAudit";
 
 export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
-  accessRequestForm: { frame: "training/admin/access-request-form.png", rect: { x: 101, y: 357, w: 405, h: 298 } },
-  accessRequestSent: { frame: "training/admin/access-request-sent.png", rect: { x: 101, y: 171, w: 405, h: 558 } },
-  accessRequestsQueue: { frame: "training/admin/access-queue.png", rect: { x: 262, y: 263, w: 887, h: 328 } },
-  accessApproveAs: { frame: "training/admin/access-queue.png", rect: { x: 567, y: 346, w: 548, h: 92 } },
-  accessSignInHandoff: { frame: "training/admin/access-handoff.png", rect: { x: 262, y: 322, w: 887, h: 205 } },
+  accessRequestForm: { frame: "training/admin/access-request-form.png", rect: { x: 101, y: 368, w: 405, h: 298 } },
+  accessRequestSent: { frame: "training/admin/access-request-sent.png", rect: { x: 101, y: 193, w: 405, h: 557 } },
+  accessRequestsQueue: { frame: "training/admin/access-queue.png", rect: { x: 262, y: 267, w: 887, h: 328 } },
+  accessApproveAs: { frame: "training/admin/access-queue.png", rect: { x: 567, y: 350, w: 548, h: 92 } },
+  accessSignInHandoff: { frame: "training/admin/access-handoff.png", rect: { x: 262, y: 325, w: 887, h: 205 } },
   accessTemporaryPassword: { frame: "training/admin/access-temp-password.png", rect: { x: 359, y: 262, w: 467, h: 331 } },
   accessPasswordSet: { frame: "training/admin/access-password-set.png", rect: { x: 262, y: 747, w: 887, h: 61 } },
   accessDeclined: { frame: "training/admin/access-declined.png", rect: { x: 500, y: 15, w: 647, h: 50 } },
   accessForcedPassword: { frame: "training/admin/access-forced-password.png", rect: { x: 390, y: 357, w: 405, h: 288 } },
   accessFirstWelcome: { frame: "training/admin/access-first-welcome.png", rect: { x: 258, y: 21, w: 895, h: 259 } },
-  accessFirstReply: { frame: "training/admin/access-reply.png", rect: { x: 315, y: 311, w: 839, h: 49 } },
-  accessDeclinedSignin: { frame: "training/admin/access-declined-signin.png", rect: { x: 101, y: 295, w: 405, h: 346 } },
-  accessSsoHandoff: { frame: "training/admin/access-sso-approved.png", rect: { x: 262, y: 322, w: 887, h: 205 } },
-  accessSsoSignin: { frame: "training/admin/access-sso-signin.png", rect: { x: 101, y: 317, w: 405, h: 356 } },
+  accessFirstReply: { frame: "training/admin/access-reply.png", rect: { x: 315, y: 311, w: 839, h: 70 } },
+  accessDeclinedSignin: { frame: "training/admin/access-declined-signin.png", rect: { x: 101, y: 308, w: 405, h: 346 } },
+  accessSsoHandoff: { frame: "training/admin/access-sso-approved.png", rect: { x: 262, y: 325, w: 887, h: 205 } },
+  accessSsoSignin: { frame: "training/admin/access-sso-signin.png", rect: { x: 101, y: 339, w: 405, h: 354 } },
   accessSsoWelcome: { frame: "training/admin/access-sso-welcome.png", rect: { x: 258, y: 21, w: 895, h: 259 } },
-  accessSsoRow: { frame: "training/admin/access-sso-row.png", rect: { x: 262, y: 747, w: 887, h: 61 } },
-  usersTabs: { frame: "training/admin/users-list.png", rect: { x: 261, y: 163, w: 889, h: 54 } },
-  usersAddForm: { frame: "training/admin/users-add-form.png", rect: { x: 112, y: 322, w: 1037, h: 158 } },
-  usersCreatedRow: { frame: "training/admin/users-created.png", rect: { x: 132, y: 747, w: 986, h: 61 } },
+  accessSsoRow: { frame: "training/admin/access-sso-row.png", rect: { x: 262, y: 750, w: 887, h: 61 } },
+  usersTabs: { frame: "training/admin/users-list.png", rect: { x: 261, y: 163, w: 889, h: 91 } },
+  usersAddForm: { frame: "training/admin/users-add-form.png", rect: { x: 112, y: 321, w: 1037, h: 158 } },
+  usersCreatedRow: { frame: "training/admin/users-created.png", rect: { x: 132, y: 714, w: 986, h: 61 } },
   usersPasswordDialog: { frame: "training/admin/users-password-dialog.png", rect: { x: 359, y: 270, w: 467, h: 315 } },
   usersLocalRow: { frame: "training/admin/users-password-set.png", rect: { x: 132, y: 747, w: 986, h: 61 } },
   usersRoleCell: { frame: "training/admin/users-role-changed.png", rect: { x: 486, y: 747, w: 144, h: 61 } },
   usersRowActions: { frame: "training/admin/users-deactivated.png", rect: { x: 967, y: 755, w: 151, h: 45 } },
-  usersBulkSelect: { frame: "training/admin/users-bulk-selected.png", rect: { x: 132, y: 126, w: 986, h: 682 } },
+  usersBulkSelect: { frame: "training/admin/users-bulk-selected.png", rect: { x: 132, y: 236, w: 986, h: 572 } },
   usersBulkDone: { frame: "training/admin/users-bulk-done.png", rect: { x: 132, y: 692, w: 986, h: 116 } },
-  usersGroupFilter: { frame: "training/admin/users-filtered.png", rect: { x: 672, y: 259, w: 161, h: 45 } },
+  usersGroupFilter: { frame: "training/admin/users-filtered.png", rect: { x: 670, y: 258, w: 161, h: 45 } },
   usersTraceBlocked: { frame: "training/admin/users-trace.png", rect: { x: 222, y: 334, w: 741, h: 214 } },
   usersDeletedToast: { frame: "training/admin/users-deleted.png", rect: { x: 500, y: 15, w: 647, h: 50 } },
-  groupsCards: { frame: "training/admin/groups-list.png", rect: { x: 297, y: 427, w: 817, h: 267 } },
-  groupsAddForm: { frame: "training/admin/groups-add-form.png", rect: { x: 297, y: 377, w: 817, h: 92 } },
+  groupsCards: { frame: "training/admin/groups-list.png", rect: { x: 297, y: 464, w: 817, h: 267 } },
+  groupsAddForm: { frame: "training/admin/groups-add-form.png", rect: { x: 297, y: 414, w: 817, h: 92 } },
   groupsNewCard: { frame: "training/admin/groups-created.png", rect: { x: 707, y: 383, w: 407, h: 88 } },
   groupsMemberRow: { frame: "training/admin/groups-members.png", rect: { x: 312, y: 445, w: 776, h: 62 } },
   groupsImport: { frame: "training/admin/groups-import.png", rect: { x: 297, y: 550, w: 767, h: 244 } },
   groupsImportResult: { frame: "training/admin/groups-import-result.png", rect: { x: 500, y: 15, w: 647, h: 60 } },
-  groupsPermGrid: { frame: "training/admin/groups-permissions.png", rect: { x: 312, y: 107, w: 787, h: 671 } },
-  groupsKnowledgeRow: { frame: "training/admin/groups-permission-saved.png", rect: { x: 312, y: 577, w: 787, h: 70 } },
-  groupsDefaultSummary: { frame: "training/admin/groups-default.png", rect: { x: 297, y: 165, w: 817, h: 100 } },
-  groupsVerifyTable: { frame: "training/admin/groups-verify.png", rect: { x: 282, y: 342, w: 867, h: 214 } },
+  groupsPermGrid: { frame: "training/admin/groups-permissions.png", rect: { x: 312, y: 36, w: 787, h: 742 } },
+  groupsKnowledgeRow: { frame: "training/admin/groups-permission-saved.png", rect: { x: 312, y: 506, w: 787, h: 70 } },
+  groupsDefaultSummary: { frame: "training/admin/groups-default.png", rect: { x: 297, y: 158, w: 817, h: 100 } },
+  groupsVerifyTable: { frame: "training/admin/groups-verify.png", rect: { x: 282, y: 379, w: 867, h: 214 } },
   maCatalog: { frame: "training/admin/ma-catalog.png", rect: { x: 132, y: 202, w: 949, h: 156 } },
   maGroupEditor: { frame: "training/admin/ma-groups-editor.png", rect: { x: 112, y: 592, w: 1037, h: 110 } },
   maTraceBlocked: { frame: "training/admin/ma-trace-blocked.png", rect: { x: 222, y: 529, w: 741, h: 214 } },
@@ -229,8 +262,8 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   mrDeclined: { frame: "training/admin/mr-declined.png", rect: { x: 262, y: 96, w: 887, h: 62 } },
   mrUserAfter: { frame: "training/admin/mr-user-after.png", rect: { x: 262, y: 633, w: 661, h: 93 } },
   mrTrace: { frame: "training/admin/mr-trace.png", rect: { x: 222, y: 444, w: 741, h: 240 } },
-  ssoReadonlyEmpty: { frame: "training/admin/sso-readonly-empty.png", rect: { x: 261, y: 234, w: 889, h: 249 } },
-  ssoPolicyAvailable: { frame: "training/admin/sso-policy-available.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
+  ssoReadonlyEmpty: { frame: "training/admin/sso-readonly-empty.png", rect: { x: 261, y: 271, w: 889, h: 249 } },
+  ssoPolicyAvailable: { frame: "training/admin/sso-policy-available.png", rect: { x: 261, y: 271, w: 889, h: 195 } },
   ssoPresetEntra: { frame: "training/admin/sso-add-entra.png", rect: { x: 283, y: 314, w: 562, h: 201 } },
   ssoPresetOkta: { frame: "training/admin/sso-add-okta.png", rect: { x: 283, y: 332, w: 562, h: 183 } },
   ssoPresetGoogle: { frame: "training/admin/sso-add-google.png", rect: { x: 283, y: 332, w: 562, h: 183 } },
@@ -238,26 +271,26 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   ssoCreate: { frame: "training/admin/sso-add-custom.png", rect: { x: 283, y: 631, w: 845, h: 132 } },
   ssoCard: { frame: "training/admin/sso-created.png", rect: { x: 282, y: 227, w: 420, h: 582 } },
   ssoTestResult: { frame: "training/admin/sso-tested.png", rect: { x: 297, y: 564, w: 390, h: 188 } },
-  ssoSignin: { frame: "training/admin/sso-signin.png", rect: { x: 101, y: 317, w: 405, h: 356 } },
+  ssoSignin: { frame: "training/admin/sso-signin.png", rect: { x: 101, y: 339, w: 405, h: 354 } },
   ssoIdpLogin: { frame: "training/admin/sso-idp-login.png", rect: { x: 387, y: 368, w: 411, h: 227 } },
   ssoWelcome: { frame: "training/admin/sso-first-welcome.png", rect: { x: 258, y: 21, w: 895, h: 259 } },
-  ssoJitRow: { frame: "training/admin/sso-jit-user.png", rect: { x: 262, y: 660, w: 887, h: 61 } },
+  ssoJitRow: { frame: "training/admin/sso-jit-user.png", rect: { x: 262, y: 750, w: 887, h: 61 } },
   ssoMappings: { frame: "training/admin/sso-mappings-saved.png", rect: { x: 297, y: 438, w: 390, h: 227 } },
-  ssoSyncedRow: { frame: "training/admin/sso-groups-synced.png", rect: { x: 262, y: 605, w: 887, h: 61 } },
+  ssoSyncedRow: { frame: "training/admin/sso-groups-synced.png", rect: { x: 262, y: 642, w: 887, h: 61 } },
   ssoEnforceRow: { frame: "training/admin/sso-enforced.png", rect: { x: 297, y: 662, w: 390, h: 51 } },
-  ssoRefused: { frame: "training/admin/sso-password-refused.png", rect: { x: 101, y: 236, w: 405, h: 437 } },
-  ssoReadonlyCard: { frame: "training/admin/sso-readonly-card.png", rect: { x: 282, y: 334, w: 677, h: 521 } },
-  policyCollapsed: { frame: "training/admin/pol-collapsed.png", rect: { x: 261, y: 234, w: 889, h: 303 } },
-  policyServiceAvailability: { frame: "training/admin/pol-status.png", rect: { x: 262, y: 96, w: 887, h: 331 } },
-  policyDefaults: { frame: "training/admin/pol-defaults.png", rect: { x: 262, y: 236, w: 887, h: 384 } },
-  polKnowledgeRow: { frame: "training/admin/pol-default-saved.png", rect: { x: 282, y: 443, w: 847, h: 51 } },
-  polVerifyRow: { frame: "training/admin/pol-verify.png", rect: { x: 312, y: 577, w: 787, h: 70 } },
+  ssoRefused: { frame: "training/admin/sso-password-refused.png", rect: { x: 101, y: 317, w: 405, h: 435 } },
+  ssoReadonlyCard: { frame: "training/admin/sso-readonly-card.png", rect: { x: 282, y: 371, w: 677, h: 484 } },
+  policyCollapsed: { frame: "training/admin/pol-collapsed.png", rect: { x: 261, y: 271, w: 889, h: 427 } },
+  policyServiceAvailability: { frame: "training/admin/pol-status.png", rect: { x: 262, y: 432, w: 887, h: 64 } },
+  policyDefaults: { frame: "training/admin/pol-defaults.png", rect: { x: 262, y: 96, w: 887, h: 471 } },
+  polKnowledgeRow: { frame: "training/admin/pol-default-saved.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
+  polVerifyRow: { frame: "training/admin/pol-verify.png", rect: { x: 312, y: 506, w: 787, h: 70 } },
   policyMemory: { frame: "training/admin/pol-memory.png", rect: { x: 261, y: 285, w: 889, h: 440 } },
   polRetentionField: { frame: "training/admin/pol-memory-saved.png", rect: { x: 262, y: 524, w: 887, h: 107 } },
   polPurgeConfirm: { frame: "training/admin/pol-purge-confirm.png", rect: { x: 282, y: 720, w: 847, h: 88 } },
   policyCounts: { frame: "training/admin/pol-purged.png", rect: { x: 261, y: 654, w: 889, h: 175 } },
-  polMemoryOff: { frame: "training/admin/pol-memory-off.png", rect: { x: 261, y: 338, w: 889, h: 170 } },
-  responseOverview: { frame: "training/admin/tools-panel.png", rect: { x: 262, y: 235, w: 887, h: 114 } },
+  polMemoryOff: { frame: "training/admin/pol-memory-off.png", rect: { x: 261, y: 499, w: 889, h: 170 } },
+  responseOverview: { frame: "training/admin/tools-panel.png", rect: { x: 262, y: 309, w: 887, h: 114 } },
   toolsBuilder: { frame: "training/admin/tools-builder.png", rect: { x: 129, y: 34, w: 927, h: 787 } },
   toolsScript: { frame: "training/admin/tools-builder-filled.png", rect: { x: 146, y: 274, w: 893, h: 157 } },
   toolsGroups: { frame: "training/admin/tools-builder-filled.png", rect: { x: 146, y: 556, w: 893, h: 90 } },
@@ -269,79 +302,112 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   toolsDraftRow: { frame: "training/admin/tools-draft.png", rect: { x: 262, y: 741, w: 887, h: 87 } },
   toolsLibrary: { frame: "training/admin/tools-connections.png", rect: { x: 709, y: 270, w: 442, h: 276 } },
   toolsSignIn: { frame: "training/admin/tools-connection-signin.png", rect: { x: 283, y: 677, w: 845, h: 67 } },
-  anSections: { frame: "training/admin/an-sections.png", rect: { x: 261, y: 234, w: 889, h: 621 } },
-  anFilters: { frame: "training/admin/an-runtime.png", rect: { x: 276, y: 98, w: 859, h: 154 } },
+  cnPanel: { frame: "training/admin/cn-panel.png", rect: { x: 262, y: 272, w: 887, h: 114 } },
+  cnWebOn: { frame: "training/admin/cn-web-on.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
+  cnWebTested: { frame: "training/admin/cn-web-tested.png", rect: { x: 282, y: 48, w: 847, h: 451 } },
+  cnWebSearxng: { frame: "training/admin/cn-web-searxng.png", rect: { x: 282, y: 48, w: 847, h: 511 } },
+  cnWebKeyed: { frame: "training/admin/cn-web-keyed.png", rect: { x: 282, y: 48, w: 847, h: 479 } },
+  cnDriveForm: { frame: "training/admin/cn-gdrive-form.png", rect: { x: 282, y: 48, w: 847, h: 428 } },
+  cnDriveTested: { frame: "training/admin/cn-gdrive-tested.png", rect: { x: 296, y: 306, w: 819, h: 130 } },
+  cnGraphForm: { frame: "training/admin/cn-graph-form.png", rect: { x: 282, y: 48, w: 847, h: 446 } },
+  cnGraphTested: { frame: "training/admin/cn-graph-tested.png", rect: { x: 296, y: 306, w: 819, h: 200 } },
+  cnBoxTested: { frame: "training/admin/cn-box-tested.png", rect: { x: 282, y: 48, w: 847, h: 544 } },
+  cnImanageTested: { frame: "training/admin/cn-imanage-tested.png", rect: { x: 296, y: 346, w: 819, h: 113 } },
+  cnUserAttach: { frame: "training/admin/cn-user-attach.png", rect: { x: 311, y: 163, w: 259, h: 283 } },
+  cnBoxHidden: { frame: "training/admin/cn-box-hidden.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
+  cnUserAttachHidden: { frame: "training/admin/cn-user-attach-hidden.png", rect: { x: 311, y: 194, w: 259, h: 252 } },
+  cnBoxShown: { frame: "training/admin/cn-box-shown.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
+  cnOffForAll: { frame: "training/admin/cn-off-for-all.png", rect: { x: 282, y: 399, w: 847, h: 51 } },
+  anSections: { frame: "training/admin/an-sections.png", rect: { x: 261, y: 271, w: 889, h: 584 } },
+  anFilters: { frame: "training/admin/an-runtime.png", rect: { x: 276, y: 98, w: 859, h: 160 } },
   anCsv: { frame: "training/admin/an-csv.png", rect: { x: 774, y: 67, w: 307, h: 235 } },
-  anActivity: { frame: "training/admin/an-activity.png", rect: { x: 262, y: 245, w: 887, h: 277 } },
-  anUsageCards: { frame: "training/admin/an-usage.png", rect: { x: 262, y: 285, w: 887, h: 156 } },
+  anActivity: { frame: "training/admin/an-activity.png", rect: { x: 262, y: 251, w: 887, h: 277 } },
+  anUsageCards: { frame: "training/admin/an-usage.png", rect: { x: 262, y: 291, w: 887, h: 156 } },
   anBudget: { frame: "training/admin/an-budget.png", rect: { x: 261, y: 391, w: 889, h: 314 } },
   anAllocationForm: { frame: "training/admin/an-allocation-form.png", rect: { x: 262, y: 743, w: 887, h: 85 } },
   anAllocationTable: { frame: "training/admin/an-allocation-saved.png", rect: { x: 282, y: 620, w: 836, h: 98 } },
   anCapHit: { frame: "training/admin/an-cap-hit.png", rect: { x: 315, y: 250, w: 839, h: 50 } },
-  auSignals: { frame: "training/admin/au-board.png", rect: { x: 262, y: 0, w: 887, h: 611 } },
+  auSignals: { frame: "training/admin/au-board.png", rect: { x: 262, y: 0, w: 887, h: 613 } },
   auSignalRecords: { frame: "training/admin/au-signal.png", rect: { x: 229, y: 105, w: 727, h: 645 } },
   auInsights: { frame: "training/admin/au-insights.png", rect: { x: 282, y: 124, w: 847, h: 306 } },
   auChartRecords: { frame: "training/admin/au-chart-records.png", rect: { x: 229, y: 131, w: 727, h: 593 } },
-  auPromptRecord: { frame: "training/admin/au-prompt.png", rect: { x: 179, y: 137, w: 827, h: 581 } },
+  auPromptRecord: { frame: "training/admin/au-prompt.png", rect: { x: 179, y: 148, w: 827, h: 559 } },
   auAlertAck: { frame: "training/admin/au-alert-ack.png", rect: { x: 283, y: 385, w: 845, h: 85 } },
-  auTrailFilters: { frame: "training/admin/au-trail.png", rect: { x: 262, y: 265, w: 887, h: 85 } },
-  alEmail: { frame: "training/admin/al-email.png", rect: { x: 261, y: 234, w: 889, h: 204 } },
+  auTrailFilters: { frame: "training/admin/au-trail.png", rect: { x: 262, y: 271, w: 887, h: 85 } },
+  alEmail: { frame: "training/admin/al-email.png", rect: { x: 261, y: 271, w: 889, h: 204 } },
   alRuleForm: { frame: "training/admin/al-template.png", rect: { x: 262, y: 0, w: 887, h: 642 } },
   alRuleDetections: { frame: "training/admin/al-detections.png", rect: { x: 283, y: 330, w: 845, h: 194 } },
   alRuleRow: { frame: "training/admin/al-rule-saved.png", rect: { x: 282, y: 459, w: 847, h: 82 } },
   alFlaggedChat: { frame: "training/admin/al-flagged-chat.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
   alDeliverySent: { frame: "training/admin/al-delivery-sent.png", rect: { x: 283, y: 601, w: 845, h: 107 } },
   alArchived: { frame: "training/admin/al-archived.png", rect: { x: 283, y: 601, w: 845, h: 107 } },
+  alSupportTemplate: { frame: "training/admin/al-support-template.png", rect: { x: 262, y: 146, w: 887, h: 646 } },
   retNavigation: { frame: "training/admin/ret-navigation.png", rect: { x: 262, y: 383, w: 887, h: 93 } },
-  retForever: { frame: "training/admin/ret-forever.png", rect: { x: 282, y: 4, w: 849, h: 221 } },
-  retSourceForm: { frame: "training/admin/ret-source.png", rect: { x: 282, y: 121, w: 847, h: 205 } },
-  retSourceRow: { frame: "training/admin/ret-source-saved.png", rect: { x: 282, y: 0, w: 847, h: 101 } },
-  retScan: { frame: "training/admin/ret-scan.png", rect: { x: 282, y: 108, w: 847, h: 349 } },
-  retConfirm: { frame: "training/admin/ret-confirm.png", rect: { x: 282, y: 377, w: 847, h: 80 } },
+  retForever: { frame: "training/admin/ret-forever.png", rect: { x: 282, y: 4, w: 849, h: 220 } },
+  retSourceForm: { frame: "training/admin/ret-source.png", rect: { x: 282, y: 120, w: 847, h: 205 } },
+  retSourceRow: { frame: "training/admin/ret-source-saved.png", rect: { x: 282, y: 0, w: 847, h: 100 } },
+  retScan: { frame: "training/admin/ret-scan.png", rect: { x: 282, y: 108, w: 847, h: 348 } },
+  retConfirm: { frame: "training/admin/ret-confirm.png", rect: { x: 282, y: 376, w: 847, h: 80 } },
   retConversation: { frame: "training/admin/ret-conversation.png", rect: { x: 179, y: 200, w: 827, h: 455 } },
-  retHold: { frame: "training/admin/ret-hold.png", rect: { x: 301, y: 0, w: 809, h: 295 } },
-  retPreview: { frame: "training/admin/ret-preview.png", rect: { x: 282, y: 370, w: 847, h: 174 } },
-  retDeleteConfirm: { frame: "training/admin/ret-delete-confirm.png", rect: { x: 282, y: 358, w: 847, h: 140 } },
+  retHold: { frame: "training/admin/ret-hold.png", rect: { x: 301, y: 0, w: 809, h: 296 } },
+  retPreview: { frame: "training/admin/ret-preview.png", rect: { x: 282, y: 370, w: 847, h: 173 } },
+  retDeleteConfirm: { frame: "training/admin/ret-delete-confirm.png", rect: { x: 282, y: 357, w: 847, h: 140 } },
   fbUserRate: { frame: "training/admin/fb-user-rate.png", rect: { x: 315, y: 360, w: 839, h: 165 } },
-  fbUserReport: { frame: "training/admin/fb-user-report.png", rect: { x: 777, y: 149, w: 382, h: 521 } },
-  fbOverview: { frame: "training/admin/fb-overview.png", rect: { x: 262, y: 98, w: 887, h: 303 } },
+  fbUserReport: { frame: "training/admin/fb-user-report.png", rect: { x: 777, y: 139, w: 382, h: 707 } },
+  fbOverview: { frame: "training/admin/fb-overview.png", rect: { x: 262, y: 98, w: 887, h: 309 } },
   feedbackConversation: { frame: "training/admin/fb-conversation.png", rect: { x: 179, y: 123, w: 827, h: 609 } },
-  fbIssues: { frame: "training/admin/fb-issues.png", rect: { x: 262, y: 359, w: 887, h: 136 } },
+  fbIssues: { frame: "training/admin/fb-issues.png", rect: { x: 262, y: 307, w: 887, h: 240 } },
   feedbackIssueReport: { frame: "training/admin/fb-issue-detail.png", rect: { x: 209, y: 302, w: 767, h: 251 } },
-  pdpFind: { frame: "training/admin/pdp-collapsed.png", rect: { x: 262, y: 339, w: 887, h: 113 } },
+  fbReports: { frame: "training/admin/fb-reports.png", rect: { x: 261, y: 271, w: 501, h: 311 } },
+  rpUserHelp: { frame: "training/admin/rp-user-help.png", rect: { x: 777, y: 118, w: 382, h: 136 } },
+  rpUserForm: { frame: "training/admin/rp-user-form.png", rect: { x: 777, y: 139, w: 382, h: 707 } },
+  rpUserSecurity: { frame: "training/admin/rp-user-security.png", rect: { x: 792, y: 164, w: 352, h: 212 } },
+  rpUserSent: { frame: "training/admin/rp-user-sent.png", rect: { x: 777, y: 149, w: 382, h: 147 } },
+  rpQueue: { frame: "training/admin/rp-queue.png", rect: { x: 261, y: 271, w: 501, h: 228 } },
+  rpSearch: { frame: "training/admin/rp-search.png", rect: { x: 261, y: 327, w: 387, h: 172 } },
+  rpTicket: { frame: "training/admin/rp-ticket.png", rect: { x: 655, y: 395, w: 495, h: 460 } },
+  rpTriage: { frame: "training/admin/rp-triage.png", rect: { x: 672, y: 342, w: 461, h: 372 } },
+  rpInternal: { frame: "training/admin/rp-internal.png", rect: { x: 672, y: 537, w: 461, h: 87 } },
+  rpReply: { frame: "training/admin/rp-reply.png", rect: { x: 672, y: 631, w: 461, h: 182 } },
+  rpUserReply: { frame: "training/admin/rp-user-reply.png", rect: { x: 777, y: 421, w: 382, h: 266 } },
+  rpNeedsReply: { frame: "training/admin/rp-needs-reply.png", rect: { x: 261, y: 86, w: 501, h: 221 } },
+  rpResolved: { frame: "training/admin/rp-resolved.png", rect: { x: 261, y: 86, w: 872, h: 372 } },
+  rpUserResolved: { frame: "training/admin/rp-user-resolved.png", rect: { x: 777, y: 216, w: 382, h: 629 } },
+  rpAudit: { frame: "training/admin/rp-audit.png", rect: { x: 283, y: 322, w: 845, h: 506 } },
+  pdpFind: { frame: "training/admin/pdp-collapsed.png", rect: { x: 262, y: 376, w: 887, h: 113 } },
   pdpToggles: { frame: "training/admin/pdp-on.png", rect: { x: 262, y: 104, w: 887, h: 143 } },
   pdpCategories: { frame: "training/admin/pdp-categories.png", rect: { x: 262, y: 273, w: 887, h: 308 } },
   pdpPreview: { frame: "training/admin/pdp-preview.png", rect: { x: 282, y: 281, w: 847, h: 292 } },
   pdpCoverage: { frame: "training/admin/pdp-coverage.png", rect: { x: 262, y: 351, w: 887, h: 269 } },
   pdpChatPrompt: { frame: "training/admin/pdp-chat.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
   pdpChatReply: { frame: "training/admin/pdp-chat.png", rect: { x: 315, y: 312, w: 839, h: 53 } },
-  pdpActivity: { frame: "training/admin/pdp-activity.png", rect: { x: 283, y: 382, w: 845, h: 90 } },
-  pdpAuditTrail: { frame: "training/admin/pdp-audit.png", rect: { x: 283, y: 600, w: 845, h: 207 } },
+  pdpActivity: { frame: "training/admin/pdp-activity.png", rect: { x: 283, y: 383, w: 845, h: 89 } },
+  pdpAuditTrail: { frame: "training/admin/pdp-audit.png", rect: { x: 283, y: 601, w: 845, h: 207 } },
   pdpModelRow: { frame: "training/admin/pdp-model-off.png", rect: { x: 282, y: 176, w: 847, h: 51 } },
   pdpOutput: { frame: "training/admin/pdp-output.png", rect: { x: 315, y: 312, w: 839, h: 27 } },
   pdpOffRow: { frame: "training/admin/pdp-off.png", rect: { x: 282, y: 124, w: 847, h: 51 } },
   pdpStillConcealed: { frame: "training/admin/pdp-after-off.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
-  dsCapture: { frame: "training/admin/ds-off.png", rect: { x: 262, y: 235, w: 887, h: 178 } },
-  dsSignals: { frame: "training/admin/ds-on.png", rect: { x: 282, y: 362, w: 847, h: 139 } },
+  dsCapture: { frame: "training/admin/ds-off.png", rect: { x: 262, y: 272, w: 887, h: 178 } },
+  dsSignals: { frame: "training/admin/ds-on.png", rect: { x: 282, y: 399, w: 847, h: 139 } },
   dsSafeguards: { frame: "training/admin/ds-safeguards.png", rect: { x: 282, y: 0, w: 847, h: 151 } },
   dsExcluded: { frame: "training/admin/ds-safeguards.png", rect: { x: 282, y: 152, w: 847, h: 87 } },
   dsScan: { frame: "training/admin/ds-scanned.png", rect: { x: 282, y: 0, w: 847, h: 649 } },
   dsUserCorrection: { frame: "training/admin/ds-user-correction.png", rect: { x: 257, y: 87, w: 897, h: 105 } },
-  dsUserNote: { frame: "training/admin/ds-user-note.png", rect: { x: 315, y: 370, w: 839, h: 155 } },
+  dsUserNote: { frame: "training/admin/ds-user-note.png", rect: { x: 315, y: 371, w: 839, h: 154 } },
   dsOverview: { frame: "training/admin/ds-overview.png", rect: { x: 262, y: 85, w: 887, h: 141 } },
   dsMix: { frame: "training/admin/ds-mix.png", rect: { x: 262, y: 306, w: 887, h: 244 } },
   dsSuggestions: { frame: "training/admin/ds-suggestions.png", rect: { x: 262, y: 291, w: 887, h: 273 } },
   dsEditorFormat: { frame: "training/admin/ds-editor.png", rect: { x: 230, y: 274, w: 725, h: 133 } },
   dsEditorRules: { frame: "training/admin/ds-editor-rules.png", rect: { x: 230, y: 88, w: 725, h: 540 } },
   dsCard: { frame: "training/admin/ds-created.png", rect: { x: 282, y: 305, w: 421, h: 246 } },
-  dsExample: { frame: "training/admin/ds-review.png", rect: { x: 282, y: 0, w: 847, h: 735 } },
-  dsConcealedExample: { frame: "training/admin/ds-concealed.png", rect: { x: 282, y: 0, w: 847, h: 697 } },
+  dsExample: { frame: "training/admin/ds-review.png", rect: { x: 282, y: 0, w: 847, h: 777 } },
+  dsConcealedExample: { frame: "training/admin/ds-concealed.png", rect: { x: 282, y: 171, w: 847, h: 637 } },
   dsApproved: { frame: "training/admin/ds-approved.png", rect: { x: 297, y: 451, w: 391, h: 26 } },
   dsDownload: { frame: "training/admin/ds-download.png", rect: { x: 319, y: 284, w: 547, h: 287 } },
   dsAudit: { frame: "training/admin/ds-audit.png", rect: { x: 283, y: 322, w: 845, h: 506 } },
 };
 
-type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "sso" | "analytics" | "policies" | "audit" | "alerts" | "retention" | "privacy" | "datasets";
+type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "connectors" | "sso" | "analytics" | "reports" | "policies" | "audit" | "alerts" | "retention" | "privacy" | "datasets";
 
 export type AdminTrainingVideo = TrainingVideoBase & { icon: AdminGuideIcon };
 
@@ -657,7 +723,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Open Users",
         caption: "Admin console from the sidebar. Users lists every account you manage.",
         narration:
-          "Choose Admin console at the bottom of the sidebar. Nine tabs cover your organization, and Users comes first. Each row shows the name, email, role, groups, sign-in method under Auth, status, and last activity.",
+          "Choose Admin console at the bottom of the sidebar. Eleven tabs cover your organization, and Users comes first. Each row shows the name, email, role, groups, sign-in method under Auth, status, and last activity.",
         durationSeconds: 16,
         focus: "usersTabs",
       },
@@ -690,8 +756,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Auth switches to local",
         caption: "After a password is set, the row's Auth reads local.",
         narration:
-          "Setting a password switches the account to local sign-in. The Auth column now reads local.",
-        durationSeconds: 7,
+          "Setting a password switches the account to local sign-in. The Auth column now reads local, and the person signs in with email and password.",
+        durationSeconds: 10,
         focus: "usersLocalRow",
       },
       {
@@ -819,6 +885,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       { symptom: "Can use API reads \"Downstream API access is unavailable under the current service policy.\"", fix: "Service policy controls downstream API access. Ask your service team." },
       { symptom: "\"Default Users is protected by organization policy and cannot be removed.\"", fix: "Default Users is the baseline group. Adjust its permissions and models instead." },
       { symptom: "Can build agents is on, but people still cannot build agents", fix: "It also needs service policy to allow user-built agents. Policies › Default users can build agents shows whether it does." },
+      { symptom: "A person sees \"Connecting APIs needs approval. Ask your administrator to turn on Can add API sources for one of your groups.\"", fix: "Turn on Can add API sources for one of their groups. It works only with Can build knowledge bases, because API sources live inside a person's own knowledge base." },
+      { symptom: "A person sees \"Needs Hermes approval from your administrator\"", fix: "Turn on Can use Hermes companion for one of their groups. Until then Hermes agents and Hermes connections stay locked for them." },
     ],
     scenes: [
       {
@@ -873,7 +941,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Set each permission",
         caption: "Chat, knowledge, agents, tools, API, Hermes, authoring, and memory.",
         narration:
-          "Open Permissions. Can use chat, knowledge, agents, and tools start on. Can use A P I and the Hermes companion are opt-in. The three building permissions let members create their own private agents, knowledge bases, and tools; publishing stays with administrators. Can use memory lets the assistant remember each person's preferences.",
+          "Open Permissions. Chat, knowledge, agents, and tools start on; A P I and the Hermes companion are opt-in. Four building permissions let members create their own private agents, knowledge bases, A P I sources, and tools; publishing stays with administrators. Can use memory lets the assistant remember each person's preferences.",
         durationSeconds: 23,
         calloutPlacement: "left-rail",
         captionPlacement: "top",
@@ -1171,15 +1239,15 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "Enforcement on, with its refusal recognized",
     ],
     prerequisites: [
-      "An Admin account, with SSO management allowed by service policy: Policies › SSO configuration reads Available. Otherwise the SSO tab is read-only; ask your service team.",
+      "An Admin account, with SSO management allowed by service policy: the SSO tab shows Add SSO configuration. If it shows \"Organization policy makes SSO configuration read-only in this console.\" instead, ask your service team.",
       "An OpenID Connect application at your identity provider, with its issuer URL, client ID, and client secret. The paths below list the exact settings for Keycloak, Microsoft Entra ID, Okta, and Google Workspace.",
       "The redirect URI shown under the Add SSO configuration form, registered exactly at the identity provider.",
       "A groups claim in the ID token if you will map groups. Google sends none.",
       "A test account at the provider with a verified email on one of your domains.",
     ],
     setupSteps: [
-      "Open Admin console › Policies › Policy Controls and check that SSO configuration reads Available. If it reads Read only, ask your service team to allow SSO management.",
-      "Choose Admin console › SSO, then Add SSO configuration.",
+      "Choose Admin console › SSO. If it reads \"Organization policy makes SSO configuration read-only in this console.\" and has no Add SSO configuration button, ask your service team to allow SSO management.",
+      "Choose Add SSO configuration.",
       "In Identity provider, choose your preset: Microsoft Entra ID, Google Workspace, Okta, or Custom OIDC provider.",
       "Enter the Issuer URL, Client ID, and Allowed email domains. Keep Provision new users on first sign-in (JIT) on.",
       "Register the redirect URI shown under the form at your identity provider.",
@@ -1237,7 +1305,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "The card reads enforced, and a local password on the domain is refused with \"SSO is enforced for this email domain; local sign-in is disabled. Use the configured identity provider.\"",
     ],
     troubleshooting: [
-      { symptom: "\"Organization policy makes SSO configuration read-only in this console.\"", fix: "Service policy does not let administrators manage SSO. Policies › SSO configuration reads Read only. Ask your service team." },
+      { symptom: "\"Organization policy makes SSO configuration read-only in this console.\"", fix: "Service policy does not let administrators manage SSO, so the tab has no Add SSO configuration button. Ask your service team." },
       { symptom: "Create SSO configuration stays unavailable", fix: "Issuer URL and Client ID are required." },
       { symptom: "\"Issuer verified, but sign-in stays disabled until you add: client secret.\"", fix: "The secret was not saved, or allowed domains are missing. Cards cannot be edited: choose Remove and create the configuration again with every field." },
       { symptom: "Test connection fails at Discovery document", fix: "The issuer URL is wrong or unreachable from the server. Open the issuer followed by /.well-known/openid-configuration; for Entra use your tenant ID." },
@@ -1257,7 +1325,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           label: "Checklist",
           where: "Have these ready",
           steps: [
-            "Policies › SSO configuration reads Available.",
+            "The SSO tab offers Add SSO configuration.",
             "Administrator access to your identity provider.",
             "Your email domains, such as examplecorp.com.",
             "A test account with a verified email on one of those domains.",
@@ -1274,11 +1342,11 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         focus: "ssoReadonlyEmpty",
       },
       {
-        title: "Check that you can manage SSO",
-        caption: "Policies › Policy Controls: SSO configuration reads Available.",
+        title: "When service policy allows it",
+        caption: "The Policy note is gone and Add SSO configuration appears.",
         narration:
-          "Open Policies and expand Policy Controls. S S O configuration reads Available once your service team allows it: you may configure S S O, and secrets stay vaulted on the server. If it reads Read only, ask your service team.",
-        durationSeconds: 17,
+          "Once your service team allows administrators to manage S S O, the Policy note is gone, and Add S S O configuration appears at the top of the tab. Secrets you enter stay vaulted on the server. If the note is still there, ask your service team.",
+        durationSeconds: 18,
         calloutPlacement: "left-rail",
         focus: "ssoPolicyAvailable",
       },
@@ -1286,8 +1354,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Register the app at your provider",
         caption: "Outside Aperture Chat: a confidential OIDC app, the redirect URI, a secret, and a groups claim.",
         narration:
-          "At your identity provider, create a confidential OpenID Connect web application with the authorization code flow, and register the redirect URI shown in the Add S S O configuration form. Copy the client I D and secret. Add a groups claim if you will map groups, and create a test person with a verified email. This lesson's written paths list the settings for Keycloak, Entra, Okta, and Google.",
-        durationSeconds: 27,
+          "At your identity provider, create a confidential OpenID Connect web application with the authorization code flow, and register the redirect URI from the Add S S O configuration form. Copy the client I D and secret. Add a groups claim if you will map groups, and create a test person with a verified email. The written paths list each provider's settings.",
+        durationSeconds: 25,
         card: {
           where: "Your identity provider's admin console",
           steps: [
@@ -1477,6 +1545,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         steps: [
           "Downstream API: people can create personal API keys for their approved models.",
           "Build agents, knowledge bases, or tools: people can create their own private ones. Sharing and publishing stay with administrators.",
+          "Add API sources: people can connect API endpoints, with keys or provider sign-in, to their own knowledge bases. It needs build knowledge bases first.",
+          "Use Hermes agents: people can open Hermes agents and Hermes connections. Off, these appear locked and never run.",
           "Use memory: the assistant saves and recalls each person's private preferences.",
         ],
       },
@@ -1496,6 +1566,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     troubleshooting: [
       { symptom: "\"Unavailable under the current service policy. The saved group grant is preserved.\"", fix: "Service policy has that capability off. Your earlier grant returns when it is turned back on." },
       { symptom: "\"Turn on Memory for this organization below before granting the default group access.\"", fix: "Turn on Memory for this organization in Personalization Memory first." },
+      { symptom: "\"Turn on knowledge bases above first; API sources live inside a person's own knowledge base.\"", fix: "Switch on Default users can build knowledge bases, then Default users can add API sources." },
       { symptom: "A memory number did not change", fix: "Values outside 1 to 3650 days or 1 to 2000 memories are ignored. Type a value in range and press Enter." },
       { symptom: "\"Memory policy was not saved. Personalization memory is unavailable under the current service policy.\"", fix: "Service policy has personalization memory off. Ask your service team." },
       { symptom: "\"Default user policy could not be saved.\"", fix: "Nothing changed. Reload Policies and try again; if it repeats, check the Audit trail for the refusal." },
@@ -1503,28 +1574,28 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     scenes: [
       {
         title: "Policies, collapsed",
-        caption: "Admin console › Policies: Policy Controls, Personalization Memory, and Memory by User.",
+        caption: "Admin console › Policies: Policy Controls, Personal Data Protection, and the memory sections.",
         narration:
-          "Open Admin console, Policies. Its sections start collapsed: Policy Controls, Personalization Memory, and Memory by User. When service policy turns memory off, a single Memory governance panel replaces the last two.",
-        durationSeconds: 17,
+          "Open Admin console, Policies. Its sections start collapsed: Policy Controls, Personal Data Protection, Personalization Memory, and Memory by User. When service policy turns memory off, a single Memory governance panel replaces the last two.",
+        durationSeconds: 18,
         calloutPlacement: "left-rail",
         focus: "policyCollapsed",
       },
       {
         title: "What service policy allows",
-        caption: "Four status rows: administrator accounts, admin sign-in, SSO, and new model defaults.",
+        caption: "The Service policy note names only what your service team limits here.",
         narration:
-          "Expand Policy Controls and read the status rows first. They show what service policy allows: whether you can create administrators, how admins sign in, whether you manage S S O, and whether new models start with Default Users.",
+          "Expand Policy Controls. At the bottom, a Service policy note names anything your service team limits that you can't change here. In this workspace, administrator accounts are created by your service team. When nothing is limited, there is no note.",
         durationSeconds: 17,
         calloutPlacement: "left-rail",
         focus: "policyServiceAvailability",
       },
       {
         title: "Default Users capabilities",
-        caption: "API keys, building agents, knowledge bases, and tools, and memory for Default Users.",
+        caption: "Seven switches set what Default Users can do. A dimmed one is limited or waits on another.",
         narration:
-          "Below them, five switches set what Default Users can do: create personal A P I keys, build private agents, knowledge bases, and tools, and use memory. A locked switch means service policy has that capability off; your saved choice is kept for later.",
-        durationSeconds: 18,
+          "Above it, seven switches set what Default Users can do: create personal A P I keys, build private agents and knowledge bases, add A P I sources to those knowledge bases, build tools, use Hermes agents, and use memory. A dimmed switch is off under service policy, or waits on another switch; your saved choice is kept.",
+        durationSeconds: 22,
         calloutPlacement: "left-rail",
         captionPlacement: "top",
         focus: "policyDefaults",
@@ -1533,8 +1604,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Grant a capability",
         caption: "Each switch saves immediately: \"Default user policy saved.\"",
         narration:
-          "Switch on Default users can build knowledge bases. It saves at once. Everyone in Default Users can now create private knowledge bases; sharing them with groups stays with administrators.",
-        durationSeconds: 14,
+          "Switch on Default users can build knowledge bases. It saves at once, and Default users can add A P I sources unlocks below it, because A P I sources live inside a person's own knowledge base. Sharing knowledge bases with groups stays with administrators.",
+        durationSeconds: 18,
         calloutPlacement: "left-rail",
         focus: "polKnowledgeRow",
       },
@@ -1596,10 +1667,347 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
   },
   {
+    id: "admin-connectors",
+    audioSrc: "training/admin/admin-connectors.mp3",
+    title: "Manage workspace connectors",
+    description: "Turn sources on for your workspace, configure and test web search and each cloud file source, hide a source from the attach menu, and recognize a source your service team has turned off.",
+    icon: "connectors",
+    track: "Workspace controls",
+    outcomes: [
+      "Web Search turned on and tested",
+      "Each cloud source saved and tested, with its real result read",
+      "A cloud source hidden from people and shown again",
+      "A source turned off for every workspace recognized",
+    ],
+    prerequisites: [
+      "An Admin account.",
+      "For cloud sources: an administrator at the vendor (Google Cloud, Microsoft Entra, Box, or iManage) who can register an application and grant consent.",
+      "Your workspace's address. Connector redirect URIs are that address followed by /api/connector-oauth/callback.",
+      "For SearXNG: your own instance's address, with JSON output allowed. For OpenAI, Anthropic, or OpenRouter web search: an active key for that provider, which your service team adds.",
+    ],
+    setupSteps: [
+      "Choose Admin console › Connections. Connectors lists every source and tool for this workspace.",
+      "Turn a source on with its switch. The status reads \"… is now on for everyone in this workspace.\" Off removes it everywhere: chat, pickers, the tool library, and the API.",
+      "Choose Configure on Web Search, pick a Search engine and Results per search, and choose Save configuration.",
+      "Choose Test connection and read every line of the result.",
+      "For a cloud source, do the vendor steps first (see the paths), then choose Configure, pick the Authentication method, fill in the vendor's values and the secret, and choose Save configuration.",
+      "Choose Test connection and read the result. For Google Drive, finish with Connect Google Drive.",
+      "To keep a cloud source out of people's attach menu without turning it off, choose Hide. The row reads Hidden; choose Show to offer it again.",
+      "Check from a person's account: the chat paperclip menu lists only the sources you have not hidden.",
+    ],
+    paths: [
+      {
+        label: "Web Search (shown)",
+        steps: [
+          "Configure › Search engine: DuckDuckGo (keyless), SearXNG (your own instance), or OpenAI, Anthropic, or OpenRouter web search.",
+          "DuckDuckGo needs no key, but it limits automated searches from busy servers, and the server must be able to reach it; the test names the reason when it fails.",
+          "SearXNG: enter the SearXNG instance URL. The instance must allow JSON output (search.formats must include json). Test connection runs a real search.",
+          "OpenAI, Anthropic, or OpenRouter web search reuse that provider's key, and each search is billed to that account. Your service team adds provider keys.",
+          "Results per search: how many results are added to the prompt as cited context, 1 to 10.",
+        ],
+      },
+      {
+        label: "Google Drive (shown)",
+        steps: [
+          "In Google Cloud, enable the Drive API, set up the Google Auth Platform with the drive.readonly scope, and create a Web application client with the redirect URI.",
+          "Configure › Google OAuth (recommended): OAuth client ID, optional Drive folder ID and Source label, and the OAuth client secret. Save configuration.",
+          "Choose Connect Google Drive and sign in with the workspace account used for knowledge sync, then Test connection.",
+          "People connect their own Google account from the attach menu and see only their own files.",
+        ],
+      },
+      {
+        label: "OneDrive / SharePoint / Outlook (Microsoft Graph) (shown)",
+        steps: [
+          "In Entra, register a single-tenant app, add Files.Read.All (and Sites.Read.All) as application permissions, grant admin consent, and create a client secret.",
+          "Configure › App-only (client credentials, recommended): Directory (tenant) ID, Application (client) ID, optional SharePoint site, Drive, and Root folder IDs, and the Client secret. Save configuration.",
+          "Test connection requests a token and calls Graph.",
+          "For chat attachments, also add the scopes as delegated permissions and the Web redirect URI.",
+        ],
+      },
+      {
+        label: "Box (shown)",
+        steps: [
+          "In the Box Developer Console, create a Server app with Client Credentials Grant, App + Enterprise Access, and Read all files and folders; a Box admin authorizes it in Admin Console › Platform › Platform Apps.",
+          "Configure › Client Credentials Grant (recommended): Client ID, Enterprise ID, optional Folder ID, and the Client secret. Save configuration, then Test connection.",
+          "For chat attachments, also enable OAuth 2.0 (Authorization Code) on the app with the redirect URI.",
+        ],
+      },
+      {
+        label: "iManage (shown)",
+        steps: [
+          "In iManage Control Center, add a Web, confidential application with the redirect URI and refresh tokens allowed.",
+          "Configure › Each user signs in (recommended): Instance URL, API key (client ID), Customer ID, Library ID, optional Workspace ID, and the OAuth client secret. Save configuration.",
+          "Test connection confirms the settings; each person completes verification by opening iManage from chat and signing in.",
+          "Service account for background sync is only for knowledge sync; chat always uses each person's own sign-in.",
+        ],
+      },
+      {
+        label: "Hide a cloud source (shown)",
+        steps: [
+          "Choose Hide on Google Drive, OneDrive / SharePoint / Outlook, Box, or iManage. Its switch and credentials stay as they are, so knowledge sync keeps running.",
+          "People no longer see it in the chat or Drafts attach menu. Choose Show to offer it again.",
+        ],
+      },
+      {
+        label: "A source off for every workspace (shown)",
+        steps: [
+          "When your service team turns a source off for every workspace, its row reads Off for all workspaces and its switch is locked off.",
+          "Your saved settings stay. Ask your service team to allow it again; then your own switch decides.",
+        ],
+      },
+    ],
+    verify: [
+      "The switch shows the new state, and the status reads \"… is now on for everyone in this workspace.\"",
+      "Web Search's Test connection reads \"Web search is working through …\" with a live result.",
+      "A cloud source's Test connection lists Required fields, Authentication, and API access as passed, or names the next step.",
+      "After Hide, the row reads Hidden and a person's paperclip menu no longer lists the source.",
+    ],
+    troubleshooting: [
+      { symptom: "\"Web search test failed: DuckDuckGo returned a page with no parseable results (it rate-limits automated queries). …\"", fix: "DuckDuckGo limits automated searches from busy servers. Retry later, or switch to SearXNG or a provider's web search." },
+      { symptom: "\"Web search test failed: DuckDuckGo request failed: ConnectTimeout\"", fix: "The server could not reach DuckDuckGo in time. Check that your deployment can reach the internet, retry, or choose SearXNG." },
+      { symptom: "\"Set the SearXNG instance URL, or switch the engine to DuckDuckGo.\"", fix: "Enter your SearXNG instance URL, or choose DuckDuckGo." },
+      { symptom: "\"OpenAI web search reuses the workspace's OpenAI provider key. Add an active OpenAI key under Providers, or switch to a keyless engine.\"", fix: "Provider keys are added by your service team. Ask them for the key, or choose DuckDuckGo or SearXNG." },
+      { symptom: "\"Google Drive is not connected: no refresh token is stored. …\"", fix: "Save the client ID and secret, then choose Connect Google Drive and finish Google's consent screen." },
+      { symptom: "\"Microsoft Graph token request failed: token endpoint returned HTTP 400: AADSTS90002: Tenant '…' not found. …\"", fix: "The Directory (tenant) ID is wrong. Copy it from the app's Overview page in Entra." },
+      { symptom: "\"Box token request failed: token endpoint returned HTTP 400: The client credentials are invalid\"", fix: "Check the Client ID and secret, and that a Box admin authorized the app in Platform Apps." },
+      { symptom: "\"Fill in: …\"", fix: "A required field (marked *) or the secret is empty. Fill it in and save again." },
+      { symptom: "A row reads Saved · disabled", fix: "Its credentials are saved, but the source is switched off in this workspace. Turn its switch on." },
+      { symptom: "A row reads Off for all workspaces and its switch is dimmed", fix: "Your service team has turned the source off for every workspace. Ask them to allow it again." },
+    ],
+    scenes: [
+      {
+        title: "Before you begin",
+        caption: "An Admin account, vendor administrators for cloud sources, and your workspace's address.",
+        narration:
+          "This lesson manages the sources and tools your workspace can use. Before you begin, have an administrator at each cloud vendor you will connect, your workspace's address for the redirect U R I, and, to use your own search engine, your SearXNG address.",
+        durationSeconds: 18,
+        card: {
+          label: "Checklist",
+          where: "Have these ready",
+          steps: [
+            "An Admin account.",
+            "An administrator at each cloud vendor: Google Cloud, Microsoft Entra, Box, or iManage.",
+            "Your workspace's address; redirect URIs end in /api/connector-oauth/callback.",
+            "For SearXNG, your instance's address, with JSON output allowed.",
+          ],
+        },
+      },
+      {
+        title: "Find Connectors",
+        caption: "Off removes a source everywhere; Hide only takes it out of the attach menu.",
+        narration:
+          "Open Admin console, Connections. Connectors lists every source and tool for this workspace. Read the subtitle: Off removes a connector everywhere, in chat, pickers, the tool library, and the A P I. Hide only takes a cloud source out of the attach menu.",
+        durationSeconds: 18,
+        focus: "cnPanel",
+      },
+      {
+        title: "Turn a source on",
+        caption: "Switch Web Search on: it is on for everyone in this workspace.",
+        narration:
+          "Here Web Search is off. Switch it on, and the status confirms that Web Search is now on for everyone in this workspace. Built-in tools, such as M C P Servers and Prompt Library, have only a switch.",
+        durationSeconds: 15,
+        focus: "cnWebOn",
+      },
+      {
+        title: "Test DuckDuckGo",
+        caption: "DuckDuckGo needs no key. Here the real test could not reach it in time.",
+        narration:
+          "Choose Configure. DuckDuckGo needs no key. Choose Save configuration, then Test connection, which runs a real search. In this recording, the request to DuckDuckGo timed out, so the test failed with that reason. DuckDuckGo also limits automated searches from busy servers. Retry later, or choose another engine.",
+        durationSeconds: 22,
+        calloutPlacement: "left-rail",
+        focus: "cnWebTested",
+      },
+      {
+        title: "Use your own SearXNG",
+        caption: "SearXNG: your instance's URL, with JSON output allowed. The real search passed.",
+        narration:
+          "To use your own search instance, choose SearXNG and enter its U R L. The instance must allow J S O N output. Save, then test. This real search passed: web search is working through SearXNG, with five live results.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "cnWebSearxng",
+      },
+      {
+        title: "Keyed search engines",
+        caption: "OpenAI, Anthropic, or OpenRouter web search reuse that provider's key and bill that account.",
+        narration:
+          "You can also choose Open A I, Anthropic, or OpenRouter web search. They reuse that provider's key, and each search is billed to that account. This workspace has no Open A I key, so the test says so. Your service team adds provider keys.",
+        durationSeconds: 18,
+        calloutPlacement: "left-rail",
+        focus: "cnWebKeyed",
+      },
+      {
+        title: "Register Google Drive access",
+        caption: "Google Cloud console: Drive API, Google Auth Platform, drive.readonly, and a Web client.",
+        narration:
+          "For Google Drive, start in the Google Cloud console. Enable the Drive A P I, set up the Google Auth Platform with the drive read-only scope, and create a web application client with your redirect U R I. Copy the client I D and secret.",
+        durationSeconds: 17,
+        card: {
+          where: "Google Cloud console",
+          steps: [
+            "Enable the Google Drive API for your project.",
+            "Google Auth Platform › Branding: app name and support email. Audience: Internal.",
+            "Data Access: add the drive.readonly scope.",
+            "Clients › Create client › Web application.",
+            "Authorized redirect URIs: add the redirect URI below, then Create.",
+            "Copy the Client ID and Client secret.",
+          ],
+          values: [{ label: "Redirect URI", value: "https://your-instance.example/api/connector-oauth/callback" }],
+        },
+      },
+      {
+        title: "Configure Google Drive",
+        caption: "Google OAuth (recommended): client ID, optional folder ID and source label, then the secret.",
+        narration:
+          "Back in Aperture Chat, choose Configure on Google Drive and keep Google O Auth. Paste the client I D, an optional Drive folder I D to index from, and a source label people will recognize, then the client secret. Choose Save configuration.",
+        durationSeconds: 18,
+        calloutPlacement: "left-rail",
+        focus: "cnDriveForm",
+      },
+      {
+        title: "Authorize, then test",
+        caption: "Until Connect Google Drive is completed, the test reports that no refresh token is stored.",
+        narration:
+          "Test connection checks each step. The fields are complete, but the workspace has not authorized Google yet, so it says no refresh token is stored. Choose Connect Google Drive, sign in with the workspace account on Google's consent screen, and test again.",
+        durationSeconds: 18,
+        calloutPlacement: "left-rail",
+        focus: "cnDriveTested",
+      },
+      {
+        title: "Register a Microsoft Graph app",
+        caption: "Entra: a single-tenant app with Files.Read.All, admin consent, and a client secret.",
+        narration:
+          "For OneDrive and SharePoint, register an app in the Microsoft Entra admin center. Add Files dot Read dot All, and Sites dot Read dot All for SharePoint, as application permissions, grant admin consent, and create a client secret. Copy its value straight away.",
+        durationSeconds: 19,
+        card: {
+          where: "Microsoft Entra admin center",
+          steps: [
+            "Entra ID › App registrations › New registration: Single tenant only, then Register.",
+            "Overview: copy the Application (client) ID and Directory (tenant) ID.",
+            "API permissions › Add a permission › Microsoft Graph › Application permissions: Files.Read.All (and Sites.Read.All).",
+            "Choose Grant admin consent for your tenant.",
+            "Certificates & secrets › New client secret › Add; copy the Value now.",
+          ],
+        },
+      },
+      {
+        title: "Configure OneDrive and SharePoint",
+        caption: "App-only (client credentials): tenant ID, client ID, optional site, drive, and folder, then the secret.",
+        narration:
+          "Choose Configure on OneDrive, SharePoint, and Outlook, and keep app-only access. Paste the directory tenant I D and the application client I D. A SharePoint site, drive, and root folder are optional. Add the client secret and save.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "cnGraphForm",
+      },
+      {
+        title: "A real Microsoft answer",
+        caption: "With a made-up tenant ID, Microsoft answers AADSTS90002: Tenant not found.",
+        narration:
+          "This recording used a made-up tenant I D, so Microsoft's token service answered with error A A D S T S nine zero zero zero two: tenant not found. With your real values, the test acquires a token and checks Graph access.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "cnGraphTested",
+      },
+      {
+        title: "Register a Box app",
+        caption: "Box Developer Console: a Server app with Client Credentials Grant, authorized by a Box admin.",
+        narration:
+          "For Box, create a server app with the client credentials grant in the Box Developer Console. Give it app plus enterprise access and read access to files and folders, submit it, and have a Box admin authorize it under Platform Apps.",
+        durationSeconds: 16,
+        card: {
+          where: "Box Developer Console and Admin Console",
+          steps: [
+            "Developer Console › New App › Server › Client Credentials Grant › Create.",
+            "Configuration: App Access Level App + Enterprise Access; scope Read all files and folders stored in Box.",
+            "Copy the Client ID and Client Secret.",
+            "Submit the app for admin approval.",
+            "Box admin: Admin Console › Platform › Platform Apps › Add, and paste the Client ID.",
+            "Enterprise ID: Admin Console › Account & Billing.",
+          ],
+        },
+      },
+      {
+        title: "Configure and test Box",
+        caption: "Client ID, Enterprise ID, optional Folder ID, and the secret. Box rejected these made-up credentials.",
+        narration:
+          "Choose Configure on Box. Enter the client I D, the enterprise I D, an optional folder I D, and the client secret, then save and test. Box rejected these made-up credentials with: the client credentials are invalid.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "cnBoxTested",
+      },
+      {
+        title: "Register an iManage application",
+        caption: "iManage Control Center: a Web, confidential application with the redirect URL and refresh tokens.",
+        narration:
+          "For iManage, add an application in iManage Control Center. Make it a web, confidential client, add the redirect U R L, and allow refresh tokens. Copy the client I D and secret. Labels can vary by iManage version, so check with your iManage administrator.",
+        durationSeconds: 20,
+        card: {
+          where: "iManage Control Center",
+          steps: [
+            "Settings › Applications › Add Application › Configure Manually.",
+            "Authentication: Application Type Web, Client Type Confidential.",
+            "Add the Redirect URL, set a Client Secret and expiry, and turn on Allow Refresh Token.",
+            "Access: all users or a custom list; Review, then Finish.",
+            "Copy the Client ID (API key) and the client secret.",
+          ],
+          values: [{ label: "Redirect URL", value: "https://your-instance.example/api/connector-oauth/callback" }],
+        },
+      },
+      {
+        title: "iManage: each person signs in",
+        caption: "With Each user signs in, the test confirms the fields; people finish by signing in from chat.",
+        narration:
+          "Choose Configure on iManage, keep each user signs in, and enter the instance U R L, client I D, customer, and library. Save and test. Because iManage checks each person's own permissions, the test confirms the settings, and each person completes verification by opening iManage from chat and signing in.",
+        durationSeconds: 22,
+        calloutPlacement: "left-rail",
+        focus: "cnImanageTested",
+      },
+      {
+        title: "What people see",
+        caption: "A person's paperclip menu lists each cloud source under Attach from source.",
+        narration:
+          "Now look from a person's side. In a chat, the paperclip menu lists each cloud source under Attach from source: Google Drive, OneDrive, SharePoint, Box, and iManage.",
+        durationSeconds: 12,
+        focus: "cnUserAttach",
+      },
+      {
+        title: "Hide a source",
+        caption: "Hide: the row reads Hidden. Its switch and credentials stay as they are.",
+        narration:
+          "To keep a source out of that menu without turning it off, choose Hide, here on Box. The status confirms Box is hidden, and the row reads Hidden. Its switch and credentials stay, so knowledge sync keeps running.",
+        durationSeconds: 15,
+        focus: "cnBoxHidden",
+      },
+      {
+        title: "Gone from the menu",
+        caption: "The person's paperclip menu no longer lists Box.",
+        narration:
+          "The person's paperclip menu no longer offers Box. The Drafts attach menu follows the same setting.",
+        durationSeconds: 9,
+        focus: "cnUserAttachHidden",
+      },
+      {
+        title: "Show it again",
+        caption: "Show puts the source back in the attach menu.",
+        narration:
+          "Choose Show to offer it again. The status confirms Box is back in the attach menu for people in this workspace.",
+        durationSeconds: 9,
+        focus: "cnBoxShown",
+      },
+      {
+        title: "Off for every workspace",
+        caption: "Off for all workspaces: your service team turned it off, and its switch is locked.",
+        narration:
+          "Sometimes your service team turns a source off for every workspace. Its row then reads Off for all workspaces, and its switch is locked off. Your saved settings stay. Ask your service team to allow it again; then your own switch decides.",
+        durationSeconds: 16,
+        focus: "cnOffForAll",
+      },
+    ],
+  },
+  {
     id: "admin-tools",
     audioSrc: "training/admin/admin-tools.mp3",
-    title: "Response actions and connector responsibilities",
-    description: "Build a script response action, test it, give it to a group, use it on a real reply, edit or draft it, and find where connections are signed in.",
+    title: "Response actions and Library connections",
+    description: "Build a script response action, test it, give it to a group, use it on a real reply, edit or draft it, and find where tool connections are signed in.",
     icon: "tools",
     track: "Workspace controls",
     outcomes: [
@@ -1614,7 +2022,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "The group whose members should see the button.",
     ],
     setupSteps: [
-      "Choose Admin console › Connections. Chat output actions lists every tool; response actions carry a Response action pill.",
+      "Choose Admin console › Connections and scroll past Connectors to Chat output actions. It lists every tool; response actions carry a Response action pill.",
       "Choose New response action. Enter Action name, Timeout (seconds, 1–30), Description, and the Python script.",
       "Under Who can run this action, tick the groups that should see it. With none ticked, everyone can.",
       "Under Test run, paste sample text and choose Run test. Read \"Finished in … ms.\" and the output.",
@@ -1662,10 +2070,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     scenes: [
       {
         title: "Chat output actions",
-        caption: "Connections › Chat output actions: buttons on replies, not MCP servers.",
+        caption: "Chat output actions, below Connectors: buttons on replies, not MCP servers.",
         narration:
-          "Open Admin console, Connections. Chat output actions are buttons you add below assistant replies, such as an export or a formatter. They are not M C P servers or model tools; those live in the Library.",
-        durationSeconds: 16,
+          "Open Admin console, Connections, and scroll past Connectors, which has its own lesson. Chat output actions are buttons you add below assistant replies, such as an export or a formatter. They are not M C P servers or model tools; those live in the Library.",
+        durationSeconds: 19,
         focus: "responseOverview",
       },
       {
@@ -1708,8 +2116,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Create the action",
         caption: "Create action: the row reads Enabled with a Response action pill.",
         narration:
-          "Choose Create action. The status confirms it is saved, and the row reads Enabled.",
-        durationSeconds: 7,
+          "Choose Create action. The status confirms it is saved and available to models and chat, and the new row reads Enabled, with a Response action pill.",
+        durationSeconds: 12,
         focus: "toolsSavedRow",
       },
       {
@@ -2469,7 +2877,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-alerts",
     audioSrc: "training/admin/admin-alerts.mp3",
     title: "Alerts and delivery",
-    description: "Check email delivery, create a rule from the Prompt-injection template with a recipient, and follow a real flagged prompt to a delivered email.",
+    description: "Check email delivery, create a rule from the Prompt-injection template with a recipient, follow a real flagged prompt to a delivered email, and know the other rule templates, including Support-reports.",
     icon: "alerts",
     track: "Oversight and compliance",
     outcomes: ["Email status read", "Rule created from a template", "Real alert delivered", "Delivery archived and restored"],
@@ -2480,7 +2888,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     setupSteps: [
       "Choose Admin console › Alerts. Email Delivery should read Email configured.",
-      "In Alert Rules, choose Prompt-injection template.",
+      "In Alert Rules, choose Prompt-injection template. Suspicious-activity template and Support-reports template prefill other rules the same way.",
       "Check the action pattern security.prompt_flagged, the minimum severity, Fire when, and Cooldown.",
       "Enter Email recipients, separated by commas.",
       "Under Only these detections, keep or change the ticked detectors.",
@@ -2498,6 +2906,13 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         label: "Suspicious-activity template",
         steps: [
           "Watches security.*: security flags, content-filter hits, and elevated governance events, at Warning and above, with a 15-minute cooldown and no detection filter.",
+        ],
+      },
+      {
+        label: "Support-reports template (shown)",
+        steps: [
+          "Prefills New support reports: action patterns support.issue_reported, support.issue_reporter_replied, and support.issue_reopened, at Info and above, every match, with no cooldown.",
+          "Add Email recipients and choose Create Rule. Each new report from Help, each reply from the person who reported, and each reopened report then sends an email. Work the ticket in Reports.",
         ],
       },
       {
@@ -2603,6 +3018,15 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
           "Choose Archive to clear a delivery from the list. Its history is kept: Show archived lists it again, marked Archived, with Restore.",
         durationSeconds: 10,
         focus: "alArchived",
+      },
+      {
+        title: "Other templates",
+        caption: "Support-reports template: an email for each new report, reply, or reopen from Help.",
+        narration:
+          "The other templates work the same way. Support-reports template prefills a rule named New support reports. It watches new reports from Help, replies from the person who reported, and reopened reports, on every match with no cooldown. Add recipients and choose Create Rule to hear about reports without watching the Reports tab.",
+        durationSeconds: 22,
+        calloutPlacement: "left-rail",
+        focus: "alSupportTemplate",
       },
     ],
   },
@@ -2759,17 +3183,17 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-feedback-issues",
     audioSrc: "training/admin/admin-feedback-issues.mp3",
     title: "Review feedback and reported issues",
-    description: "Follow a real rating with a note and a reported problem from the person's screen to your review in Analytics.",
+    description: "Follow a real rating with a note and a reported problem from the person's screen to your review in Analytics, then hand the report to Reports.",
     icon: "analytics",
     track: "Oversight and compliance",
-    outcomes: ["Rating and note reviewed in context", "Reported problem read", "Review scoped by person and date"],
+    outcomes: ["Rating and note reviewed in context", "Reported problem read and opened in Reports", "Review scoped by person and date"],
     prerequisites: [
       "An Admin account.",
       "People who rate replies or report problems from Help.",
     ],
     setupSteps: [
       "The person rates a reply with the thumbs buttons below it and may add a note, then chooses Send note.",
-      "The person reports a problem from Help › Report a problem with a Subject, Message, and optional screenshot, then Send report.",
+      "The person reports a problem from Help › Report a problem: they choose Problem (or Idea, Question, Feedback, or Security), enter a Subject and Message, add an optional screenshot, and choose Send report.",
       "Choose Admin console › Analytics and expand Chat Feedback.",
       "Choose the person and dates, or Today, Week, or 30 days.",
       "Open a feedback row to read the note and the rated exchange.",
@@ -2786,7 +3210,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       {
         label: "A reported problem (shown)",
         steps: [
-          "Help › Report a problem. The report shows the subject, message, sender, time, and any screenshot.",
+          "Help › Report a problem. Analytics shows the subject, message, sender, time, and any screenshot.",
+          "Manage in Reports opens the Reports tab, where you reply, set the status, and keep internal notes (see Work reported problems in Reports).",
         ],
       },
     ],
@@ -2794,6 +3219,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "The summary counts Total feedback, Positive, Negative, and Issue reports for your scope.",
       "Feedback and conversation shows the note and the rated exchange.",
       "Platform issue report shows the subject and message the person sent.",
+      "Manage in Reports opens the Reports tab with the report in its queue.",
     ],
     troubleshooting: [
       { symptom: "The list is empty", fix: "Widen the person and date filter. Each section filters independently." },
@@ -2811,11 +3237,12 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "The person reports a problem",
-        caption: "Help › Report a problem: Subject, Message, an optional screenshot, Send report.",
+        caption: "Help › Report a problem: the type, Subject, Message, an optional screenshot, Send report.",
         narration:
-          "For a problem with the workspace itself, they open Help, Report a problem, enter a subject and message, attach a screenshot if they like, and choose Send report.",
-        durationSeconds: 12,
+          "For a problem with the workspace itself, they open Help, Report a problem, choose what they are sending, here Problem, enter a subject and message, attach a screenshot if they like, and choose Send report.",
+        durationSeconds: 14,
         calloutPlacement: "left-rail",
+        captionPlacement: "top",
         focus: "fbUserReport",
       },
       {
@@ -2837,20 +3264,247 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Reported platform issues",
-        caption: "Reports from Help, newest first, with the subject and sender.",
+        caption: "Reports from Help, newest first, with Manage in Reports beside the heading.",
         narration:
-          "Below the ratings, Reported platform issues lists reports from Help, with the subject, sender, and time.",
-        durationSeconds: 8,
+          "Below the ratings, Reported platform issues lists reports from Help, with the subject, sender, and time. Manage in Reports sits beside the heading.",
+        durationSeconds: 11,
         focus: "fbIssues",
       },
       {
         title: "Read the report",
         caption: "Platform issue report: subject, message, sender, time, and any screenshot.",
         narration:
-          "Open a report to read the subject, message, sender, time, and any screenshot. Follow up through your team's support process, then close the preview.",
-        durationSeconds: 11,
+          "Open a report to read the subject, message, sender, time, and any screenshot. This preview is read-only. To reply or change the report's status, close it and choose Manage in Reports.",
+        durationSeconds: 14,
         calloutPlacement: "left-rail",
         focus: "feedbackIssueReport",
+      },
+      {
+        title: "Manage in Reports",
+        caption: "Manage in Reports opens the ticket queue: reply, set the status, and keep notes there.",
+        narration:
+          "Choose Manage in Reports. The Reports tab opens with the report in its queue. Replies, status, priority, assignment, and internal notes all happen there, as the lesson Work reported problems in Reports shows.",
+        durationSeconds: 16,
+        focus: "fbReports",
+      },
+    ],
+  },
+  {
+    id: "admin-reports",
+    audioSrc: "training/admin/admin-reports.mp3",
+    title: "Work reported problems in Reports",
+    description: "Take a report from Help to resolved: find it in Reports, set its status, priority, and assignee, keep internal notes, reply to the person, and confirm every step in the Audit Trail.",
+    icon: "reports",
+    track: "Oversight and compliance",
+    outcomes: [
+      "New report found under Needs reply",
+      "Status, priority, and assignee set",
+      "Internal note kept and reply sent",
+      "Report resolved and audited",
+    ],
+    prerequisites: [
+      "An Admin account. Reports lists the reports people in your organization send.",
+      "People who send reports from Help › Report a problem. They follow your replies in Help › My reports.",
+    ],
+    setupSteps: [
+      "The person opens Help › Report a problem, chooses what they are sending (Problem, Idea, Question, Feedback, or Security), enters a Subject and Message, and chooses Send report. They see \"Report #N sent\".",
+      "Choose Admin console › Reports. Needs reply lists reports waiting on you; Open lists every report still being worked.",
+      "Search by subject, person, or #number, then select the report.",
+      "Set Status (such as In review), Priority, and Assignee. Each change saves at once and appears in the activity. The person sees status changes; priority and assignee changes are internal.",
+      "For a note only administrators see, choose Internal note, type it, and choose Add note.",
+      "To answer the person, choose Reply to and their first name, such as Reply to Jane, type your reply, and choose Send reply. They see it in Help › My reports.",
+      "When the person replies, the report returns to Needs reply. Choose Refresh to see it.",
+      "When it is fixed, type a closing reply and choose Reply and resolve, or set Status to Resolved.",
+      "Choose Audit › Audit Trail, choose Refresh, and set the category filter to support to see each step.",
+    ],
+    paths: [
+      {
+        label: "A problem (shown)",
+        steps: [
+          "Problem asks How much is this affecting you?: Blocking me, Slows me down, or Minor. That sets the starting priority, High, Normal, or Low; you can raise it to Urgent.",
+          "The report may carry a screenshot and, unless the person cleared Include technical details, the version, page, browser, and recent errors. Open Technical details on the report to read them.",
+        ],
+      },
+      {
+        label: "An idea, a question, or feedback",
+        steps: [
+          "The same form, with prompts for that type. The report's Type shows it; change Type if the person chose the wrong one.",
+          "Work it the same way: reply, set a status, and resolve or close it.",
+        ],
+      },
+      {
+        label: "A security concern (shown)",
+        steps: [
+          "Choosing Security tells the person: \"Security concerns go only to your administrators and are never posted publicly.\"",
+          "The report's Type reads Security concern. Follow your organization's security process, and keep sensitive details in internal notes.",
+        ],
+      },
+      {
+        label: "Closed and reopened reports",
+        steps: [
+          "Closed lists resolved and closed reports; All lists everything. The Status menu narrows the list to one status.",
+          "On a resolved report the person sees Still having this problem? and can choose Reopen report; it returns to your queue.",
+        ],
+      },
+      {
+        label: "An email for each new report",
+        steps: [
+          "Admin console › Alerts › Support-reports template prefills New support reports, which watches support.issue_reported, support.issue_reporter_replied, and support.issue_reopened.",
+          "Add Email recipients and choose Create Rule (see Alerts and delivery).",
+        ],
+      },
+    ],
+    verify: [
+      "The report shows the status, priority, and assignee you set, and each change appears in its activity.",
+      "The person's My reports shows your reply and the progress tracker, never your internal note.",
+      "After Reply and resolve, the status reads Resolved and the report leaves Open.",
+      "The Audit Trail, filtered to support, lists the report, each change, your replies, and the person's reply.",
+    ],
+    troubleshooting: [
+      { symptom: "\"No reports yet\"", fix: "Nobody in your organization has sent a report. Reports people send from Help › Report a problem appear here." },
+      { symptom: "\"Nothing matches\"", fix: "A view, menu, or search is narrowing the list. Choose All, set the menus back to Any status and All types, and clear the search." },
+      { symptom: "Reply and resolve is not offered", fix: "It appears only with Reply to selected while the report is open, and it needs a reply typed first." },
+      { symptom: "\"The change could not be saved.\"", fix: "Nothing changed. Choose Refresh and try again; another administrator may have changed the report." },
+      { symptom: "\"Reports could not be loaded.\"", fix: "Choose Refresh. If it repeats, confirm your account is still an administrator." },
+      { symptom: "The open report does not show the person's latest reply", fix: "Refresh updates the list, not the report already open. Select another report and then this one again, or reload the page." },
+    ],
+    scenes: [
+      {
+        title: "Where reports start",
+        caption: "Help: Report a problem sends a report; My reports follows it.",
+        narration:
+          "Reports start with the person. In Help, Report a problem sends a report to you, and My reports is where they follow its status and your replies.",
+        durationSeconds: 11,
+        focus: "rpUserHelp",
+      },
+      {
+        title: "The person sends a report",
+        caption: "The type, how much it affects them, a Subject, and a Message.",
+        narration:
+          "They choose what they are sending: a problem, an idea, a question, feedback, or a security concern. For a problem, they say how much it affects them, which sets the starting priority. Then a subject and message, an optional screenshot, and Send report.",
+        durationSeconds: 17,
+        focus: "rpUserForm",
+      },
+      {
+        title: "Security concerns stay private",
+        caption: "Security: only administrators see it, and it is never posted publicly.",
+        narration:
+          "Security works the same way, and tells the person that security concerns go only to administrators and are never posted publicly.",
+        durationSeconds: 10,
+        focus: "rpUserSecurity",
+      },
+      {
+        title: "Report sent",
+        caption: "\"Report #N sent\", with View status.",
+        narration:
+          "They see Report sent, with its number. Their administrators can see it now, and View status opens it in My reports.",
+        durationSeconds: 9,
+        focus: "rpUserSent",
+      },
+      {
+        title: "Needs reply",
+        caption: "Admin console › Reports › Needs reply: reports waiting on you.",
+        narration:
+          "Open Admin console, Reports. Needs reply lists reports where the person spoke last. Open lists every report still being worked, then Closed and All. The new report is here, marked Received.",
+        durationSeconds: 15,
+        focus: "rpQueue",
+      },
+      {
+        title: "Search the queue",
+        caption: "Search by subject, person, or #number.",
+        narration:
+          "In a busy queue, search by subject, person, or report number. The status and type menus narrow it further.",
+        durationSeconds: 9,
+        focus: "rpSearch",
+      },
+      {
+        title: "Open the report",
+        caption: "Who sent it, the message, and Status, Priority, Assignee, and Type.",
+        narration:
+          "Select the report. You see who sent it and when, their message, and Technical details if they included them. Above the message are Status, Priority, Assignee, and Type.",
+        durationSeconds: 12,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "rpTicket",
+      },
+      {
+        title: "Triage it",
+        caption: "Each change saves at once. Priority and assignee are marked internal.",
+        narration:
+          "Set Status to In review, raise Priority to High, and choose an assignee, here Alex Morgan. Each change saves at once and appears in the activity. The person sees status changes; priority and assignee are marked internal.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "rpTriage",
+      },
+      {
+        title: "Keep an internal note",
+        caption: "Internal note: only administrators see it.",
+        narration:
+          "To record something for other administrators, choose Internal note, type it, and choose Add note. It is marked Internal note, and the person never sees it.",
+        durationSeconds: 11,
+        calloutPlacement: "left-rail",
+        focus: "rpInternal",
+      },
+      {
+        title: "Reply to the person",
+        caption: "Reply to Jane: the person sees it in My reports.",
+        narration:
+          "To answer the person, choose Reply to Jane, type your reply, and choose Send reply. They see it in My reports.",
+        durationSeconds: 9,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "rpReply",
+      },
+      {
+        title: "The person answers",
+        caption: "My reports: your reply, the progress tracker, and Add a reply.",
+        narration:
+          "In Help, My reports, the person sees your reply and the tracker at In review. Your internal note is not there. They add a reply and choose Send reply.",
+        durationSeconds: 12,
+        focus: "rpUserReply",
+      },
+      {
+        title: "Back in Needs reply",
+        caption: "Their answer puts the report back in Needs reply.",
+        narration:
+          "Choose Refresh. Their answer puts the report back in Needs reply, marked so you can see who is waiting.",
+        durationSeconds: 8,
+        focus: "rpNeedsReply",
+      },
+      {
+        title: "Reply and resolve",
+        caption: "Reply and resolve sends your reply and marks the report Resolved.",
+        narration:
+          "Open the report to read their answer. When it is fixed, type a closing reply and choose Reply and resolve. The status reads Resolved, and the report leaves Open.",
+        durationSeconds: 12,
+        focus: "rpResolved",
+      },
+      {
+        title: "The person sees Resolved",
+        caption: "Resolved, with Reopen report if the problem comes back.",
+        narration:
+          "The person's tracker reads Resolved, with your closing reply. If the problem comes back, they choose Reopen report, and it returns to your queue.",
+        durationSeconds: 11,
+        focus: "rpUserResolved",
+      },
+      {
+        title: "Every step is audited",
+        caption: "Audit Trail, category support: each report, change, and reply.",
+        narration:
+          "In Audit, choose Refresh in the Audit Trail and set the category filter to support. It records the report, each change, your replies, and the person's reply.",
+        durationSeconds: 12,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "rpAudit",
+      },
+      {
+        title: "An email for each new report",
+        caption: "Alerts › Support-reports template: an email for each new report or reply.",
+        narration:
+          "To hear about reports without watching this tab, open Alerts and choose Support-reports template. Add recipients and create the rule, as the Alerts and delivery lesson shows.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        focus: "alSupportTemplate",
       },
     ],
   },
@@ -2861,8 +3515,10 @@ const VIDEO_ICONS = {
   groups: Users,
   models: SlidersHorizontal,
   tools: Wrench,
+  connectors: Plug,
   sso: Mail,
   analytics: BarChart3,
+  reports: Inbox,
   policies: SlidersHorizontal,
   audit: ShieldCheck,
   alerts: BellRing,
@@ -2880,7 +3536,7 @@ const ADMIN_DECK: TrainingDeck = {
     href: "docs/aperture-admin-guide.pdf",
     title: "Administrator guide (PDF)",
     description:
-      "The full user guide plus every admin tab — users, groups, model access, connections, SSO, analytics, policies and memory, audit, and alerts — spelled out step by step.",
+      "The full user guide plus every admin tab — users, groups, model access, connections, SSO, analytics, reports, policies and memory, datasets, audit, and alerts — spelled out step by step.",
     tooltip: "Download the printable administrator guide covering every console tab",
   },
 };
@@ -2892,7 +3548,7 @@ export function AdminDocumentationModal({ onClose }: { onClose: () => void }) {
       docTitleId="admin-doc-title"
       videoTitleId="admin-video-title"
       title="Admin console documentation"
-      description="Narrated walkthroughs of every admin surface: users, groups, model access, connections, SSO, analytics, policies and memory, audit, and alerts."
+      description="Narrated walkthroughs of every admin surface: users, groups, model access, connections, SSO, analytics, reports, policies and memory, datasets, audit, and alerts."
       backTooltip="Return to the full list of admin walkthroughs"
       onClose={onClose}
     />

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the fictional "Meridian Advisory" brand template used by the
-training-video capture pipeline (capture-deck-frames.cjs).
+training-video capture pipeline (walkthroughs/user-drafts.cjs).
 
 The brand is invented for this repository so the demo material stays free of
 any real company's identity. Rebuild with:

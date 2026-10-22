@@ -7,7 +7,7 @@
  * manage SSO mappings" off, and its API base URL must equal CAPTURE_APP_URL.
  *
  * admin-sso records the read-only tab, then (with SSO management allowed by
- * service policy as setup) the Policies status row, every provider preset, then creates a Custom OIDC
+ * service policy as setup) the editable SSO tab, every provider preset, then creates a Custom OIDC
  * configuration, tests it, signs a test person in, maps and syncs groups,
  * enforces SSO and records the real refusal, and finally records the
  * read-only card once service policy stops allowing SSO management. admin-access-sso (same invocation)
@@ -19,7 +19,7 @@
 const crypto = require("node:crypto");
 const { helpers } = require("./admin-shared.cjs");
 
-const { removeUsers, scrollTo, toast, dismissToast, openTab, expandPanel, keycloak, ssoSignIn } = helpers;
+const { removeUsers, scrollTo, toast, dismissToast, openTab, keycloak, ssoSignIn } = helpers;
 const REALM = "examplecorp-admin";
 const CLIENT_ID = "aperture-chat";
 const DOMAIN = "examplecorp.test";
@@ -70,16 +70,19 @@ const adminSso = {
     await shot("sso-readonly-empty");
 
     // 2. Setup: service policy allows tenant admins to manage SSO (the
-    //    platform owner's switch, set through the API; the admin library never
-    //    shows the Platform console). The admin confirms it on Policies.
+    //    service team's switch, set through the API; the admin library never
+    //    shows the Platform console). The SSO tab itself shows the change: the
+    //    Policy note is gone and Add SSO configuration appears. (Policies no
+    //    longer carries an SSO status row.)
     await kit.api("owner", "PATCH", "/api/platform/settings", { tenant_admins_can_manage_sso: true });
     await admin.reload();
     await admin.getByRole("tablist", { name: "Admin sections" }).waitFor();
-    await openTab(admin, "Policies");
-    const controls = await expandPanel(admin, "Policy Controls");
-    const ssoRow = controls.locator(".policy-toggle-row").filter({ hasText: "SSO configuration" });
-    await ssoRow.getByText("Available", { exact: true }).waitFor();
-    await scrollTo(admin, ssoRow, "center");
+    await openTab(admin, "SSO");
+    const editable = admin.locator(".panel").filter({ hasText: "SSO and Provisioning" }).first();
+    await editable.getByRole("button", { name: "Add SSO configuration" }).waitFor();
+    if (await editable.getByText("Organization policy makes SSO configuration read-only in this console.").count()) {
+      throw new Error("The SSO tab is still read-only after service policy allowed SSO management.");
+    }
     await shot("sso-policy-available");
 
     // 3. The identity provider (setup; taught with a card and written paths).

@@ -64,14 +64,14 @@ const SECTIONS = [
       table(
         ["Guide", "Who it is for", "What it covers"],
         [
-          ["User Guide", "Everyone", "Chat, model access requests, personalization memory, documents and decks, account sync, agents, knowledge and tools, search and commands, appearance, and account security."],
-          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, response actions, SSO, analytics, policies and memory governance, personal data protection, training datasets, audit, and alerts."],
-          ["Platform Owner Guide", "Platform owners", "Everything in the other guides, plus setup readiness, providers and keys, organization policy, shared connectors, branding, releases, search indexing, and platform governance."],
+          ["User Guide", "Everyone", "Chat, model access requests, personalization memory, documents and decks, account sync, agents, knowledge and tools, search and commands, appearance, account security, and reporting a problem."],
+          ["Administrator Guide", "Workspace admins", "Everything in the User Guide, plus the Admin console: users, groups, model access, connectors, response actions, SSO, analytics, support tickets, policies and memory governance, personal data protection, training datasets, audit, and alerts."],
+          ["Platform Owner Guide", "Platform owners", "Everything in the other guides, plus setup readiness, providers and keys, organization policy, the connector ceiling, branding, releases, search indexing, and platform governance."],
         ],
       ),
       note(
         "tip",
-        "If a feature is not configured — a connector without credentials, a model that is not enabled — the screen reports that state. Ask your administrator about account or model access; shared connector settings and credentials are managed by the service team outside tenant administration.",
+        "If a feature is not configured — a connector without credentials, a model that is not enabled — the screen reports that state. Ask your administrator about account, model, or connector access; workspace connectors are configured in Admin console → Connections.",
       ),
     ],
   },
@@ -395,7 +395,7 @@ const SECTIONS = [
       ]),
       sub("Attach from source"),
       p(
-        "Below those options, under the Attach from source heading, the menu lists your organization's workspace sources: Google Drive, OneDrive, SharePoint, Box, and iManage. Availability depends on the service team's connector setup and your own source-account access.",
+        "Below those options, under the Attach from source heading, the menu lists your organization's workspace sources: Google Drive, OneDrive, SharePoint, Box, and iManage. Which ones appear depends on your administrator: a source that is switched off or hidden in Admin console → Connections does not appear in the menu, and its files cannot be attached.",
       ),
       sub("Connecting your own account"),
       list([
@@ -405,7 +405,7 @@ const SECTIONS = [
       ]),
       note(
         "info",
-        "If a source needs shared configuration, ask your administrator to coordinate with the service team. Shared connector administration is managed outside tenant administration. Your own Connect action in the attach menu remains separate and grants access only through your source account.",
+        "If a source you expect is missing or needs configuration, ask your administrator: workspace connectors are set up, tested, and hidden or shown in Admin console → Connections. Your own Connect action in the attach menu remains separate and grants access only through your source account.",
       ),
       lesson("user", "attachments"),
     ],
@@ -507,7 +507,7 @@ const SECTIONS = [
       list([
         "Look at the Sources, Web, and Templates chips at the top of the assistant rail first: they show which context is on before you generate anything.",
         "In the assistant's message box, describe the document you need: a memo, an engagement letter, a summary. Be specific about audience and tone if it matters. The suggested requests under the heading fill the box for you.",
-        "The assistant writes the document directly into the editor. You can also send any chat response here with Transfer to Drafts.",
+        "The assistant writes the document directly into the editor. You can also send any chat response here with Transfer to Drafts, or, when you ask for a document in chat, choose Write in Drafts on the card that appears (see “Hand a chat request to Drafts”).",
         "Use the model selector in the toolbar area to choose which approved model writes and edits this draft.",
       ]),
       sub("Opening a file from this device"),
@@ -515,7 +515,7 @@ const SECTIONS = [
         "Click the paperclip in the assistant's message box. Under From this device are two choices. Attach to chat gives files to the assistant to read with your next request; they become sources, not the document. Open in editor opens one file as the document itself, so you can edit it directly or select text and use Ask AI.",
       ),
       list([
-        "Open in editor accepts Word (.docx, .dotx, .doc), Markdown (.md), plain text (.txt), and web page (.html) files. Word and web pages keep their formatting, and Markdown keeps its headings, lists, and emphasis. When something could not be carried over, an import note in the assistant rail says what.",
+        "Open in editor accepts Word (.docx, .dotx, .doc), PDF (.pdf), Markdown (.md), plain text (.txt), and web page (.html) files. Word and PDF files keep their page setup, headers, footers, page numbers, tab stops, and tables; web pages keep their formatting; Markdown keeps its headings, lists, and emphasis. When something could not be carried over, an import note in the assistant rail says what. “Open a Word or PDF file and keep its formatting” walks through it.",
         "The file opens as a new draft and is saved to your account as one. The draft you had open stays in Document history; if it has unsaved changes, the unsaved-changes dialog asks first.",
         "Open in editor is unavailable while the assistant is still working on a request. In deck mode the same choice opens a PowerPoint file; see “Building a slide deck”.",
       ]),
@@ -537,10 +537,12 @@ const SECTIONS = [
         "Pick an action — Improve writing, Fix spelling & grammar, Make shorter, Make longer, Simplify language, Turn into a bulleted list, Turn into a table, Summarize, or Use active voice — or a tone or language, or type your own instruction.",
         "Review the suggestion. Changes marks what was added and removed; Result shows the finished text. Nothing in the document changes yet.",
         "Choose Replace, Insert below, Try again, or Discard. To adjust the suggestion instead, type a follow-up such as “shorter” or “add a number” in the box underneath.",
+        "When the instruction asks only for different words (fill the blanks, fix the wording, translate), the suggestion is written into the original text and the review says Original formatting kept: fonts, underlines, tab stops, and blank lines stay as they were. You do not need to add “keep the formatting”. Requests to restyle or restructure replace the passage instead.",
       ]),
       p("An accepted AI edit stays highlighted briefly and is recorded with the document; More → AI edit trail highlights the recorded edits again so you can review what changed."),
       sub("Revise the document you already have"),
       p("Describe the change in the assistant: shorten a section, change tone, apply a template, or transform the existing paper. Revision requests work from the current document. Ask explicitly to start over, replace, or clear it when that is your intention. The editor keeps instructions separate from the deliverable; review the resulting document and use Undo or a saved version when a change needs correction."),
+      p("Ask for page layout in plain words, such as “Times New Roman 12, double spaced, 1-inch margins”, and the editor applies it to the page setup directly, with no model call. The rail says Applied … Nothing was rewritten., and the change is one step you can undo. “Templates and page layout” covers templates and layout requests together."),
       p("For an existing paper, Assistant settings → Apply MLA layout applies double-spaced 12-point Times New Roman, a student heading, centered title, body and reference indents, and a separate Works Cited page without asking a model. It preserves the paper's text and supports Undo. Fill missing student details and verify quotations and sources yourself; formatting is not citation verification."),
       p("The page navigator shows the current sheet and total pages outside the document text. Older drafts are paginated when opened, and manual edits reflow after you leave the editor. Page labels do not become part of the exported body."),
       sub("Status bar, outline, find, and zoom"),
@@ -555,7 +557,7 @@ const SECTIONS = [
         "Click Save version whenever the draft reaches a good state. You can restore an earlier version at any time from the draft's history.",
         "Compare versions opens a read-only visual redline of two saved versions, so you can see exactly what changed between them. It needs two genuinely different saved versions before it activates.",
         "Open Document history to browse saved documents and decks. Hover or keyboard-focus an entry for a preview. Archive moves finished work into Archived, where Unarchive restores it; Delete requires confirmation and permanently removes the saved item and revisions.",
-        "Read the save status: account-backed documents and decks can be reopened after sign-in on another device. A pending or failed save stays a working copy in this browser. If the account version changed elsewhere, resolve the reported conflict before treating the save as complete.",
+        "Read the save status: account-backed documents and decks can be reopened after sign-in on another device. A pending or failed save stays a working copy in this browser. If the chip reads Local only — server save failed, choose Retry beside it; if it reads Draft changed elsewhere, choose Reload server copy and review the account version before saving again.",
       ]),
       sub("Leaving with unsaved changes"),
       p("When you leave an edited draft through workspace navigation, open another chat or draft, or choose Sign out, the unsaved-changes dialog lets you Keep editing, Save copy and continue, or Discard and continue. The saved copy goes into local document history in this browser. If browser storage fails, the app keeps you in the draft so you can recover it. A forced security sign-out can still interrupt work; save important changes regularly."),
@@ -563,13 +565,65 @@ const SECTIONS = [
       list([
         "Click Export to open the export panel. In document mode it offers a Word document (an editable Word file with preview page breaks and embedded images), Markdown (best for plain text or web publishing), and Print / Save as PDF, which opens your browser's print dialog with the saved version — choose “Save as PDF” there to keep a PDF copy.",
         "Exports always run from a saved version. If you have unsaved edits, the panel says Save your edits first and offers a one-click Save version and export (or Save version and print) button.",
-        "When your browser supports it, choose Choose a location to select a destination, or Browser downloads to use its download folder. Word and print retain document formatting; Markdown preserves the text without its typography. Exporting a file does not by itself upload pending work to your account.",
+        "When your browser supports it, choose Choose a location to select a destination, or Browser downloads to use its download folder. If the chosen location cannot be written, the file is sent to your browser downloads instead and the status says so. Word and print retain document formatting; Markdown preserves the text without its typography. Exporting a file does not by itself upload pending work to your account.",
       ]),
+      note("info", "If a provider's content filter withholds the model's reply, Drafts changes nothing and says which service withheld it, starting with No local draft was substituted. or No revision was applied. Choose a different model or try again."),
       note(
         "tip",
         "On a narrow window, the assistant rail becomes a slide-out drawer so the editor gets the full screen. Open it with the pen tab on the left edge or Ctrl+. (⌘. on a Mac); resting the mouse on that edge previews it. Press Escape or click the dimmed area to close it.",
       ),
       lesson("user", "drafts"),
+    ],
+  },
+  {
+    id: "chat-to-drafts",
+    part: "workspace",
+    minRole: "user",
+    title: "Hand a chat request to Drafts",
+    summary: "Send a document or deck request from chat straight into the editor.",
+    blocks: [
+      p("When a chat message asks for a document (a memo, a letter, a report) or a slide deck, the message waits above the composer with a card. Write this in Drafts? offers Write in Drafts or Continue in chat; for slides, Build this as a slide deck? offers Build in deck editor or Draft slides in chat. Nothing is sent until you choose."),
+      list([
+        "Write in Drafts (or Build in deck editor) opens Drafts and starts the document or deck from your request, with no retyping. The rail says Writing the document you asked for in chat. The chat's model (unless you starred a drafting default), its Web and knowledge choices, your attached files, and earlier messages in the conversation travel with the request; the card notes when your files and this conversation come along.",
+        "Continue in chat (or Draft slides in chat) sends the message to the chat as usual.",
+        "Edit request puts the message back in the composer so you can change it. While the card is waiting, Send is disabled: Choose Drafts or chat for the request above first.",
+        "The card is not offered in Agent mode, with selected tools, for fetched links, or for queued automations, and outlines, summaries, emails, poems, code, and questions about writing stay in chat. Transfer to Drafts under any reply still sends a finished answer to the editor.",
+      ]),
+      lesson("user", "chat-to-drafts"),
+    ],
+  },
+  {
+    id: "word-pdf",
+    part: "workspace",
+    minRole: "user",
+    title: "Open a Word or PDF file and keep its formatting",
+    summary: "Edit an existing Word or PDF document in Drafts without losing its layout.",
+    blocks: [
+      p("Open in editor turns a file from your device into the document itself. Word files (.docx, .dotx, .doc) and PDF files keep their page size and margins, headers and footers, page numbers, tab stops, and tables, so a contract or form looks the way it did. Edits and AI suggestions then work on that layout."),
+      list([
+        "Click the paperclip in the assistant's message box, choose Open in editor under From this device, and pick the file. It opens as a new draft and is saved to your account.",
+        "Select a passage and choose Ask AI. When you ask only for different words, the review says Original formatting kept and the result keeps the original fonts, underlines, and tab stops.",
+        "Save version, then Export → Word document to take it back to Word. The import note in the assistant rail lists anything that could not be carried over.",
+        "To reuse a Word file's look for new drafts instead, open Templates in the assistant rail and choose Upload Word template.",
+      ]),
+      lesson("user", "draft-word-pdf"),
+    ],
+  },
+  {
+    id: "document-templates",
+    part: "workspace",
+    minRole: "user",
+    title: "Templates and page layout",
+    summary: "Start from a template, restyle a draft, and set the page layout in plain words.",
+    blocks: [
+      p("Templates in the assistant rail lists document templates by category: Client Update, Approval Email, Legal Contract, Mutual NDA, Contract Amendment, Investment Memo, Board Update, Project Brief, Research Paper, Screenplay, and Implementation Plan. On an empty draft a template starts the document; on a draft with text it sets the draft in that template's layout without changing its words."),
+      list([
+        "Use templates in chat (off by default) lets the selected template shape what the assistant writes for new drafts.",
+        "Upload Word template uses your own .docx or .dotx file as the layout.",
+        "Type a layout request in the assistant, such as “Times New Roman 12, double spaced, 1-inch margins”. It is applied directly with no model call: Applied … Nothing was rewritten. Undo reverses it in one step.",
+        "Assistant settings → Apply MLA layout formats a student paper; see “Drafting documents”.",
+      ]),
+      lesson("user", "document-templates"),
     ],
   },
   {
@@ -586,23 +640,25 @@ const SECTIONS = [
       list([
         "Slide thumbnails run along the side. Click one to select it, or drag it to reorder the deck.",
         "Hover a thumbnail for its actions: move up, move down, duplicate, and delete (undo restores a deleted slide).",
-        "Add slide at the end of the filmstrip opens the layout menu for a new slide.",
+        "Add slide at the end of the filmstrip opens the Add a slide panel on the left, where you pick the new slide's layout.",
         "Slide sorter, at the right of the deck toolbar, lays every slide out in a grid. Drag to reorder, double-click a slide to edit it, and use each slide's duplicate and delete buttons.",
       ]),
       sub("Slide layouts"),
       p(
-        "Above the slide, Layouts previews seven arrangements: Title, Title + bullets, Two columns, Image + caption, Section, Quote, and Closing. Select one to switch the selected slide; the layout button on the slide and in the toolbar opens the same choices. Themes offers five color palettes — Aperture, Midnight, Editorial, Violet, and Forest; a palette change recolors every slide, keeps text, media, and layout, and can be undone.",
+        "Above the slide, Layouts previews seven arrangements: Title, Title + bullets, Two columns, Image + caption, Section, Quote, and Closing. Select one to switch the selected slide. The layout chip in the slide's corner opens the Change layout panel on the left, with the same layouts grouped as Openers, Content, Pictures, and Highlights. Themes offers five color palettes — Aperture, Midnight, Editorial, Violet, and Forest; a palette change recolors every slide, keeps text, media, and layout, and can be undone. The chevron beside Layouts folds the strip away to give the slide more room.",
       ),
       sub("Editing slide text"),
       list([
-        "Click any text region on a slide to edit it in place. The deck toolbar carries undo and redo, bold, italic, underline, and Text for font, size, and color; More copies the deck outline or lists the keyboard shortcuts.",
+        "Click any text region on a slide to edit it in place. A floating text toolbar appears beside the box: Ask AI, font size, Bold, Italic, Underline, Strikethrough, Text color with the deck's Theme colors, list level, and Clear formatting. With nothing highlighted it formats the whole box; highlight words to format only those. The deck toolbar above keeps undo and redo, Text, and More (copy the deck outline, keyboard shortcuts).",
+        "When text no longer fits its box, the toolbar says Text overflows this box · shorten it, size it down, or drag a corner. Until you do, the slide shrinks the text to fit (Shrunk to fit, as PowerPoint does), and the PowerPoint export uses the same shrink.",
         "Drag a text box by its frame to move it. Guides snap it to the slide's edges and center and to other boxes; arrow keys nudge the selected box (Shift moves ten times as far).",
         "Inside bullet lists, press Tab to indent a bullet one level and Shift+Tab to outdent it.",
       ]),
       sub("Editing slides with AI"),
       list([
-        "Edit slide with AI (the AI pen in the deck toolbar, or Ctrl+J / ⌘J) reworks the whole slide: Improve this slide, Make it punchier, Cut the text in half, Write speaker notes, Pick a better layout, Split into two slides, Fix spelling & grammar, a tone or language, or your own instruction.",
-        "The review shows the slide before and after, plus any new speaker notes. Choose Apply to slide, Try again, or Discard; undo restores the previous slide.",
+        "Edit slide with AI (the AI pen in the deck toolbar, or Ctrl+J / ⌘J) opens the Edit slide with AI panel on the left and reworks the whole slide: Improve this slide, Make it punchier, Cut the text in half, Write speaker notes, Pick a better layout, Split into two slides, Fix spelling & grammar, a tone or language, or your own instruction.",
+        "The review in the panel shows the slide before and after, plus any new speaker notes. Choose Apply to slide, Try again, or Discard; undo restores the previous slide.",
+        "When the deck assistant builds or revises slides, it runs a fit check before you review them. Checking slide fit appears while it measures; Fit check: every slide's text fits its boxes. means nothing needed changing, otherwise it rewrites the text that was too large and says which slides it changed.",
         "To rewrite only part of a slide, highlight the text and choose Ask AI, then review the suggestion before replacing it.",
       ]),
       sub("Opening a PowerPoint file"),
@@ -617,6 +673,11 @@ const SECTIONS = [
         "A Use templates in chat toggle (off by default) lets the selected template guide the deck assistant when it drafts for you.",
         "Upload brand template accepts your firm's own file — “.pptx or .potx — brand colors, fonts, logo, and every slide's text are extracted.” The extracted theme is stored only on this device.",
         "Once a brand theme is loaded, Apply to deck restyles the current deck with its colors, fonts, and logo, and a “Load all N slides” button can replace the deck with every slide from the uploaded template.",
+      ]),
+      sub("Slide pictures"),
+      list([
+        "Slide pictures in the deck toolbar opens the Slide picture panel on the left. Upload from this device adds a PNG, JPEG, WebP, or GIF; or type a description under Or describe the picture and choose Find web images (needs web search) or Generate AI picture (needs an image-generation model for your workspace).",
+        "Alt text describes the picture for screen readers and is kept in the PowerPoint export. If the slide's layout has no place for a picture, the panel offers layouts that do.",
       ]),
       sub("Backgrounds and AI images"),
       list([
@@ -643,6 +704,23 @@ const SECTIONS = [
         "Limits: a deck holds up to 100 slides and 8 MB of content. The editor tells you plainly if a deck exceeds them.",
       ]),
       lesson("user", "deck-basics"),
+    ],
+  },
+  {
+    id: "deck-editing",
+    part: "workspace",
+    minRole: "user",
+    title: "Editing slides: layouts, pictures, and text",
+    summary: "Add slides, change layouts, place pictures, format text, and edit with AI in the slide panel.",
+    blocks: [
+      p("The panel on the left of the deck editor handles slide-by-slide work. Add slide opens Add a slide, the layout chip on a slide opens Change layout, Slide pictures opens Slide picture, and Edit slide with AI opens the AI review. Close the panel with its X or Escape; drag its edge to resize it."),
+      list([
+        "Pick a layout from Openers, Content, Pictures, or Highlights. Changing layout keeps the slide's text; if some items have no slot in the new layout, the status says so and Undo restores them.",
+        "Add a picture with Upload from this device, Find web images, or Generate AI picture, and give it Alt text.",
+        "Select text for the floating text toolbar: size, Bold, Text color with Theme colors, list level, and Clear formatting. Overflowing text shrinks to fit until you shorten it or enlarge the box.",
+        "Save version when the slides look right; the PowerPoint export matches what you see.",
+      ]),
+      lesson("user", "deck-editing"),
     ],
   },
   {
@@ -705,8 +783,9 @@ const SECTIONS = [
         "Knowledge lives in the Library: click Library in the sidebar, then the Knowledge tab. The Knowledge Bases panel lists every collection with its status, security posture, and whether it is enabled.",
       ),
       list([
-        "Click Add Knowledge Base and name the collection.",
-        "Choose what feeds it. A knowledge base can index documents you upload, a public web page (Add a web link — enter the address and an optional note), or an API (Connect an API — enter the endpoint and its authentication).",
+        "Click New knowledge base and name the collection.",
+        "Choose what feeds it. A knowledge base can start from Upload files (PDFs, Office files, email, images, audio, and video), Add web pages (public pages, re-fetched whenever you sync), or Connect an API (JSON or text from an endpoint, with a key or sign-in).",
+        "Connect an API needs its own permission. Without it the choice is locked and says Connecting APIs needs approval. Ask your administrator to turn on Can add API sources for one of your groups.",
         "Create the base, then check its row in the table: it shows the status, the security posture, and whether the base is enabled.",
       ]),
       note(
@@ -745,6 +824,7 @@ const SECTIONS = [
         "Click New Prompt or New Skill to create one: give it a name, a category, a description, and the content itself, then save.",
         "Click any existing card to review or edit it; the trash icon deletes it permanently.",
         "Every tool row shows its real status — draft, approval required, or enabled — so you always know whether a connection is actually live before relying on it.",
+        "Add connection is locked until an administrator grants Can build tools to one of your groups; its tooltip says so. Hermes connections and Hermes agents show Locked until your administrator approves Hermes for you.",
       ]),
       lesson("user", "tools-automations"),
     ],
@@ -907,6 +987,7 @@ const SECTIONS = [
         "Choose Report a problem in Help to describe a problem, the affected screen, and the expected result. Share only permitted details with your administrators; omit passwords, keys, and recovery codes.",
         "Choose My reports in Help to see each report's status (Received, In review, In progress, On hold, Resolved, or Closed), read replies, answer questions, or reopen a report that is still a problem.",
       ]),
+      lesson("user", "report-and-follow-up"),
     ],
   },
 
@@ -916,7 +997,7 @@ const SECTIONS = [
     part: "admin",
     minRole: "admin",
     title: "Opening the Admin console",
-    summary: "Where the console lives and what its ten tenant-governance tabs control.",
+    summary: "Where the console lives and what its eleven tenant-governance tabs control.",
     blocks: [
       steps([
         "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Management section lists it too.)",
@@ -985,7 +1066,8 @@ const SECTIONS = [
           ["Can use Hermes companion", "Build and run agent profiles with the Hermes learning companion. Off until approved."],
           ["Can build agents", "Create private agent profiles when service policy permits. Organization publishing stays admin-only."],
           ["Can build knowledge bases", "Create private knowledge bases. Group sharing and organization management stay admin-only."],
-          ["Can build tools", "Create private tools. Group sharing, stdio commands, and organization management stay admin-only."],
+          ["Can add API sources", "Connect API endpoints, with keys or provider sign-in, to their own knowledge bases. Off until approved; needs Can build knowledge bases."],
+          ["Can build tools", "Add their own private MCP connections. Off until approved. Group sharing and stdio commands stay admin-only."],
           ["Can use memory", "Allow personal preferences to be learned and reused within the workspace memory policy."],
         ],
       ),
@@ -1035,24 +1117,61 @@ const SECTIONS = [
     ],
   },
   {
+    id: "admin-connectors",
+    part: "admin",
+    minRole: "admin",
+    title: "Connections: workspace connectors",
+    summary: "Turn sources and tools on or off, configure and test them, and hide cloud sources from the attach menu.",
+    blocks: [
+      p("Admin console → Connections → Connectors lists the sources and tools for this workspace: Web Search, Google Drive, OneDrive / SharePoint / Outlook, Box, iManage, MCP, and the other connectors your deployment allows. Off removes a connector everywhere: chat, pickers, the tool library, and the API. Hide only takes a cloud source out of the attach menu, so people don't see it as an option."),
+      list([
+        "Use a connector's switch to turn it on or off for everyone in this workspace. The status confirms it, for example “Box is now off for everyone in this workspace.”",
+        "Choose Configure to fill in the connector's settings and secret, then Save configuration. Secrets are stored encrypted and are never shown again; replace them by saving a new value.",
+        "Choose Test connection after saving. The result reports what the provider actually returned; a test before saving says Save the configuration first, then test the connection.",
+        "Choose Hide on Google Drive, OneDrive / SharePoint / Outlook, Box, or iManage to take it out of the attach menu without switching it off. It shows a Hidden pill until you choose Show.",
+        "A connector marked Off for all workspaces has been switched off for every workspace by your service team. You cannot turn it back on from this workspace until they allow it again.",
+      ]),
+      note(
+        "info",
+        "Users still connect their own Google, Microsoft, Box, or iManage account from the attach menu, and those delegated connections respect each person's own source permissions. The workspace configuration here supports sign-in and background knowledge sync; it never grants someone else's files.",
+      ),
+      sub("Configure and test a source"),
+      list([
+        "Choose Configure on the source row. Select Authentication method and fill in the fields shown for that method. Read the source's setup notes for its required permissions and redirect URI.",
+        "Choose Save configuration. For an existing saved secret, leave its password field blank to retain it, or enter a new value to replace it. Wait for the save result before testing.",
+        "For Google OAuth, save the client ID and secret first, then choose Connect Google Drive to authorize the workspace account used for knowledge sync. Complete the consent flow before checking the connection.",
+        "Choose Test connection and read its result and individual checks. An incomplete, failed, or missing result is not proof of access. Resolve the reported issue before relying on the source.",
+        "Set the source's switch and verify the resulting status. Configure the intended users' source-account access separately when they will attach files in chat.",
+      ]),
+      table(
+        ["Source", "Configuration shown by the form"],
+        [
+          ["Google Drive", "Google OAuth client ID and secret, with an optional Drive folder ID and source label. Paste access token is a testing option."],
+          ["OneDrive / SharePoint / Outlook", "Microsoft Graph directory ID, application ID, and client secret for app-only access, with optional site, drive, and root-folder IDs."],
+          ["Box", "Client ID, enterprise ID, and client secret for Client Credentials Grant; an optional folder ID limits the starting location. Developer token is a testing option."],
+          ["iManage", "Instance URL, API key (client ID), and OAuth client secret for Each user signs in. Service account for background sync adds the service username and password; chat still requires each user's OAuth sign-in."],
+        ],
+      ),
+      sub("Clear saved configuration"),
+      p("Clear configuration removes the source's saved fields, stored secret, shared OAuth data, and service-account password, and disables its saved configuration. Use it only when that removal is intended. An empty secret field alone retains the saved secret; clearing all visible fields and saving an existing configuration also performs a clear."),
+      sub("Web Search"),
+      p("Choose Configure on Web Search, then select Search engine and Results per search (1 to 10). DuckDuckGo is keyless. SearXNG requires an instance URL with JSON search output enabled. OpenAI, Anthropic, and OpenRouter choices use the corresponding saved provider key and bill searches to that provider account. Choose Save configuration, then Test connection to run a real query."),
+      p("The engine choice applies to models without hosted web search of their own. OpenRouter-backed models use OpenRouter's built-in search regardless of this selection. The Web Search switch still governs availability for the workspace."),
+      lesson("admin", "admin-connectors"),
+    ],
+  },
+  {
     id: "admin-tools",
     part: "admin",
     minRole: "admin",
-    title: "Connections: response actions and connector handoff",
-    summary: "Manage response actions and route shared connector setup to the service team.",
+    title: "Connections: response actions and Library connections",
+    summary: "Add admin-approved buttons to replies and know where MCP connections are managed.",
     blocks: [
-      p(
-        "The Admin console's Connections tab contains Chat output actions. Shared connector switches, saved credentials, connection tests, and workspace OAuth are managed by the service team outside tenant administration.",
-      ),
-      note(
-        "info",
-        "Users still connect their own Google, Microsoft, Box, or iManage account from the composer's attach menu. Those delegated connections respect each user's source permissions. Shared credentials managed by the service team support connector setup and background knowledge sync; they do not grant users someone else's files.",
-      ),
       sub("Chat output actions"),
       p(
-        "Chat output actions adds admin-approved buttons to assistant responses for export, formatting, or handoff. Choose New response action to create one; existing custom actions offer Edit and Delete. Each row shows Enabled or Draft and an enable switch. Creating these actions does not configure a shared source connector.",
+        "Chat output actions, also on the Connections tab, adds admin-approved buttons to assistant responses for export, formatting, or handoff. Choose New response action to create one; existing custom actions offer Edit and Delete. Each row shows Enabled or Draft and an enable switch. Creating these actions does not configure a source connector.",
       ),
-      p("MCP connections and model-callable tools remain in Library → Tools → Connections. Prompts and Skills also remain in the Tools library. Their authoring and use follow the existing permissions and the shared connector availability set by the service team."),
+      p("MCP connections and model-callable tools remain in Library → Tools → Connections. Prompts and Skills also remain in the Tools library. People add their own MCP connections only with Can build tools. When the MCP Servers connector is off in Connectors, nobody can use these connections."),
       lesson("admin", "admin-tools"),
     ],
   },
@@ -1064,13 +1183,13 @@ const SECTIONS = [
     summary: "What admins need to configure before users can rely on recurring model chains.",
     blocks: [
       p(
-        "Users create and run automations from the Automations tab of the Agents view, and enabled schedules fire automatically in the background (UTC), delivering each run's output as a new chat thread. Admins manage group and model access; the service team manages shared connector availability and credentials outside tenant administration. Check the actual failure details to determine which setup needs attention.",
+        "Users create and run automations from the Automations tab of the Agents view, and enabled schedules fire automatically in the background, delivering each run's output as a new chat or draft. Admins manage group and model access and the workspace connectors in Connections. Check the actual failure details to determine which setup needs attention.",
       ),
       sub("Admin readiness checklist"),
       steps([
         "Open Model Access and confirm the automation's model is visible to the user's group.",
         "Open Groups and confirm the user belongs to the group that receives the model grant.",
-        "Ask the service team to confirm any required shared connector and inspect its real connection-test result. Users complete their own source-account connection when the workflow needs delegated access.",
+        "Open Connections and confirm any connector the automation needs is on, configured, and passes Test connection. Users complete their own source-account connection when the workflow needs delegated access.",
         "If the automation uses knowledge, confirm the knowledge base is enabled and its source ACL allows the user's group.",
         "Ask the user to press Run now after saving the automation; the transcript and last-run status will show whether the setup is complete.",
       ]),
@@ -1141,7 +1260,7 @@ const SECTIONS = [
         "When your service team limits something you cannot change here, a Service policy note at the bottom of Policy Controls says so: administrator accounts created by the service team, administrators required to sign in with SSO, or newly available models starting without access until you grant a group in Model Access. No note means nothing is limited. Whether you can edit SSO is shown on the SSO tab itself.",
       ),
       p(
-        "Policy Controls sets defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Shared connector availability is managed by the service team outside tenant administration.",
+        "Policy Controls sets defaults for the protected Default Users group: personal API keys, private-agent building, private knowledge-base and tool authoring, adding API sources, Hermes agents, and personalization memory. A switch locks when its capability is unavailable under service policy; the saved group grant is preserved rather than silently erased. Use Groups for exceptions and Model Access for available models. Workspace connectors are managed in Connections.",
       ),
       sub("Personalization Memory settings"),
       list([
@@ -1293,6 +1412,26 @@ const SECTIONS = [
     ],
   },
   {
+    id: "admin-reports",
+    part: "admin",
+    minRole: "admin",
+    title: "Reports: work support tickets",
+    summary: "Triage, answer, and resolve the problems, ideas, and questions people send from Help.",
+    blocks: [
+      p("Every report sent from Help → Report a problem becomes a ticket in Admin console → Reports. People choose what they are sending (Problem, Idea, Question, Feedback, or Security) and how much it affects them, and they follow the ticket and your replies in Help → My reports."),
+      list([
+        "Start with Needs reply: tickets that are new or where the reporter answered last. Open, Closed, and All show the rest; search finds a ticket by its number, subject, or reporter.",
+        "Open a ticket to read the message, any screenshot, and technical details if the reporter chose to include them.",
+        "Set Status (Received, In review, In progress, On hold, Resolved, or Closed), Priority, Assignee, and Type as you work it. Each change is recorded in the ticket's timeline and in the audit trail under support.*.",
+        "Reply to the reporter to send a message they see in My reports; Help shows them a dot when there is news. Internal note keeps a comment visible only to administrators.",
+        "When the reporter answers, the ticket returns to Needs reply. A reporter can reopen a resolved ticket with “Still having this problem?”.",
+        "Security reports stay private to your deployment and are never shared outside it.",
+      ]),
+      note("tip", "Alerts → Support-reports template creates a rule that notifies you when new reports, replies, or reopened reports arrive."),
+      lesson("admin", "admin-reports"),
+    ],
+  },
+  {
     id: "admin-audit",
     part: "admin",
     minRole: "admin",
@@ -1347,7 +1486,7 @@ const SECTIONS = [
       ),
       sub("Alert Rules"),
       list([
-        "Click Prompt-injection template to start from a rule that watches prompt-injection, system-prompt extraction, and credential-extraction attempts; Suspicious-activity template for security flags and elevated-severity events; or New rule to build one from scratch. A template only fills in the form; nothing is saved until you click Create Rule.",
+        "Click Prompt-injection template to start from a rule that watches prompt-injection, system-prompt extraction, and credential-extraction attempts; Suspicious-activity template for security flags and elevated-severity events; Support-reports template for new reports people send from Help, their replies, and reopened reports; or New rule to build one from scratch. A template only fills in the form; nothing is saved until you click Create Rule.",
         "A rule has: a name; Action patterns — exact audit actions or prefixes such as security.* or admin.user_deleted; a Minimum severity; an optional Watched user; a threshold — how many matches within a time window before it fires; a cooldown between alerts; and email recipients. Leave recipients empty and the alert is in-app only.",
         "Only these detections narrows a rule to prompts flagged by specific detectors: Prompt injection, System-prompt extraction, Credential extraction, API key or token shared, Private key shared, Password shared, US Social Security number, and Payment card number. Leave all unchecked to match every event the action patterns allow. A rule that could never fire is refused with an explanation when you save it.",
         "Alert emails name the rule and the detection but never include the flagged prompt text.",
@@ -1377,8 +1516,8 @@ const SECTIONS = [
       table(
         ["Role", "What it controls"],
         [
-          ["Platform owner", "Providers, API keys and secrets, shared connectors, organization model availability, SSO, branding, policies, usage budgets, platform updates, alert email, and removing admins. The highest level."],
-          ["Admin", "Tenant users, groups, response actions, and tenant model access — always inside the boundaries the owner sets."],
+          ["Platform owner", "Providers, API keys and secrets, the connector ceiling, organization model availability, SSO, branding, policies, usage budgets, platform updates, alert email, sharing reports with the maintainers, and removing admins. The highest level."],
+          ["Admin", "Tenant users, groups, connectors, response actions, tenant model access, and support tickets — always inside the boundaries the owner sets."],
           ["User", "Chat, drafts, assigned agents, and whatever models and sources their groups allow."],
         ],
       ),
@@ -1554,11 +1693,11 @@ const SECTIONS = [
     part: "owner",
     minRole: "owner",
     title: "Org Settings: platform branding",
-    summary: "Rename the product, swap the logos, and recolor the theme everywhere.",
+    summary: "Rename the product, upload a logo and an icon, and recolor the theme everywhere.",
     blocks: [
       note(
         "info",
-        "Branding reaches further than the shell: the same identity feeds the runtime theme colors and the per-tenant install manifest and icons, so the app people add to their phone's home screen carries your name and logo, not a generic one.",
+        "Branding reaches further than the shell: the same identity feeds the runtime theme colors and the per-tenant install manifest, so the app people add to their phone's home screen carries your name and Icon, not a generic one. Wide sidebars and the sign-in page show the Logo; compact places such as the collapsed sidebar and the browser tab show the Icon. Without uploads, the Aperture Chat wordmark and teal icon are used.",
       ),
       lesson("owner", "branding"),
     ],
@@ -1567,8 +1706,8 @@ const SECTIONS = [
     id: "owner-policies",
     part: "owner",
     minRole: "owner",
-    title: "Org Settings: policies and budgets",
-    summary: "Set the organization ceiling and the workspace usage budget.",
+    title: "Org Settings: policies, budgets, and the connector ceiling",
+    summary: "Set the organization ceiling, the workspace usage budget, and which connectors any workspace may use.",
     blocks: [
       sub("Policy Controls"),
       p(
@@ -1612,34 +1751,16 @@ const SECTIONS = [
     id: "owner-connectors",
     part: "owner",
     minRole: "owner",
-    title: "Org Settings: shared connectors and source credentials",
-    summary: "Configure deployment-wide availability, test real connections, and distinguish shared access from personal sign-in.",
+    title: "The connector ceiling",
+    summary: "Switch a connector off for every workspace, or allow it again.",
     blocks: [
-      p("Open Platform owner console → Org Settings and expand Connectors. This owner-only panel controls shared source settings and availability. Turning a connector off removes that capability across chat, source pickers, the command palette, the Tools library, and the API. Tenant administrators do not configure these shared connections."),
-      p("Credential-backed sources show Credentials saved, Saved · disabled, or Needs credentials. A saved credential is configuration evidence; read Test connection for the live result. Switch-only capabilities, such as MCP Servers and Prompt Library, have an enable switch without a vendor credential form."),
-      sub("Configure and test a source"),
+      p("Connectors are configured per workspace in Admin console → Connections → Connectors, where workspace administrators turn sources on or off, configure and test them, and hide cloud sources from the attach menu (see “Connections: workspace connectors”). As platform owner you open the same panel and also see Off for all on each connector: the deployment-wide ceiling."),
       list([
-        "Choose Configure on the source row. Select Authentication method and fill in the fields shown for that method. Read the source's setup notes for its required permissions and redirect URI.",
-        "Choose Save configuration. For an existing saved secret, leave its password field blank to retain it, or enter a new value to replace it. Wait for the save result before testing.",
-        "For Google OAuth, save the client ID and secret first, then choose Connect Google Drive to authorize the workspace account used for knowledge sync. Complete the consent flow before checking the connection.",
-        "Choose Test connection and read its result and individual checks. An incomplete, failed, or missing result is not proof of access. Resolve the reported issue before relying on the source.",
-        "Set the source's enable switch for the deployment and verify the resulting status. Configure the intended users' source-account access separately when they will attach files in chat.",
+        "Choose Off for all and confirm “Turn {connector} off for every workspace? Workspace admins can't turn it back on until you allow it again.” The status reads “{connector} is off for every workspace.”",
+        "Workspace administrators then see an Off for all workspaces pill and cannot switch it on.",
+        "Choose Allow all to lift the ceiling: “{connector} is allowed in every workspace again. Each workspace's own switch decides whether it is on.”",
       ]),
-      table(
-        ["Source", "Configuration shown by the form"],
-        [
-          ["Google Drive", "Google OAuth client ID and secret, with an optional Drive folder ID and source label. Paste access token is a testing option."],
-          ["OneDrive / SharePoint", "Microsoft Graph directory ID, application ID, and client secret for app-only access, with optional site, drive, and root-folder IDs."],
-          ["Box", "Client ID, enterprise ID, and client secret for Client Credentials Grant; an optional folder ID limits the starting location. Developer token is a testing option."],
-          ["iManage", "Instance URL, API key (client ID), and OAuth client secret for Each user signs in. Service account for background sync adds the service username and password; chat still requires each user's OAuth sign-in."],
-        ],
-      ),
       note("info", "Google, Microsoft, Box, and iManage chat attachments use each signed-in user's delegated source account. Shared knowledge-sync credentials do not replace that sign-in or bypass source permissions. Users keep their Connect action in the attach menu."),
-      sub("Clear saved configuration"),
-      p("Clear configuration removes the source's saved fields, stored secret, shared OAuth data, and service-account password, and disables its saved configuration. Use it only when that removal is intended. An empty secret field alone retains the saved secret; clearing all visible fields and saving an existing configuration also performs a clear."),
-      sub("Web Search"),
-      p("Choose Configure on Web Search, then select Search engine and Results per search (1 to 10). DuckDuckGo is keyless. SearXNG requires an instance URL with JSON search output enabled. OpenAI, Anthropic, and OpenRouter choices use the corresponding saved provider key and bill searches to that provider account. Choose Save configuration, then Test connection to run a real query."),
-      p("The engine choice applies to models without hosted web search of their own. OpenRouter-backed models use OpenRouter's built-in search regardless of this selection. The Web Search enable switch still governs availability for the deployment."),
     ],
   },
   {
@@ -1701,6 +1822,30 @@ const SECTIONS = [
         "User Usage — durable per-user usage from real completions across chat, drafts, agents, automations, and the API gateway, with provider-reported token counts only. The owner view is the complete one: its user picker reads All owners, admins, and users — unlike the admin console's version, which excludes platform-owner usage. The Usage by user section at the bottom ranks everyone in a contained, scrollable list; pick a person from its selector — or click their row — to focus the whole panel on them.",
       ]),
       lesson("owner", "runtime-analytics"),
+    ],
+  },
+  {
+    id: "owner-reports-sharing",
+    part: "owner",
+    minRole: "owner",
+    title: "Reports: share tickets with the Aperture Chat maintainers",
+    summary: "Work tickets across the platform and send redacted copies to the maintainers' community hub.",
+    blocks: [
+      p("Platform console → Reports has Tickets, Community hub, and Settings. Tickets works like the administrators' Reports tab (see “Reports: work support tickets”), across every workspace, and adds a card for sharing a ticket with the Aperture Chat maintainers so it can be tracked as a GitHub issue — without a GitHub account on this platform."),
+      sub("Choose how sharing works"),
+      list([
+        "In Settings → Sharing with the Aperture Chat maintainers, choose Review each report (recommended: nothing leaves until an owner reviews the redacted text and sends it), Share automatically (every new report except security concerns is redacted and sent), or Off (reports stay on this platform).",
+        "Check connection confirms the community hub is accepting reports. Security concerns are never shared, and screenshots never leave this platform; the deployment is identified to the hub only by an anonymous ID.",
+        "Support assistant picks a model that can help rewrite reports; Updates for the people who report can email reporters when support replies or changes the status.",
+      ]),
+      sub("Share one ticket"),
+      list([
+        "Open the ticket and choose Share with maintainers. Edit the redacted title and text; Rewrite with AI makes an extra privacy pass with the support assistant model.",
+        "Expand Preview the GitHub issue to read exactly what will be filed, then choose Send to maintainers. The card then shows the shared copy's status, and the reporter sees it in My reports.",
+        "For a security concern the button reads Report privately and offers a private security advisory instead of a public issue.",
+      ]),
+      note("info", "Community hub and Accept reports from other deployments are for the project's own deployment, which holds the GitHub connection and files the issues. Most platforms leave them off."),
+      lesson("owner", "owner-reports-sharing"),
     ],
   },
   {
@@ -1787,7 +1932,7 @@ const SECTIONS = [
       ),
       sub("Alert Rules"),
       list([
-        "Rules work exactly as described in the Administrator Guide — Prompt-injection template, Suspicious-activity template, or New rule, with action patterns, a Minimum severity, an optional Watched user, a threshold within a window, a cooldown, email recipients (empty recipients means in-app only), and Only these detections to narrow a rule to specific prompt detectors.",
+        "Rules work exactly as described in the Administrator Guide — Prompt-injection template, Suspicious-activity template, Support-reports template, or New rule, with action patterns, a Minimum severity, an optional Watched user, a threshold within a window, a cooldown, email recipients (empty recipients means in-app only), and Only these detections to narrow a rule to specific prompt detectors.",
         "Owner rules are platform-wide: they watch audit activity across the whole organization, including owner actions. Tenant rules created by admins appear in the same list, each labeled with its scope, so you always see the full alerting picture.",
       ]),
       sub("Alert Deliveries"),
@@ -1807,21 +1952,21 @@ const GUIDES = {
     docTitle: "User Guide",
     badge: "For every user",
     subtitle:
-      "Everything you need to work in Aperture Chat: chat, model access, personalization memory, documents and decks, account sync, agents, knowledge and tools, automations, search, and account security. No prior knowledge assumed.",
+      "Everything you need to work in Aperture Chat: chat, model access, personalization memory, documents and decks (including Word and PDF files, templates, and the slide editor), account sync, agents, knowledge and tools, automations, search, account security, and reporting a problem. No prior knowledge assumed.",
   },
   admin: {
     file: "aperture-admin-guide",
     docTitle: "Administrator Guide",
     badge: "For workspace administrators",
     subtitle:
-      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, response actions, single sign-on, analytics, token budgets, personal data protection, training datasets, the tenant audit trail, and alerts. No prior knowledge assumed.",
+      "The complete User Guide, plus the Admin console: accounts, groups, model access requests and diagnostics, workspace connectors, response actions, single sign-on, analytics, token budgets, support tickets, personal data protection, training datasets, the tenant audit trail, and alerts. No prior knowledge assumed.",
   },
   owner: {
     file: "aperture-owner-guide",
     docTitle: "Platform Owner Guide",
     badge: "For platform owners",
     subtitle:
-      "The complete User and Administrator Guides, plus first-run guidance, providers and shared connectors, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, audit, and alerts. Personal data protection and training datasets are covered in the Administrator part. No prior knowledge assumed.",
+      "The complete User and Administrator Guides, plus first-run guidance, providers, the connector ceiling, the API key vault, organization model availability, SSO and MFA policy, branding, search indexing, budgets, Elastic export, releases, analytics, sharing reports with the maintainers, audit, and alerts. Personal data protection and training datasets are covered in the Administrator part. No prior knowledge assumed.",
   },
 };
 

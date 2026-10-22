@@ -669,10 +669,11 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "Single sign-on with Okta",
     "Single sign-on with Google Workspace",
     "Go live: groups, MFA, and enforcement",
-    "Policies, budget, and connectors",
+    "Policies, budget, and the connector ceiling",
     "Platform branding",
     "Review workspace search readiness",
     "Analytics: runtime, activity, and usage",
+    "Share reports with the Aperture Chat maintainers",
     "Owner audit signals",
     "Alerts and email delivery",
     "Elastic Analytics export",
@@ -723,13 +724,21 @@ test("documentation opens owner guide and audit replaces the old activity log ac
   expect(screen.getByText("Voiceover, captions, and title cards use the same timeline.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
 
-  fireEvent.click(screen.getByRole("button", { name: "Watch Policies, budget, and connectors" }));
-  expect(screen.getByRole("dialog", { name: "Policies, budget, and connectors video" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Watch Policies, budget, and the connector ceiling" }));
+  expect(screen.getByRole("dialog", { name: "Policies, budget, and the connector ceiling video" })).toBeInTheDocument();
   expect(screen.getByTestId("remotion-player")).toHaveAttribute(
     "data-audio-src",
     "training/owner/policies-connectors.mp3",
   );
   expect(screen.getByText(/Each area is a collapsed panel; expand only the one you need/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Watch Share reports with the Aperture Chat maintainers" }));
+  expect(screen.getByRole("dialog", { name: "Share reports with the Aperture Chat maintainers video" })).toBeInTheDocument();
+  expect(screen.getByTestId("remotion-player")).toHaveAttribute(
+    "data-audio-src",
+    "training/owner/owner-reports-sharing.mp3",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Close documentation" }));
