@@ -195,6 +195,7 @@ from app.repositories.matters import MatterDraftRepository
 from app.repositories.data_protection import DataProtectionRepository
 from app.repositories.model_access_requests import ModelAccessRequestRepository
 from app.repositories.search_index import SearchIndexRepository
+from app.repositories.support_tickets import SupportTicketRepository
 from app.repositories.usage_budgets import TenantUsageBudgetRepository
 
 
@@ -394,6 +395,7 @@ class SeedStore:
         self.matter_draft_repository = MatterDraftRepository(application_engine)
         self.model_access_request_repository = ModelAccessRequestRepository(application_engine)
         self.data_protection_repository = DataProtectionRepository(application_engine)
+        self.support_ticket_repository = SupportTicketRepository(application_engine)
         # Last captured shape per thread, so streaming saves of an unchanged
         # conversation never re-run training capture.
         self._training_capture_signatures: dict[str, str] = {}
@@ -5207,7 +5209,7 @@ class SeedStore:
                 }
             )
         with self._store_lock:
-            return self.application_state_repository.save_issue_report(report)
+            return self.support_ticket_repository.create_report(report)
 
     def get_issue_report(self, report_id: str) -> IssueReportRecord | None:
         with self._store_lock:
@@ -5862,6 +5864,8 @@ _AUDIT_TARGET_TYPES = (
     ("prompt_template", "prompt-template"),
     ("skill_file", "skill-file"),
     ("login", "session"),
+    ("issue_", "support-ticket"),
+    ("hub_", "community-report"),
 )
 
 

@@ -132,6 +132,7 @@ import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPreviewText } from "../lib/markdown";
 import { RetentionPanel, RetentionTagsView } from "./RetentionPanel";
 import { AlertsConsole, type AlertsConsoleApi } from "./AlertsConsole";
+import { SupportTicketsConsole, type SupportTicketsApi } from "./SupportTicketsConsole";
 import { AuditSummaryBoard, type AuditSummaryGroup, type AuditSummaryItem } from "./AuditSummaryCard";
 import { AuditInsights } from "./AuditInsights";
 import {
@@ -508,6 +509,7 @@ const TAB_TOOLTIPS: Record<string, string> = {
   analytics: "View runtime execution timestamps and chat feedback trends",
   audit: "Inspect governance signals and the append-only audit trail",
   alerts: "Define alert rules and review email delivery of suspicious-activity notifications",
+  reports: "Work through reported problems and ideas, and share them with the Aperture Chat maintainers",
 };
 
 type ModelStatusFilter = "all" | "enabled" | "disabled";
@@ -670,10 +672,13 @@ export function PlatformConsole({
   onSectionChange,
   onOpenAdminDocumentation,
   onOpenUserHelp,
+  supportApi,
 }: {
   data: BootstrapData;
   onDataChange: (updater: (current: BootstrapData) => BootstrapData) => void;
   platformActions?: PlatformConsoleActions;
+  /** Support tickets from every organization, sharing, and the community hub. */
+  supportApi?: SupportTicketsApi;
   openDocumentationRequestKey?: number;
   openProvidersRequestKey?: number;
   /** Route-driven section; when provided the tabs are controlled by the URL. */
@@ -2616,6 +2621,7 @@ export function PlatformConsole({
             ["Models", "models"],
             ["Providers", "providers"],
             ["Analytics", "analytics"],
+            ...(supportApi ? [["Reports", "reports"]] : []),
             ["Audit", "audit"],
             ["Alerts", "alerts"],
           ].map(([tab, value]) => (
@@ -3689,7 +3695,14 @@ export function PlatformConsole({
 
               {filteredIssueReports.length > 0 && (
                 <>
-                  <h3 className="feedback-subsection-title">Reported platform issues</h3>
+                  <div className="feedback-subsection-head">
+                    <h3 className="feedback-subsection-title">Reported platform issues</h3>
+                    {supportApi && (
+                      <button className="link-button" type="button" onClick={() => setActiveSection("reports")}>
+                        Manage in Reports
+                      </button>
+                    )}
+                  </div>
                   <div className="feedback-event-list scrollable-log-list" aria-label="Platform issue reports">
                     {filteredIssueReports.map((item) => (
                       <button
@@ -4550,6 +4563,12 @@ export function PlatformConsole({
 
           </div>
         </Tabs.Content>
+
+        {supportApi && (
+          <Tabs.Content value="reports" className="tab-content">
+            <SupportTicketsConsole variant="owner" api={supportApi} />
+          </Tabs.Content>
+        )}
 
         <Tabs.Content value="alerts" className="tab-content">
           <AlertsConsole variant="owner" api={alertsApi} actorOptions={alertActorOptions} />

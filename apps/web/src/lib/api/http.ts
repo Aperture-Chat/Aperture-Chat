@@ -1,3 +1,5 @@
+import { recordApiFailure } from "../diagnostics";
+
 export const apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
 export const DEFAULT_CHAT_TIMEOUT_MS = normalizedPositiveNumber(import.meta.env.VITE_CHAT_TIMEOUT_MS, 75 * 60 * 1000);
 
@@ -103,6 +105,7 @@ export async function apiRequest<ResponseBody>(
   }
 
   if (!response.ok) {
+    recordApiFailure(method, path, response.status);
     throw new ChatRequestError(await readApiError(response), response.status);
   }
   if (response.status === 204) return undefined as ResponseBody;

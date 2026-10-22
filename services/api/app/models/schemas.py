@@ -2230,19 +2230,384 @@ class ChatFeedbackSubmitRequest(BaseModel):
     model_id: str = Field(default="", max_length=200)
 
 
+IssueReportKind = Literal["bug", "feature", "feedback", "question", "security"]
+IssueReportStatus = Literal["new", "in_review", "in_progress", "on_hold", "resolved", "closed"]
+IssueReportPriority = Literal["low", "normal", "high", "urgent"]
+IssueReportActorKind = Literal["reporter", "support", "system"]
+IssueReportEventKind = Literal[
+    "comment", "status", "priority", "assignment", "kind", "upstream", "reopened"
+]
+IssueReportVisibility = Literal["public", "internal"]
+# Instance-side state of one report's trip to the community intake hub.
+IssueReportUpstreamState = Literal[
+    "queued", "failed", "sent", "published", "declined", "private"
+]
+SupportUpstreamMode = Literal["off", "review", "automatic"]
+SupportHubReportStatus = Literal["pending", "published", "linked", "declined", "spam", "private"]
+
+ISSUE_REPORT_OPEN_STATUSES: frozenset[str] = frozenset(
+    {"new", "in_review", "in_progress", "on_hold"}
+)
+
+
 class IssueReportRecord(BaseModel):
-    """A user-submitted platform problem visible to tenant administrators."""
+    """A user-submitted platform problem, idea, or question tracked as a ticket.
+
+    ``number`` is a per-organization ticket number people can quote. The
+    ``last_public_activity_at``/``reporter_seen_at`` pair drives the reporter's
+    unread marker; ``last_activity_by`` tells support whether the reporter is
+    waiting on them.
+    """
 
     id: str
     tenant_id: str
     user_id: str
     user_name: str = ""
+    number: int | None = Field(default=None, ge=1)
+    kind: IssueReportKind = "bug"
+    priority: IssueReportPriority = "normal"
+    status: IssueReportStatus = "new"
     subject: str
     body: str
     screenshot_filename: str | None = None
     screenshot_mime_type: str | None = None
     screenshot_size_bytes: int | None = Field(default=None, ge=0)
+    assignee_user_id: str | None = None
+    assignee_name: str | None = None
+    diagnostics: dict[str, Any] | None = None
     created_at: datetime
+    updated_at: datetime | None = None
+    resolved_at: datetime | None = None
+    last_public_activity_at: datetime | None = None
+    last_activity_by: IssueReportActorKind | None = None
+    reporter_seen_at: datetime | None = None
+
+
+class IssueReportEvent(BaseModel):
+    """One timeline entry: a reply, an internal note, or a field change."""
+
+    id: str
+    report_id: str
+    tenant_id: str
+    kind: IssueReportEventKind
+    visibility: IssueReportVisibility = "public"
+    actor_user_id: str | None = None
+    actor_name: str = ""
+    actor_kind: IssueReportActorKind = "support"
+    body: str = ""
+    from_value: str | None = None
+    to_value: str | None = None
+    created_at: datetime
+
+
+class IssueReportUpstream(BaseModel):
+    """Stored link between a local ticket and its community-hub submission.
+
+    ``receipt_token`` is the hub-issued capability used to poll status. It is
+    never serialized to a browser; use :class:`IssueReportUpstreamView`.
+    ``sent_title``/``sent_body`` keep the exact text that left the deployment.
+    """
+
+    report_id: str
+    tenant_id: str
+    state: IssueReportUpstreamState
+    hub_url: str
+    hub_report_id: str | None = None
+    receipt_token: str | None = None
+    issue_number: int | None = None
+    issue_url: str | None = None
+    issue_state: str | None = None
+    issue_state_reason: str | None = None
+    maintainer_note: str | None = None
+    shared_by_user_id: str | None = None
+    shared_by_name: str = ""
+    sent_title: str
+    sent_body: str
+    sent_diagnostics: dict[str, Any] | None = None
+    attempts: int = Field(default=0, ge=0)
+    last_error: str | None = None
+    next_attempt_at: datetime | None = None
+    queued_at: datetime
+    sent_at: datetime | None = None
+    checked_at: datetime | None = None
+    updated_at: datetime
+
+
+class IssueReportUpstreamView(BaseModel):
+    state: IssueReportUpstreamState
+    hub_url: str
+    issue_number: int | None = None
+    issue_url: str | None = None
+    issue_state: str | None = None
+    issue_state_reason: str | None = None
+    maintainer_note: str | None = None
+    shared_by_name: str = ""
+    sent_title: str = ""
+    sent_body: str = ""
+    sent_diagnostics: dict[str, Any] | None = None
+    attempts: int = 0
+    last_error: str | None = None
+    queued_at: datetime
+    sent_at: datetime | None = None
+    checked_at: datetime | None = None
+
+    @classmethod
+    def from_link(cls, link: IssueReportUpstream) -> IssueReportUpstreamView:
+        return cls(
+            **link.model_dump(
+                exclude={
+                    "report_id",
+                    "tenant_id",
+                    "hub_report_id",
+                    "receipt_token",
+                    "shared_by_user_id",
+                    "next_attempt_at",
+                    "updated_at",
+                }
+            )
+        )
+
+
+class IssueReportListItem(IssueReportRecord):
+    """Queue row: the ticket plus context the consoles show beside it."""
+
+    tenant_name: str = ""
+    unread: bool = False
+    upstream: IssueReportUpstreamView | None = None
+
+
+class IssueReportDetail(BaseModel):
+    report: IssueReportListItem
+    events: list[IssueReportEvent] = Field(default_factory=list)
+
+
+class IssueReportCommentRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+    visibility: IssueReportVisibility = "public"
+
+
+class IssueReportReopenRequest(BaseModel):
+    body: str = Field(default="", max_length=5000)
+
+
+class IssueReportUpdateRequest(BaseModel):
+    status: IssueReportStatus | None = None
+    priority: IssueReportPriority | None = None
+    kind: IssueReportKind | None = None
+    # Empty string clears the assignee.
+    assignee_user_id: str | None = None
+    # Optional public message posted alongside a status change.
+    note: str | None = Field(default=None, max_length=5000)
+
+
+class IssueReportAssignee(BaseModel):
+    id: str
+    name: str
+
+
+class SupportModelOption(BaseModel):
+    id: str
+    name: str
+
+
+class IssueReportQueue(BaseModel):
+    items: list[IssueReportListItem]
+    counts: dict[str, int]
+    assignees: list[IssueReportAssignee] = Field(default_factory=list)
+
+
+class IssueReportUpstreamDraft(BaseModel):
+    """Redacted text an owner reviews before anything leaves the deployment."""
+
+    title: str
+    body: str
+    labels: list[str] = Field(default_factory=list)
+    diagnostics: dict[str, Any] | None = None
+    # The GitHub issue exactly as the hub will post it.
+    preview_markdown: str = ""
+    redaction_count: int = 0
+    ai_drafted: bool = False
+    ai_error: str | None = None
+    github_new_issue_url: str
+    hub_url: str
+    hub_available: bool = True
+    blocked_reason: str | None = None
+
+
+class IssueReportUpstreamDraftRequest(BaseModel):
+    use_ai: bool = False
+    include_diagnostics: bool = True
+
+
+class IssueReportUpstreamShareRequest(BaseModel):
+    title: str = Field(min_length=4, max_length=200)
+    body: str = Field(min_length=10, max_length=12000)
+    include_diagnostics: bool = True
+
+
+class SupportSettings(BaseModel):
+    """Deployment-wide support settings (owner managed, never in bootstrap)."""
+
+    upstream_mode: SupportUpstreamMode = "review"
+    instance_id: str
+    ai_model_id: str | None = None
+    notify_reporters: bool = True
+    hub_enabled: bool = False
+    hub_repository: str = ""
+    hub_auto_publish: bool = False
+    hub_ai_triage: bool = True
+    updated_at: datetime
+
+
+class SupportSettingsView(BaseModel):
+    upstream_mode: SupportUpstreamMode
+    instance_id: str
+    ai_model_id: str | None = None
+    ai_model_name: str | None = None
+    notify_reporters: bool
+    hub_url: str
+    hub_is_self: bool = False
+    email_configured: bool = False
+    hub_enabled: bool
+    hub_repository: str
+    hub_auto_publish: bool
+    hub_ai_triage: bool
+    hub_token_set: bool = False
+    hub_masked_token: str = ""
+    model_options: list[SupportModelOption] = Field(default_factory=list)
+
+
+class SupportSettingsUpdateRequest(BaseModel):
+    upstream_mode: SupportUpstreamMode | None = None
+    ai_model_id: str | None = None
+    notify_reporters: bool | None = None
+    hub_enabled: bool | None = None
+    hub_repository: str | None = Field(default=None, max_length=200)
+    hub_auto_publish: bool | None = None
+    hub_ai_triage: bool | None = None
+    # Write-only. Empty string clears the stored token.
+    hub_github_token: str | None = Field(default=None, max_length=400)
+
+
+class SupportHubStatus(BaseModel):
+    hub_url: str
+    reachable: bool
+    accepting: bool = False
+    repository: str | None = None
+    detail: str | None = None
+
+
+class SupportHubReport(BaseModel):
+    """A report received from any deployment by this community intake hub."""
+
+    id: str
+    receipt_hash: str
+    instance_id: str
+    instance_version: str = ""
+    source_hash: str | None = None
+    kind: IssueReportKind = "bug"
+    priority: IssueReportPriority = "normal"
+    title: str
+    body: str
+    diagnostics: dict[str, Any] | None = None
+    status: SupportHubReportStatus = "pending"
+    issue_number: int | None = None
+    issue_url: str | None = None
+    issue_state: str | None = None
+    issue_state_reason: str | None = None
+    issue_checked_at: datetime | None = None
+    triage: dict[str, Any] | None = None
+    maintainer_note: str | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: datetime | None = None
+    received_at: datetime
+    updated_at: datetime
+
+
+class SupportHubReportView(BaseModel):
+    id: str
+    instance_id: str
+    instance_version: str
+    kind: IssueReportKind
+    priority: IssueReportPriority
+    title: str
+    body: str
+    diagnostics: dict[str, Any] | None = None
+    status: SupportHubReportStatus
+    issue_number: int | None = None
+    issue_url: str | None = None
+    issue_state: str | None = None
+    issue_state_reason: str | None = None
+    triage: dict[str, Any] | None = None
+    maintainer_note: str | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: datetime | None = None
+    received_at: datetime
+    updated_at: datetime
+    instance_report_count: int = 1
+
+    @classmethod
+    def from_report(cls, report: SupportHubReport, *, instance_report_count: int = 1) -> SupportHubReportView:
+        return cls(
+            **report.model_dump(exclude={"receipt_hash", "source_hash", "issue_checked_at"}),
+            instance_report_count=instance_report_count,
+        )
+
+
+class SupportHubQueue(BaseModel):
+    items: list[SupportHubReportView]
+    counts: dict[str, int]
+
+
+class SupportHubSubmission(BaseModel):
+    """Wire format a deployment sends to the hub. Text is already redacted."""
+
+    instance_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9-]+$")
+    instance_version: str = Field(default="", max_length=32)
+    kind: IssueReportKind = "bug"
+    priority: IssueReportPriority = "normal"
+    title: str = Field(min_length=4, max_length=200)
+    body: str = Field(min_length=10, max_length=12000)
+    diagnostics: dict[str, Any] | None = None
+
+
+class SupportHubReceipt(BaseModel):
+    id: str
+    token: str
+    status: SupportHubReportStatus
+
+
+class SupportHubPublicStatus(BaseModel):
+    id: str
+    status: SupportHubReportStatus
+    issue_number: int | None = None
+    issue_url: str | None = None
+    issue_state: str | None = None
+    issue_state_reason: str | None = None
+    maintainer_note: str | None = None
+    updated_at: datetime
+
+
+class SupportHubInfo(BaseModel):
+    accepting: bool
+    repository: str | None = None
+    version: str
+
+
+class SupportHubPublishRequest(BaseModel):
+    title: str = Field(min_length=4, max_length=200)
+    body: str = Field(min_length=10, max_length=60000)
+    labels: list[str] = Field(default_factory=list, max_length=8)
+
+
+class SupportHubLinkRequest(BaseModel):
+    issue_number: int = Field(ge=1)
+    comment: str = Field(default="", max_length=20000)
+
+
+class SupportHubDeclineRequest(BaseModel):
+    reason: str = Field(default="", max_length=1000)
+    spam: bool = False
 
 
 class RetentionBatchRequest(BaseModel):

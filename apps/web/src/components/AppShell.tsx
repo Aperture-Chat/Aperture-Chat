@@ -7,6 +7,7 @@ import {
   Bug,
   Camera,
   Check,
+  ListChecks,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -22,14 +23,12 @@ import {
   MessageSquare,
   Moon,
   Ellipsis,
-  Paperclip,
   Pin,
   PinOff,
   Plus,
   RefreshCw,
   Pencil,
   Search,
-  Send,
   ShieldCheck,
   Smartphone,
   Sun,
@@ -59,6 +58,8 @@ import type {
   BootstrapData,
   ChatMessage,
   ChatThread,
+  IssueReportRecord,
+  IssueReportSubmission,
   Role,
   User,
 } from "../lib/types";
@@ -85,6 +86,8 @@ import { PlatformUpdateRow } from "./PlatformUpdateRow";
 import { Logo } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
 import { AccountSecurity } from "./AccountSecurity";
+import { IssueReportForm } from "./IssueReportForm";
+import { MyReportsPanel, type MyReportsApi } from "./MyReportsPanel";
 import { forgetLegacyReadState, isThreadUnread } from "../lib/chatReadState";
 
 export type { ViewKey };
@@ -233,7 +236,7 @@ function flattenFolderTree(folders: ChatFolder[]): Array<{ folder: ChatFolder; d
 }
 
 
-type UtilityDrawerKey = "help" | "report" | "settings" | "account" | "all-chats" | "all-pinned" | "all-folders";
+type UtilityDrawerKey = "help" | "report" | "my-reports" | "settings" | "account" | "all-chats" | "all-pinned" | "all-folders";
 
 function memoryDrawerHint(data: BootstrapData): string {
   if (data.memoryState?.enabled) return "See and edit what the assistant remembers about you.";
@@ -294,6 +297,7 @@ function UserAppShell({
   onApiKeyCreate,
   onApiKeyRevoke,
   onSubmitIssueReport,
+  myReportsApi,
   memoryApi,
   children,
 }: {
@@ -337,11 +341,8 @@ function UserAppShell({
   onApiKeyLoad?: () => Promise<AccountApiKeyStatus>;
   onApiKeyCreate?: () => Promise<AccountApiKeyCreateResponse>;
   onApiKeyRevoke?: () => Promise<AccountApiKeyStatus>;
-  onSubmitIssueReport?: (payload: {
-    subject: string;
-    body: string;
-    screenshot?: File | null;
-  }) => Promise<void>;
+  onSubmitIssueReport?: (payload: IssueReportSubmission) => Promise<IssueReportRecord | void>;
+  myReportsApi?: MyReportsApi;
   memoryApi?: MemoryManagerApi;
   children: ReactNode;
 }) {
@@ -357,6 +358,25 @@ function UserAppShell({
   const [isResizing, setIsResizing] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [drawer, setDrawer] = useState<UtilityDrawerKey | null>(null);
+  // Unread support replies drive the dot on Help; the focus id opens one
+  // report directly (for example right after sending it).
+  const [reportsUnread, setReportsUnread] = useState(0);
+  const [myReportsFocusId, setMyReportsFocusId] = useState<string | null>(null);
+  const showReportsDot = reportsUnread > 0;
+  useEffect(() => {
+    if (!myReportsApi) return;
+    if (drawer !== null && drawer !== "help") return;
+    let active = true;
+    myReportsApi
+      .list()
+      .then((items) => {
+        if (active) setReportsUnread(items.filter((item) => item.unread).length);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [myReportsApi, drawer]);
   const [securityCloseBlocked, setSecurityCloseBlocked] = useState(false);
   const securityCloseBlockedRef = useRef(false);
   const updateSecurityCloseGuard = (blocked: boolean) => {
@@ -1377,6 +1397,13 @@ function UserAppShell({
               >
                 <CircleHelp size={16} />
                 <span>Help</span>
+                {showReportsDot && (
+                  <span
+                    className="help-unread-dot"
+                    role="status"
+                    aria-label={`${reportsUnread} ${reportsUnread === 1 ? "report has" : "reports have"} a new update`}
+                  />
+                )}
               </button>
               <button
                 type="button"
@@ -1512,6 +1539,14 @@ function UserAppShell({
           onSubmitIssueReport={onSubmitIssueReport}
           onOpenIssueReport={() => setDrawer("report")}
           onBackToHelp={() => setDrawer("help")}
+          myReportsApi={myReportsApi}
+          reportsUnread={reportsUnread}
+          onReportsUnreadChange={setReportsUnread}
+          myReportsFocusId={myReportsFocusId}
+          onOpenMyReports={(reportId) => {
+            setMyReportsFocusId(reportId ?? null);
+            setDrawer("my-reports");
+          }}
           currentView={currentView}
           onSelectView={handleSelectView}
           memoryAvailable={Boolean(memoryApi)}
@@ -1563,6 +1598,11 @@ function UtilityDrawer({
   onSubmitIssueReport,
   onOpenIssueReport,
   onBackToHelp,
+  myReportsApi,
+  reportsUnread,
+  onReportsUnreadChange,
+  myReportsFocusId,
+  onOpenMyReports,
   currentView,
   onSelectView,
   memoryAvailable,
@@ -1594,13 +1634,14 @@ function UtilityDrawer({
   onApiKeyLoad?: () => Promise<AccountApiKeyStatus>;
   onApiKeyCreate?: () => Promise<AccountApiKeyCreateResponse>;
   onApiKeyRevoke?: () => Promise<AccountApiKeyStatus>;
-  onSubmitIssueReport?: (payload: {
-    subject: string;
-    body: string;
-    screenshot?: File | null;
-  }) => Promise<void>;
+  onSubmitIssueReport?: (payload: IssueReportSubmission) => Promise<IssueReportRecord | void>;
   onOpenIssueReport: () => void;
   onBackToHelp: () => void;
+  myReportsApi?: MyReportsApi;
+  reportsUnread: number;
+  onReportsUnreadChange: (count: number) => void;
+  myReportsFocusId: string | null;
+  onOpenMyReports: (reportId?: string) => void;
   currentView: ViewKey;
   onSelectView: (view: ViewKey) => void;
   memoryAvailable?: boolean;
@@ -1643,6 +1684,8 @@ function UtilityDrawer({
       ? "Help"
       : drawer === "report"
         ? "Report a problem"
+      : drawer === "my-reports"
+        ? "My reports"
       : drawer === "settings"
         ? "Preferences"
         : drawer === "account"
@@ -1684,12 +1727,6 @@ function UtilityDrawer({
   const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [apiCopied, setApiCopied] = useState<"url" | "key" | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [reportSubject, setReportSubject] = useState("");
-  const [reportBody, setReportBody] = useState("");
-  const [reportScreenshot, setReportScreenshot] = useState<File | null>(null);
-  const [reportBusy, setReportBusy] = useState(false);
-  const [reportError, setReportError] = useState<string | null>(null);
-  const [reportSent, setReportSent] = useState(false);
   const [chatFilterText, setChatFilterText] = useState("");
   const [folderMenuThreadId, setFolderMenuThreadId] = useState<string | null>(null);
   const canUpdatePassword = data.me.auth_method === "local";
@@ -1737,33 +1774,6 @@ function UtilityDrawer({
     setChatFilterText("");
     setFolderMenuThreadId(null);
   }, [drawer]);
-
-  const handleIssueReportSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!onSubmitIssueReport) {
-      setReportError("Issue reporting is not connected right now.");
-      return;
-    }
-    const subject = reportSubject.trim();
-    const body = reportBody.trim();
-    if (!subject || !body) {
-      setReportError("Add both a subject and a message.");
-      return;
-    }
-    setReportBusy(true);
-    setReportError(null);
-    try {
-      await onSubmitIssueReport({ subject, body, screenshot: reportScreenshot });
-      setReportSent(true);
-      setReportSubject("");
-      setReportBody("");
-      setReportScreenshot(null);
-    } catch (error) {
-      setReportError(error instanceof Error ? error.message : "The issue report could not be sent.");
-    } finally {
-      setReportBusy(false);
-    }
-  };
 
   // Drawer chat rows mirror the sidebar chat-row design exactly: the same
   // folder/pin/archive actions with the same reveal behavior, plus the same
@@ -2191,9 +2201,27 @@ function UtilityDrawer({
               <Bug size={18} />
               <span>
                 <strong>Report a problem</strong>
-                <small>Tell us about a platform issue and attach a screenshot.</small>
+                <small>Report an issue, share an idea, or ask a question.</small>
               </span>
             </button>
+            {myReportsApi && (
+              <button
+                className="drawer-row my-reports-entry"
+                type="button"
+                onClick={() => onOpenMyReports()}
+              >
+                <ListChecks size={18} />
+                <span>
+                  <strong>My reports</strong>
+                  <small>Track status and replies on reports you've sent.</small>
+                </span>
+                {reportsUnread > 0 && (
+                  <span className="count-badge" aria-label={`${reportsUnread} with new updates`}>
+                    {reportsUnread}
+                  </span>
+                )}
+              </button>
+            )}
             <LazyChunkBoundary label="The user guide">
               <Suspense
                 fallback={
@@ -2216,73 +2244,22 @@ function UtilityDrawer({
             <button className="back-link-button" type="button" onClick={onBackToHelp}>
               <ArrowLeft size={15} /> Back to Help
             </button>
-            {reportSent ? (
-              <div className="issue-report-success" role="status">
-                <span className="feedback-icon is-positive"><Check size={18} /></span>
-                <div>
-                  <strong>Report sent</strong>
-                  <p>Thank you. An administrator can now review it in Analytics.</p>
-                </div>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setReportSent(false)}
-                >
-                  Report another issue
-                </button>
-              </div>
-            ) : (
-              <form className="issue-report-form" onSubmit={handleIssueReportSubmit}>
-                <p className="issue-report-intro">
-                  Describe what happened, what you expected, and any steps that help reproduce it.
-                </p>
-                <label>
-                  <span>Subject</span>
-                  <input
-                    autoFocus
-                    maxLength={200}
-                    value={reportSubject}
-                    onChange={(event) => setReportSubject(event.currentTarget.value)}
-                    placeholder="Short summary of the issue"
-                    required
-                  />
-                </label>
-                <label>
-                  <span>Message</span>
-                  <textarea
-                    maxLength={5000}
-                    rows={8}
-                    value={reportBody}
-                    onChange={(event) => setReportBody(event.currentTarget.value)}
-                    placeholder="What happened? What were you trying to do?"
-                    required
-                  />
-                </label>
-                <label className="issue-report-attachment">
-                  <span><Paperclip size={15} /> Screenshot (optional)</span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0] ?? null;
-                      if (file && file.size > 10 * 1024 * 1024) {
-                        setReportError("Choose a screenshot that is 10 MB or smaller.");
-                        event.currentTarget.value = "";
-                        setReportScreenshot(null);
-                        return;
-                      }
-                      setReportError(null);
-                      setReportScreenshot(file);
-                    }}
-                  />
-                  <small>{reportScreenshot?.name ?? "PNG, JPEG, GIF, or WebP up to 10 MB."}</small>
-                </label>
-                {reportError && <p className="form-error" role="alert">{reportError}</p>}
-                <button className="primary-button issue-report-submit" type="submit" disabled={reportBusy}>
-                  <Send size={15} /> {reportBusy ? "Sending…" : "Send report"}
-                </button>
-              </form>
-            )}
+            <IssueReportForm
+              onSubmit={onSubmitIssueReport}
+              onViewReport={myReportsApi ? (reportId) => onOpenMyReports(reportId) : undefined}
+            />
+          </div>
+        )}
+
+        {drawer === "my-reports" && myReportsApi && (
+          <div className="issue-report-drawer">
+            <MyReportsPanel
+              api={myReportsApi}
+              focusReportId={myReportsFocusId}
+              onNewReport={onOpenIssueReport}
+              onBackToHelp={onBackToHelp}
+              onUnreadChange={onReportsUnreadChange}
+            />
           </div>
         )}
 

@@ -2774,7 +2774,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "Choose the person and dates, or Today, Week, or 30 days.",
       "Open a feedback row to read the note and the rated exchange.",
       "Scroll to Reported platform issues and open a report to read it.",
-      "Follow up through your team's support process.",
+      "Choose Manage in Reports to reply, set the status, priority, and assignee, or add an internal note. The person follows it in Help › My reports.",
     ],
     paths: [
       {

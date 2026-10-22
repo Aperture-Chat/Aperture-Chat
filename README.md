@@ -63,15 +63,14 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.13](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.13)**:
-> workspace admins manage connectors under Admin → Connections and can hide
-> Google Drive, SharePoint/OneDrive, Box, or iManage from the attach menus
-> without turning them off; regular users' own MCP connections, API sources,
-> and Hermes agents stay off until an admin grants them per group; and
-> knowledge, Hermes, and custom-script boundaries are tightened. v0.5.12
-> upgraded the Drafts deck editor, kept Word and PDF formatting on import, and
-> added separate logo and icon branding.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0512) and
+> **Current release: [v0.5.14](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.14)**:
+> problem reports become support tickets that admins work in a Reports tab and
+> reporters follow in Help › My reports, with optional owner-reviewed sharing
+> to the maintainers as GitHub issues; document and deck requests in chat can
+> continue in Drafts; inline AI edits keep the original formatting; and
+> buttons and toggles share one tactile style. v0.5.13 moved connectors to
+> Admin → Connections with a per-source Hide.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0513) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -156,6 +155,7 @@ policies appropriate for your organization's data.
 - **Personal data.** Optionally conceal Social Security, card, and account numbers, contact details, health identifiers, and secrets wherever chats are stored, shown, or exported, and keep them from the model. Detection runs inside your deployment.
 - **Training datasets.** Optionally capture de-identified ratings and corrections, route them by practice area and department, review them, and download fine-tuning datasets for an open-weight model.
 - **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Audit dashboards group signals by what needs attention and chart trends, and every number opens its records. Alert rules can email on matching activity, including chosen prompt detections such as prompt injection. Owners can send audit, usage, chats, documents, and users to Elastic for Kibana. Tenant administrators see prompt activity only for the users they administer.
+- **Support tickets.** Problem reports become tickets that admins work in a Reports tab and reporters follow in **Help › My reports**. Owners can share a redacted copy with the maintainers, who track it as a GitHub issue. See [support tickets](docs/SUPPORT_TICKETS.md).
 - **Training.** Role-specific Help includes narrated walkthroughs and downloadable guides, with fullscreen playback on desktop and mobile.
 
 ## Get started
@@ -169,7 +169,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.13
+#   APERTURE_IMAGE_TAG=v0.5.14
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -190,7 +190,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.13 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.14 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -225,10 +225,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.13` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.14` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.13-dev`, `v0.5.13-test`, `v0.5.13-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.14-dev`, `v0.5.14-test`, `v0.5.14-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

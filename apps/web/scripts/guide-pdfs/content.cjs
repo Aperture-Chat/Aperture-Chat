@@ -905,6 +905,7 @@ const SECTIONS = [
         "Click Help at the bottom of the sidebar for guided videos, captions, transcripts, and this PDF. The guide also covers additional procedures.",
         "Administrators can also open Documentation inside the console for role-specific videos and a printable guide.",
         "Choose Report a problem in Help to describe a problem, the affected screen, and the expected result. Share only permitted details with your administrators; omit passwords, keys, and recovery codes.",
+        "Choose My reports in Help to see each report's status (Received, In review, In progress, On hold, Resolved, or Closed), read replies, answer questions, or reopen a report that is still a problem.",
       ]),
     ],
   },
@@ -919,7 +920,7 @@ const SECTIONS = [
     blocks: [
       steps([
         "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Management section lists it too.)",
-        "The console opens with ten tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Policies, Datasets, Audit, and Alerts. Policies is always present between Analytics and Datasets; service-wide availability determines which organization controls are active inside it.",
+        "The console opens with eleven tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Reports, Policies, Datasets, Audit, and Alerts. Policies is always present between Analytics and Datasets; service-wide availability determines which organization controls are active inside it.",
       ]),
       p(
         "Everything you change here writes through the admin API immediately — changes persist across refreshes and restarts, and every action lands in the tenant audit trail. Status messages under the header tell you honestly whether an action synced or failed.",
@@ -1286,7 +1287,7 @@ const SECTIONS = [
     part: "admin",
     minRole: "admin",
     title: "Review feedback and reported issues",
-    summary: "Read response ratings, written feedback, and platform reports in Analytics.",
+    summary: "Read response ratings and written feedback in Analytics, and work reported problems in Reports.",
     blocks: [
       lesson("admin", "admin-feedback-issues"),
     ],
@@ -1366,11 +1367,11 @@ const SECTIONS = [
     part: "owner",
     minRole: "owner",
     title: "Opening the Platform owner console",
-    summary: "The highest access level, its six tabs, and the role ceilings.",
+    summary: "The highest access level, its seven tabs, and the role ceilings.",
     blocks: [
       steps([
         "Click Platform console (building icon) near the bottom of the sidebar. (Only platform owners see it; the account drawer's Management section lists it as Platform owner console.)",
-        "The console has six tabs: Org Settings, Models, Providers, Analytics, Audit, and Alerts. Org Settings holds organization configuration; API keys live on each provider's card under Providers.",
+        "The console has seven tabs: Org Settings, Models, Providers, Analytics, Reports, Audit, and Alerts. Org Settings holds organization configuration; API keys live on each provider's card under Providers.",
       ]),
       p("Keep the three role ceilings in mind — they explain who can touch what across the entire platform:"),
       table(

@@ -217,6 +217,7 @@ class ConfigurationSecretNamespace(StrEnum):
     TOOL_OAUTH_TOKEN = "tool-oauth-token"
     SMTP = "smtp"
     ELASTIC = "elastic"
+    SUPPORT = "support"
 
 
 class ConfigurationSecretResourceKind(StrEnum):
@@ -226,6 +227,7 @@ class ConfigurationSecretResourceKind(StrEnum):
     TOOL_CONFIG = "tool_config"
     PLATFORM_EMAIL = "platform_email"
     PLATFORM_ELASTIC = "platform_elastic"
+    PLATFORM_SUPPORT = "platform_support"
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +397,18 @@ def parse_configuration_secret_key(
             namespace=namespace,
             resource_kind=ConfigurationSecretResourceKind.PLATFORM_ELASTIC,
             resource_id="primary",
+        )
+
+    if namespace is ConfigurationSecretNamespace.SUPPORT:
+        if record_id != "github":
+            raise ConfigurationSecretKeyError(
+                "The support configuration-secret key must reference the hub GitHub token."
+            )
+        return ParsedConfigurationSecretKey(
+            storage_key=storage_key,
+            namespace=namespace,
+            resource_kind=ConfigurationSecretResourceKind.PLATFORM_SUPPORT,
+            resource_id="github",
         )
 
     raise ConfigurationSecretKeyError(

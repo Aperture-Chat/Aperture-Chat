@@ -127,10 +127,20 @@ test("persists dark mode preference across app reloads", async () => {
 test("Help lets a user submit a platform issue with an optional screenshot", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/api/issue-reports/mine")) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.includes("/api/issue-reports")) {
       return new Response(
         JSON.stringify({
           id: "issue-test",
+          number: 7,
+          kind: "bug",
+          priority: "high",
+          status: "new",
           tenant_id: sampleData.currentTenant.id,
           user_id: sampleData.me.id,
           user_name: sampleData.me.display_name,
@@ -158,6 +168,7 @@ test("Help lets a user submit a platform issue with an optional screenshot", asy
 
   const reportDialog = await screen.findByRole("dialog", { name: "Report a problem" });
   expect(reportDialog).toBeInTheDocument();
+  fireEvent.click(within(reportDialog).getByRole("radio", { name: "Blocking me" }));
   fireEvent.change(within(reportDialog).getByLabelText("Subject"), {
     target: { value: "Knowledge row is mislabeled" },
   });
@@ -169,15 +180,18 @@ test("Help lets a user submit a platform issue with an optional screenshot", asy
   });
   fireEvent.click(screen.getByRole("button", { name: "Send report" }));
 
-  expect(await screen.findByText("Report sent")).toBeInTheDocument();
-  const request = fetchMock.mock.calls.find(([input]) =>
-    String(input).includes("/api/issue-reports"),
+  expect(await screen.findByText("Report #7 sent")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /View status/i })).toBeInTheDocument();
+  const request = fetchMock.mock.calls.find(
+    ([input, init]) => String(input).endsWith("/api/issue-reports") && init?.method === "POST",
   );
   expect(request).toBeDefined();
-  expect(request?.[1]?.method).toBe("POST");
   const form = request?.[1]?.body as FormData;
   expect(form.get("subject")).toBe("Knowledge row is mislabeled");
   expect(form.get("body")).toBe("The group share still shows one user.");
+  expect(form.get("kind")).toBe("bug");
+  expect(form.get("priority")).toBe("high");
+  expect(JSON.parse(String(form.get("diagnostics")))).toMatchObject({ route: expect.any(String) });
   expect((form.get("screenshot") as File).name).toBe("knowledge.png");
 });
 

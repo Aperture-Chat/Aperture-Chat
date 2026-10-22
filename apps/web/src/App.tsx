@@ -7,6 +7,8 @@ import { AUDIT_ALERT_PAGE_SIZE, AUDIT_EVENT_PAGE_SIZE } from "./components/audit
 import { AuthScreen, ForcedPasswordScreen } from "./components/AuthScreen";
 import { ChatWorkspace } from "./components/ChatWorkspace";
 import type { MemoryManagerApi } from "./components/MemoryManager";
+import type { MyReportsApi } from "./components/MyReportsPanel";
+import type { SupportTicketsApi } from "./components/SupportTicketsConsole";
 import {
   DocumentAssistantWorkspace,
   type DraftImportPayload,
@@ -138,6 +140,31 @@ import {
   createAccountApiKey,
   revokeAccountApiKey,
   submitIssueReport,
+  listMyIssueReports,
+  getMyIssueReport,
+  markMyIssueReportSeen,
+  replyToMyIssueReport,
+  reopenMyIssueReport,
+  getMyIssueReportScreenshot,
+  getAdminIssueReportQueue,
+  getAdminIssueReport,
+  updateAdminIssueReport,
+  commentOnAdminIssueReport,
+  draftIssueReportUpstream,
+  shareIssueReportUpstream,
+  refreshIssueReportUpstream,
+  getSupportSettings,
+  updateSupportSettings,
+  getSupportHubStatus,
+  listSupportHubReports,
+  previewSupportHubReport,
+  publishSupportHubReport,
+  linkSupportHubReport,
+  declineSupportHubReport,
+  requeueSupportHubReport,
+  triageSupportHubReport,
+  syncSupportHubReports,
+  checkSupportHubGitHub,
 } from "./lib/api";
 import { isBlankNewChat, useChatStore } from "./lib/chatStore";
 import { markdownToPlainText } from "./lib/markdown";
@@ -188,6 +215,7 @@ import {
 } from "./lib/brandIcon";
 import { appendChatCitationsForDraft } from "./lib/draftCitations";
 import type { DraftNavigationGuard } from "./lib/draftNavigation";
+import type { DraftHandoffRequest } from "./lib/draftHandoff";
 import { sampleData } from "./data/sampleData";
 
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
@@ -213,6 +241,8 @@ export function App() {
   const [data, setData] = useState<BootstrapData>(sampleData);
   const [draftSessionKey, setDraftSessionKey] = useState(0);
   const [draftImport, setDraftImport] = useState<DraftImportPayload | null>(null);
+  // A chat request the user chose to build in Drafts; Drafts starts it once.
+  const [draftHandoff, setDraftHandoff] = useState<DraftHandoffRequest | null>(null);
   const draftNavigationGuardRef = useRef<DraftNavigationGuard | null>(null);
   const registerDraftNavigationGuard = useCallback((guard: DraftNavigationGuard | null) => {
     draftNavigationGuardRef.current = guard;
@@ -813,6 +843,7 @@ export function App() {
     requestWorkspaceNavigation(label, () => {
       if (nextRoute.kind === "drafts") {
         setDraftImport(null);
+        setDraftHandoff(null);
         setDraftSessionKey((current) => current + 1);
       }
       navigate(nextRoute, options);
@@ -851,10 +882,21 @@ export function App() {
         createdAt: message.createdAt,
         createdAtIso: message.completedAt || message.createdAtIso || message.executedAt,
       });
+      setDraftHandoff(null);
       setDraftSessionKey((current) => current + 1);
       navigate({ kind: "drafts" });
     },
     [chat.activeThread?.title, navigate],
+  );
+
+  const handleSendToDrafts = useCallback(
+    (request: DraftHandoffRequest) => {
+      setDraftImport(null);
+      setDraftHandoff(request);
+      setDraftSessionKey((current) => current + 1);
+      navigate({ kind: "drafts" });
+    },
+    [navigate],
   );
 
   const adminApi = useMemo<AdminConsoleApi>(
@@ -1001,6 +1043,53 @@ export function App() {
 
   // Memory content is fetched lazily and only for the signed-in user; it never
   // rides along in the bootstrap payload.
+  // The reporter's own tickets (Help › My reports).
+  const myReportsApi = useMemo<MyReportsApi>(
+    () => ({
+      list: () => listMyIssueReports(data.me.id),
+      get: (reportId) => getMyIssueReport(data.me.id, reportId),
+      markSeen: (reportId) => markMyIssueReportSeen(data.me.id, reportId),
+      reply: (reportId, body) => replyToMyIssueReport(data.me.id, reportId, body),
+      reopen: (reportId, body) => reopenMyIssueReport(data.me.id, reportId, body),
+      loadScreenshot: (reportId) => getMyIssueReportScreenshot(data.me.id, reportId),
+    }),
+    [data.me.id],
+  );
+
+  // Admin and owner ticket triage. Sharing, settings, and the community hub
+  // are owner-only; the API enforces the same boundary.
+  const supportApi = useMemo<SupportTicketsApi>(() => {
+    const userId = data.me.id;
+    const base: SupportTicketsApi = {
+      queue: () => getAdminIssueReportQueue(userId),
+      get: (reportId) => getAdminIssueReport(userId, reportId),
+      update: (reportId, patch) => updateAdminIssueReport(userId, reportId, patch),
+      comment: (reportId, payload) => commentOnAdminIssueReport(userId, reportId, payload),
+      loadScreenshot: (reportId) => getAdminIssueReportScreenshot(userId, reportId),
+    };
+    if (data.me.role !== "PLATFORM_OWNER") return base;
+    return {
+      ...base,
+      draftUpstream: (reportId, payload) => draftIssueReportUpstream(userId, reportId, payload),
+      shareUpstream: (reportId, payload) => shareIssueReportUpstream(userId, reportId, payload),
+      refreshUpstream: (reportId) => refreshIssueReportUpstream(userId, reportId),
+      getSettings: () => getSupportSettings(userId),
+      updateSettings: (patch) => updateSupportSettings(userId, patch),
+      hubStatus: () => getSupportHubStatus(userId),
+      hub: {
+        list: () => listSupportHubReports(userId),
+        preview: (reportId) => previewSupportHubReport(userId, reportId),
+        publish: (reportId, payload) => publishSupportHubReport(userId, reportId, payload),
+        link: (reportId, payload) => linkSupportHubReport(userId, reportId, payload),
+        decline: (reportId, payload) => declineSupportHubReport(userId, reportId, payload),
+        requeue: (reportId) => requeueSupportHubReport(userId, reportId),
+        triage: (reportId) => triageSupportHubReport(userId, reportId),
+        sync: () => syncSupportHubReports(userId),
+        check: () => checkSupportHubGitHub(userId),
+      },
+    };
+  }, [data.me.id, data.me.role]);
+
   const memoryApi = useMemo<MemoryManagerApi>(
     () => ({
       list: () => listMemories(data.me.id),
@@ -1261,6 +1350,7 @@ export function App() {
           requestedAgentId={requestedAgentId}
           onRequestedAgentConsumed={() => setRequestedAgentId(null)}
           onTransferToDraft={handleTransferToDraft}
+          onSendToDrafts={handleSendToDrafts}
           onExplainModelAccess={() => setModelAccessExplainerOpen(true)}
         />
       );
@@ -1272,6 +1362,8 @@ export function App() {
           data={effectiveData}
           brandName={chatBrandName}
           initialDraft={route.draftId ? null : draftImport}
+          initialRequest={route.draftId ? null : draftHandoff}
+          onInitialRequestStarted={() => setDraftHandoff(null)}
           initialServerDraftId={route.draftId ?? null}
           actorUserId={effectiveData.me.id}
           onCloseDraft={() => navigate(DEFAULT_ROUTE)}
@@ -1290,6 +1382,7 @@ export function App() {
           platformActions={platformActions}
           onOpenAdminDocumentation={openAdminDocumentation}
           onOpenUserHelp={openHelpDrawer}
+          supportApi={supportApi}
         />
       );
     }
@@ -1303,6 +1396,7 @@ export function App() {
           onDataChange={setData}
           adminApi={adminApi}
           connectorApi={connectorActions}
+          supportApi={supportApi}
           section={route.section}
           onSectionChange={(section) => navigate({ kind: "admin", section })}
           openDocumentationRequestKey={adminDocumentationRequestKey}
@@ -1378,8 +1472,10 @@ export function App() {
     chatBrandDisplayName,
     draftSessionKey,
     draftImport,
+    draftHandoff,
     registerDraftNavigationGuard,
     handleTransferToDraft,
+    handleSendToDrafts,
     openAdminDocumentation,
     openHelpDrawer,
     adminDocumentationRequestKey,
@@ -1476,9 +1572,8 @@ export function App() {
       onApiKeyLoad={handleAccountApiKeyLoad}
       onApiKeyCreate={handleAccountApiKeyCreate}
       onApiKeyRevoke={handleAccountApiKeyRevoke}
-      onSubmitIssueReport={async (payload) => {
-        await submitIssueReport(data.me.id, payload);
-      }}
+      onSubmitIssueReport={(payload) => submitIssueReport(data.me.id, payload)}
+      myReportsApi={myReportsApi}
       memoryApi={memoryApi}
     >
       {loading && (
