@@ -1,4 +1,4 @@
-import { BarChart3, BellRing, Clock3, DatabaseZap, Edit3, KeyRound, Lock, Mail, Palette, QrCode, ShieldAlert, UserPlus } from "lucide-react";
+import { BarChart3, BellRing, Clock3, DatabaseZap, Edit3, KeyRound, LifeBuoy, Lock, Mail, Palette, QrCode, ShieldAlert, UserPlus } from "lucide-react";
 import { TrainingDocumentationModal, type TrainingDeck } from "../TrainingVideoLibrary";
 import type { FocusRegion, TrainingVideoBase } from "../trainingVideoKit";
 
@@ -41,14 +41,12 @@ export type OwnerFocus =
   | "googlePreset"
   | "googleTestPassed"
   | "brandPreview"
-  | "brandFields"
   | "brandThemeColors"
   | "brandActions"
   | "policyCollapsed"
   | "policyFloor"
   | "policyToggles"
   | "budgetControls"
-  | "sharedConnectors"
   | "analyticsFilters"
   | "runtimeScorecards"
   | "activityCharts"
@@ -128,14 +126,6 @@ export type OwnerFocus =
   | "budgetSaved"
   | "budgetBlocked"
   | "budgetUnlimited"
-  | "connWebTested"
-  | "connWebKeyed"
-  | "connDriveForm"
-  | "connDriveTested"
-  | "connGraphForm"
-  | "connGraphTested"
-  | "connBoxTested"
-  | "connImanageTested"
   | "searchRebuilt"
   | "searchUserResults"
   | "searchUserPrivate"
@@ -165,11 +155,34 @@ export type OwnerFocus =
   | "retentionConfirmed"
   | "retentionHold"
   | "retentionConversation"
+  | "brandNameDomain"
+  | "brandLogoCard"
+  | "brandIconWide"
+  | "brandIconCard"
+  | "sharedConnectors"
+  | "connCeilingOff"
+  | "connCeilingAdmin"
+  | "connCeilingAllowed"
+  | "rpTickets"
+  | "rpSettingsModes"
+  | "rpAssistant"
+  | "rpHubOn"
+  | "rpTicketOpen"
+  | "rpShareDraft"
+  | "rpShareAi"
+  | "rpSharePreview"
+  | "rpShared"
+  | "rpHubQueue"
+  | "rpReporterShared"
+  | "rpAutoMode"
+  | "rpAutoShared"
+  | "rpOffBlocked"
+  | "rpSecurityPrivate"
   | "retentionPreviewHeld";
 
 export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
-  searchIndex: { frame: "training/owner/si-status.png", rect: { x: 261, y: 246, w: 889, h: 226 } },
-  modelBrowsingPolicy: { frame: "training/owner/md-browse-policy.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
+  searchIndex: { frame: "training/owner/si-status.png", rect: { x: 261, y: 245, w: 889, h: 226 } },
+  modelBrowsingPolicy: { frame: "training/owner/md-browse-policy.png", rect: { x: 282, y: 470, w: 847, h: 51 } },
   // vault/audit/alerts frames are local-stack re-captures with staged synthetic
   // keys, events, rules, and deliveries; rects measured from the live DOM.
   rolesDisclosure: { frame: "training/owner/ur-panel.png", rect: { x: 282, y: 125, w: 847, h: 223 } },
@@ -180,62 +193,58 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   ssoPanelOpen: { frame: "training/owner/sso-panel-open.png", rect: { x: 262, y: 0, w: 887, h: 230 } },
   ssoRedirectCopied: { frame: "training/owner/sso-redirect-copied.png", rect: { x: 282, y: 383, w: 847, h: 90 } },
   idpRealmCreate: { frame: "training/owner/idp-realm-create.png", rect: { x: 169, y: 131, w: 847, h: 593 } },
-  idpClientGeneral: { frame: "training/owner/idp-client-general.png", rect: { x: 279, y: 227, w: 877, h: 163 } },
-  idpClientCapability: { frame: "training/owner/idp-client-capability.png", rect: { x: 279, y: 227, w: 877, h: 461 } },
-  idpClientRedirect: { frame: "training/owner/idp-client-redirect.png", rect: { x: 279, y: 347, w: 877, h: 79 } },
-  idpClientSecret: { frame: "training/owner/idp-client-secret.png", rect: { x: 38, y: 443, w: 980, h: 59 } },
-  idpGroupMapper: { frame: "training/owner/idp-group-mapper.png", rect: { x: 13, y: 271, w: 1030, h: 219 } },
-  idpGroups: { frame: "training/owner/idp-groups.png", rect: { x: 589, y: 380, w: 596, h: 143 } },
-  idpUserCreate: { frame: "training/owner/idp-user-create.png", rect: { x: 13, y: 289, w: 1030, h: 417 } },
+  idpClientGeneral: { frame: "training/owner/idp-client-general.png", rect: { x: 279, y: 256, w: 877, h: 163 } },
+  idpClientCapability: { frame: "training/owner/idp-client-capability.png", rect: { x: 279, y: 256, w: 877, h: 461 } },
+  idpClientRedirect: { frame: "training/owner/idp-client-redirect.png", rect: { x: 279, y: 376, w: 877, h: 79 } },
+  idpClientSecret: { frame: "training/owner/idp-client-secret.png", rect: { x: 38, y: 472, w: 980, h: 59 } },
+  idpGroupMapper: { frame: "training/owner/idp-group-mapper.png", rect: { x: 13, y: 300, w: 1030, h: 219 } },
+  idpGroups: { frame: "training/owner/idp-groups.png", rect: { x: 589, y: 409, w: 596, h: 143 } },
+  idpUserCreate: { frame: "training/owner/idp-user-create.png", rect: { x: 13, y: 318, w: 1030, h: 417 } },
   ssoProviderDetails: { frame: "training/owner/sso-form-filled.png", rect: { x: 282, y: 0, w: 847, h: 268 } },
   ssoAccessFields: { frame: "training/owner/sso-access-settings.png", rect: { x: 282, y: 0, w: 847, h: 198 } },
   ssoAccessToggles: { frame: "training/owner/sso-access-settings.png", rect: { x: 282, y: 501, w: 847, h: 163 } },
   ssoMfaToggle: { frame: "training/owner/sso-access-settings.png", rect: { x: 282, y: 557, w: 847, h: 51 } },
   ssoActionsRow: { frame: "training/owner/sso-actions.png", rect: { x: 282, y: 405, w: 847, h: 45 } },
   ssoTestPassed: { frame: "training/owner/sso-saved-tested.png", rect: { x: 282, y: 368, w: 847, h: 118 } },
-  ssoSignInForm: { frame: "training/owner/sso-signin-sso.png", rect: { x: 101, y: 317, w: 405, h: 356 } },
+  ssoSignInForm: { frame: "training/owner/sso-signin-sso.png", rect: { x: 101, y: 339, w: 405, h: 354 } },
   idpLogin: { frame: "training/owner/idp-login.png", rect: { x: 387, y: 368, w: 411, h: 227 } },
   ssoFirstWelcome: { frame: "training/owner/sso-first-welcome.png", rect: { x: 258, y: 21, w: 895, h: 259 } },
   ssoJitUserRow: { frame: "training/owner/sso-jit-user.png", rect: { x: 262, y: 750, w: 887, h: 61 } },
   ssoMappingEditor: { frame: "training/owner/sso-admin-mapping.png", rect: { x: 297, y: 438, w: 390, h: 227 } },
-  ssoGroupsSyncedRow: { frame: "training/owner/sso-groups-synced.png", rect: { x: 262, y: 605, w: 887, h: 61 } },
+  ssoGroupsSyncedRow: { frame: "training/owner/sso-groups-synced.png", rect: { x: 262, y: 642, w: 887, h: 61 } },
   ssoEnforceRow: { frame: "training/owner/sso-enforce-saved.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
-  ssoPasswordBlocked: { frame: "training/owner/sso-password-blocked.png", rect: { x: 101, y: 295, w: 405, h: 437 } },
-  ssoDomainRejected: { frame: "training/owner/sso-domain-rejected.png", rect: { x: 101, y: 317, w: 405, h: 430 } },
+  ssoPasswordBlocked: { frame: "training/owner/sso-password-blocked.png", rect: { x: 101, y: 238, w: 405, h: 435 } },
+  ssoDomainRejected: { frame: "training/owner/sso-domain-rejected.png", rect: { x: 101, y: 339, w: 405, h: 428 } },
   entraPreset: { frame: "training/owner/sso-preset-entra.png", rect: { x: 282, y: 410, w: 847, h: 201 } },
   oktaPreset: { frame: "training/owner/sso-preset-okta.png", rect: { x: 282, y: 410, w: 847, h: 201 } },
   googlePreset: { frame: "training/owner/sso-preset-google.png", rect: { x: 282, y: 410, w: 847, h: 201 } },
   googleTestPassed: { frame: "training/owner/sso-google-tested.png", rect: { x: 282, y: 368, w: 847, h: 118 } },
-  brandPreview: { frame: "training/owner/br-panel.png", rect: { x: 262, y: 0, w: 887, h: 192 } },
-  brandFields: { frame: "training/owner/br-name-logo.png", rect: { x: 282, y: 105, w: 847, h: 600 } },
-  brandThemeColors: { frame: "training/owner/br-colors.png", rect: { x: 282, y: 37, w: 847, h: 255 } },
-  brandActions: { frame: "training/owner/br-reset.png", rect: { x: 282, y: 345, w: 847, h: 155 } },
+  brandPreview: { frame: "training/owner/br-panel.png", rect: { x: 262, y: 0, w: 887, h: 203 } },
+  brandThemeColors: { frame: "training/owner/br-colors.png", rect: { x: 282, y: 199, w: 847, h: 255 } },
+  brandActions: { frame: "training/owner/br-reset.png", rect: { x: 282, y: 399, w: 847, h: 105 } },
   // A 4:3 camera zoom removes the capture tool's unused right/bottom canvas
   // while preserving the native console text. Expanded sections use dedicated
   // scrolled frames, and rects are measured in the final zoomed composition.
-  policyCollapsed: { frame: "training/owner/pc-overview.png", rect: { x: 261, y: 418, w: 889, h: 98 } },
+  policyCollapsed: { frame: "training/owner/pc-overview.png", rect: { x: 261, y: 529, w: 889, h: 98 } },
   // The enforced-floor row sits above the toggle stack in the toggles frame,
   // inside the readable-viewport envelope pinned by trainingVideoKit.test.ts;
   // sharing the frame with policyToggles glides the highlight down the stack.
   policyFloor: { frame: "training/owner/pc-policy-toggles.png", rect: { x: 282, y: 104, w: 847, h: 51 } },
   policyToggles: { frame: "training/owner/pc-policy-toggles.png", rect: { x: 262, y: 84, w: 887, h: 515 } },
-  budgetControls: { frame: "training/owner/pc-budget-panel.png", rect: { x: 283, y: 391, w: 845, h: 94 } },
-  // The legacy filename is retained; recapture the new owner Connectors panel
-  // and apply its measured bounds before publishing the reconciled UI.
-  sharedConnectors: { frame: "training/owner/cn-panel.png", rect: { x: 261, y: 0, w: 889, h: 855 } },
-  analyticsFilters: { frame: "training/owner/an-runtime-scoped.png", rect: { x: 262, y: 98, w: 887, h: 303 } },
-  runtimeScorecards: { frame: "training/owner/an-runtime.png", rect: { x: 262, y: 245, w: 887, h: 610 } },
+  budgetControls: { frame: "training/owner/pc-budget-panel.png", rect: { x: 283, y: 502, w: 845, h: 94 } },
+  analyticsFilters: { frame: "training/owner/an-runtime-scoped.png", rect: { x: 262, y: 98, w: 887, h: 309 } },
+  runtimeScorecards: { frame: "training/owner/an-runtime.png", rect: { x: 262, y: 251, w: 887, h: 604 } },
   activityCharts: { frame: "training/owner/an-activity.png", rect: { x: 262, y: 391, w: 887, h: 277 } },
-  usageScorecards: { frame: "training/owner/an-usage.png", rect: { x: 262, y: 286, w: 887, h: 156 } },
-  usageByUser: { frame: "training/owner/an-usage-user.png", rect: { x: 262, y: 47, w: 887, h: 782 } },
-  auditSignalBoard: { frame: "training/owner/au-summary.png", rect: { x: 262, y: 322, w: 887, h: 533 } },
-  auditInsightsTrends: { frame: "training/owner/au-insights.png", rect: { x: 282, y: 465, w: 847, h: 306 } },
+  usageScorecards: { frame: "training/owner/an-usage.png", rect: { x: 262, y: 292, w: 887, h: 156 } },
+  usageByUser: { frame: "training/owner/an-usage-user.png", rect: { x: 262, y: 41, w: 887, h: 788 } },
+  auditSignalBoard: { frame: "training/owner/au-summary.png", rect: { x: 262, y: 321, w: 887, h: 534 } },
+  auditInsightsTrends: { frame: "training/owner/au-insights.png", rect: { x: 282, y: 56, w: 847, h: 306 } },
   auditInsightsPeople: { frame: "training/owner/au-insights-people.png", rect: { x: 282, y: 17, w: 847, h: 658 } },
   auditInvestigation: { frame: "training/owner/au-signal-records.png", rect: { x: 229, y: 69, w: 727, h: 717 } },
-  auditSecurityAlerts: { frame: "training/owner/au-alerts.png", rect: { x: 262, y: 98, w: 887, h: 746 } },
-  trailFilters: { frame: "training/owner/au-trail-filtered.png", rect: { x: 262, y: 245, w: 887, h: 85 } },
-  alertSmtp: { frame: "training/owner/al-email-panel.png", rect: { x: 261, y: 234, w: 889, h: 521 } },
-  alertTemplates: { frame: "training/owner/al-rule-templates.png", rect: { x: 282, y: 79, w: 633, h: 45 } },
+  auditSecurityAlerts: { frame: "training/owner/au-alerts.png", rect: { x: 262, y: 98, w: 887, h: 752 } },
+  trailFilters: { frame: "training/owner/au-trail-filtered.png", rect: { x: 262, y: 251, w: 887, h: 85 } },
+  alertSmtp: { frame: "training/owner/al-email-panel.png", rect: { x: 261, y: 233, w: 889, h: 521 } },
+  alertTemplates: { frame: "training/owner/al-rule-templates.png", rect: { x: 282, y: 79, w: 847, h: 93 } },
   alertDeliveries: { frame: "training/owner/al-delivered.png", rect: { x: 283, y: 384, w: 845, h: 107 } },
   alertRuleForm: { frame: "training/owner/al-rule-form.png", rect: { x: 262, y: 0, w: 887, h: 642 } },
   // Elastic frames come from a real single-node synthetic cluster the panel
@@ -245,19 +254,19 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   elasticStreams: { frame: "training/owner/el-streams.png", rect: { x: 282, y: 56, w: 847, h: 384 } },
   elasticChecks: { frame: "training/owner/el-checked.png", rect: { x: 282, y: 130, w: 847, h: 289 } },
   elasticDelivery: { frame: "training/owner/el-synced.png", rect: { x: 282, y: 521, w: 847, h: 334 } },
-  firstOwnerSetup: { frame: "training/owner/fw-setup.png", rect: { x: 101, y: 359, w: 405, h: 449 } },
+  firstOwnerSetup: { frame: "training/owner/fw-setup.png", rect: { x: 101, y: 380, w: 405, h: 449 } },
   firstOwnerWelcome: { frame: "training/owner/fw-welcome.png", rect: { x: 258, y: 21, w: 895, h: 280 } },
-  firstProviderValidated: { frame: "training/owner/fw-provider-connected.png", rect: { x: 282, y: 463, w: 847, h: 210 } },
+  firstProviderValidated: { frame: "training/owner/fw-provider-connected.png", rect: { x: 282, y: 462, w: 847, h: 210 } },
   firstWorkspaceAccess: { frame: "training/owner/fw-model-access.png", rect: { x: 282, y: 645, w: 867, h: 163 } },
   firstWorkspaceReply: { frame: "training/owner/fw-first-reply.png", rect: { x: 315, y: 311, w: 839, h: 49 } },
-  firstProvidersEmpty: { frame: "training/owner/fw-providers-empty.png", rect: { x: 262, y: 279, w: 887, h: 272 } },
-  firstProviderForm: { frame: "training/owner/fw-provider-form.png", rect: { x: 262, y: 362, w: 887, h: 321 } },
-  firstModelEnabled: { frame: "training/owner/fw-model-enabled.png", rect: { x: 283, y: 468, w: 845, h: 77 } },
+  firstProvidersEmpty: { frame: "training/owner/fw-providers-empty.png", rect: { x: 262, y: 278, w: 887, h: 272 } },
+  firstProviderForm: { frame: "training/owner/fw-provider-form.png", rect: { x: 262, y: 361, w: 887, h: 321 } },
+  firstModelEnabled: { frame: "training/owner/fw-model-enabled.png", rect: { x: 283, y: 467, w: 845, h: 77 } },
   firstAccountCreated: { frame: "training/owner/fw-account-created.png", rect: { x: 282, y: 171, w: 847, h: 289 } },
   firstPasswordDialog: { frame: "training/owner/fw-password-dialog.png", rect: { x: 359, y: 279, w: 467, h: 297 } },
-  firstPersonSignIn: { frame: "training/owner/fw-person-signin.png", rect: { x: 101, y: 302, w: 405, h: 290 } },
+  firstPersonSignIn: { frame: "training/owner/fw-person-signin.png", rect: { x: 101, y: 317, w: 405, h: 290 } },
   firstPersonNewPassword: { frame: "training/owner/fw-person-new-password.png", rect: { x: 390, y: 357, w: 405, h: 288 } },
-  pvOverview: { frame: "training/owner/pv-overview.png", rect: { x: 262, y: 362, w: 887, h: 493 } },
+  pvOverview: { frame: "training/owner/pv-overview.png", rect: { x: 262, y: 361, w: 887, h: 494 } },
   pvKindMenu: { frame: "training/owner/pv-kind-menu.png", rect: { x: 496, y: 82, w: 207, h: 287 } },
   pvLocalForm: { frame: "training/owner/pv-local-form.png", rect: { x: 262, y: 0, w: 887, h: 317 } },
   pvLocalConnected: { frame: "training/owner/pv-local-connected.png", rect: { x: 282, y: 470, w: 420, h: 338 } },
@@ -280,10 +289,10 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   kvReplaceForm: { frame: "training/owner/kv-replace-form.png", rect: { x: 300, y: 456, w: 811, h: 163 } },
   kvOldDeleted: { frame: "training/owner/kv-old-deleted.png", rect: { x: 300, y: 638, w: 800, h: 152 } },
   kvExpired: { frame: "training/owner/kv-expired.png", rect: { x: 300, y: 741, w: 800, h: 49 } },
-  mdOverview: { frame: "training/owner/md-overview.png", rect: { x: 601, y: 269, w: 482, h: 45 } },
-  mdFilter: { frame: "training/owner/md-filter.png", rect: { x: 363, y: 402, w: 223, h: 183 } },
+  mdOverview: { frame: "training/owner/md-overview.png", rect: { x: 595, y: 268, w: 488, h: 45 } },
+  mdFilter: { frame: "training/owner/md-filter.png", rect: { x: 363, y: 401, w: 223, h: 183 } },
   mdDetails: { frame: "training/owner/md-details.png", rect: { x: 295, y: 399, w: 821, h: 298 } },
-  mdDisabled: { frame: "training/owner/md-disabled.png", rect: { x: 283, y: 523, w: 845, h: 61 } },
+  mdDisabled: { frame: "training/owner/md-disabled.png", rect: { x: 283, y: 522, w: 845, h: 61 } },
   mdUserMenu: { frame: "training/owner/md-user-menu.png", rect: { x: 829, y: 54, w: 287, h: 127 } },
   mdUserCatalog: { frame: "training/owner/md-user-catalog.png", rect: { x: 249, y: 82, w: 687, h: 657 } },
   mdUserCatalogOff: { frame: "training/owner/md-user-catalog-off.png", rect: { x: 249, y: 82, w: 687, h: 504 } },
@@ -292,28 +301,20 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   rolesRoleChanged: { frame: "training/owner/ur-role-changed.png", rect: { x: 282, y: 395, w: 847, h: 65 } },
   rolesAccountDeleted: { frame: "training/owner/ur-account-deleted.png", rect: { x: 260, y: 162, w: 891, h: 55 } },
   rolesAdminSignedIn: { frame: "training/owner/ur-admin-signed-in.png", rect: { x: 9, y: 680, w: 207, h: 156 } },
-  brandGradientError: { frame: "training/owner/br-gradient-error.png", rect: { x: 282, y: 0, w: 847, h: 311 } },
+  brandGradientError: { frame: "training/owner/br-gradient-error.png", rect: { x: 282, y: 139, w: 847, h: 315 } },
   brandApplied: { frame: "training/owner/br-applied.png", rect: { x: 0, y: 0, w: 229, h: 855 } },
-  brandSignIn: { frame: "training/owner/br-signin.png", rect: { x: 101, y: 107, w: 405, h: 41 } },
-  brandAppIcon: { frame: "training/owner/br-app-icon.png", rect: { x: 461, y: 296, w: 263, h: 263 } },
+  brandSignIn: { frame: "training/owner/br-signin.png", rect: { x: 101, y: 101, w: 405, h: 61 } },
+  brandAppIcon: { frame: "training/owner/br-app-icon.png", rect: { x: 333, y: 168, w: 519, h: 519 } },
   policySaved: { frame: "training/owner/pc-policy-saved.png", rect: { x: 260, y: 162, w: 891, h: 55 } },
   policyApiAccess: { frame: "training/owner/pc-api-access.png", rect: { x: 777, y: 255, w: 382, h: 222 } },
-  budgetUsd: { frame: "training/owner/pc-budget-usd.png", rect: { x: 283, y: 391, w: 845, h: 110 } },
-  budgetSaved: { frame: "training/owner/pc-budget-saved.png", rect: { x: 283, y: 391, w: 845, h: 246 } },
+  budgetUsd: { frame: "training/owner/pc-budget-usd.png", rect: { x: 283, y: 502, w: 845, h: 110 } },
+  budgetSaved: { frame: "training/owner/pc-budget-saved.png", rect: { x: 283, y: 502, w: 845, h: 246 } },
   budgetBlocked: { frame: "training/owner/pc-budget-blocked.png", rect: { x: 257, y: 219, w: 897, h: 81 } },
-  budgetUnlimited: { frame: "training/owner/pc-budget-unlimited.png", rect: { x: 283, y: 334, w: 845, h: 246 } },
-  connWebTested: { frame: "training/owner/cn-web-tested.png", rect: { x: 282, y: 68, w: 847, h: 486 } },
-  connWebKeyed: { frame: "training/owner/cn-web-keyed.png", rect: { x: 282, y: 68, w: 847, h: 479 } },
-  connDriveForm: { frame: "training/owner/cn-gdrive-form.png", rect: { x: 282, y: 68, w: 847, h: 428 } },
-  connDriveTested: { frame: "training/owner/cn-gdrive-tested.png", rect: { x: 296, y: 266, w: 819, h: 130 } },
-  connGraphForm: { frame: "training/owner/cn-graph-form.png", rect: { x: 282, y: 68, w: 847, h: 446 } },
-  connGraphTested: { frame: "training/owner/cn-graph-tested.png", rect: { x: 296, y: 266, w: 819, h: 200 } },
-  connBoxTested: { frame: "training/owner/cn-box-tested.png", rect: { x: 282, y: 68, w: 847, h: 544 } },
-  connImanageTested: { frame: "training/owner/cn-imanage-tested.png", rect: { x: 296, y: 306, w: 819, h: 113 } },
-  searchRebuilt: { frame: "training/owner/si-rebuilt.png", rect: { x: 261, y: 246, w: 889, h: 308 } },
+  budgetUnlimited: { frame: "training/owner/pc-budget-unlimited.png", rect: { x: 283, y: 445, w: 845, h: 246 } },
+  searchRebuilt: { frame: "training/owner/si-rebuilt.png", rect: { x: 261, y: 245, w: 889, h: 308 } },
   searchUserResults: { frame: "training/owner/si-user-results.png", rect: { x: 279, y: 99, w: 627, h: 588 } },
   searchUserPrivate: { frame: "training/owner/si-user-private.png", rect: { x: 279, y: 99, w: 627, h: 205 } },
-  alertSmtpFilled: { frame: "training/owner/al-smtp-filled.png", rect: { x: 261, y: 234, w: 889, h: 521 } },
+  alertSmtpFilled: { frame: "training/owner/al-smtp-filled.png", rect: { x: 261, y: 233, w: 889, h: 521 } },
   alertTestFailed: { frame: "training/owner/al-test-failed.png", rect: { x: 262, y: 384, w: 887, h: 86 } },
   alertTestSent: { frame: "training/owner/al-test-sent.png", rect: { x: 262, y: 384, w: 887, h: 86 } },
   alertRuleCreated: { frame: "training/owner/al-rule-created.png", rect: { x: 282, y: 386, w: 847, h: 82 } },
@@ -323,23 +324,46 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   kibanaImport: { frame: "training/owner/kb-import.png", rect: { x: 885, y: 93, w: 300, h: 762 } },
   kibanaImported: { frame: "training/owner/kb-imported.png", rect: { x: 885, y: 93, w: 300, h: 762 } },
   kibanaDiscover: { frame: "training/owner/kb-discover.png", rect: { x: 300, y: 384, w: 885, h: 471 } },
-  analyticsOverview: { frame: "training/owner/an-overview.png", rect: { x: 261, y: 234, w: 889, h: 447 } },
+  analyticsOverview: { frame: "training/owner/an-overview.png", rect: { x: 261, y: 233, w: 889, h: 447 } },
   runtimeCsv: { frame: "training/owner/an-runtime-csv.png", rect: { x: 774, y: 67, w: 307, h: 252 } },
-  feedbackEvents: { frame: "training/owner/an-feedback.png", rect: { x: 262, y: 408, w: 887, h: 447 } },
+  feedbackEvents: { frame: "training/owner/an-feedback.png", rect: { x: 262, y: 414, w: 887, h: 441 } },
   feedbackRecord: { frame: "training/owner/an-feedback-record.png", rect: { x: 179, y: 57, w: 827, h: 741 } },
-  auditChartRecords: { frame: "training/owner/au-chart-records.png", rect: { x: 229, y: 17, w: 727, h: 821 } },
-  auditAlertAcknowledged: { frame: "training/owner/au-alert-acknowledged.png", rect: { x: 262, y: 317, w: 887, h: 527 } },
+  auditChartRecords: { frame: "training/owner/au-chart-records.png", rect: { x: 229, y: 52, w: 727, h: 751 } },
+  auditAlertAcknowledged: { frame: "training/owner/au-alert-acknowledged.png", rect: { x: 262, y: 323, w: 887, h: 527 } },
   trailExport: { frame: "training/owner/au-trail-export.png", rect: { x: 669, y: 451, w: 307, h: 252 } },
   retentionEntry: { frame: "training/owner/rt-navigation.png", rect: { x: 261, y: 422, w: 889, h: 95 } },
   retentionSchedule: { frame: "training/owner/rt-schedule.png", rect: { x: 282, y: 154, w: 849, h: 221 } },
   retentionSource: { frame: "training/owner/rt-source.png", rect: { x: 282, y: 0, w: 847, h: 855 } },
   retentionPreviewFinite: { frame: "training/owner/rt-preview.png", rect: { x: 282, y: 370, w: 847, h: 174 } },
   retentionForeverSaved: { frame: "training/owner/rt-forever-saved.png", rect: { x: 282, y: 405, w: 847, h: 86 } },
-  retentionScan: { frame: "training/owner/rt-scan.png", rect: { x: 282, y: 6, w: 847, h: 192 } },
-  retentionConfirmed: { frame: "training/owner/rt-confirmed.png", rect: { x: 282, y: 6, w: 847, h: 409 } },
+  retentionScan: { frame: "training/owner/rt-scan.png", rect: { x: 282, y: 0, w: 847, h: 189 } },
+  retentionConfirmed: { frame: "training/owner/rt-confirmed.png", rect: { x: 282, y: 0, w: 847, h: 406 } },
   retentionHold: { frame: "training/owner/rt-hold.png", rect: { x: 301, y: 321, w: 809, h: 212 } },
-  retentionConversation: { frame: "training/owner/rt-conversation.png", rect: { x: 179, y: 132, w: 827, h: 591 } },
+  retentionConversation: { frame: "training/owner/rt-conversation.png", rect: { x: 179, y: 127, w: 827, h: 601 } },
   retentionPreviewHeld: { frame: "training/owner/rt-preview-held.png", rect: { x: 282, y: 370, w: 847, h: 116 } },
+  brandNameDomain: { frame: "training/owner/br-name-domain.png", rect: { x: 282, y: 219, w: 847, h: 108 } },
+  brandLogoCard: { frame: "training/owner/br-logo-card.png", rect: { x: 282, y: 105, w: 564, h: 542 } },
+  brandIconWide: { frame: "training/owner/br-icon-wide.png", rect: { x: 708, y: 249, w: 421, h: 356 } },
+  brandIconCard: { frame: "training/owner/br-icon-card.png", rect: { x: 708, y: 105, w: 421, h: 542 } },
+  sharedConnectors: { frame: "training/owner/pc-connections.png", rect: { x: 956, y: 402, w: 113, h: 453 } },
+  connCeilingOff: { frame: "training/owner/pc-ceiling-off.png", rect: { x: 282, y: 503, w: 847, h: 51 } },
+  connCeilingAdmin: { frame: "training/owner/pc-ceiling-admin.png", rect: { x: 282, y: 503, w: 847, h: 51 } },
+  connCeilingAllowed: { frame: "training/owner/pc-ceiling-allowed.png", rect: { x: 282, y: 503, w: 847, h: 51 } },
+  rpTickets: { frame: "training/owner/rp-tickets.png", rect: { x: 261, y: 233, w: 889, h: 157 } },
+  rpSettingsModes: { frame: "training/owner/rp-settings.png", rect: { x: 262, y: 379, w: 887, h: 253 } },
+  rpAssistant: { frame: "training/owner/rp-assistant.png", rect: { x: 261, y: 247, w: 889, h: 473 } },
+  rpHubOn: { frame: "training/owner/rp-hub-on.png", rect: { x: 261, y: 308, w: 889, h: 521 } },
+  rpTicketOpen: { frame: "training/owner/rp-ticket-open.png", rect: { x: 672, y: 160, w: 461, h: 435 } },
+  rpShareDraft: { frame: "training/owner/rp-share-draft.png", rect: { x: 229, y: 137, w: 727, h: 581 } },
+  rpShareAi: { frame: "training/owner/rp-share-ai.png", rect: { x: 250, y: 279, w: 685, h: 353 } },
+  rpSharePreview: { frame: "training/owner/rp-share-preview.png", rect: { x: 250, y: 486, w: 685, h: 290 } },
+  rpShared: { frame: "training/owner/rp-shared.png", rect: { x: 672, y: 611, w: 461, h: 153 } },
+  rpHubQueue: { frame: "training/owner/rp-hub-queue.png", rect: { x: 672, y: 307, w: 461, h: 241 } },
+  rpReporterShared: { frame: "training/owner/rp-reporter-shared.png", rect: { x: 777, y: 263, w: 382, h: 63 } },
+  rpAutoMode: { frame: "training/owner/rp-auto-mode.png", rect: { x: 262, y: 409, w: 887, h: 163 } },
+  rpAutoShared: { frame: "training/owner/rp-auto-shared.png", rect: { x: 672, y: 471, w: 461, h: 79 } },
+  rpOffBlocked: { frame: "training/owner/rp-off-blocked.png", rect: { x: 250, y: 423, w: 685, h: 75 } },
+  rpSecurityPrivate: { frame: "training/owner/rp-security-private.png", rect: { x: 229, y: 272, w: 727, h: 311 } },
 };
 
 type OwnerGuideIcon =
@@ -355,6 +379,7 @@ type OwnerGuideIcon =
   | "audit"
   | "alerts"
   | "elastic"
+  | "support"
   | "retention";
 
 export type OwnerTrainingVideo = TrainingVideoBase & { icon: OwnerGuideIcon };
@@ -434,6 +459,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       { symptom: "\"Key saved; model sync failed: Provider model sync failed with HTTP 401.\"", fix: "The vendor rejected the key. Create a new key in the vendor's console, then use Replace on the key row." },
       { symptom: "The person sees No connected models in the Model menu.", fix: "Turn the model on in Models, and check Admin console › Model Access: the model needs a group the person belongs to, such as Default Users." },
       { symptom: "\"Invalid local credentials.\" when the person signs in.", fix: "Check the email and the temporary password. Set a new temporary password from Role Boundary if it was lost; it is shown only once." },
+      { symptom: "The first reply reads \"Web search (duckduckgo) is unavailable: … Turn off Web for this reply to continue without it.\"", fix: "Web is on by default for new chats, and the server could not reach DuckDuckGo. Turn off Web in Send options and send again, or choose another engine for Web Search in Admin console › Connections." },
     ],
     scenes: [
       {
@@ -1263,7 +1289,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       {
         label: "Admin",
         steps: [
-          "Everything a user can do, plus the Admin console: users, groups, model access, SSO mappings, analytics, policies, audit, and alerts for the organization.",
+          "Everything a user can do, plus the Admin console for the organization: Users, Groups, Model Access, Connections, SSO, Analytics, Reports, Policies, Datasets, Audit, and Alerts.",
           "No Platform console: providers, keys, branding, and platform policies stay with owners.",
         ],
       },
@@ -1544,7 +1570,8 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         narration:
           "To map identity provider groups to workspace groups, the I D token needs a groups claim. Open Client scopes, then the client's dedicated scope, and configure a Group Membership mapper. Name the claim groups. Turn off Full group path, so values read litigation rather than slash litigation. Keep Add to I D token on, and save.",
         durationSeconds: 23,
-        calloutPlacement: "right-mid",
+        calloutPlacement: "lower-right",
+        captionPlacement: "top",
         focus: "idpGroupMapper",
       },
       {
@@ -2177,28 +2204,28 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
   {
     id: "policies-connectors",
     audioSrc: "training/owner/policies-connectors.mp3",
-    title: "Policies, budget, and connectors",
-    description: "Set the organization's policy ceiling, cap workspace usage with a budget, and configure and test the shared connectors people use for files and web search.",
+    title: "Policies, budget, and the connector ceiling",
+    description: "Set the organization's policy ceiling, cap workspace usage with a budget, and decide which connectors any workspace may use.",
     icon: "policy",
     track: "Policies and branding",
     outcomes: [
       "Each Policy Controls switch is set deliberately, and its effect is confirmed",
       "A workspace budget caps tokens or dollars per day, week, or month",
-      "Each shared connector is saved and tested, with its real result read",
+      "A connector is turned off for every workspace, and allowed again, from Admin console › Connections",
     ],
     prerequisites: [
       "A platform owner account.",
-      "For connectors: an administrator at the vendor (Google Cloud, Microsoft Entra, Box, or iManage) who can register an application and grant consent.",
-      "Your instance's API address. Connector redirect URIs are that address followed by /api/connector-oauth/callback.",
+      "Your organization's usage limit, in tokens or dollars, and how often it resets.",
+      "The connectors your organization does not allow in any workspace. Setting a connector up (credentials, Test connection, Hide) is an administrator task taught in the Admin documentation's connectors lesson.",
     ],
     setupSteps: [
       "Open Platform console › Org Settings. Each area is a collapsed panel; expand only the one you need.",
       "Expand Policy Controls. Read each switch's description, which states what is true right now, then turn on or off the switches you need. Each change saves immediately and shows a confirmation.",
       "Expand Workspace Usage Budget. Choose the Budget measure (Token allowance or Dollar amount (USD)), the Reset period (Every day, Every week, or Every month, in UTC), and the limit. 0 means unlimited.",
       "Choose Save budget policy and read the confirmation, for example Workspace ceiling saved at 1,000 tokens daily.",
-      "Expand Connectors. Turn each source on or off with its switch; off removes it for everyone, including the API.",
-      "For a connector with credentials, choose Configure, pick the Authentication method, fill in the vendor's values and secret, and choose Save configuration.",
-      "Choose Test connection and read every line of the result. For Google Drive, finish with Connect Google Drive to authorize the workspace account.",
+      "Open Admin console › Connections. As platform owner, every connector row has Off for all.",
+      "To keep a source out of every workspace, choose Off for all and confirm. The row shows Off for all workspaces, and workspace administrators cannot turn it back on.",
+      "To lift the ceiling, choose Allow all. Each workspace's own switch decides again.",
     ],
     paths: [
       {
@@ -2231,46 +2258,19 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         ],
       },
       {
-        label: "Web Search",
+        label: "Connector ceiling (shown in the video)",
         steps: [
-          "Configure › Search engine: DuckDuckGo (keyless), SearXNG (your own instance; enter its URL and allow JSON output), or OpenAI, Anthropic, or OpenRouter web search (reuses that provider's key; each search is billed to that account).",
-          "Results per search: how many results are added to the prompt as cited context.",
-          "Save configuration, then Test connection runs a real search.",
+          "Admin console › Connections lists every source and tool. As platform owner, each row has Off for all.",
+          "Off for all asks: Turn … off for every workspace? Workspace admins can't turn it back on until you allow it again. Choose OK.",
+          "The confirmation reads … is off for every workspace. Administrators see Off for all workspaces on the row, with the switch greyed out.",
+          "Allow all reopens it: … is allowed in every workspace again. Each workspace's own switch decides whether it is on.",
         ],
       },
       {
-        label: "Google Drive",
+        label: "Setting up a connector",
         steps: [
-          "In Google Cloud, enable the Drive API, set up the Google Auth Platform, add the drive.readonly scope, and create a Web application client with the redirect URI.",
-          "Configure › Google OAuth (recommended): OAuth client ID, optional Drive folder ID and Source label, and the OAuth client secret. Save configuration.",
-          "Choose Connect Google Drive and sign in with the workspace account used for knowledge sync. Then Test connection.",
-          "Chat users connect their own Google account from the attach menu and see only their own files.",
-        ],
-      },
-      {
-        label: "OneDrive / SharePoint / Outlook (Microsoft Graph)",
-        steps: [
-          "In Entra, register a single-tenant app, add Files.Read.All (and Sites.Read.All) as application permissions, grant admin consent, and create a client secret.",
-          "Configure › App-only (client credentials, recommended): Directory (tenant) ID, Application (client) ID, optional SharePoint site, Drive, and Root folder IDs, and the Client secret.",
-          "Save configuration, then Test connection requests a token and calls Graph.",
-          "For chat attachments, also add the scopes as delegated permissions and the Web redirect URI.",
-        ],
-      },
-      {
-        label: "Box",
-        steps: [
-          "In the Box Developer Console, create a Server app with Client Credentials Grant, App + Enterprise Access, and Read all files and folders; submit it, and have a Box admin authorize it in Admin Console › Platform › Platform Apps.",
-          "Configure › Client Credentials Grant (recommended): Client ID, Enterprise ID, optional Folder ID, and the Client secret.",
-          "Save configuration, then Test connection.",
-        ],
-      },
-      {
-        label: "iManage",
-        steps: [
-          "In iManage Control Center, add a Web, confidential application with the redirect URI and refresh tokens allowed.",
-          "Configure › Each user signs in (recommended): Instance URL, API key (client ID), Customer ID, Library ID, optional Workspace ID, and the OAuth client secret.",
-          "Save configuration. Test connection confirms the fields; each person completes verification by opening iManage from chat and signing in.",
-          "Service account for background sync is only for knowledge sync; chat always uses each person's own sign-in.",
+          "Credentials, Test connection, and Hide for Google Drive, OneDrive / SharePoint / Outlook, Box, iManage, and Web Search are done per workspace in Admin console › Connections.",
+          "Follow the connectors lesson in the Admin documentation for each vendor's console steps and real test results.",
         ],
       },
     ],
@@ -2278,40 +2278,39 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Each policy change shows its own confirmation, and the switch's description now describes the new state.",
       "With Downstream API access on, an administrator's Account panel shows API access with Create key.",
       "The budget panel shows the saved ceiling and the current period's usage; a person who exceeds it gets the budget message instead of a reply.",
-      "A connector's Test connection lists Required fields, Authentication, and API access as passed.",
+      "After Off for all, the row shows Off for all workspaces and Allow all, and an administrator's switch for it is greyed out.",
     ],
     troubleshooting: [
-      { symptom: "\"Web search test failed: DuckDuckGo returned a page with no parseable results (it rate-limits automated queries).\"", fix: "DuckDuckGo limits automated searches from busy servers. Retry later, or switch to SearXNG or a provider's web search." },
-      { symptom: "\"OpenAI web search reuses the workspace's OpenAI provider key. Add an active OpenAI key under Providers, or switch to a keyless engine.\"", fix: "Add an OpenAI key in Providers, or choose DuckDuckGo or SearXNG." },
-      { symptom: "\"Google Drive is not connected: no refresh token is stored …\"", fix: "Save the client ID and secret, then choose Connect Google Drive and finish Google's consent screen." },
-      { symptom: "\"Microsoft Graph token request failed: token endpoint returned HTTP 400: AADSTS90002: Tenant '…' not found.\"", fix: "The Directory (tenant) ID is wrong. Copy it from the app's Overview page in Entra." },
-      { symptom: "\"Box token request failed: token endpoint returned HTTP 400: The client credentials are invalid\"", fix: "Check the Client ID and secret, and that a Box admin authorized the app in Platform Apps." },
       { symptom: "People keep seeing Aperture Chat is working for several minutes, then the budget message.", fix: "The workspace budget is spent. Raise or clear the ceiling, or wait for the next UTC period. The chat currently retries for a few minutes before it shows the message." },
+      { symptom: "A ceiling is saved but people can still chat.", fix: "The ceiling blocks the next request only once usage for the period has reached it. The usage card under the controls shows how much has been used." },
       { symptom: "\"Policy was not saved: …\"", fix: "The change was not stored and the switch returns to its previous state. Read the reason and try again." },
+      { symptom: "A workspace administrator cannot turn a connector on, and its row says Off for all workspaces.", fix: "A platform owner turned it off for every workspace. An owner chooses Allow all on that row in Admin console › Connections." },
+      { symptom: "\"… was not changed. …\" after Off for all or Allow all", fix: "Nothing was saved. Read the reason, then try again." },
+      { symptom: "Connectors are missing from Org Settings.", fix: "They moved to Admin console › Connections, where each workspace sets them up and the owner sets the ceiling." },
     ],
     scenes: [
       {
         title: "Before you begin",
-        caption: "An owner account, vendor administrators for any connectors, and your instance's API address.",
+        caption: "An owner account, your usage limit, and the connectors no workspace may use.",
         narration:
-          "This lesson covers three owner controls in Org Settings: the policy ceiling, the workspace budget, and the shared connectors for files and web search. For connectors, you need an administrator at each vendor who can register an application, and your instance's address for the redirect U R I.",
-        durationSeconds: 20,
+          "This lesson covers three owner controls: the policy ceiling in Org Settings, the workspace usage budget, and the connector ceiling in the Admin console's Connections tab. Before you begin, know your organization's usage limit and how often it resets, and which connectors no workspace may use.",
+        durationSeconds: 21,
         card: {
           label: "Checklist",
           where: "Have these ready",
           steps: [
             "A platform owner account.",
-            "An administrator at each connector vendor: Google Cloud, Microsoft Entra, Box, or iManage.",
-            "Your instance's API address; redirect URIs end in /api/connector-oauth/callback.",
+            "Your usage limit, in tokens or dollars, and its reset period.",
+            "The connectors your organization does not allow in any workspace.",
           ],
         },
       },
       {
         title: "Org Settings panels",
-        caption: "Org Settings groups each area into a collapsed panel. Expand only the one you need.",
+        caption: "Org Settings groups each area into a collapsed panel. Connectors now live in Admin console › Connections.",
         narration:
-          "Open Platform console, then Org Settings. Each area is a collapsed panel: Role Boundary, Single Sign-On, Platform Branding, Policy Controls, Workspace Usage Budget, Connectors, and Elastic Analytics. Expand only the one you need.",
-        durationSeconds: 17,
+          "Open Platform console, then Org Settings. Below the search index, each area is a collapsed panel: Role Boundary, Single Sign-On, Platform Branding, Policy Controls, Workspace Usage Budget, and Elastic Analytics. Expand only the one you need. Connectors are not here; they live in the Admin console's Connections tab, which comes later in this lesson.",
+        durationSeconds: 24,
         calloutPlacement: "left-rail",
         focus: "policyCollapsed",
       },
@@ -2373,8 +2372,8 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Save a ceiling",
         caption: "Save budget policy: Workspace ceiling saved at 1,000 tokens daily.",
         narration:
-          "Here the ceiling is set to one thousand tokens a day and saved. Today's usage is already above it, so the next request will be refused.",
-        durationSeconds: 10,
+          "Here the ceiling is set to one thousand tokens a day and saved. Someone has already chatted today, and the usage card shows that today's usage is above the ceiling, so the next request will be refused.",
+        durationSeconds: 14,
         calloutPlacement: "left-rail",
         focus: "budgetSaved",
       },
@@ -2397,157 +2396,41 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         focus: "budgetUnlimited",
       },
       {
-        title: "Shared connectors",
-        caption: "Each source has a switch for everyone, and Configure for its credentials.",
+        title: "Connectors live in the Admin console",
+        caption: "Admin console › Connections: as platform owner, every row also has Off for all.",
         narration:
-          "Expand Connectors. Every source and tool has a switch; off removes it for everyone, in chat, pickers, the tool library, and the A P I. Sources that need credentials show Needs credentials until you configure them.",
-        durationSeconds: 16,
+          "Connectors are set up per workspace in Admin console, Connections, where administrators add credentials, test each source, and hide cloud sources from the attach menu. The connectors lesson in the Admin documentation covers that. As platform owner, you see one more button on every row: Off for all.",
+        durationSeconds: 21,
         calloutPlacement: "left-rail",
+        captionPlacement: "top",
         focus: "sharedConnectors",
       },
       {
-        title: "Web Search, tested live",
-        caption: "DuckDuckGo needs no key. Test connection runs a real search; here DuckDuckGo was rate-limiting.",
+        title: "Off for every workspace",
+        caption: "Off for all › OK: the row shows Off for all workspaces, and the button becomes Allow all.",
         narration:
-          "Web Search works without a key using DuckDuckGo. Save the configuration, then Test connection runs a real search. In this recording, DuckDuckGo was limiting automated searches, so the test failed with that exact reason. Retry later, or choose another engine.",
-        durationSeconds: 19,
+          "Choose Off for all on a source, here Box, and confirm the prompt. The message reads Box is off for every workspace. The row now shows Off for all workspaces, and the button changes to Allow all.",
+        durationSeconds: 14,
         calloutPlacement: "left-rail",
-        focus: "connWebTested",
+        focus: "connCeilingOff",
       },
       {
-        title: "Keyed search engines",
-        caption: "OpenAI, Anthropic, or OpenRouter web search reuse that provider's key and bill that account.",
+        title: "What an administrator sees",
+        caption: "A workspace administrator sees Off for all workspaces, with the switch greyed out.",
         narration:
-          "You can also choose Open A I, Anthropic, or OpenRouter web search. They reuse that provider's key, and each search is billed to that account. This workspace has no Open A I key, so the test says to add one under Providers, or pick a keyless engine.",
-        durationSeconds: 18,
-        calloutPlacement: "left-rail",
-        focus: "connWebKeyed",
-      },
-      {
-        title: "Register Google Drive access",
-        caption: "Google Cloud console: Drive API, Google Auth Platform, drive.readonly, and a Web client.",
-        narration:
-          "For Google Drive, start in the Google Cloud console. Enable the Drive A P I, set up the Google Auth Platform with the drive read-only scope, and create a web application client with your redirect U R I. Copy the client I D and secret.",
-        durationSeconds: 17,
-        card: {
-          where: "Google Cloud console",
-          steps: [
-            "Enable the Google Drive API for your project.",
-            "Google Auth Platform › Branding: app name and support email. Audience: Internal.",
-            "Data Access: add the drive.readonly scope.",
-            "Clients › Create client › Web application.",
-            "Authorized redirect URIs: add the redirect URI below, then Create.",
-            "Copy the Client ID and Client secret.",
-          ],
-          values: [{ label: "Redirect URI", value: "https://your-instance.example/api/connector-oauth/callback" }],
-        },
-      },
-      {
-        title: "Configure Google Drive",
-        caption: "Google OAuth (recommended): client ID, optional folder ID and source label, then the secret.",
-        narration:
-          "Choose Configure on Google Drive and keep Google O Auth. Paste the client I D, an optional Drive folder I D to index from, and a source label people will recognise, then the client secret. Choose Save configuration.",
+          "Here is a workspace administrator's view of the same tab. Box shows Off for all workspaces, and its switch is greyed out, so they cannot turn it back on, and nobody in the workspace can use it. There is no Off for all button on their rows.",
         durationSeconds: 16,
         calloutPlacement: "left-rail",
-        focus: "connDriveForm",
+        focus: "connCeilingAdmin",
       },
       {
-        title: "Authorize, then test",
-        caption: "Until Connect Google Drive is completed, the test reports that no refresh token is stored.",
+        title: "Allow it again",
+        caption: "Allow all lifts the ceiling; each workspace's own switch decides again.",
         narration:
-          "Test connection checks each step. The fields are complete, but the workspace has not authorized Google yet, so it says no refresh token is stored. Choose Connect Google Drive, sign in with the workspace account on Google's consent screen, and test again.",
-        durationSeconds: 18,
+          "To lift the ceiling, choose Allow all. The message says Box is allowed in every workspace again, and each workspace's own switch decides whether it is on. This workspace had Box on, so it is on again.",
+        durationSeconds: 15,
         calloutPlacement: "left-rail",
-        focus: "connDriveTested",
-      },
-      {
-        title: "Register a Microsoft Graph app",
-        caption: "Entra: a single-tenant app with Files.Read.All, admin consent, and a client secret.",
-        narration:
-          "For OneDrive and SharePoint, register an app in the Microsoft Entra admin center. Add Files dot Read dot All, and Sites dot Read dot All for SharePoint, as application permissions, grant admin consent, and create a client secret. Copy its value straight away.",
-        durationSeconds: 19,
-        card: {
-          where: "Microsoft Entra admin center",
-          steps: [
-            "Entra ID › App registrations › New registration: Single tenant only, then Register.",
-            "Overview: copy the Application (client) ID and Directory (tenant) ID.",
-            "API permissions › Add a permission › Microsoft Graph › Application permissions: Files.Read.All (and Sites.Read.All).",
-            "Choose Grant admin consent for your tenant.",
-            "Certificates & secrets › New client secret › Add; copy the Value now.",
-          ],
-        },
-      },
-      {
-        title: "Configure OneDrive and SharePoint",
-        caption: "App-only (client credentials): tenant ID, client ID, optional site, drive, and folder, then the secret.",
-        narration:
-          "Choose Configure on OneDrive, SharePoint, and Outlook, and keep app-only access. Paste the directory tenant I D and the application client I D. A SharePoint site, drive, and root folder are optional. Add the client secret and save.",
-        durationSeconds: 17,
-        calloutPlacement: "left-rail",
-        focus: "connGraphForm",
-      },
-      {
-        title: "A real Microsoft answer",
-        caption: "With a made-up tenant ID, Microsoft answers AADSTS90002: Tenant not found.",
-        narration:
-          "This recording used a made-up tenant I D, so Microsoft's token service answered with error A A D S T S nine zero zero zero two: tenant not found. With your real values, the test acquires a token and checks Graph access.",
-        durationSeconds: 17,
-        calloutPlacement: "left-rail",
-        focus: "connGraphTested",
-      },
-      {
-        title: "Register a Box app",
-        caption: "Box Developer Console: a Server app with Client Credentials Grant, authorized by a Box admin.",
-        narration:
-          "For Box, create a server app with the client credentials grant in the Box Developer Console. Give it app plus enterprise access and read access to files and folders, submit it, and have a Box admin authorize it under Platform Apps.",
-        durationSeconds: 16,
-        card: {
-          where: "Box Developer Console and Admin Console",
-          steps: [
-            "Developer Console › New App › Server › Client Credentials Grant › Create.",
-            "Configuration: App Access Level App + Enterprise Access; scope Read all files and folders stored in Box.",
-            "Copy the Client ID and Client Secret.",
-            "Submit the app for admin approval.",
-            "Box admin: Admin Console › Platform › Platform Apps › Add, and paste the Client ID.",
-            "Enterprise ID: Admin Console › Account & Billing.",
-          ],
-        },
-      },
-      {
-        title: "Configure and test Box",
-        caption: "Client ID, Enterprise ID, optional Folder ID, and the secret. Box rejected these made-up credentials.",
-        narration:
-          "Choose Configure on Box. Enter the client I D, the enterprise I D, an optional folder I D, and the client secret, then save and test. Box rejected these made-up credentials with: the client credentials are invalid.",
-        durationSeconds: 17,
-        calloutPlacement: "left-rail",
-        focus: "connBoxTested",
-      },
-      {
-        title: "Register an iManage application",
-        caption: "iManage Control Center: a Web, confidential application with the redirect URL and refresh tokens.",
-        narration:
-          "For iManage, add an application in iManage Control Center. Make it a web, confidential client, add the redirect U R L, and allow refresh tokens. Copy the client I D and secret. Labels can vary by iManage version, so check with your iManage administrator.",
-        durationSeconds: 20,
-        card: {
-          where: "iManage Control Center",
-          steps: [
-            "Settings › Applications › Add Application › Configure Manually.",
-            "Authentication: Application Type Web, Client Type Confidential.",
-            "Add the Redirect URL, set a Client Secret and expiry, and turn on Allow Refresh Token.",
-            "Access: all users or a custom list; Review, then Finish.",
-            "Copy the Client ID (API key) and the client secret.",
-          ],
-          values: [{ label: "Redirect URL", value: "https://your-instance.example/api/connector-oauth/callback" }],
-        },
-      },
-      {
-        title: "iManage: each person signs in",
-        caption: "With Each user signs in, the test confirms the fields; people finish by signing in from chat.",
-        narration:
-          "Choose Configure on iManage, keep each user signs in, and enter the instance U R L, client I D, customer, and library. Save and test. Because iManage checks each person's own permissions, the test confirms the settings, and each person completes verification by opening iManage from chat and signing in.",
-        durationSeconds: 22,
-        calloutPlacement: "left-rail",
-        focus: "connImanageTested",
+        focus: "connCeilingAllowed",
       },
     ],
   },
@@ -2555,83 +2438,121 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "branding",
     audioSrc: "training/owner/branding.mp3",
     title: "Platform branding",
-    description: "Give the platform your organization's name, logo, and colors, apply them everywhere, and check each place the brand appears.",
+    description: "Give the platform your organization's logo, icon, and colors, apply them everywhere, and check each place the brand appears.",
     icon: "branding",
     track: "Policies and branding",
     outcomes: [
-      "The platform name, logo, and browser icon are set",
+      "The logo and the icon are set separately, each in its own card",
       "Theme colors restyle buttons, the sidebar, and text",
       "The brand appears in the sidebar, on the sign-in page, and on the installed app icon",
     ],
     prerequisites: [
       "A platform owner account.",
-      "A logo (square or horizontal) and, optionally, a square icon as PNG, JPEG, WebP, or SVG files under 4 MB, or public HTTPS addresses for them.",
+      "Your logo (horizontal or square) and a square icon, as PNG, JPEG, WebP, or SVG files under 4 MB, or public HTTPS addresses for them.",
       "Your colors as 6-digit hex values, such as #2f5d8a. Pick dark sidebar colors so the light sidebar text stays readable.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings and expand Platform Branding. The preview at the top shows the light and dark sidebars, a browser tab, and the compact icon.",
-      "Enter the Platform name. It replaces Aperture Chat in the sidebar, the sign-in page, the browser tab, and the installed app. If your logo already spells the name, you can leave it blank so the logo stands alone.",
-      "In the Logo card, choose Upload (or drop a file on the card) and pick your full logo. It appears in the sidebar, on the sign-in page, and above new chats.",
-      "In the Icon card, upload a square mark for browser tabs, the collapsed sidebar, chat replies, and the installed app. Without one, a square logo is used, otherwise the Aperture Chat icon.",
+      "Open Platform console › Org Settings and expand Platform Branding. The preview at the top has three tiles: Light sidebar, Dark sidebar and dark mode, and Browser tab and compact icon.",
+      "Decide on the Platform name. It is optional with a logo: leave it blank when your logo already spells the name, so the logo stands alone (browser tabs and the installed app then show Aperture Chat), or type a name to show it beside the logo and in browser tabs.",
       "Enter the Platform domain people use. It is recorded for administrators and the API; it does not change DNS, TLS, or routing.",
+      "In the Logo card, choose Upload (or drop a file on the card) and pick your full logo. The Light sidebar and Dark sidebar tiles show it straight away.",
+      "In the Icon card, choose Upload and pick a square mark. It is used for browser tabs, the collapsed sidebar, chat replies, and the installed app, and the Browser tab and compact icon tile shows it.",
       "Under Theme colors, set Accent color, Sidebar gradient start, Sidebar gradient end, and Interface text color. Leave a field empty to keep the default for that surface.",
-      "Choose Apply branding. The message … branding saved through the platform API and will persist across reloads confirms it.",
-      "Check the sidebar, open the sign-in page in a private window, and on a phone add the workspace to the home screen to see the new icon and name.",
-      "To undo everything, choose Reset defaults. It saves the Aperture Chat defaults immediately.",
+      "Choose Apply branding and wait for … branding saved through the platform API and will persist across reloads.",
+      "Check the sidebar, open the sign-in page in a private window, and on a phone add the workspace to the home screen to see the icon.",
+      "To undo everything, choose Reset defaults. It saves the defaults immediately: the Aperture Chat wordmark, the teal icon, and the default colors.",
     ],
     paths: [
       {
-        label: "Upload the logo and icon",
+        label: "Upload the logo and icon (shown in the video)",
         steps: [
-          "Upload accepts PNG, JPEG, WebP, and SVG files up to 4 MB. Each file is stored as a PNG, with transparent edges trimmed; icons are padded to a square.",
-          "The logo and the icon change independently: replacing one leaves the other alone, and Remove clears just that image.",
-          "Uploaded images are stored with the branding, so nothing needs hosting elsewhere. Choose Apply branding to save them.",
+          "Upload accepts PNG, JPEG, WebP, and SVG files up to 4 MB. Each file is stored as a PNG with transparent edges trimmed; icons are padded to a square.",
+          "The Logo and the Icon change independently: Replace swaps one image, and Remove clears just that image. Choose Apply branding to save either change.",
+          "A wide file is refused in the Icon card: … too wide for an icon. Icons need a roughly square image; upload wordmarks as the logo.",
+          "Uploaded images are stored with the branding, so nothing needs hosting elsewhere.",
         ],
       },
       {
         label: "Use hosted image addresses",
         steps: [
-          "Paste an HTTPS address into Platform logo URL for the sidebar and sign-in logo.",
-          "Paste an HTTPS address into Browser icon URL for the tab icon. When it is empty, a square logo stands in; a wide logo never does.",
-          "Choose Apply branding.",
+          "Paste an HTTPS address into Platform logo URL (Logo card) or Browser icon URL (Icon card). The card loads the image and shows its size.",
+          "A wide image in the Icon card shows Too wide for an icon, so compact spaces show the Aperture Chat icon instead. Point it at a square image.",
+          "Choose Apply branding. Addresses that do not start with https:// are refused.",
+        ],
+      },
+      {
+        label: "Only a logo, or no artwork",
+        steps: [
+          "With a logo and no icon, compact spaces use the logo when it is roughly square (the Icon card reads Not set: your square logo is used), otherwise the Aperture Chat icon.",
+          "With no logo and no icon, a custom platform name shows beside the Aperture Chat icon, and the default name shows the Aperture Chat wordmark.",
         ],
       },
     ],
     verify: [
-      "The confirmation reads … branding saved through the platform API and will persist across reloads, and the fields keep their values after a reload.",
-      "The sidebar shows the new logo, name, and gradient, and the collapsed sidebar and browser tab show the icon.",
-      "A signed-out visitor sees the new name and logo on the sign-in page, including New to … under the form.",
-      "The installed app icon (/api/pwa/icon-512.png) shows the icon, and the manifest's name is the new platform name.",
+      "The confirmation reads … branding saved through the platform API and will persist across reloads (Image-only branding when the name is blank), and both cards keep their images after a reload.",
+      "The sidebar shows the logo on the new gradient, and the Browser tab and compact icon tile shows the icon.",
+      "A signed-out visitor sees the logo and the accent color on the sign-in page.",
+      "The installed app icon (/api/pwa/icon-512.png) serves the Icon, and the manifest's name is the platform name (Aperture Chat when the name is blank).",
     ],
     troubleshooting: [
       { symptom: "\"Set both gradient colors (or clear both) so the sidebar gradient has a start and an end.\"", fix: "Fill in both Sidebar gradient start and Sidebar gradient end, or clear both." },
       { symptom: "\"… is not a 6-digit hex color like #087d8b. Fix it before applying.\"", fix: "Use a # followed by exactly six hex digits, or use the color picker beside the field." },
       { symptom: "\"… is not a PNG, JPEG, WebP, or SVG image.\"", fix: "Export the artwork in one of those formats and upload it again." },
       { symptom: "\"… is larger than 4 MB. Export a smaller version and try again.\"", fix: "Export a smaller file; about 1,000 pixels wide is plenty for a logo." },
-      { symptom: "\"… too wide for an icon.\"", fix: "Icons must be roughly square. Upload the wordmark in the Logo card and a square mark in the Icon card." },
+      { symptom: "\"… too wide for an icon. Icons need a roughly square image; upload wordmarks as the logo.\"", fix: "The file was refused in the Icon card. Upload the wordmark in the Logo card and a square mark in the Icon card." },
+      { symptom: "\"Too wide for an icon, so compact spaces show the Aperture Chat icon instead.\"", fix: "The Icon card's hosted image is wide. Upload a square mark, or point Browser icon URL at a square image." },
       { symptom: "The browser tab still shows the Aperture Chat icon.", fix: "Wide artwork never appears in square spaces. Upload a square icon, or use a square logo." },
-      { symptom: "\"Image addresses must start with https://.\"", fix: "Use an HTTPS address, or upload the file instead." },
+      { symptom: "\"Image addresses must start with https://. Upload the file instead if it is not hosted.\"", fix: "Use an HTTPS address, or upload the file instead." },
+      { symptom: "Browser tabs say Aperture Chat after branding.", fix: "Platform name is blank. Type a name if you want it in browser tabs and on the installed app." },
       { symptom: "The sidebar text is hard to read.", fix: "Choose darker gradient colors, or clear both gradient fields to restore the default." },
       { symptom: "A phone still shows the old icon.", fix: "Icons are cached for a few minutes, and an installed app keeps its icon until it is removed and added to the home screen again." },
     ],
     scenes: [
       {
         title: "Open Platform Branding",
-        caption: "Org Settings › Platform Branding: a live preview, the name, logo, icon, domain, and theme colors.",
+        caption: "Org Settings › Platform Branding: three preview tiles, then the name, domain, Logo and Icon cards, and colors.",
         narration:
-          "Open Platform console, then Org Settings, and expand Platform Branding. The preview at the top shows the logo, the platform name, and a sample of interface text, and it updates as you type. Nothing changes for anyone else until you choose Apply branding.",
-        durationSeconds: 18,
+          "Open Platform console, then Org Settings, and expand Platform Branding. Three tiles preview the brand as people will see it: the light sidebar, the dark sidebar and dark mode, and a browser tab with the compact icon. Out of the box, that is the Aperture Chat wordmark and the teal icon. The tiles follow your edits, but nothing changes for anyone else until you choose Apply branding.",
+        durationSeconds: 25,
         calloutPlacement: "left-rail",
         focus: "brandPreview",
       },
       {
-        title: "Name, logo, and domain",
-        caption: "Platform name, Upload PNG for the logo and browser icon, and the Platform domain.",
+        title: "Name and domain",
+        caption: "Platform name is optional with a logo; the domain is recorded for administrators and the API.",
         narration:
-          "Enter the platform name your people will see. Choose Upload PNG and pick your logo; it fills both the logo and the browser icon, and the preview shows it straight away. The platform domain is recorded for administrators and the A P I. It does not change D N S or routing.",
+          "Platform name is optional once you add a logo. The logo in this lesson already spells Example Corp, so the name is cleared and the logo will stand alone; browser tabs and the installed app then say Aperture Chat. Type a name if you want it beside the logo and in browser tabs. Then enter the platform domain people use. It is recorded for administrators and the A P I, and does not change D N S or routing.",
+        durationSeconds: 27,
+        calloutPlacement: "left-rail",
+        focus: "brandNameDomain",
+      },
+      {
+        title: "The Logo card",
+        caption: "Logo › Upload: your full logo, shown at once in the light and dark sidebar tiles.",
+        narration:
+          "In the Logo card, choose Upload, or drop a file on the card, and pick your full logo. P N G, J P E G, Web P, and S V G files all work, and transparent edges are trimmed. The card shows the image size, and the light and dark sidebar tiles show the logo straight away.",
         durationSeconds: 20,
         calloutPlacement: "left-rail",
-        focus: "brandFields",
+        focus: "brandLogoCard",
+      },
+      {
+        title: "Too wide for an icon",
+        caption: "A wide image in the Icon card: \"Too wide for an icon, so compact spaces show the Aperture Chat icon instead.\"",
+        narration:
+          "The Icon card can also take a hosted address. Here, Browser icon U R L points at a wide wordmark. The card measures it and warns: too wide for an icon, so compact spaces show the Aperture Chat icon instead. Icons must be roughly square.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "brandIconWide",
+      },
+      {
+        title: "The Icon card",
+        caption: "Icon › Upload: a square mark for browser tabs, the collapsed sidebar, chat replies, and the installed app.",
+        narration:
+          "So upload a square mark instead. Choose Upload in the Icon card. The file replaces the address and is padded to a square, and the browser tab and compact icon tile now shows it. The same icon appears on chat replies and as the installed app icon.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
+        focus: "brandIconCard",
       },
       {
         title: "A gradient needs both ends",
@@ -2653,37 +2574,37 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Applied everywhere",
-        caption: "Saved for everyone: the sidebar now carries the new name, logo, and colors.",
+        caption: "Saved for everyone: the sidebar now carries the logo on the new gradient.",
         narration:
-          "The branding is saved for the whole organization and survives a reload. The sidebar now shows the new name and logo on the new gradient, and every button uses the new accent.",
+          "The branding is saved for the whole organization and survives a reload. The sidebar now shows the Example Corp logo on the new gradient, and both cards keep their images.",
         durationSeconds: 13,
         calloutPlacement: "right-mid",
         focus: "brandApplied",
       },
       {
         title: "The sign-in page",
-        caption: "Signed out, people see the new name and logo before they sign in.",
+        caption: "Signed out, people see the logo and the accent color before they sign in.",
         narration:
-          "Signed-out visitors see it too. The sign-in page shows the new logo and name, the accent color, and New to Example Corp Assistant under the form.",
-        durationSeconds: 11,
+          "Signed-out visitors see it too. The sign-in page shows the logo and the accent color. Because the platform name is blank, the line under the form still reads New to Aperture Chat.",
+        durationSeconds: 13,
         calloutPlacement: "right-mid",
         focus: "brandSignIn",
       },
       {
         title: "The installed app",
-        caption: "The home-screen app icon now serves the uploaded logo, and the app takes the new name.",
+        caption: "The home-screen app icon now serves the uploaded Icon.",
         narration:
-          "When someone adds the workspace to a phone's home screen, the app uses this icon, which now serves your logo, and the platform name as its label. Phones cache icons for a few minutes.",
-        durationSeconds: 13,
+          "When someone adds the workspace to a phone's home screen, the app uses the icon you uploaded, on a light tile. Its label is the platform name, which is Aperture Chat here because the name is blank. Phones cache icons for a few minutes.",
+        durationSeconds: 17,
         calloutPlacement: "left-rail",
         focus: "brandAppIcon",
       },
       {
         title: "Back to the defaults",
-        caption: "Reset defaults saves the Aperture Chat look immediately.",
+        caption: "Reset defaults saves the Aperture Chat wordmark, icon, and colors immediately.",
         narration:
-          "To undo everything, choose Reset defaults. It saves the default Aperture Chat name, logo, and colors immediately, so there is no separate Apply step.",
-        durationSeconds: 12,
+          "To undo everything, choose Reset defaults. It saves the Aperture Chat wordmark, the teal icon, and the default colors immediately, so there is no separate Apply step.",
+        durationSeconds: 13,
         calloutPlacement: "left-rail",
         focus: "brandActions",
       },
@@ -2792,7 +2713,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Expand a section. Each has its own filter: a person picker, From and Through dates, and the presets All, Today, Week, and 30 days. A filter changes only its own section.",
       "Runtime Clock Metadata: read the Runtime events, Chat, and Drafts totals, and the list of executions with who, which provider, and when.",
       "Choose CSV on a section, set the CSV date range (or All dates), and choose Download. The file name records the person and range.",
-      "Chat Feedback: read the totals, then choose Preview on a rating or issue report to open the conversation or report behind it.",
+      "Chat Feedback: read the totals, then choose Preview on a rating or issue report to open the conversation or report behind it. Manage in Reports opens reported problems in the Reports tab, where they are worked as tickets.",
       "Model Activity: Prompts by model, Prompt trend, and Users by prompt activity, for the section's filter.",
       "User Usage: Messages, Prompt tokens, Completion tokens, Total tokens, and Models used, then Messages by model, Message trend, and Usage by user. Pick a person in Usage by user to focus the section.",
     ],
@@ -2814,7 +2735,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
     ],
     verify: [
-      "The filter line reads, for example, 52 of 119 records, and the totals change to match.",
+      "The filter line reads, for example, 49 of 119 records, and the totals change to match.",
       "The CSV downloads with one row per record and a header row (the runtime file starts id, actor_id, actor_name, surface…).",
       "Preview opens the rated conversation with the person's prompt and the saved model output.",
     ],
@@ -2848,7 +2769,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Scope it to one person",
         caption: "Each section has its own filter: a person, From and Through, and All, Today, Week, or 30 days.",
         narration:
-          "Every section has its own filter. Here it is set to Jane Smith and the last thirty days, so the line reads fifty two of one hundred nineteen records, and the totals follow. Other sections keep their own filters.",
+          "Every section has its own filter. Here it is set to Jane Smith and the last thirty days, so the line reads forty nine of one hundred nineteen records, and the totals follow. Other sections keep their own filters.",
         durationSeconds: 15,
         calloutPlacement: "left-rail",
         focus: "analyticsFilters",
@@ -2864,10 +2785,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Chat Feedback",
-        caption: "Thumbs ratings, written notes, and platform issue reports, each with a Preview.",
+        caption: "Thumbs ratings, written notes, and reported platform issues, each with a Preview. Manage in Reports opens the tickets.",
         narration:
-          "Chat Feedback collects thumbs up and down, written notes, and the platform issues people report from Help. Each item has a Preview.",
-        durationSeconds: 10,
+          "Chat Feedback collects thumbs up and down, written notes, and the problems people report from Help. Each item has a Preview, and Manage in Reports opens the Reports tab, where reported problems are worked as tickets.",
+        durationSeconds: 16,
         calloutPlacement: "left-rail",
         captionPlacement: "top",
         focus: "feedbackEvents",
@@ -2907,6 +2828,263 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         durationSeconds: 9,
         calloutPlacement: "left-rail",
         focus: "usageByUser",
+      },
+    ],
+  },
+  {
+    id: "owner-reports-sharing",
+    audioSrc: "training/owner/owner-reports-sharing.mp3",
+    title: "Share reports with the Aperture Chat maintainers",
+    description: "Work the reports people send from Help, choose how reports are shared with the Aperture Chat maintainers, and send a reviewed, redacted copy that is tracked as a GitHub issue.",
+    icon: "support",
+    track: "Monitoring and compliance",
+    outcomes: [
+      "The sharing mode is chosen: Review each report, Share automatically, or Off",
+      "A report is shared as a reviewed, redacted copy, and its card reads With the maintainers",
+      "The reporter sees Shared with the Aperture Chat maintainers in Help › My reports",
+    ],
+    prerequisites: [
+      "A platform owner account. Administrators work tickets in their own Reports tab, but only owners share with the maintainers.",
+      "A report someone sent from Help › Report a problem.",
+      "Optional: an enabled model to use as the Support assistant for Rewrite with AI.",
+      "Your organization's rule for sending redacted text outside the deployment. Nothing is sent until an owner chooses it.",
+    ],
+    setupSteps: [
+      "Open Platform console › Reports. Tickets lists every organization's reports; use Needs reply, Open, Closed, and All, the search box, and the status and type filters.",
+      "Choose Settings. Under Sharing with the Aperture Chat maintainers, keep Review each report (the default), or choose Share automatically or Off.",
+      "Optional: under Support assistant, choose a Model. It rewrites reports for sharing and only ever sees text that was already redacted.",
+      "Under Updates for the people who report, keep Email reporters when support replies or changes the status on (it emails only once SMTP is set up in Alerts).",
+      "Choose Tickets and open a report. Set Status, Priority, Assignee, and Type, reply to the person, or add an internal note, as administrators do.",
+      "On the Aperture Chat maintainers card, choose Share with maintainers. Review the redacted Issue title and Description: names, organizations, email addresses, phone numbers, links, hosts, and keys are placeholders.",
+      "Edit either field if anything is still too specific, or choose Rewrite with AI and review the support assistant's rewrite.",
+      "Open Preview the GitHub issue to read exactly what will be filed, then choose Send to maintainers.",
+      "Check the card: With the maintainers. When the maintainers file the issue, it changes to Tracked on GitHub with the issue number; Check status refreshes it.",
+    ],
+    paths: [
+      {
+        label: "Review each report (default, shown in the video)",
+        steps: [
+          "Nothing leaves until an owner opens Share with maintainers, reviews or edits the redacted text, and chooses Send to maintainers.",
+          "Include technical details adds the version, browser, page, and recent errors, redacted the same way. Screenshots never leave the platform.",
+          "Or open a prefilled GitHub issue yourself opens GitHub's new-issue form with the redacted text, without any hub.",
+        ],
+      },
+      {
+        label: "Share automatically",
+        steps: [
+          "Settings › Share automatically. Every new report except security concerns is redacted and sent to the hub without review.",
+          "With a Support assistant model, AI rewrites each report first as an extra privacy pass.",
+          "The ticket's card reads With the maintainers, Shared … by Automatic sharing.",
+        ],
+      },
+      {
+        label: "Off",
+        steps: [
+          "Settings › Off. Reports stay on this platform.",
+          "Share with maintainers then shows Sharing with the maintainers is turned off in Reports settings, with Open settings. The prefilled GitHub issue link still works.",
+        ],
+      },
+      {
+        label: "Security concerns",
+        steps: [
+          "Reports sent as Security are never shared, whatever the mode. The card reads Security concerns are reported privately, never as public issues.",
+          "Report privately explains: Security concerns are never posted publicly. Report it privately to the maintainers through a GitHub security advisory instead. Open a private security advisory goes to GitHub.",
+        ],
+      },
+      {
+        label: "Running a community hub",
+        steps: [
+          "Only the project's own deployment usually turns on Settings › Community hub › Accept reports from other deployments.",
+          "A hub needs the GitHub repository (owner/name) and a fine-grained personal access token limited to that repository with Issues: Read and write. Check GitHub access tests it.",
+          "Incoming reports wait in Reports › Community hub with triage (likely duplicates on GitHub and, with a model, a summary and suggested labels). The maintainer chooses Publish issue, Add as comment, or declines it.",
+        ],
+      },
+    ],
+    verify: [
+      "The ticket's card reads With the maintainers, Shared … by you, and the activity shows Shared with the Aperture Chat maintainers. You'll see their progress here.",
+      "In Help › My reports, the reporter's ticket shows With the maintainers and Shared with the Aperture Chat maintainers.",
+      "Platform console › Audit records support.issue_shared_upstream for the ticket.",
+      "Once the maintainers file the issue, the card reads Tracked on GitHub · #N open (#N fixed when it is closed as completed), and the reporter sees The maintainers are tracking this as GitHub issue #N.",
+    ],
+    troubleshooting: [
+      { symptom: "\"Sharing with the maintainers is turned off in Reports settings.\"", fix: "Choose Open settings and pick Review each report or Share automatically." },
+      { symptom: "\"Security concerns are never posted publicly. Report it privately to the maintainers through a GitHub security advisory instead.\"", fix: "Expected for Security reports. Use Open a private security advisory." },
+      { symptom: "\"This deployment has no community hub configured (APERTURE_SUPPORT_HUB_URL).\"", fix: "The server's hub address is blank. Set APERTURE_SUPPORT_HUB_URL (the default is https://chat.aperturechat.com), or use the prefilled GitHub issue link." },
+      { symptom: "\"Choose a support assistant model in Reports settings to draft with AI.\"", fix: "Pick a Model under Settings › Support assistant, then choose Rewrite with AI again." },
+      { symptom: "\"This ticket was already shared with the maintainers.\"", fix: "Each ticket is shared once. Use Check status on its card." },
+      { symptom: "The card reads Send failed with \"The community hub could not be reached.\"", fix: "Sends retry with growing delays. Check the server's outbound access to the hub, then choose Retry now, or Edit and resend." },
+      { symptom: "Send to maintainers stays greyed out.", fix: "The title needs at least 4 characters and the description at least 10." },
+    ],
+    scenes: [
+      {
+        title: "Before you begin",
+        caption: "An owner account, a report someone sent, an optional assistant model, and your rule for sharing outside.",
+        narration:
+          "This lesson works a report that someone sent from Help, then shares a redacted copy with the Aperture Chat maintainers, who track it as a GitHub issue. Before you begin, have a platform owner account, a report to work on, optionally an enabled model for the support assistant, and your organization's rule for sending redacted text outside the deployment.",
+        durationSeconds: 23,
+        card: {
+          label: "Checklist",
+          where: "Have these ready",
+          steps: [
+            "A platform owner account.",
+            "A report someone sent from Help › Report a problem.",
+            "Optional: an enabled model for the Support assistant.",
+            "Your organization's rule for sharing redacted text outside the deployment.",
+          ],
+        },
+      },
+      {
+        title: "The Reports tab",
+        caption: "Platform console › Reports: Tickets, Community hub, and Settings, with Needs reply, Open, Closed, and All.",
+        narration:
+          "Open Platform console, then Reports. Tickets lists every organization's reports, newest first. Filter by Needs reply, Open, Closed, or All, search by subject, person, or number, and narrow by status or type. Jane Smith has just sent an idea.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
+        focus: "rpTickets",
+      },
+      {
+        title: "Choose how sharing works",
+        caption: "Settings › Sharing with the Aperture Chat maintainers: Review each report, Share automatically, or Off.",
+        narration:
+          "Choose Settings. Sharing with the Aperture Chat maintainers has three modes. Review each report is the default: nothing leaves until an owner reviews the redacted text and sends it. Share automatically sends every new report except security concerns. Off keeps reports on this platform. Your deployment shares with the maintainers' community hub shown here.",
+        durationSeconds: 24,
+        calloutPlacement: "left-rail",
+        focus: "rpSettingsModes",
+      },
+      {
+        title: "Support assistant and updates",
+        caption: "Support assistant: a model for Rewrite with AI. Email reporters about updates stays on.",
+        narration:
+          "Under Support assistant, choose a model. It rewrites reports for sharing, and it only ever sees text that was already redacted. Below, Email reporters when support replies or changes the status is on, so people hear back by email once S M T P is set up in Alerts, and they can always follow along in My reports.",
+        durationSeconds: 22,
+        calloutPlacement: "left-rail",
+        focus: "rpAssistant",
+      },
+      {
+        title: "This recording's own hub",
+        caption: "For this recording only: Accept reports from other deployments makes this platform its own hub.",
+        narration:
+          "One step is for this recording only. To show a send that really completes without reaching the maintainers, this platform turns on Accept reports from other deployments, so it becomes its own community hub. Only the project's own deployment normally turns this on; leave it off, and your reports go to the maintainers' hub.",
+        durationSeconds: 21,
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+        focus: "rpHubOn",
+      },
+      {
+        title: "Open the report",
+        caption: "Status, Priority, Assignee, Type, the message, and the Aperture Chat maintainers card.",
+        narration:
+          "Back in Tickets, open Jane's idea. You work it as administrators do: set the status, priority, assignee, and type, reply to Jane, or add an internal note. As an owner you also see the Aperture Chat maintainers card. Choose Share with maintainers.",
+        durationSeconds: 18,
+        calloutPlacement: "left-rail",
+        focus: "rpTicketOpen",
+      },
+      {
+        title: "Review the redacted copy",
+        caption: "Names, organizations, the email address, and the phone number became placeholders.",
+        narration:
+          "Nothing has left yet. The dialog shows a redacted copy: Casey Doe, Example Corporation, Jane's email address, and her phone number became placeholders, and the note says four values were replaced. You can edit the title and description before you send.",
+        durationSeconds: 18,
+        calloutPlacement: "left-rail",
+        focus: "rpShareDraft",
+      },
+      {
+        title: "Rewrite with AI",
+        caption: "Rewrite with AI: the support assistant drafts the issue from the redacted text. Review it.",
+        narration:
+          "Choose Rewrite with AI. The support assistant drafts a clearer issue from the redacted text, and the result is redacted again. The note says it was rewritten by the support assistant; read it and edit anything that is wrong before you send.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "rpShareAi",
+      },
+      {
+        title: "Preview the GitHub issue",
+        caption: "Preview the GitHub issue shows exactly what will be filed: the description, the type, and the redacted environment.",
+        narration:
+          "Open Preview the GitHub issue to read exactly what will be filed: the description, then the report type and an environment section with the version, browser, and window size, all redacted. Screenshots never leave this platform. When it reads right, choose Send to maintainers.",
+        durationSeconds: 19,
+        calloutPlacement: "left-rail",
+        focus: "rpSharePreview",
+      },
+      {
+        title: "With the maintainers",
+        caption: "The card reads With the maintainers, and the activity tells Jane it was shared.",
+        narration:
+          "The card now reads With the maintainers, shared by you, and the activity adds: Shared with the Aperture Chat maintainers. You'll see their progress here. Check status refreshes it later.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        focus: "rpShared",
+      },
+      {
+        title: "Where the report landed",
+        caption: "Here, this platform's Community hub queue: the redacted report waits for review, with triage.",
+        narration:
+          "Because this recording's platform is its own hub, the report arrived in its Community hub view, waiting for review. A hub runs triage on each report: it searches GitHub for likely duplicates and, with a model, suggests a summary and labels. On your deployment, the same report lands in the maintainers' hub instead.",
+        durationSeconds: 22,
+        calloutPlacement: "left-rail",
+        focus: "rpHubQueue",
+      },
+      {
+        title: "What the maintainers do next",
+        caption: "The maintainers publish the issue on GitHub; the status flows back to your ticket and to the reporter.",
+        narration:
+          "The rest happens at the maintainers' hub, and this recording stops before GitHub, because publishing needs the maintainers' own GitHub token. A maintainer reviews the report and publishes it as a GitHub issue, adds it to an existing issue, or declines it with a note. Your ticket then reads Tracked on GitHub with the issue number, and Jane is told which issue tracks it.",
+        durationSeconds: 24,
+        card: {
+          where: "The Aperture Chat maintainers' community hub",
+          steps: [
+            "A maintainer reviews the redacted report and its triage.",
+            "Publish issue files it on GitHub, labeled in-app report; Add as comment joins an existing issue; or it is declined with a note.",
+            "Your ticket's card changes to Tracked on GitHub · #N open, with a GitHub link.",
+            "The reporter sees: The maintainers are tracking this as GitHub issue #N.",
+            "When the issue closes as completed, the card reads #N fixed.",
+          ],
+        },
+      },
+      {
+        title: "What the reporter sees",
+        caption: "Help › My reports: Shared with the Aperture Chat maintainers.",
+        narration:
+          "Jane follows it from her side. In Help, My reports, her idea shows With the maintainers and Shared with the Aperture Chat maintainers, and the activity explains that she will see their progress there.",
+        durationSeconds: 14,
+        calloutPlacement: "left-rail",
+        focus: "rpReporterShared",
+      },
+      {
+        title: "Share automatically",
+        caption: "Settings › Share automatically: every new report except security concerns is sent without review.",
+        narration:
+          "The second path is Share automatically. Choose it in Settings, and every new report except security concerns is redacted and sent without review. With a support assistant, A I rewrites each report first as an extra privacy pass.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "rpAutoMode",
+      },
+      {
+        title: "Shared without review",
+        caption: "A new question was shared on its own, after the AI rewrite: Shared … by Automatic sharing.",
+        narration:
+          "Jane then asks a question. With no owner step at all, the support assistant rewrote it, and a couple of minutes later the ticket reads With the maintainers, shared by Automatic sharing.",
+        durationSeconds: 13,
+        calloutPlacement: "left-rail",
+        focus: "rpAutoShared",
+      },
+      {
+        title: "Off",
+        caption: "With Off, Share with maintainers reads \"Sharing with the maintainers is turned off in Reports settings.\"",
+        narration:
+          "The third path is Off. Reports stay on this platform, and Share with maintainers explains that sharing is turned off in Reports settings, with Open settings to change it. The prefilled GitHub issue link still works if you want to file one yourself.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "rpOffBlocked",
+      },
+      {
+        title: "Security reports stay private",
+        caption: "A Security report offers only Report privately, which points to a private GitHub security advisory.",
+        narration:
+          "Security reports are never shared, whatever the mode. On a security ticket, the card offers Report privately, which explains that security concerns are never posted publicly, and links to a private GitHub security advisory instead.",
+        durationSeconds: 17,
+        calloutPlacement: "left-rail",
+        focus: "rpSecurityPrivate",
       },
     ],
   },
@@ -3029,7 +3207,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Filter the audit trail",
         caption: "Audit Trail: severity, category, and search on top of the section's own person and date filter.",
         narration:
-          "Expand Audit Trail, the append-only log of every change. Filter by severity and category, or search actions, people, and targets. Here, warning events only: fifty four of five hundred forty one.",
+          "Expand Audit Trail, the append-only log of every change. Filter by severity and category, or search actions, people, and targets. Here, warning events only: fifty four of five hundred forty two.",
         durationSeconds: 15,
         calloutPlacement: "left-rail",
         focus: "trailFilters",
@@ -3067,7 +3245,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Enter the SMTP host, Port, and Security (STARTTLS on 587, or SSL/TLS on 465), the Username, the Password, and the From address.",
       "Choose Save Email Settings and wait for SMTP settings saved. The password is stored in the encrypted vault and never shown again.",
       "Enter a recipient beside Send test email and choose it. Read the result: Test email sent to … or the relay's exact error.",
-      "In Alert Rules, choose Prompt-injection template, Suspicious-activity template, or New rule.",
+      "In Alert Rules, choose Prompt-injection template, Suspicious-activity template, Support-reports template, or New rule.",
       "Review the action patterns, Minimum severity, Watched user, Fire when threshold, and Cooldown. Name the rule and enter the Email recipients, separated by commas.",
       "Under Only these detections, keep the detectors this rule should watch. Choose Create Rule.",
       "When a matching event happens, Alert Deliveries lists it as queued, then sent (or failed with the SMTP error). The email names the detection but never includes the flagged text.",
@@ -3117,6 +3295,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         steps: [
           "Prompt-injection template: security.prompt_flagged events from the prompt-injection, system-prompt-extraction, and credential-extraction detectors, at warning and above.",
           "Suspicious-activity template: security flags and elevated-severity events.",
+          "Support-reports template: support.issue_reported, support.issue_reporter_replied, and support.issue_reopened at info and above, with no cooldown, so every report people send from Help › Report a problem, every reporter reply, and every reopened report is emailed.",
           "New rule: start from scratch. Leave Email recipients empty to log alerts in-app only.",
         ],
       },
@@ -3207,10 +3386,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Start a rule from a template",
-        caption: "Alert Rules: Prompt-injection template, Suspicious-activity template, or New rule.",
+        caption: "Alert Rules: the Prompt-injection, Suspicious-activity, and Support-reports templates, or New rule.",
         narration:
-          "Now decide what should send email. In Alert Rules, the Prompt-injection template watches attempts to override instructions or extract hidden prompts and credentials. The Suspicious-activity template watches security flags and higher-severity events. New rule starts from scratch.",
-        durationSeconds: 20,
+          "Now decide what should send email. In Alert Rules, the Prompt-injection template watches attempts to override instructions or extract hidden prompts and credentials. The Suspicious-activity template watches security flags and higher-severity events. The Support-reports template emails you about every report people send from Help, their replies, and reopened reports. New rule starts from scratch.",
+        durationSeconds: 26,
         calloutPlacement: "left-rail",
         focus: "alertTemplates",
       },
@@ -3582,7 +3761,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Scan existing chats",
         caption: "Tags and holds › Scan existing chats: suggestions for the new matter, and no chats deleted.",
         narration:
-          "Switch to Tags and holds and choose Scan existing chats. It reviewed eleven saved chats and made three suggestions, and it says plainly that no chats were deleted. Suggestions are not authoritative until you confirm them.",
+          "Switch to Tags and holds and choose Scan existing chats. It reviewed twelve saved chats and made four suggestions, and it says plainly that no chats were deleted. Suggestions are not authoritative until you confirm them.",
         durationSeconds: 16,
         calloutPlacement: "left-rail",
         focus: "retentionScan",
@@ -3640,6 +3819,7 @@ const VIDEO_ICONS = {
   audit: ShieldAlert,
   alerts: BellRing,
   elastic: BarChart3,
+  support: LifeBuoy,
   retention: DatabaseZap,
 } satisfies Record<OwnerGuideIcon, typeof KeyRound>;
 
@@ -3652,7 +3832,7 @@ const OWNER_DECK: TrainingDeck = {
     href: "docs/aperture-owner-guide.pdf",
     title: "Platform owner guide (PDF)",
     description:
-      "The user and administrator guides plus every owner surface — providers, keys, models, SSO, branding, policies and budgets, analytics, audit, and alert delivery.",
+      "The user and administrator guides plus every owner surface — providers, keys, models, SSO, branding, policies, budgets, and the connector ceiling, analytics, support reports, audit, and alert delivery.",
     tooltip: "Download the printable platform owner guide covering the entire platform",
   },
 };
@@ -3713,7 +3893,7 @@ export function OwnerDocumentationModal({
       docTitleId="owner-doc-title"
       videoTitleId="owner-video-title"
       title="Platform owner documentation"
-      description="Narrated walkthroughs of the current console: first-run setup, providers, keys, models, roles, SSO, policies and budgets, connectors, branding, search, analytics, audit, alerts, Elastic export, and retention."
+      description="Narrated walkthroughs of the current console: first-run setup, providers, keys, models, roles, SSO, policies, budgets, and the connector ceiling, branding, search, analytics, support reports, audit, alerts, Elastic export, and retention."
       backTooltip="Return to the full list of training videos"
       headerLinks={headerLinks}
       onClose={onClose}

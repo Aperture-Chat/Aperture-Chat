@@ -107,7 +107,7 @@ const userModels = {
     await page.getByRole("button", { name: "Select model" }).click();
     await page.locator(".workspace-header .model-menu").getByRole("option", { name: new RegExp(MODEL_NAME) }).click();
     const before = await sendChat(page, "In one sentence, what should a finance team check before approving a vendor invoice?");
-    await waitForReply(page, before);
+    await waitForReply(page, before, { timeout: 900000 });
     await shot("models-reply");
   },
 };

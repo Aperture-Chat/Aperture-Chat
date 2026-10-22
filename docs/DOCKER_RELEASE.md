@@ -231,6 +231,39 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.14
+
+- **Training for the current interface.** Every walkthrough in Help and in
+  the consoles' Documentation was recaptured from the current interface:
+  the warm light palette, tactile buttons and toggles, and the Aperture Chat
+  wordmark and icon. The library now holds 64 lessons and 689 scenes (about
+  165 minutes); 30 narration tracks were regenerated and checked against
+  their scripts with speech recognition.
+- **Eight new lessons.** Users: **Report a problem and follow it up**,
+  **Hand a chat request to Drafts**, **Open a Word or PDF file and keep its
+  formatting**, **Start from a template and set the page layout**, and
+  **Edit slides: layouts, pictures, and text**. Administrators: **Manage
+  workspace connectors** and **Work reported problems in Reports**. Platform
+  owners: **Share reports with the Aperture Chat maintainers**.
+- **Lessons that follow the current layout.** Connector setup is taught in
+  **Admin console › Connections**, and the owner lesson is now **Policies,
+  budget, and the connector ceiling** (Off for all / Allow all). Branding
+  teaches the separate Logo and Icon cards; the deck lesson teaches the slide
+  panel and fit check; knowledge, tools, agents, groups, policies, SSO, and
+  alerts lessons show the current locks, permissions, and templates.
+- **Guides.** The User, Administrator, and Platform Owner PDFs are
+  regenerated with sections for every new lesson, the current tab counts and
+  permissions, and the shipped icon on the cover. The README screenshots and
+  product tour show the current interface.
+- Fixes: bold text in an automation's run output no longer renders as
+  separate headings, and the Tools library's MCP Servers and Prompt Library
+  notices point to **Admin console › Connections › Connectors**.
+- No database migrations or new settings. Upgrading from v0.5.14 changes the
+  web image's training media, guides, and the two fixes above.
+- API and web images publish as `v0.5.15-dev`, `v0.5.15-test`, and
+  `v0.5.15-main`. Stable `v0.5.15` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.13
 
 - **Problem reports become support tickets.** **Help › Report a problem**

@@ -180,7 +180,7 @@ export function preferredModel(models: ModelConfig[]) {
  * the model family supports it), and all other providers get results from
  * the platform-hosted search engine (SearXNG, DuckDuckGo, or provider-hosted
  * OpenAI/Anthropic search) injected as context by the API. Governance:
- * - The Web Search connector (Platform → Org Settings → Connectors) is the
+ * - The Web Search connector (Admin console → Connections → Connectors) is the
  *   deployment-wide on/off switch; the API enforces it too.
  * - A `tool-web-search` tool config can additionally restrict web search to
  *   specific models; when absent, it is available everywhere.

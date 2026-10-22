@@ -1501,7 +1501,8 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Groups and permissions",
     "Tenant model access",
     "Review model requests and explain access",
-    "Response actions and connector responsibilities",
+    "Response actions and Library connections",
+    "Manage workspace connectors",
     "Tenant SSO and provisioning",
     "Tenant analytics",
     "Policies and memory governance",
@@ -1510,10 +1511,11 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Tenant audit",
     "Alerts and delivery",
     "Data retention and tagging",
+    "Work reported problems in Reports",
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/guided video$/)).toHaveLength(15);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(17);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "/docs/aperture-admin-guide.pdf");

@@ -8,8 +8,10 @@
  * download, and a per-person token cap that the person then hits in chat
  * (the cap is removed again at the end).
  * admin-feedback: the person rates a real reply with a note and reports a
- * problem from Help; the admin reviews both in Analytics › Chat Feedback.
- * admin-alerts: the read-only email status, the Prompt-injection template with
+ * problem from Help; the admin reviews both in Analytics › Chat Feedback and
+ * opens the report's ticket queue with Manage in Reports.
+ * admin-alerts: the read-only email status, the Support-reports template
+ * (prefilled, then cancelled), the Prompt-injection template with
  * a recipient, a real flagged prompt, the delivery reaching "sent", and
  * Archive / Show archived.
  * admin-audit: the same flagged prompt investigated end to end: the signal
@@ -22,7 +24,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { helpers } = require("./admin-shared.cjs");
 
-const { tidyFixture, scrollTo, toast, dismissToast, openTab, expandPanel } = helpers;
+const { tidyFixture, scrollTo, toast, dismissToast, openTab, expandPanel, continueInChat } = helpers;
 const MODEL = "Qwen3.5 9B";
 
 /** The person opens a new chat with the local model and sends one message. */
@@ -33,9 +35,10 @@ async function sendAsUser(kit, text, { waitForReply = true } = {}) {
   await page.getByRole("option", { name: new RegExp(MODEL.replace(".", "\\.")) }).click();
   await page.locator(".composer textarea").fill(text);
   await page.getByRole("button", { name: "Send message" }).click();
+  await continueInChat(page);
   if (waitForReply) {
-    await page.locator(".assistant-message .message-rendered-response").last().waitFor({ timeout: 300000 });
-    await page.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 300000 });
+    await page.locator(".assistant-message .message-rendered-response").last().waitFor({ timeout: 900000 });
+    await page.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 900000 });
     await page.waitForTimeout(800);
   }
   return page;
@@ -120,7 +123,7 @@ const adminAnalytics = {
 
     // 5. The person's next message is refused with the real budget message.
     const person = kit.use(await sendAsUser(kit, "List two tips for a clear meeting agenda.", { waitForReply: false }));
-    await person.getByText("Your daily token budget has been reached. Requests are blocked until the next UTC day.").waitFor({ timeout: 420000 });
+    await person.getByText("Your daily token budget has been reached. Requests are blocked until the next UTC day.").waitFor({ timeout: 1200000 });
     await person.waitForTimeout(600);
     await shot("an-cap-hit");
 
@@ -136,7 +139,7 @@ const adminFeedback = {
   description: "A rating with a note and a reported problem, reviewed in Analytics › Chat Feedback.",
   frames: [
     "admin/fb-user-rate", "admin/fb-user-report", "admin/fb-overview", "admin/fb-conversation",
-    "admin/fb-issues", "admin/fb-issue-detail",
+    "admin/fb-issues", "admin/fb-issue-detail", "admin/fb-reports",
   ],
   async run(kit) {
     const { shot } = kit;
@@ -157,11 +160,13 @@ const adminFeedback = {
     await person.getByRole("button", { name: "Help", exact: true }).click();
     await person.getByRole("dialog", { name: "Help", exact: true }).getByRole("button", { name: /Report a problem/ }).click();
     const report = person.getByRole("dialog", { name: "Report a problem", exact: true });
+    await report.getByRole("radio", { name: "Problem" }).click();
     await report.getByLabel("Subject", { exact: true }).fill(subject);
     await report.getByLabel("Message", { exact: true }).fill("Synthetic training report: the Export button on a draft does not say which format it downloads.");
+    await scrollTo(person, report.getByLabel("Subject", { exact: true }), "center");
     await shot("fb-user-report");
     await report.getByRole("button", { name: "Send report", exact: true }).click();
-    await report.getByRole("status").filter({ hasText: "Report sent" }).waitFor();
+    await report.getByRole("status").filter({ hasText: /Report (#\d+ )?sent/ }).waitFor();
 
     // 3. The admin reviews Chat Feedback for that person and today.
     const page = kit.use(await analyticsTab(kit));
@@ -189,6 +194,14 @@ const adminFeedback = {
     const detail = page.getByRole("dialog", { name: "Platform issue report" });
     await detail.getByText(subject).first().waitFor();
     await shot("fb-issue-detail");
+
+    // The preview is read-only; Manage in Reports opens the ticket queue.
+    await page.getByRole("button", { name: "Close issue report preview" }).click();
+    await detail.waitFor({ state: "detached" });
+    await feedback.getByRole("button", { name: "Manage in Reports" }).click();
+    await page.locator(".support-queue .support-queue-list").getByText(subject).first().waitFor();
+    await page.waitForTimeout(600);
+    await shot("fb-reports");
   },
 };
 
@@ -199,7 +212,7 @@ const adminAlerts = {
   role: "admin",
   description: "Email status, the Prompt-injection template with a recipient, a real flagged prompt, and its delivery.",
   frames: [
-    "admin/al-email", "admin/al-template", "admin/al-detections", "admin/al-rule-saved", "admin/al-flagged-chat",
+    "admin/al-email", "admin/al-support-template", "admin/al-template", "admin/al-detections", "admin/al-rule-saved", "admin/al-flagged-chat",
     "admin/al-delivery-sent", "admin/al-archived",
   ],
   async run(kit) {
@@ -219,8 +232,19 @@ const adminAlerts = {
     await email.getByText("Email configured").waitFor();
     await shot("al-email");
 
-    // 1. Start from the Prompt-injection template and add a recipient.
+    // 1. The Support-reports template prefills a rule for new reports (shown, then cancelled).
     const rules = page.locator(".panel").filter({ hasText: "Alert Rules" }).first();
+    await rules.getByRole("button", { name: "Support-reports template" }).click();
+    const supportForm = page.locator(".alert-rule-form");
+    await supportForm.waitFor();
+    await supportForm.getByLabel("Alert rule name").and(page.locator("[value='New support reports']")).waitFor();
+    await scrollTo(page, supportForm, "start");
+    await page.evaluate(() => window.scrollBy(0, -150));
+    await shot("al-support-template");
+    await supportForm.getByRole("button", { name: "Cancel" }).click();
+    await supportForm.waitFor({ state: "detached" });
+
+    // 2. Start from the Prompt-injection template and add a recipient.
     await rules.getByRole("button", { name: "Prompt-injection template" }).click();
     const form = page.locator(".alert-rule-form");
     await form.waitFor();

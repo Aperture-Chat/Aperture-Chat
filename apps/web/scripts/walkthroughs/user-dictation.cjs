@@ -7,8 +7,10 @@
  * real outcome: this workspace has no transcription model, so the server
  * refuses with its own message. Nothing about the transcript is staged.
  *
- * The diagram half asks the local model for a Mermaid flowchart, records the
- * rendered figure and its Code view, and checks a real PNG download. The Edit
+ * The diagram half asks the local model for a Graphviz (DOT) diagram, which
+ * the workspace converts and renders as a figure in its own palette; it
+ * records the figure and its Code view (the model's original DOT source), and
+ * checks a real PNG download. The Edit
  * dialog is not captured: it renders clipped inside the message column (it is
  * not portaled), which is reported as a product bug.
  */
@@ -43,7 +45,7 @@ async function microphonePage(kit) {
 
 const userDictation = {
   role: "user",
-  description: "Record dictation (and see the real refusal without a transcription model), and work with a Mermaid diagram.",
+  description: "Record dictation (and see the real refusal without a transcription model), and work with a diagram the model wrote in Graphviz.",
   externalOrigins: () => [],
   frames: ["user/dictation-recording", "user/dictation-error", "user/diagram-rendered", "user/diagram-code"],
   async run(kit) {
@@ -67,13 +69,13 @@ const userDictation = {
       await mic.browser.close();
     }
 
-    // 2. A Mermaid diagram from the model.
+    // 2. A diagram the model writes in Graphviz, rendered as a figure.
     const page = await kit.app("user", "/chat");
     await composer(page).waitFor();
     let figure;
     for (let attempt = 0; attempt < 3 && !figure; attempt += 1) {
-      const before = await sendChat(page, "Show the stages of a synthetic vendor onboarding process as a Mermaid flowchart. Use exactly this style: a mermaid code block with flowchart LR and four simple nodes written like A[Request] --> B[Screening], no subgraphs and no styling. After the code block, add one sentence.");
-      const reply = await waitForReply(page, before);
+      const before = await sendChat(page, "Show the stages of a synthetic vendor onboarding process as a Graphviz diagram. Use exactly this style: a dot code block containing digraph onboarding { rankdir=LR; Request -> Screening -> Contract -> Onboarded; } with no other attributes. After the code block, add one sentence.");
+      const reply = await waitForReply(page, before, { timeout: 900000 });
       const panel = reply.locator(".md-diagram-panel");
       await panel.first().waitFor({ timeout: 30000 }).catch(() => {});
       await scrollTo(page, panel.first(), "center").catch(() => {});
@@ -85,6 +87,7 @@ const userDictation = {
     await shot("diagram-rendered");
     await figure.locator(".md-code-action").filter({ hasText: "Code" }).click();
     await page.waitForTimeout(600);
+    if (!/digraph/.test(await figure.innerText())) throw new Error("Code does not show the model's Graphviz source.");
     await shot("diagram-code");
     await figure.locator(".md-code-action").filter({ hasText: "Diagram" }).click();
     await page.waitForTimeout(800);

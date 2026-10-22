@@ -1031,6 +1031,10 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
   expect(screen.getByText("Knowledge, Web, Agent, and reply settings")).toBeInTheDocument();
   expect(screen.getByText("Session details and context")).toBeInTheDocument();
   expect(screen.getByText("Draft documents")).toBeInTheDocument();
+  expect(screen.getByText("Hand a chat request to Drafts")).toBeInTheDocument();
+  expect(screen.getByText("Open a Word or PDF file and keep its formatting")).toBeInTheDocument();
+  expect(screen.getByText("Start from a template and set the page layout")).toBeInTheDocument();
+  expect(screen.getByText("Edit slides: layouts, pictures, and text")).toBeInTheDocument();
   expect(screen.getByText("Agent profiles")).toBeInTheDocument();
   expect(screen.getByText("Knowledge bases")).toBeInTheDocument();
   expect(screen.getByText("Tools and the Library")).toBeInTheDocument();
@@ -1043,6 +1047,7 @@ test("help drawer lists the user guide playlist and opens a walkthrough", async 
     screen.getByText("Save preferences in plain English, recall them in later sessions, and stay in control."),
   ).toBeInTheDocument();
   expect(screen.getByText("Organize and find your work")).toBeInTheDocument();
+  expect(screen.getByText("Report a problem and follow it up")).toBeInTheDocument();
 
   const guidePdf = screen.getByRole("link", { name: /User guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "/docs/aperture-user-guide.pdf");
