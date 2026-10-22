@@ -19,10 +19,10 @@ Chat, documents, slide decks, agents, automations, and knowledge, on infrastruct
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-tour-light.png">
-  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, Agents, Automations, the knowledge Library, the document editor, and the Admin Console" width="100%">
+  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, Agents, Automations, the knowledge Library, the document editor, the slide editor, and the Admin Console" width="100%">
 </picture>
 
-<sub>The current interface in a synthetic organization, answered by an open model running locally through Ollama.
+<sub>The current interface in a synthetic organization, answered by an open model (Qwen 3.5 9B) running locally.
 Watch the narrated walkthrough at <a href="https://aperturechat.com/#demoPanel">ApertureChat.com</a>.</sub>
 
 </div>
@@ -90,7 +90,7 @@ policies appropriate for your organization's data.
 <details>
 <summary><b>Mobile layout</b></summary>
 <br>
-<img src="docs/images/chat-mobile.png" alt="Chat on a phone-sized screen with the compact composer" width="320">
+<img src="docs/images/chat-mobile.png" alt="A cited Policy Assistant answer on a phone-sized screen with the compact composer" width="320">
 </details>
 
 ### Documents and slide decks
@@ -100,9 +100,10 @@ policies appropriate for your organization's data.
 | ![Document editor with a project brief, compact formatting toolbar, status bar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with the project brief converted into a deck, layout and theme choices, and slide thumbnails](docs/images/deck-dark.png) |
 
 - **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
-- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word, Markdown, or text file as the document, or a PowerPoint file as the deck.
-- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything.
-- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, table and picture tools, and, for decks, layouts and themes, a slide sorter, snapping guides, and presenter view.
+- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
+- **Start from chat.** Ask for a document or a deck in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
+- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
+- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts, and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and themes, a slide sorter, snapping guides, and presenter view round it out.
 - **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
 - **Export.** Download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`), or print a paginated PDF.
@@ -142,7 +143,7 @@ policies appropriate for your organization's data.
 
 | Admin Console | Platform Owner Console |
 | --- | --- |
-| ![Admin Console user list with roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local Ollama provider and three agents](docs/images/platform-dark.png) |
+| ![Admin Console user list with roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local model provider and three agents](docs/images/platform-dark.png) |
 
 | Role | Responsibilities |
 | --- | --- |

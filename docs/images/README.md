@@ -1,30 +1,25 @@
 # README interface captures
 
-The root README's screenshots and product tour were refreshed on
-September 24, 2026 from the v0.5.5 interface (redesigned sidebar, Agents,
-Automations, and Library). They illustrate the current interface, not a claim
-that every pixel matches an older published image.
-`sign-in.png` was recaptured the same day for v0.5.6 after the sign-in screen
-redesign. `drafts-light.png`, `drafts-dark.png`, `deck-light.png`,
-`deck-dark.png`, and the document-editor frame of `product-tour-light.gif`
-were recaptured on September 26, 2026 from the same instance after the Drafts
-editor upgrade (assistant chips, status bar, and the deck Layouts/Themes strip).
-The tour GIF was rebuilt from the same six frames with only that frame
-replaced; its poster, the first frame, is unchanged.
+The root README's screenshots and product tour were recaptured on
+October 21, 2026 from the v0.5.14 interface: the warm light palette, tactile
+buttons and toggles, the Aperture Chat wordmark and icon, and the upgraded
+deck editor with its left-hand slide panel. They illustrate the current
+interface, not a claim that every pixel matches an older published image.
 
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
-  slideshow of six light-mode captures (a cited agent answer in chat, Agents,
-  Automations, Knowledge, the document editor, and the Admin Console), with the
-  first frame as the reduced-motion fallback.
+  slideshow of seven light-mode captures (a cited agent answer in chat, Agents,
+  Automations, Knowledge, the document editor, the slide editor, and the Admin
+  Console), with the first frame as the reduced-motion fallback.
 - `chat-light.png`, `chat-dark.png`: a Policy Assistant answer citing the
   uploaded travel policy, and a chat delivered by an automation's Run now.
-- `chat-mobile.png`: the chat composer at a phone-sized breakpoint.
+- `chat-mobile.png`: the same cited answer at a phone-sized breakpoint.
 - `drafts-light.png`, `drafts-dark.png`: a manually authored project brief in
   the document editor.
 - `deck-light.png`, `deck-dark.png`: the same brief converted through the real
-  Document/Deck switch.
+  Document/Deck switch and rebuilt by the deck assistant, with the slide panel
+  and floating text toolbar.
 - `agents-light.png`, `automations-light.png`: three agents and three
   automations (weekly, weekday cron, and a paused one-time run).
 - `knowledge-dark.png`, `tools-dark.png`: a knowledge base with its uploaded
@@ -40,10 +35,11 @@ agents, automations, prompts, and skills are synthetic. The capture API used
 new local data stores, no seeded demo data, no production configuration, and no
 private credentials.
 
-Model output is real. Chat replies and automation runs came from Gemma 3 4B,
-an open model served locally by Ollama and registered through the normal
-provider, validation, and model-sync flow. Knowledge documents were uploaded
-and indexed by the application; citations point at those uploads. No provider
+Model output is real. Chat replies, automation runs, and the deck rebuild came
+from Qwen 3.5 9B, an open model served locally through an OpenAI-compatible
+endpoint and registered through the normal provider, key, validation, and
+model-sync flow. Knowledge documents were uploaded and indexed by the
+application; citations point at those uploads. No provider
 responses, connection results, or usage counters were edited or fabricated.
 Screens that depend on external services (web search, cloud connectors, MCP
 servers) are shown in their unconfigured state or not at all.
@@ -53,9 +49,10 @@ servers) are shown in their unconfigured state or not at all.
 1. Run the current UI against an isolated local API with separate data paths,
    seeds disabled, and no private production configuration. Create the first
    owner through the bootstrap flow and use only synthetic accounts and files.
-2. Connect a local model (for example Ollama) through the Platform Owner
-   Console flow so answers are genuine. Review every answer for accuracy
-   against the synthetic source documents before capturing it.
+2. Connect a local model (for example Ollama or another OpenAI-compatible
+   server) through the Platform Owner Console flow so answers are genuine.
+   Review every answer for accuracy against the synthetic source documents
+   before capturing it.
 3. Capture the real interface in light and dark themes and at a mobile
    breakpoint (1440×900 at 2× device scale; 390×844 for mobile). Keep
    unconfigured-state notices visible; do not restyle the product or invent
