@@ -127,6 +127,7 @@ import {
   setAdminUsageAllocation,
   type UsageAllocationsSnapshot,
   mapToolConfigRecordToDisplay,
+  ssoInitiateLoginUri,
   ssoRedirectUri,
   UsageBudgetRequestError,
 } from "../lib/api";
@@ -2199,18 +2200,20 @@ export function AdminConsole({
       .map((domain) => domain.trim())
       .filter(Boolean);
     const localId = `sso-local-${data.ssoConfigs.length + 1}`;
+    const protocolFields = ssoDraftProtocolFields(draft);
     const localConfig: SsoConfig = {
       id: localId,
       name: draft.name,
-      protocol: "OIDC",
+      protocol: draft.protocol,
       status: "ready",
       enforced: false,
-      issuer: draft.issuer,
+      issuer: protocolFields.issuer,
       client_id: draft.clientId,
       client_secret_set: Boolean(draft.clientSecret),
       domains: domains.length ? domains : ["tenant domain"],
       jit_provisioning: draft.jit,
       mapped_groups: {},
+      workos_organization_id: protocolFields.organizationId,
       last_tested: "Not tested yet",
       admin_notes: "Created from the Admin Console.",
     };
@@ -2227,12 +2230,13 @@ export function AdminConsole({
               {
                 tenant_id: data.currentTenant.id,
                 provider: draft.provider,
-                issuer_url: draft.issuer,
-                client_id: draft.clientId,
+                issuer_url: protocolFields.issuer,
+                client_id: draft.clientId.trim(),
                 client_secret: draft.clientSecret || null,
                 enabled: true,
                 settings: {
-                  protocol: "OIDC",
+                  protocol: draft.protocol,
+                  display_name: draft.name.trim(),
                   status: "ready",
                   // Enforcement always starts off so a misconfigured provider
                   // can never lock the tenant out before a passing test.
@@ -2240,6 +2244,7 @@ export function AdminConsole({
                   domains,
                   jit_provisioning: draft.jit,
                   admin_notes: "Created from the Admin Console.",
+                  ...protocolFields.settings,
                 },
               },
               mutationContext,
@@ -5928,15 +5933,23 @@ function TenantDailyBudgetPanel({ userId }: { userId: string }) {
 
 type SsoCreateDraft = {
   provider: string;
+  protocol: "OIDC" | "WORKOS";
   name: string;
   issuer: string;
   clientId: string;
   clientSecret: string;
+  workosOrganizationId: string;
   domains: string;
   jit: boolean;
 };
 
-const SSO_PROVIDER_PRESETS: Array<{ value: string; label: string; issuer: string; hint?: string }> = [
+const SSO_PROVIDER_PRESETS: Array<{
+  value: string;
+  label: string;
+  issuer: string;
+  hint?: string;
+  protocol?: "WORKOS";
+}> = [
   {
     value: "entra-id",
     label: "Microsoft Entra ID",
@@ -5946,7 +5959,19 @@ const SSO_PROVIDER_PRESETS: Array<{ value: string; label: string; issuer: string
   { value: "google-workspace", label: "Google Workspace", issuer: "https://accounts.google.com" },
   { value: "okta", label: "Okta", issuer: "https://{your-domain}.okta.com" },
   { value: "custom-oidc", label: "Custom OIDC provider", issuer: "" },
+  {
+    value: "workos",
+    label: "WorkOS (AuthKit)",
+    issuer: "",
+    protocol: "WORKOS",
+    hint: "Uses your own WorkOS account. WorkOS runs the sign-in page and your organization's SSO connection.",
+  },
 ];
+
+/** Display label for a stored protocol value. */
+function ssoProtocolLabel(protocol: SsoConfig["protocol"]): string {
+  return protocol === "WORKOS" ? "WorkOS AuthKit" : protocol;
+}
 
 function SsoCreateForm({
   pending,
@@ -5960,24 +5985,23 @@ function SsoCreateForm({
   const [preset, setPreset] = useState(SSO_PROVIDER_PRESETS[0]);
   const [draft, setDraft] = useState<SsoCreateDraft>({
     provider: SSO_PROVIDER_PRESETS[0].value,
+    protocol: "OIDC",
     name: SSO_PROVIDER_PRESETS[0].label,
     issuer: SSO_PROVIDER_PRESETS[0].issuer,
     clientId: "",
     clientSecret: "",
+    workosOrganizationId: "",
     domains: "",
     jit: true,
   });
-  const canSubmit = draft.issuer.trim().length > 0 && draft.clientId.trim().length > 0 && !pending;
+  const isWorkos = draft.protocol === "WORKOS";
+  const setField = (field: SsoDraftTextField, value: string) =>
+    setDraft((current) => ({ ...current, [field]: value }));
 
   function applyPreset(value: string) {
     const next = SSO_PROVIDER_PRESETS.find((option) => option.value === value) ?? SSO_PROVIDER_PRESETS[3];
     setPreset(next);
-    setDraft((current) => ({
-      ...current,
-      provider: next.value,
-      name: next.label === "Custom OIDC provider" ? current.name : next.label,
-      issuer: next.issuer || current.issuer,
-    }));
+    setDraft((current) => withSsoPreset(current, next));
   }
 
   return (
@@ -6003,50 +6027,21 @@ function SsoCreateForm({
           <input
             value={draft.name}
             aria-label="SSO display name"
-            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+            onChange={(event) => setField("name", event.target.value)}
           />
         </label>
-        <label>
-          <span className="connector-field-label">
-            Issuer URL<span className="required-mark"> *</span>
-          </span>
-          <input
-            value={draft.issuer}
-            aria-label="Issuer URL"
-            placeholder="https://accounts.google.com"
-            onChange={(event) => setDraft((current) => ({ ...current, issuer: event.target.value }))}
-          />
-          <small className="field-hint">
-            Discovery is fetched from {"{issuer}"}/.well-known/openid-configuration
-          </small>
-        </label>
-        <label>
-          <span className="connector-field-label">
-            Client ID<span className="required-mark"> *</span>
-          </span>
-          <input
-            value={draft.clientId}
-            aria-label="Client ID"
-            onChange={(event) => setDraft((current) => ({ ...current, clientId: event.target.value }))}
-          />
-        </label>
-        <label>
-          <span className="connector-field-label">Client secret</span>
-          <input
-            type="password"
-            value={draft.clientSecret}
-            aria-label="Client secret"
-            placeholder="Vaulted server-side, never shown again"
-            onChange={(event) => setDraft((current) => ({ ...current, clientSecret: event.target.value }))}
-          />
-        </label>
+        {isWorkos ? (
+          <WorkosCredentialFields draft={draft} setField={setField} />
+        ) : (
+          <OidcCredentialFields draft={draft} setField={setField} />
+        )}
         <label>
           <span className="connector-field-label">Allowed email domains</span>
           <input
             value={draft.domains}
             aria-label="Allowed email domains"
             placeholder="example.com, example.co.uk"
-            onChange={(event) => setDraft((current) => ({ ...current, domains: event.target.value }))}
+            onChange={(event) => setField("domains", event.target.value)}
           />
           <small className="field-hint">Only accounts on these domains can sign in through this provider</small>
         </label>
@@ -6065,13 +6060,14 @@ function SsoCreateForm({
         />
       </div>
       <small className="field-hint sso-redirect-hint">
-        Register this redirect URI with your identity provider: <code>{ssoRedirectUri()}</code>
+        {SSO_REDIRECT_HINTS[draft.protocol]}
+        <code>{ssoRedirectUri()}</code>
       </small>
       <div className="connector-config-actions">
         <button
           className="primary-button form-submit-button"
           type="button"
-          disabled={!canSubmit}
+          disabled={!ssoDraftReady(draft) || pending}
           data-tooltip="Create this SSO configuration for the tenant; enforcement stays off until you enable it"
           onClick={() => onCreate(draft)}
         >
@@ -6086,6 +6082,184 @@ function SsoCreateForm({
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+type SsoDraftTextField = "name" | "issuer" | "clientId" | "clientSecret" | "workosOrganizationId" | "domains";
+type SsoCredentialFieldsProps = {
+  draft: SsoCreateDraft;
+  setField: (field: SsoDraftTextField, value: string) => void;
+};
+
+const SSO_REDIRECT_HINTS: Record<SsoCreateDraft["protocol"], string> = {
+  OIDC: "Register this redirect URI with your identity provider: ",
+  WORKOS: "In the WorkOS dashboard, open Redirects and add this redirect URI: ",
+};
+
+/** The draft after choosing a preset: WorkOS has no issuer and its own name. */
+function withSsoPreset(current: SsoCreateDraft, next: (typeof SSO_PROVIDER_PRESETS)[number]): SsoCreateDraft {
+  if (next.protocol === "WORKOS") {
+    return { ...current, provider: next.value, protocol: "WORKOS", name: "WorkOS", issuer: "" };
+  }
+  return {
+    ...current,
+    provider: next.value,
+    protocol: "OIDC",
+    name: next.label === "Custom OIDC provider" ? current.name : next.label,
+    issuer: next.issuer || current.issuer,
+  };
+}
+
+/** What a draft stores that depends on its protocol. */
+function ssoDraftProtocolFields(draft: SsoCreateDraft): {
+  issuer: string;
+  organizationId: string | null;
+  settings: { workos_organization_id?: string; group_claim?: string };
+} {
+  if (draft.protocol !== "WORKOS") return { issuer: draft.issuer, organizationId: null, settings: {} };
+  // WorkOS has one fixed API host, so it stores no issuer. WorkOS can assign
+  // roles from the identity provider's groups, so role slugs are what admins map.
+  const organizationId = draft.workosOrganizationId.trim();
+  return {
+    issuer: "",
+    organizationId: organizationId || null,
+    settings: { workos_organization_id: organizationId, group_claim: "roles" },
+  };
+}
+
+/** OIDC needs an issuer; WorkOS has one fixed API host and needs its API key. */
+function ssoDraftReady(draft: SsoCreateDraft): boolean {
+  const credential = draft.protocol === "WORKOS" ? draft.clientSecret : draft.issuer;
+  return credential.trim().length > 0 && draft.clientId.trim().length > 0;
+}
+
+function OidcCredentialFields({ draft, setField }: SsoCredentialFieldsProps) {
+  return (
+    <>
+      <label>
+        <span className="connector-field-label">
+          Issuer URL<span className="required-mark"> *</span>
+        </span>
+        <input
+          value={draft.issuer}
+          aria-label="Issuer URL"
+          placeholder="https://accounts.google.com"
+          onChange={(event) => setField("issuer", event.target.value)}
+        />
+        <small className="field-hint">
+          Discovery is fetched from {"{issuer}"}/.well-known/openid-configuration
+        </small>
+      </label>
+      <label>
+        <span className="connector-field-label">
+          Client ID
+          <span className="required-mark"> *</span>
+        </span>
+        <input
+          value={draft.clientId}
+          aria-label="Client ID"
+          onChange={(event) => setField("clientId", event.target.value)}
+        />
+      </label>
+      <label>
+        <span className="connector-field-label">Client secret</span>
+        <input
+          type="password"
+          value={draft.clientSecret}
+          aria-label="Client secret"
+          placeholder="Vaulted server-side, never shown again"
+          onChange={(event) => setField("clientSecret", event.target.value)}
+        />
+      </label>
+    </>
+  );
+}
+
+function WorkosCredentialFields({ draft, setField }: SsoCredentialFieldsProps) {
+  return (
+    <>
+      <label>
+        <span className="connector-field-label">
+          WorkOS client ID
+          <span className="required-mark"> *</span>
+        </span>
+        <input
+          value={draft.clientId}
+          aria-label="WorkOS client ID"
+          placeholder="client_..."
+          onChange={(event) => setField("clientId", event.target.value)}
+        />
+        <small className="field-hint">WorkOS dashboard → API Keys</small>
+      </label>
+      <label>
+        <span className="connector-field-label">
+          WorkOS API key
+          <span className="required-mark"> *</span>
+        </span>
+        <input
+          type="password"
+          value={draft.clientSecret}
+          aria-label="WorkOS API key"
+          placeholder="sk_... — vaulted server-side"
+          onChange={(event) => setField("clientSecret", event.target.value)}
+        />
+        <small className="field-hint">Vaulted server-side and never shown again</small>
+      </label>
+      <label>
+        <span className="connector-field-label">WorkOS organization ID</span>
+        <input
+          value={draft.workosOrganizationId}
+          aria-label="WorkOS organization ID"
+          placeholder="org_... (optional)"
+          onChange={(event) => setField("workosOrganizationId", event.target.value)}
+        />
+        <small className="field-hint">
+          Optional. Sends everyone straight to this organization&apos;s sign-in. Leave blank to let WorkOS
+          find the organization from each email.
+        </small>
+      </label>
+    </>
+  );
+}
+
+/** Card wording that differs between OIDC providers and WorkOS. */
+const SSO_CARD_COPY = {
+  OIDC: {
+    sourceLabel: "Issuer",
+    source: (config: SsoConfig) => config.issuer,
+    mappingTitle: "IdP group mapping",
+    mappingHint:
+      "Map identity-provider group or role claim values to tenant groups so JIT-provisioned users land with the right access.",
+    claimPlaceholder: "IdP group value (e.g. legal-team)",
+    testTooltip: (name: string) => `Run a live discovery and key check against ${name}`,
+  },
+  WORKOS: {
+    sourceLabel: "WorkOS organization",
+    source: (config: SsoConfig) => config.workos_organization_id || "Found from each email",
+    mappingTitle: "WorkOS role mapping",
+    mappingHint: "Map WorkOS role slugs to tenant groups. WorkOS can assign roles from your identity provider's groups.",
+    claimPlaceholder: "WorkOS role slug (e.g. member)",
+    testTooltip: () => "Check the API key, client ID, and organization with WorkOS",
+  },
+} as const;
+
+function ssoCardCopy(protocol: SsoConfig["protocol"]) {
+  return SSO_CARD_COPY[protocol === "WORKOS" ? "WORKOS" : "OIDC"];
+}
+
+/** The two addresses the WorkOS dashboard's Redirects page needs. */
+function WorkosRedirectUris({ config }: { config: SsoConfig }) {
+  if (config.protocol !== "WORKOS") return null;
+  return (
+    <div className="field-hint sso-redirect-hint sso-workos-uris">
+      <span>In the WorkOS dashboard under Redirects, add:</span>
+      <span>
+        Redirect URI <code>{ssoRedirectUri()}</code>
+      </span>
+      <span>
+        Initiate login URI <code>{ssoInitiateLoginUri(config.id)}</code>
+      </span>
     </div>
   );
 }
@@ -6116,6 +6290,7 @@ function SsoConfigCard({
   );
   const testing = pendingAction === `sso-test-${config.id}`;
   const savingMappings = pendingAction === `sso-mappings-${config.id}`;
+  const copy = ssoCardCopy(config.protocol);
 
   function mappingsToRecord(): Record<string, string> {
     const record: Record<string, string> = {};
@@ -6137,11 +6312,11 @@ function SsoConfigCard({
       <dl className="meta-list stacked">
         <div>
           <dt>Protocol</dt>
-          <dd>{config.protocol}</dd>
+          <dd>{ssoProtocolLabel(config.protocol)}</dd>
         </div>
         <div>
-          <dt>Issuer</dt>
-          <dd>{config.issuer}</dd>
+          <dt>{copy.sourceLabel}</dt>
+          <dd>{copy.source(config)}</dd>
         </div>
         <div>
           <dt>Domains</dt>
@@ -6157,17 +6332,14 @@ function SsoConfigCard({
         </div>
       </dl>
       <div className="sso-mapping-editor">
-        <strong className="sso-mapping-title">IdP group mapping</strong>
-        <small className="field-hint">
-          Map identity-provider group or role claim values to tenant groups so JIT-provisioned users land with the
-          right access.
-        </small>
+        <strong className="sso-mapping-title">{copy.mappingTitle}</strong>
+        <small className="field-hint">{copy.mappingHint}</small>
         {mappingRows.length === 0 && <small className="field-hint">No mappings yet.</small>}
         {mappingRows.map((row, index) => (
           <div className="sso-mapping-row" key={index}>
             <input
               value={row.claim}
-              placeholder="IdP group value (e.g. legal-team)"
+              placeholder={copy.claimPlaceholder}
               aria-label={`IdP group value ${index + 1}`}
               disabled={!canManage}
               onChange={(event) =>
@@ -6253,7 +6425,7 @@ function SsoConfigCard({
             className="secondary-button compact"
             type="button"
             disabled={testing}
-            data-tooltip={`Run a live discovery and key check against ${config.name}`}
+            data-tooltip={copy.testTooltip(config.name)}
             onClick={onTest}
           >
             <RefreshCw size={14} /> {testing ? "Testing…" : "Test connection"}
@@ -6282,6 +6454,7 @@ function SsoConfigCard({
           ))}
         </div>
       )}
+      <WorkosRedirectUris config={config} />
       <p className="muted-note">{config.mfa_notes || config.admin_notes}</p>
     </div>
   );

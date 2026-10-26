@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # External base URL of this API, used to build the OIDC redirect URI that
     # admins register with their identity provider.
     api_base_url: str = "http://localhost:8000"
+    # WorkOS API used by WorkOS sign-in configurations. Only a test harness
+    # changes this (for example to the `workos emulate` API emulator); each
+    # deployment's own WorkOS client ID and API key live in its SSO settings.
+    workos_api_base_url: str = "https://api.workos.com"
     # Process-local token-bucket limits. A value of zero disables that endpoint
     # class. Each API worker owns independent buckets, so multi-worker
     # deployments need a shared limiter before these values become global caps.

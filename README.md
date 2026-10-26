@@ -150,7 +150,7 @@ policies appropriate for your organization's data.
 | **Tenant Admin** | Users, groups, access requests, SSO, model restrictions, connectors, knowledge, tools, policies, personal data protection, training datasets, retention, and tenant analytics. |
 | **User** | Granted chat, drafting, agent, knowledge, and tool workflows. |
 
-- **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
+- **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; optional [WorkOS AuthKit](docs/WORKOS_SSO.md) with your own WorkOS account; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
 - **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing provider secrets requires platform-owner authorization; workspace admins can replace their own connectors' credentials but never read them back.
 - **Personal data.** Optionally conceal Social Security, card, and account numbers, contact details, health identifiers, and secrets wherever chats are stored, shown, or exported, and keep them from the model. Detection runs inside your deployment.
 - **Training datasets.** Optionally capture de-identified ratings and corrections, route them by practice area and department, review them, and download fine-tuning datasets for an open-weight model.

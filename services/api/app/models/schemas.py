@@ -404,7 +404,7 @@ class AuthOptionsResponse(BaseModel):
     password_auth_enabled: bool = False
     providers: list[AuthProviderOption] = Field(default_factory=list)
     tenant_branding: Tenant | None = None
-    supported_sso_protocols: list[str] = Field(default_factory=lambda: ["OIDC"])
+    supported_sso_protocols: list[str] = Field(default_factory=lambda: ["OIDC", "WORKOS"])
     deferred_sso_protocols: list[str] = Field(default_factory=lambda: ["SAML"])
 
 

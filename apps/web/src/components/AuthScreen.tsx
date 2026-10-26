@@ -517,7 +517,7 @@ export function AuthScreen({
     }
     setValidationError(null);
     const redirect = onSsoRedirect ?? ((url: string) => window.location.assign(url));
-    redirect(ssoAuthorizeUrl(selectedProvider.id));
+    redirect(ssoAuthorizeUrl(selectedProvider.id, ssoLoginHint(selectedProvider, nextEmail)));
   };
 
   const submitLocal = () => {
@@ -1099,7 +1099,9 @@ export function AuthScreen({
                   required={bootstrapRequired || primaryAuthMethod === "local"}
                 />
               </span>
-              {primaryAuthMethod === "sso" && <small className="auth-field-help">Optional. Helps select your organization's sign-in provider.</small>}
+              {primaryAuthMethod === "sso" && (
+                <small className="auth-field-help">{ssoEmailHelp(selectedProvider)}</small>
+              )}
             </label>
 
             {bootstrapRequired && (
@@ -1336,6 +1338,17 @@ function providerFromId(providers: AuthProviderOption[], id: string): AuthProvid
 
 function isEmailLike(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+/** WorkOS AuthKit hosts the sign-in page, so a typed email prefills it. */
+function ssoLoginHint(provider: AuthProviderOption, email: string): string | undefined {
+  return provider.protocol === "WORKOS" && email ? email : undefined;
+}
+
+function ssoEmailHelp(provider: AuthProviderOption | null): string {
+  return provider?.protocol === "WORKOS"
+    ? "Optional. WorkOS uses it to find your organization's sign-in."
+    : "Optional. Helps select your organization's sign-in provider.";
 }
 
 function providerStatusText(provider: AuthProviderOption): string {

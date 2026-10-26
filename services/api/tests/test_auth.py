@@ -95,7 +95,7 @@ def test_auth_options_expose_enabled_sso_without_secrets() -> None:
     assert payload["providers"][0]["mfa_methods"] == ["Microsoft Authenticator", "Duo Mobile"]
     assert payload["tenant_branding"]["chat_brand_name"] == "Aperture Chat"
     assert payload["tenant_branding"]["logo_url"] is None
-    assert payload["supported_sso_protocols"] == ["OIDC"]
+    assert payload["supported_sso_protocols"] == ["OIDC", "WORKOS"]
     assert payload["deferred_sso_protocols"] == ["SAML"]
     assert "secret" not in response.text.lower()
 
