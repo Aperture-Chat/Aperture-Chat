@@ -136,7 +136,7 @@ export function ToolsLibrary({
                 <AlertTriangle size={16} />
                 <span>
                   The Prompt Library is turned off for this workspace, so people can't see or use these prompts. Turn it
-                  back on in Platform console → Org Settings → Connectors.
+                  back on in Admin console → Connections → Connectors.
                 </span>
               </div>
             )}
@@ -585,7 +585,7 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
           <AlertTriangle size={16} />
           <span>
             {isAdmin
-              ? "MCP servers are turned off for this workspace, so nobody can use these connections until the MCP Servers connector is turned back on (Platform console → Org Settings → Connectors)."
+              ? "MCP servers are turned off for this workspace, so nobody can use these connections until the MCP Servers connector is turned back on (Admin console → Connections → Connectors)."
               : "MCP servers are turned off for this workspace."}
           </span>
         </div>

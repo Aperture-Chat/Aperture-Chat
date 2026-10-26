@@ -1120,6 +1120,63 @@ test("sso tab creates a tenant SSO configuration through the admin API", async (
   );
 });
 
+test("sso tab creates a WorkOS configuration with the deployment's own keys", async () => {
+  const createdConfig = {
+    ...cloneData().ssoConfigs[0],
+    id: "sso-workos",
+    name: "WorkOS",
+    protocol: "WORKOS" as const,
+    issuer: "",
+    enforced: false,
+    status: "ready" as const,
+    mapped_groups: {},
+    workos_organization_id: "org_01JSYNTHETIC",
+  };
+  const adminApi: AdminConsoleApi = { createSsoConfig: vi.fn(async () => createdConfig) };
+
+  renderAdmin(adminApi);
+  selectTab("SSO");
+  fireEvent.click(screen.getByRole("button", { name: "Add SSO configuration" }));
+  fireEvent.change(screen.getByLabelText("Identity provider preset"), { target: { value: "workos" } });
+  const form = screen.getByTestId("sso-create-form");
+  // WorkOS has one API host: no issuer, and the API key is required.
+  expect(within(form).queryByLabelText("Issuer URL")).not.toBeInTheDocument();
+  expect(within(form).getByText(/open Redirects and add this redirect URI/)).toBeInTheDocument();
+  fireEvent.change(within(form).getByLabelText("WorkOS client ID"), { target: { value: "client_01JSYNTHETIC" } });
+  fireEvent.change(within(form).getByLabelText("Allowed email domains"), { target: { value: "example.com" } });
+  expect(screen.getByRole("button", { name: "Create SSO configuration" })).toBeDisabled();
+  fireEvent.change(within(form).getByLabelText("WorkOS API key"), { target: { value: "sk_test_synthetic" } });
+  fireEvent.change(within(form).getByLabelText("WorkOS organization ID"), { target: { value: " org_01JSYNTHETIC " } });
+  fireEvent.click(screen.getByRole("button", { name: "Create SSO configuration" }));
+
+  expect(
+    await screen.findByText("WorkOS SSO configuration created. Test the connection before enforcing it."),
+  ).toBeInTheDocument();
+  expect(adminApi.createSsoConfig).toHaveBeenCalledWith(
+    "user-admin",
+    expect.objectContaining({
+      provider: "workos",
+      issuer_url: "",
+      client_id: "client_01JSYNTHETIC",
+      client_secret: "sk_test_synthetic",
+      settings: expect.objectContaining({
+        protocol: "WORKOS",
+        display_name: "WorkOS",
+        workos_organization_id: "org_01JSYNTHETIC",
+        group_claim: "roles",
+        enforced: false,
+        domains: ["example.com"],
+      }),
+    }),
+    expect.any(Object),
+  );
+  const card = screen.getByText("WorkOS", { selector: "strong" }).closest(".settings-card") as HTMLElement;
+  expect(within(card).getByText("WorkOS AuthKit")).toBeInTheDocument();
+  expect(within(card).getByText("org_01JSYNTHETIC")).toBeInTheDocument();
+  expect(within(card).getByText("WorkOS role mapping")).toBeInTheDocument();
+  expect(within(card).getByText(/\/api\/auth\/sso\/sso-workos\/authorize$/)).toBeInTheDocument();
+});
+
 test("sso tab saves IdP group mappings through the admin API", async () => {
   const adminApi: AdminConsoleApi = { updateSsoConfig: vi.fn(async () => undefined) };
 
@@ -1501,7 +1558,8 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Groups and permissions",
     "Tenant model access",
     "Review model requests and explain access",
-    "Response actions and connector responsibilities",
+    "Response actions and Library connections",
+    "Manage workspace connectors",
     "Tenant SSO and provisioning",
     "Tenant analytics",
     "Policies and memory governance",
@@ -1510,10 +1568,11 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Tenant audit",
     "Alerts and delivery",
     "Data retention and tagging",
+    "Work reported problems in Reports",
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/guided video$/)).toHaveLength(15);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(17);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "/docs/aperture-admin-guide.pdf");

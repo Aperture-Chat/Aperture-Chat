@@ -27,6 +27,23 @@ function selectIn(scope, label) {
   return scope.locator("label").filter({ hasText: new RegExp(`^\\s*${label}`) }).locator("select").first();
 }
 
+/* Web search defaults on for a new chat. DuckDuckGo refuses automated
+ * searches from the recording network (a real reply would read "Web search
+ * (duckduckgo) is unavailable: … Turn off Web for this reply to continue
+ * without it."), so the person turns Web off in Send options first. */
+async function webOff(page) {
+  const menu = page.locator(".send-options-menu");
+  if (!(await menu.isVisible())) await page.locator("form.composer .send-options-button").click();
+  await menu.waitFor();
+  const web = menu.locator(".send-option").filter({ has: page.locator("strong:text-is('Web')") });
+  if ((await web.getAttribute("aria-checked")) === "true") await web.click();
+  await page.waitForTimeout(300);
+  if ((await web.getAttribute("aria-checked")) !== "false") throw new Error("Web did not turn off.");
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "hidden" }).catch(() => {});
+  await page.waitForTimeout(300);
+}
+
 async function openTab(page, name) {
   await page.getByRole("tab", { name, exact: true }).click();
   await page.waitForTimeout(700);
@@ -88,8 +105,9 @@ const firstWorkspace = {
     await form.getByLabel("API key or secret", { exact: true }).fill(`local-${crypto.randomBytes(6).toString("hex")}`);
     await form.getByRole("button", { name: "Save Provider" }).click();
     const card = page.locator(".provider-card").filter({ hasText: "Local model server" });
-    await card.waitFor();
-    await card.locator(".pill", { hasText: "Connected" }).waitFor({ timeout: 240000 });
+    // Saving syncs the catalog and runs a test chat; the shared model may queue it.
+    await card.waitFor({ timeout: 300000 });
+    await card.locator(".pill", { hasText: "Connected" }).waitFor({ timeout: 600000 });
     await page.waitForTimeout(800);
     await scrollTo(page, card, "center");
     await shot("fw-provider-connected");
@@ -163,13 +181,15 @@ const firstWorkspace = {
     if (await welcomeClose.count()) await welcomeClose.first().click();
 
     // 8. A first message, answered by the model the owner just connected.
+    await webOff(person);
     const composer = person.getByRole("textbox", { name: "Message" });
     await composer.fill("In one sentence, what can you help our team with?");
     await person.getByRole("button", { name: "Send message" }).click();
     const reply = person.locator(".assistant-message .message-rendered-response").last();
-    await reply.waitFor({ timeout: 300000 });
+    // The shared local model may be busy with other work; allow for a queue.
+    await reply.waitFor({ timeout: 900000 });
     // The reply is finished when its feedback actions appear.
-    await person.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 300000 });
+    await person.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 900000 });
     await person.getByText("Streaming reply").waitFor({ state: "detached", timeout: 60000 }).catch(() => {});
     await person.waitForTimeout(2500);
     if (!(await reply.innerText()).trim()) throw new Error("The model returned no text.");

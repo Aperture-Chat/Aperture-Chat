@@ -1049,7 +1049,9 @@ export type Connector = {
 export type SsoConfig = {
   id: string;
   name: string;
-  protocol: "OIDC" | "SAML" | "SCIM";
+  /** WORKOS: WorkOS AuthKit runs the sign-in with the deployment's own
+   * WorkOS client ID and API key (see services/api/app/core/workos.py). */
+  protocol: "OIDC" | "SAML" | "SCIM" | "WORKOS";
   status: "not-configured" | "ready" | "enforced" | "error";
   enforced: boolean;
   issuer: string;
@@ -1076,6 +1078,8 @@ export type SsoConfig = {
   require_platform_mfa?: boolean;
   /** IdP group/claim value -> tenant group id, editable by tenant admins. */
   mapped_groups?: Record<string, string>;
+  /** WorkOS only: the organization AuthKit selects for every sign-in. */
+  workos_organization_id?: string | null;
   last_tested: string;
   admin_notes: string;
 };

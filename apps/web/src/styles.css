@@ -17662,6 +17662,17 @@ button.retention-tagged-title:focus-visible strong {
   word-break: break-all;
 }
 
+/* WorkOS cards list the two addresses its Redirects page needs, one per line. */
+.sso-workos-uris {
+  display: grid;
+  gap: 4px;
+}
+
+.sso-workos-uris code {
+  display: block;
+  margin-top: 1px;
+}
+
 .sso-test-result {
   display: grid;
   gap: 6px;

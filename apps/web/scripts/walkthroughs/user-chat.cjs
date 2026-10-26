@@ -26,6 +26,9 @@ const userChat = {
     const page = await kit.app("user", "/chat");
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: kit.APP });
     await composer(page).waitFor();
+    // A first chat starts with no send options on (user-send-options
+    // disconnects the web search it connects, which would otherwise default on).
+    if (await page.locator(".composer-tools-status").count()) throw new Error("Send options are on in a new chat; reset or rerun user-send-options teardown.");
 
     // 1. A starter fills the box without sending; then the real question.
     await page.locator(".chat-starters").getByRole("button", { name: /Explore an idea/ }).click();
@@ -55,7 +58,7 @@ const userChat = {
     await page.getByRole("button", { name: "Send edited message" }).click();
     const edited = page.locator("article.assistant-message").first();
     await page.waitForTimeout(1500);
-    await edited.locator(".message-quick-actions").waitFor({ timeout: 240000 });
+    await edited.locator(".message-quick-actions").waitFor({ timeout: 900000 });
     await page.waitForTimeout(1000);
     await shot("chat-edited");
 

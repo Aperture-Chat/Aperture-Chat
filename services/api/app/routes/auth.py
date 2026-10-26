@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import RedirectResponse
 
-from app.core import oidc
+from app.core import oidc, workos
 from app.core.config import get_settings
 from app.core.policy import api_access_allowed
 from app.core.rate_limit import ProcessLocalTokenBucket
@@ -78,6 +78,10 @@ from app.core.tenancy import require_request_tenant
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger("aperture.auth")
 
+# Protocols that can complete a verified sign-in. WorkOS is optional: it only
+# runs for a workspace that saved its own WorkOS client ID and API key.
+LIVE_SSO_PROTOCOLS = ("OIDC", "WORKOS")
+
 # Credential stuffing targets one account at a time, so the strict sign-in
 # budget belongs to the account rather than to the network address: a whole
 # office behind one NAT (or every user behind this deployment's reverse proxy)
@@ -140,7 +144,7 @@ def auth_options(
             if config.tenant_id == tenant.id and _sso_config_ready_for_login(config)
         ],
         tenant_branding=tenant,
-        supported_sso_protocols=["OIDC"],
+        supported_sso_protocols=list(LIVE_SSO_PROTOCOLS),
         deferred_sso_protocols=["SAML"],
     )
 
@@ -578,34 +582,17 @@ def disable_mfa(
 def sso_authorize(
     config_id: str,
     return_to: str | None = None,
+    login_hint: str | None = None,
     tenant: Tenant = Depends(require_request_tenant),
     store: SeedStore = Depends(get_store),
 ) -> RedirectResponse:
-    """Begin the real OIDC authorization-code flow: redirect the browser to the IdP."""
-    settings = get_settings()
-    config = store.sso_configs.get(config_id)
-    if config is None or config.tenant_id != tenant.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="This SSO provider is not fully configured. An administrator must save the issuer URL, client ID, and client secret first.",
-        )
-    protocol = _config_protocol(config)
-    if protocol != "OIDC":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Only OIDC sign-in is supported for live login. SAML configurations are stored but cannot authenticate users yet.",
-        )
-    if not _sso_config_ready_for_login(config):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="This SSO provider is not fully configured. An administrator must save the issuer URL, client ID, and client secret first.",
-        )
-    web_origin = _validate_return_origin(return_to, tenant, store)
-    try:
-        discovery = oidc.fetch_discovery_document(config.issuer_url)
-    except oidc.OidcError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    """Begin the authorization-code flow: redirect the browser to the IdP.
 
+    OIDC providers are reached through their discovery document; WorkOS
+    configurations go to WorkOS's hosted AuthKit page (see app.core.workos).
+    """
+    config = _live_sso_config(config_id, tenant, store)
+    web_origin = _validate_return_origin(return_to, tenant, store)
     nonce = py_secrets.token_urlsafe(16)
     # PKCE (S256). The verifier travels inside the HMAC-signed state, so the
     # callback can complete on any API instance without server-side storage.
@@ -625,8 +612,57 @@ def sso_authorize(
             "return_to": web_origin,
             "pkce": code_verifier,
         },
-        settings.secret_key,
+        get_settings().secret_key,
     )
+    if _config_protocol(config) == "WORKOS":
+        url = _workos_authorization_url(config, state, code_challenge, login_hint)
+    else:
+        url = _oidc_authorization_url(config, state, nonce, code_challenge)
+    return RedirectResponse(url=url, status_code=302)
+
+
+def _live_sso_config(config_id: str, tenant: Tenant, store: SeedStore) -> SsoConfig:
+    """The tenant's configuration, provided it can complete a real sign-in."""
+    not_configured = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="This SSO provider is not fully configured. An administrator must save the issuer URL, client ID, and client secret first.",
+    )
+    config = store.sso_configs.get(config_id)
+    if config is None or config.tenant_id != tenant.id:
+        raise not_configured
+    if _config_protocol(config) not in LIVE_SSO_PROTOCOLS:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Only OIDC and WorkOS sign-in are supported for live login. SAML configurations are stored but cannot authenticate users yet.",
+        )
+    if not _sso_config_ready_for_login(config):
+        raise not_configured
+    return config
+
+
+def _workos_authorization_url(
+    config: SsoConfig,
+    state: str,
+    code_challenge: str,
+    login_hint: str | None,
+) -> str:
+    # The email typed on the sign-in screen prefills WorkOS's hosted page.
+    hint = _normalize_email(login_hint) if login_hint and "@" in login_hint else None
+    return workos.authorization_url(
+        client_id=config.client_id,
+        redirect_uri=_sso_redirect_uri(),
+        state=state,
+        code_challenge=code_challenge,
+        organization=workos.organization_id(config.settings),
+        login_hint=hint,
+    )
+
+
+def _oidc_authorization_url(config: SsoConfig, state: str, nonce: str, code_challenge: str) -> str:
+    try:
+        discovery = oidc.fetch_discovery_document(config.issuer_url)
+    except oidc.OidcError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     query = urlencode(
         {
             "response_type": "code",
@@ -639,7 +675,7 @@ def sso_authorize(
             "code_challenge_method": "S256",
         }
     )
-    return RedirectResponse(url=f"{discovery['authorization_endpoint']}?{query}", status_code=302)
+    return f"{discovery['authorization_endpoint']}?{query}"
 
 
 @router.get("/sso/callback")
@@ -650,7 +686,7 @@ def sso_callback(
     error_description: str | None = None,
     store: SeedStore = Depends(get_store),
 ) -> RedirectResponse:
-    """OIDC redirect URI: exchange the code, validate the ID token, and hand the SPA a session."""
+    """Shared SSO redirect URI: redeem the code, verify the identity, and hand the SPA a session."""
     settings = get_settings()
     state_payload = verify_oidc_state(state, settings.secret_key) if state else None
     state_tenant = (
@@ -689,26 +725,8 @@ def sso_callback(
     callback_client_id = config.client_id
 
     try:
-        discovery = oidc.fetch_discovery_document(config.issuer_url)
-        tokens = oidc.exchange_authorization_code(
-            discovery["token_endpoint"],
-            config.client_id,
-            client_secret,
-            code,
-            _sso_redirect_uri(),
-            code_verifier=(
-                str(state_payload.get("pkce")) if state_payload.get("pkce") else None
-            ),
-            auth_methods_supported=discovery.get("token_endpoint_auth_methods_supported"),
-        )
-        claims = oidc.validate_id_token(
-            tokens["id_token"],
-            discovery["jwks_uri"],
-            discovery["issuer"],
-            config.client_id,
-            expected_nonce=str(state_payload.get("nonce")) if state_payload.get("nonce") else None,
-        )
-    except oidc.OidcError as exc:
+        claims, issuer = _redeem_authorization_code(config, client_secret, code, state_payload)
+    except (oidc.OidcError, workos.WorkOSError) as exc:
         return _sso_error_redirect(return_to, str(exc))
 
     email = _email_from_claims(claims)
@@ -800,7 +818,7 @@ def sso_callback(
                 "auth_method": "sso",
                 "sso_config_id": live_config.id,
                 "email": user.email,
-                "issuer": discovery["issuer"],
+                "issuer": issuer,
             },
         )
         store.save_runtime_state()
@@ -1530,6 +1548,51 @@ def _sso_redirect_uri() -> str:
     return f"{get_settings().api_base_url.rstrip('/')}/api/auth/sso/callback"
 
 
+def _redeem_authorization_code(
+    config: SsoConfig,
+    client_secret: str,
+    code: str,
+    state_payload: dict,
+) -> tuple[dict, str]:
+    """Turn the provider's authorization code into verified identity claims.
+
+    Returns the claims and the issuer recorded in the sign-in audit event.
+    Everything after this point is shared by every live protocol.
+    """
+    code_verifier = str(state_payload.get("pkce")) if state_payload.get("pkce") else None
+    if _config_protocol(config) == "WORKOS":
+        authentication = workos.authenticate_with_code(
+            client_id=config.client_id,
+            api_key=client_secret,
+            code=code,
+            code_verifier=code_verifier,
+        )
+        claims = workos.identity_claims(
+            authentication,
+            client_id=config.client_id,
+            required_organization=workos.organization_id(config.settings),
+        )
+        return claims, workos.api_base_url()
+    discovery = oidc.fetch_discovery_document(config.issuer_url)
+    tokens = oidc.exchange_authorization_code(
+        discovery["token_endpoint"],
+        config.client_id,
+        client_secret,
+        code,
+        _sso_redirect_uri(),
+        code_verifier=code_verifier,
+        auth_methods_supported=discovery.get("token_endpoint_auth_methods_supported"),
+    )
+    claims = oidc.validate_id_token(
+        tokens["id_token"],
+        discovery["jwks_uri"],
+        discovery["issuer"],
+        config.client_id,
+        expected_nonce=str(state_payload.get("nonce")) if state_payload.get("nonce") else None,
+    )
+    return claims, discovery["issuer"]
+
+
 def _sso_error_redirect(return_to: str, message: str) -> RedirectResponse:
     response = RedirectResponse(
         url=f"{return_to}/#sso_error={quote(message[:600])}",
@@ -1548,14 +1611,20 @@ def _email_from_claims(claims: dict) -> str | None:
 
 
 def _config_protocol(config: SsoConfig) -> str:
-    return str(config.settings.get("protocol") or ("SAML" if "saml" in config.provider.lower() else "OIDC")).upper()
+    configured = config.settings.get("protocol")
+    if configured:
+        return str(configured).upper()
+    provider = config.provider.lower()
+    if provider == "workos":
+        return "WORKOS"
+    return "SAML" if "saml" in provider else "OIDC"
 
 
 def _auth_provider_option(config: SsoConfig) -> AuthProviderOption:
     mfa_methods = _mfa_methods(config)
     return AuthProviderOption(
         id=config.id,
-        name=_provider_name(config.provider),
+        name=_config_display_name(config),
         provider=config.provider,
         protocol=_config_protocol(config),
         tenant_id=config.tenant_id,
@@ -1572,9 +1641,14 @@ def _sso_config_ready_for_login(config: SsoConfig) -> bool:
     if not config.enabled or not _config_domains(config):
         return False
 
-    # Only OIDC can complete a real, verified login today. SAML configurations are
-    # stored for future support but must not appear as working sign-in options.
-    if _config_protocol(config) != "OIDC":
+    # Only OIDC and WorkOS can complete a real, verified login today. SAML
+    # configurations are stored for future support but must not appear as
+    # working sign-in options.
+    protocol = _config_protocol(config)
+    if protocol == "WORKOS":
+        # WorkOS has one fixed API host, so a client ID and API key suffice.
+        return bool(config.client_id.strip() and config.secret_set)
+    if protocol != "OIDC":
         return False
     return bool(config.issuer_url.strip() and config.client_id.strip() and config.secret_set)
 
@@ -1704,6 +1778,11 @@ def _name_from_email(email: str) -> str:
     return " ".join(part.capitalize() for part in re.split(r"[._-]+", local) if part) or email
 
 
+def _config_display_name(config: SsoConfig) -> str:
+    display_name = _string_setting(config, "display_name")
+    return display_name.strip() if display_name else _provider_name(config.provider)
+
+
 def _provider_name(provider: str) -> str:
     labels = {
         "entra-id": "Microsoft Entra ID",
@@ -1711,6 +1790,7 @@ def _provider_name(provider: str) -> str:
         "okta": "Okta",
         "auth0": "Auth0",
         "saml": "SAML",
+        "workos": "WorkOS",
     }
     return labels.get(provider.lower(), provider.replace("-", " ").title())
 

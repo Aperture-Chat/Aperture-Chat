@@ -19,10 +19,10 @@ Chat, documents, slide decks, agents, automations, and knowledge, on infrastruct
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-tour-light.png">
-  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, Agents, Automations, the knowledge Library, the document editor, and the Admin Console" width="100%">
+  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, Agents, Automations, the knowledge Library, the document editor, the slide editor, and the Admin Console" width="100%">
 </picture>
 
-<sub>The current interface in a synthetic organization, answered by an open model running locally through Ollama.
+<sub>The current interface in a synthetic organization, answered by an open model (Qwen 3.5 9B) running locally.
 Watch the narrated walkthrough at <a href="https://aperturechat.com/#demoPanel">ApertureChat.com</a>.</sub>
 
 </div>
@@ -63,14 +63,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.14](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.14)**:
-> problem reports become support tickets that admins work in a Reports tab and
-> reporters follow in Help › My reports, with optional owner-reviewed sharing
-> to the maintainers as GitHub issues; document and deck requests in chat can
-> continue in Drafts; inline AI edits keep the original formatting; and
-> buttons and toggles share one tactile style. v0.5.13 moved connectors to
-> Admin → Connections with a per-source Hide.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0513) and
+> **Current release: [v0.5.15](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.15)**:
+> every training walkthrough, guide PDF, and README screenshot now shows the
+> current interface, with eight new lessons for support tickets, workspace
+> connectors, sharing reports with the maintainers, chat-to-Drafts handoff,
+> Word and PDF files, document templates, and slide editing. v0.5.14 turned
+> problem reports into support tickets and added tactile controls.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0514) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -90,7 +89,7 @@ policies appropriate for your organization's data.
 <details>
 <summary><b>Mobile layout</b></summary>
 <br>
-<img src="docs/images/chat-mobile.png" alt="Chat on a phone-sized screen with the compact composer" width="320">
+<img src="docs/images/chat-mobile.png" alt="A cited Policy Assistant answer on a phone-sized screen with the compact composer" width="320">
 </details>
 
 ### Documents and slide decks
@@ -100,9 +99,10 @@ policies appropriate for your organization's data.
 | ![Document editor with a project brief, compact formatting toolbar, status bar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with the project brief converted into a deck, layout and theme choices, and slide thumbnails](docs/images/deck-dark.png) |
 
 - **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
-- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word, Markdown, or text file as the document, or a PowerPoint file as the deck.
-- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything.
-- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, table and picture tools, and, for decks, layouts and themes, a slide sorter, snapping guides, and presenter view.
+- **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
+- **Start from chat.** Ask for a document or a deck in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
+- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
+- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts, and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and themes, a slide sorter, snapping guides, and presenter view round it out.
 - **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
 - **Export.** Download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`), or print a paginated PDF.
@@ -142,7 +142,7 @@ policies appropriate for your organization's data.
 
 | Admin Console | Platform Owner Console |
 | --- | --- |
-| ![Admin Console user list with roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local Ollama provider and three agents](docs/images/platform-dark.png) |
+| ![Admin Console user list with roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local model provider and three agents](docs/images/platform-dark.png) |
 
 | Role | Responsibilities |
 | --- | --- |
@@ -150,7 +150,7 @@ policies appropriate for your organization's data.
 | **Tenant Admin** | Users, groups, access requests, SSO, model restrictions, connectors, knowledge, tools, policies, personal data protection, training datasets, retention, and tenant analytics. |
 | **User** | Granted chat, drafting, agent, knowledge, and tool workflows. |
 
-- **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
+- **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; optional [WorkOS AuthKit](docs/WORKOS_SSO.md) with your own WorkOS account; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
 - **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing provider secrets requires platform-owner authorization; workspace admins can replace their own connectors' credentials but never read them back.
 - **Personal data.** Optionally conceal Social Security, card, and account numbers, contact details, health identifiers, and secrets wherever chats are stored, shown, or exported, and keep them from the model. Detection runs inside your deployment.
 - **Training datasets.** Optionally capture de-identified ratings and corrections, route them by practice area and department, review them, and download fine-tuning datasets for an open-weight model.
@@ -169,7 +169,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.14
+#   APERTURE_IMAGE_TAG=v0.5.15
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -190,7 +190,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.14 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.15 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -225,10 +225,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.14` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.15` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.14-dev`, `v0.5.14-test`, `v0.5.14-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.15-dev`, `v0.5.15-test`, `v0.5.15-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

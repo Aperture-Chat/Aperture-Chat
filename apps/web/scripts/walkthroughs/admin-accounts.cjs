@@ -129,8 +129,8 @@ const adminAccess = {
     await person.locator(".composer textarea").fill("In one sentence, what can you help me with today?");
     await person.getByRole("button", { name: "Send message" }).click();
     const reply = person.locator(".assistant-message .message-rendered-response").last();
-    await reply.waitFor({ timeout: 300000 });
-    await person.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 300000 });
+    await reply.waitFor({ timeout: 900000 });
+    await person.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 900000 });
     await person.waitForTimeout(1000);
     await shot("access-reply");
 
@@ -334,7 +334,8 @@ const adminGroups = {
     await shot("groups-permissions");
     await grid.getByRole("switch", { name: "Can build knowledge bases" }).click();
     await toast(page, `${name} group permissions synced with the admin API.`);
-    await scrollTo(page, grid.locator(".permission-row").filter({ hasText: "Can build knowledge bases" }), "center");
+    // "Can add API sources" mentions this permission in its description, so match the row title.
+    await scrollTo(page, grid.locator(".permission-row").filter({ has: page.locator("strong", { hasText: /^Can build knowledge bases$/ }) }), "center");
     await shot("groups-permission-saved");
     await dismissToast(page);
 

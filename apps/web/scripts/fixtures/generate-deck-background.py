@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the synthetic slide background the deck training capture uploads
-through "Upload background…" (capture-deck-frames.cjs).
+through "Upload background…" (walkthroughs/user-deck-editing.cjs).
 
 The image is drawn here from simple shapes, so it is neither a photo nor AI
 output: the scene it appears in teaches uploading your own background. Rebuild

@@ -98,8 +98,14 @@ const userAgents = {
     await menu.waitFor();
     await menu.locator(".composer-command-item").filter({ hasText: AGENT.name }).first().click();
     await page.locator(".composer-tools-status").waitFor();
+    // Let the inserted mention settle before typing, or the caret can jump.
+    await page.waitForTimeout(600);
     await box.press("End");
+    await page.waitForTimeout(200);
     await box.pressSequentially("What should our responsive pleadings preserve?", { delay: 15 });
+    if (!/Assistant What should our responsive pleadings preserve\?$/.test((await box.inputValue()).trim())) {
+      throw new Error(`The question was not typed after the mention: ${await box.inputValue()}`);
+    }
     await page.waitForTimeout(300);
     await shot("agent-mention", { keepFocus: true });
     const before = await page.locator("article.assistant-message").count();
@@ -154,7 +160,7 @@ const userKnowledge = {
   externalOrigins: () => [],
   frames: [
     "user/knowledge-blocked", "user/knowledge-page", "user/knowledge-create", "user/knowledge-files",
-    "user/knowledge-web", "user/knowledge-web-added", "user/knowledge-api", "user/knowledge-question", "user/knowledge-reply", "user/knowledge-sources",
+    "user/knowledge-web", "user/knowledge-web-added", "user/knowledge-api-locked", "user/knowledge-api", "user/knowledge-question", "user/knowledge-reply", "user/knowledge-sources",
   ],
   async run(kit) {
     const { shot } = kit;
@@ -203,7 +209,17 @@ const userKnowledge = {
       await page.waitForTimeout(2500);
       await shot("knowledge-web-added");
 
-      // 4. The API source form (not fetched: there is no synthetic API to reach).
+      // 4. API sources need their own grant: without Can add API sources the
+      // API tab explains the lock. Then the administrator's grant, and the
+      // form (not fetched: there is no synthetic API to reach).
+      await page.getByRole("tab", { name: /^API/ }).click();
+      await page.getByText(/Connecting APIs needs approval\./).first().waitFor();
+      await page.waitForTimeout(500);
+      await shot("knowledge-api-locked");
+      await page.context().close();
+      await grantAuthoring(kit, { knowledge_authoring: true, api_source_authoring: true });
+      page = await kit.app("user", "/library/knowledge");
+      await page.locator(`article[aria-label="${KB}"] .knowledge-card-title-button`).click();
       await page.getByRole("tab", { name: /^API/ }).click();
       await page.getByLabel("API address").waitFor();
       await page.waitForTimeout(500);
@@ -218,8 +234,14 @@ const userKnowledge = {
       const menu = page.locator(".composer-command-menu[role='listbox']");
       await menu.waitFor();
       await menu.locator(".composer-command-item").filter({ hasText: KB }).first().click();
+      // Let the inserted knowledge base settle before typing, or the caret can jump.
+      await page.waitForTimeout(600);
       await box.press("End");
+      await page.waitForTimeout(200);
       await box.pressSequentially("When is the renewal date in the vendor checklist, and who is the security contact?", { delay: 15 });
+      if (!/\) When is the renewal date in the vendor checklist, and who is the security contact\?$/.test((await box.inputValue()).trim())) {
+        throw new Error(`The question was not typed after the knowledge base: ${await box.inputValue()}`);
+      }
       await shot("knowledge-question", { keepFocus: true });
       const before = await page.locator("article.assistant-message").count();
       await page.locator("form.composer .send-button").click();

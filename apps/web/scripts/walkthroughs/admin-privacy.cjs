@@ -25,7 +25,7 @@ const { execFileSync } = require("node:child_process");
 const { helpers } = require("./admin-shared.cjs");
 const { helpers: people } = require("./user-common.cjs");
 
-const { scrollTo, openTab, expandPanel, removeUsers } = helpers;
+const { scrollTo, openTab, expandPanel, removeUsers, continueInChat } = helpers;
 const MODEL = /Qwen3\.5 9B/;
 const ALL_CATEGORIES = ["identity", "contact", "financial", "health", "credentials", "network"];
 const NOTE_PROMPT =
@@ -45,8 +45,9 @@ async function ask(page, text) {
   const before = await page.locator("article.assistant-message").count();
   await page.locator(".composer textarea").fill(text);
   await page.getByRole("button", { name: "Send message" }).click();
+  await continueInChat(page);
   const reply = page.locator("article.assistant-message").nth(before);
-  await reply.getByRole("button", { name: "Send positive feedback" }).waitFor({ timeout: 300000 });
+  await reply.getByRole("button", { name: "Send positive feedback" }).waitFor({ timeout: 900000 });
   // The chat saves after the reply finishes; the saved copy is what capture,
   // concealment, and Audit read.
   await page.waitForTimeout(2500);

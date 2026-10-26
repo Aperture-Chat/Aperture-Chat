@@ -392,7 +392,7 @@ def test_saml_authorize_returns_explicit_not_implemented() -> None:
 
     assert response.status_code == 501
     assert response.json()["detail"] == (
-        "Only OIDC sign-in is supported for live login. "
+        "Only OIDC and WorkOS sign-in are supported for live login. "
         "SAML configurations are stored but cannot authenticate users yet."
     )
 

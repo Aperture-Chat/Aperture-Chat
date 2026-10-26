@@ -13,7 +13,7 @@ relational database is available.
 
 ## Frontend
 
-- Signed-session bootstrap, first-owner setup, local/OIDC sign-in, access requests, and account security.
+- Signed-session bootstrap, first-owner setup, local/OIDC sign-in, optional WorkOS AuthKit sign-in ([WORKOS_SSO.md](WORKOS_SSO.md)), access requests, and account security.
 - Chat, model selection, attachments, connected sources, work traces, history, and session details.
 - Drafts with document/deck switching, grouped formatting controls, templates, version comparison, history previews, archive/delete, and export.
 - Agents (with Automations) and Library (Knowledge and Tools) workspaces with role-aware access.

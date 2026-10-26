@@ -7,7 +7,7 @@
  * skill file ($), and records the cited reply.
  */
 const { helpers } = require("./user-common.cjs");
-const { composer, waitForReply, scrollTo } = helpers;
+const { composer, waitForReply, scrollTo, ensureSharedAgent, SHARED_AGENT } = helpers;
 
 async function openSymbol(page, symbol, filter = "") {
   const box = composer(page);
@@ -36,9 +36,14 @@ const userSymbols = {
   ],
   async run(kit) {
     const { shot } = kit;
+    // Setup: an agent profile shared with the organization (see user-common).
+    await ensureSharedAgent(kit);
     // An existing chat keeps the message box at the bottom, so menus open in full.
-    const page = await kit.app("user", "/chat");
-    await page.locator(".chat-row").filter({ hasText: "Synthetic training — vendor review checklist" }).first().click();
+    // Earlier modules push it below the sidebar's recent list, so open it by its address.
+    const threads = await kit.api("user", "GET", "/api/chat/threads");
+    const thread = (Array.isArray(threads) ? threads : threads.threads || []).find((item) => item.title === "Synthetic training — vendor review checklist");
+    if (!thread) throw new Error("The seeded vendor review chat is missing.");
+    const page = await kit.app("user", `/chat/${encodeURIComponent(thread.id)}`);
     await page.locator("article.assistant-message").first().waitFor();
     await composer(page).waitFor();
     const clearTools = async () => {
@@ -58,7 +63,7 @@ const userSymbols = {
     // @ agents.
     menu = await openSymbol(page, "@");
     await shot("symbols-at", { keepFocus: true });
-    await choose(page, menu, "Client Update Agent");
+    await choose(page, menu, SHARED_AGENT);
     await page.locator(".composer-tools-status").waitFor();
     await shot("symbols-at-inserted", { keepFocus: true });
     await clearTools();
@@ -98,7 +103,7 @@ const userSymbols = {
     await box.pressSequentially("What should a responsive pleading preserve? Two sentences.", { delay: 15 });
     const before = await page.locator("article.assistant-message").count();
     await page.locator("form.composer .send-button").click();
-    const reply = await waitForReply(page, before);
+    const reply = await waitForReply(page, before, { timeout: 900000 });
     if (!(await reply.locator(".message-citation-action").count())) throw new Error("The reply has no citations.");
     await scrollTo(page, reply, "start");
     await shot("symbols-reply");
