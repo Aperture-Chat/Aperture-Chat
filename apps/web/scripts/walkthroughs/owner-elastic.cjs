@@ -82,8 +82,18 @@ const elastic = {
       });
     }
 
-    const page = await kit.app("owner", "/platform/org-settings");
-    const panel = await elasticPanel(page);
+    // After an API restart the headline reflects the last passed test until
+    // the background delivery (about every 30 seconds) fails against the old
+    // address; wait for that real failure before photographing it.
+    let page = await kit.app("owner", "/platform/org-settings");
+    let panel = await elasticPanel(page);
+    for (let attempt = 0; attempt < 12 && !(await panel.locator(".elastic-card").getByText("Delivery failing").count()); attempt += 1) {
+      await page.waitForTimeout(10000);
+      await page.reload();
+      await page.getByRole("navigation", { name: "Primary" }).waitFor();
+      panel = await elasticPanel(page);
+    }
+    await panel.locator(".elastic-card").getByText("Delivery failing").waitFor({ timeout: 5000 });
     await scrollTo(page, panel, "start");
     await shot("el-failing");
 

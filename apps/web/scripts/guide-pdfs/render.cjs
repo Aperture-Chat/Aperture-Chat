@@ -55,8 +55,10 @@ const SECTION_FIGURES = {
   drafts: ["user/drafts.png", "Drafts combines the document editor with a separate assistant and document controls."],
   "settings-account": ["user/account-security-overview.png", "Your account includes profile settings, password controls, and two-step verification."],
   "admin-overview": ["admin/users-list.png", "The Admin console opens the workspace controls available to your administrator account."],
+  "admin-connectors": ["admin/cn-panel.png", "Admin console → Connections → Connectors: each source's switch, Configure, Hide, and test results for this workspace."],
+  "admin-reports": ["admin/rp-queue.png", "Admin console → Reports lists the tickets people send from Help, with Needs reply first."],
   "owner-providers": ["owner/pv-overview.png", "Provider cards show the actual connection and model-catalog state."],
-  "owner-connectors": ["owner/cn-panel.png", "Shared connector configuration is in the Platform Owner console under Org Settings."],
+  "owner-connectors": ["owner/pc-ceiling-off.png", "Off for all in Admin console → Connections switches a connector off for every workspace; Allow all lifts it."],
 };
 
 function renderSectionFigure(sectionId) {
@@ -70,23 +72,10 @@ function renderSectionFigure(sectionId) {
   return `<figure class="ui-figure"><img src="data:image/png;base64,${png.toString("base64")}" alt="${escapeHtml(caption)}"><figcaption>${escapeHtml(caption)} <span>Example workspace with synthetic data.</span></figcaption></figure>`;
 }
 
-/* The aperture mark in one flat light teal — the owner wants the documents'
- * logo unified, with none of the light/dark blade split the app gradient has. */
-const LOGO_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Aperture">
-  <defs>
-    <mask id="blade-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
-      <rect width="64" height="64" fill="#fff"/><circle cx="32" cy="32" r="6.4" fill="#000"/>
-    </mask>
-  </defs>
-  <g fill="#0aa4b5" opacity=".96" mask="url(#blade-cutout)">
-    ${[0, 60, 120, 180, 240, 300]
-      .map(
-        (deg) =>
-          `<path d="M32 8.4 C40.1 9.1 47.2 14.5 49.7 22 C44.2 21.1 39.1 23.8 35.7 29.4 C33.2 24.8 31.4 16.5 32 8.4 Z"${deg ? ` transform="rotate(${deg} 32 32)"` : ""}/>`,
-      )
-      .join("")}
-  </g>
-</svg>`;
+/* The shipped Aperture Chat icon (apps/web/public/brand), so the guides carry
+ * the same mark as the product rather than a separately drawn copy. */
+const LOGO_PNG = fs.readFileSync(path.join(__dirname, "../../public/brand/aperture-chat-icon.png"));
+const LOGO_MARK = `<img class="cover-mark" src="data:image/png;base64,${LOGO_PNG.toString("base64")}" alt="Aperture Chat">`;
 
 const CSS = `
   :root {
@@ -113,7 +102,7 @@ const CSS = `
   /* ---- cover ---- */
   .cover { height: 9.05in; display: flex; flex-direction: column; page-break-after: always; position: relative; }
   .cover-brandline { display: flex; align-items: center; gap: 12px; }
-  .cover-brandline svg { width: 44px; height: 44px; }
+  .cover-brandline .cover-mark { width: 44px; height: 44px; }
   .cover-brandline strong { font-size: 15pt; font-weight: 800; letter-spacing: -0.01em; color: var(--text-strong); }
   .cover-brandline span { font-size: 9pt; color: var(--muted); display: block; margin-top: 1px; }
   .cover-main { margin-top: auto; }
@@ -401,7 +390,7 @@ function renderGuideHtml(role, pageMap = {}) {
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>${CSS}</style></head><body>
 <div class="cover">
-  <div class="cover-brandline">${LOGO_SVG}<div><strong>Aperture Chat</strong><span>Secure, source-aware answers across your connected workspace</span></div></div>
+  <div class="cover-brandline">${LOGO_MARK}<div><strong>Aperture Chat</strong><span>Secure, source-aware answers across your connected workspace</span></div></div>
   <div class="cover-rule"></div>
   <div class="cover-main">
     <span class="cover-badge">${escapeHtml(guide.badge)}</span>

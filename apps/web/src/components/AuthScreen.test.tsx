@@ -351,6 +351,31 @@ test("email/password mode submits credentials on Enter while SSO keeps its own r
   expect(onSsoRedirect).toHaveBeenCalledTimes(1);
 });
 
+test("WorkOS sign-in forwards the typed email as a login hint", () => {
+  const onSsoRedirect = vi.fn();
+  render(<AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: false, providers: [{
+    id: "sso-workos", name: "WorkOS", provider: "workos", protocol: "WORKOS", tenant_id: "tenant-example", domains: ["example.com"], enforced: false,
+  }] }} onSsoRedirect={onSsoRedirect} />);
+  expect(screen.getByText("Sign in with WorkOS")).toBeInTheDocument();
+  expect(screen.getByText("Optional. WorkOS uses it to find your organization's sign-in.")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "riley.chen@example.com" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue with SSO" }));
+  const url = new URL(onSsoRedirect.mock.calls[0][0], "http://localhost");
+  expect(url.pathname).toBe("/api/auth/sso/sso-workos/authorize");
+  expect(url.searchParams.get("login_hint")).toBe("riley.chen@example.com");
+});
+
+test("OIDC sign-in does not forward the typed email", () => {
+  const onSsoRedirect = vi.fn();
+  render(<AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: false, providers: [{
+    id: "sso-entra", name: "Microsoft Entra ID", provider: "entra-id", protocol: "OIDC", tenant_id: "tenant-example", domains: ["example.com"], enforced: false,
+  }] }} onSsoRedirect={onSsoRedirect} />);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "jane@example.com" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue with SSO" }));
+  const url = new URL(onSsoRedirect.mock.calls[0][0], "http://localhost");
+  expect(url.searchParams.has("login_hint")).toBe(false);
+});
+
 test("password visibility can be toggled without changing the value", () => {
   render(<AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: true, providers: [] }} />);
   const password = screen.getByLabelText("Password");

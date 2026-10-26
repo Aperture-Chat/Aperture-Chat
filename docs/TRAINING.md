@@ -4,16 +4,16 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **56 lessons, 581 scenes, 56 MP3 tracks, and 8,213 seconds of narration timelines (136 minutes 53 seconds)**. Its 527 measured focus-map entries comprise 205 user targets and 322 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **65 lessons, 704 scenes, 65 MP3 tracks, and 10,179 seconds of narration timelines (169 minutes 39 seconds)**. Its 638 measured focus-map entries comprise 259 user targets and 379 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 23 | 216 | 205 | 23 | 2719 | 27 |
-| Administrator | 15 | 168 | 164 | 15 | 2299 | 43 |
-| Platform owner | 18 | 197 | 158 | 18 | 3195 | 62 |
-| Total | 56 | 581 | 527 | 56 | 8213 | — |
+| User | 28 | 274 | 259 | 28 | 3577 | 31 |
+| Administrator | 17 | 207 | 197 | 17 | 2902 | 49 |
+| Platform owner | 20 | 223 | 182 | 20 | 3700 | 70 |
+| Total | 65 | 704 | 638 | 65 | 10179 | — |
 
-All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 26/40/59 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
+All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 31/49/70 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
 Lesson counts and timings below are generated from the TypeScript catalog with `--include-drafts`; focus maps, MP3 counts, guide sections, and PDF-copy equality are checked separately. Including drafts inventories proposed content; it never publishes a lesson.
 
@@ -87,39 +87,46 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | User | Get started | Choose models and request access | `model-access` | 8 | 0 | 118 |
 | User | Get started | Protect your account and recover access | `account-security` | 12 | 1 | 171 |
 | User | Chat | Symbol shortcuts: / @ # $ > | `composer-commands` | 11 | 0 | 109 |
-| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 158 |
+| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 163 |
 | User | Chat | Attach files and sources | `attachments` | 9 | 1 | 128 |
-| User | Chat | Dictation, images, and diagrams | `dictation-images` | 6 | 0 | 87 |
+| User | Chat | Dictation, images, and diagrams | `dictation-images` | 6 | 0 | 106 |
 | User | Chat | Follow the work trace and act on replies | `work-traces` | 8 | 0 | 103 |
 | User | Chat | Session details and context | `session-details` | 4 | 0 | 59 |
 | User | Chat | Preview chats at a glance | `chat-previews` | 2 | 0 | 34 |
 | User | Chat | Personal data in your chats | `personal-data` | 5 | 0 | 75 |
-| User | Drafts and decks | Draft documents | `drafts` | 17 | 0 | 214 |
-| User | Drafts and decks | Build a slide deck | `deck-basics` | 15 | 0 | 165 |
-| User | Drafts and decks | Save, organize, and recover your drafts | `save-and-recover-work` | 8 | 0 | 100 |
-| User | Agents, knowledge, and automations | Agent profiles | `agents` | 9 | 0 | 112 |
-| User | Agents, knowledge, and automations | Knowledge bases | `knowledge` | 10 | 0 | 123 |
-| User | Agents, knowledge, and automations | Tools and the Library | `tools-automations` | 6 | 0 | 68 |
+| User | Drafts and decks | Draft documents | `drafts` | 16 | 0 | 217 |
+| User | Drafts and decks | Hand a chat request to Drafts | `chat-to-drafts` | 7 | 0 | 95 |
+| User | Drafts and decks | Open a Word or PDF file and keep its formatting | `draft-word-pdf` | 10 | 0 | 118 |
+| User | Drafts and decks | Start from a template and set the page layout | `document-templates` | 9 | 0 | 108 |
+| User | Drafts and decks | Build a slide deck | `deck-basics` | 14 | 0 | 170 |
+| User | Drafts and decks | Edit slides: layouts, pictures, and text | `deck-editing` | 13 | 0 | 190 |
+| User | Drafts and decks | Save, organize, and recover your drafts | `save-and-recover-work` | 10 | 0 | 132 |
+| User | Agents, knowledge, and automations | Agent profiles | `agents` | 10 | 0 | 126 |
+| User | Agents, knowledge, and automations | Knowledge bases | `knowledge` | 11 | 0 | 144 |
+| User | Agents, knowledge, and automations | Tools and the Library | `tools-automations` | 7 | 0 | 83 |
 | User | Agents, knowledge, and automations | Scheduled automations | `scheduled-automations` | 15 | 0 | 162 |
 | User | Organize and personalize | Organize and find your work | `organize` | 9 | 0 | 96 |
 | User | Organize and personalize | Search, commands, and workspace links | `search-and-commands` | 7 | 0 | 80 |
 | User | Organize and personalize | Personalization memory | `personalization-memory` | 7 | 0 | 88 |
-| User | Organize and personalize | Personalize, use mobile, and get help | `account-mobile-help` | 12 | 1 | 141 |
+| User | Organize and personalize | Personalize, use mobile, and get help | `account-mobile-help` | 10 | 1 | 128 |
+| User | Organize and personalize | Report a problem and follow it up | `report-and-follow-up` | 18 | 2 | 246 |
 | Administrator | Accounts and access | Approve access and finish sign-in | `admin-access-onboarding` | 17 | 1 | 209 |
-| Administrator | Accounts and access | Users and accounts | `admin-users` | 12 | 0 | 156 |
+| Administrator | Accounts and access | Users and accounts | `admin-users` | 12 | 0 | 159 |
 | Administrator | Accounts and access | Groups and permissions | `admin-groups` | 10 | 0 | 125 |
 | Administrator | Accounts and access | Tenant model access | `admin-model-access` | 8 | 0 | 111 |
 | Administrator | Accounts and access | Review model requests and explain access | `admin-model-requests` | 8 | 0 | 97 |
-| Administrator | Sign-in | Tenant SSO and provisioning | `admin-sso` | 20 | 2 | 294 |
-| Administrator | Workspace controls | Policies and memory governance | `admin-policies` | 10 | 0 | 149 |
-| Administrator | Workspace controls | Response actions and connector responsibilities | `admin-tools` | 12 | 0 | 150 |
+| Administrator | Sign-in | Tenant SSO and provisioning | `admin-sso` | 20 | 2 | 293 |
+| Administrator | Workspace controls | Policies and memory governance | `admin-policies` | 10 | 0 | 158 |
+| Administrator | Workspace controls | Manage workspace connectors | `admin-connectors` | 21 | 5 | 350 |
+| Administrator | Workspace controls | Response actions and Library connections | `admin-tools` | 12 | 0 | 158 |
 | Administrator | Privacy and training data | Protect personal data | `admin-personal-data` | 13 | 0 | 200 |
 | Administrator | Privacy and training data | Build training datasets from ratings and corrections | `admin-training-datasets` | 18 | 0 | 276 |
 | Administrator | Oversight and compliance | Tenant analytics | `admin-analytics` | 9 | 0 | 123 |
 | Administrator | Oversight and compliance | Tenant audit | `admin-audit` | 7 | 0 | 93 |
-| Administrator | Oversight and compliance | Alerts and delivery | `admin-alerts` | 8 | 1 | 111 |
+| Administrator | Oversight and compliance | Alerts and delivery | `admin-alerts` | 9 | 1 | 133 |
 | Administrator | Oversight and compliance | Data retention and tagging | `admin-retention` | 10 | 0 | 136 |
-| Administrator | Oversight and compliance | Review feedback and reported issues | `admin-feedback-issues` | 6 | 0 | 69 |
+| Administrator | Oversight and compliance | Review feedback and reported issues | `admin-feedback-issues` | 7 | 0 | 93 |
+| Administrator | Oversight and compliance | Work reported problems in Reports | `admin-reports` | 16 | 0 | 188 |
 | Platform owner | Get started | Set up the first workspace | `owner-first-workspace` | 13 | 1 | 232 |
 | Platform owner | Get started | Providers and connections | `provider-setup` | 23 | 7 | 388 |
 | Platform owner | Get started | API Key Vault and replacement | `api-key-vault` | 7 | 0 | 111 |
@@ -129,13 +136,15 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Platform owner | Single sign-on | Single sign-on with Microsoft Entra ID | `sso-entra` | 9 | 4 | 157 |
 | Platform owner | Single sign-on | Single sign-on with Okta | `sso-okta` | 8 | 5 | 125 |
 | Platform owner | Single sign-on | Single sign-on with Google Workspace | `sso-google` | 6 | 4 | 98 |
+| Platform owner | Single sign-on | Single sign-on with WorkOS | `sso-workos` | 15 | 4 | 250 |
 | Platform owner | Single sign-on | Go live: groups, MFA, and enforcement | `sso-security` | 7 | 1 | 128 |
-| Platform owner | Policies and branding | Policies, budget, and connectors | `policies-connectors` | 24 | 5 | 394 |
-| Platform owner | Policies and branding | Platform branding | `branding` | 8 | 0 | 118 |
+| Platform owner | Policies and branding | Policies, budget, and the connector ceiling | `policies-connectors` | 15 | 1 | 240 |
+| Platform owner | Policies and branding | Platform branding | `branding` | 11 | 0 | 197 |
 | Platform owner | Policies and branding | Review workspace search readiness | `search-index` | 4 | 0 | 62 |
-| Platform owner | Monitoring and compliance | Analytics: runtime, activity, and usage | `runtime-analytics` | 9 | 0 | 117 |
+| Platform owner | Monitoring and compliance | Analytics: runtime, activity, and usage | `runtime-analytics` | 9 | 0 | 123 |
+| Platform owner | Monitoring and compliance | Share reports with the Aperture Chat maintainers | `owner-reports-sharing` | 17 | 2 | 318 |
 | Platform owner | Monitoring and compliance | Owner audit signals | `owner-audit` | 9 | 0 | 136 |
-| Platform owner | Monitoring and compliance | Alerts and email delivery | `owner-alerts` | 12 | 3 | 209 |
+| Platform owner | Monitoring and compliance | Alerts and email delivery | `owner-alerts` | 12 | 3 | 215 |
 | Platform owner | Monitoring and compliance | Elastic Analytics export | `elastic-analytics` | 12 | 2 | 184 |
 | Platform owner | Monitoring and compliance | Data retention and tagging | `owner-retention` | 10 | 0 | 155 |
 
@@ -159,8 +168,6 @@ Run from the repository root with the intended synthetic role session. Read each
 | --- | --- |
 | Every lesson's complete walkthrough (current library) | `capture-walkthroughs.cjs` with the modules in `walkthroughs/` (one file per role and topic) |
 | User chat and navigation | `capture-training-frames.cjs` |
-| Deck editor, slide AI edit, uploaded background, presenter view, and brand template | `capture-deck-frames.cjs` |
-| Document editor, Edit with AI review, slash menu, find and outline, settings, and history | `capture-training-refresh.cjs drafts` |
 | Session details, its Symbol shortcuts list, and the five composer symbol menus | `capture-training-refresh.cjs symbols` |
 | Admin and owner audit signals, Audit Insights, a chart drill-down, security alerts or prompts, and the trail | `capture-training-refresh.cjs audit` |
 | Admin and owner alert email, both rule templates, the Only these detections form, and real deliveries | `capture-training-refresh.cjs alerts` |
@@ -332,3 +339,26 @@ Behaviour recorded honestly rather than staged:
 - The practice-area keyword classifier labels a question about a "contractor" as Legal, because `contract\w*` also matches "contractor". The capture avoids the word; the classifier is reported for follow-up.
 
 The user, administrator, and owner guides gained matching sections (*Personal data in your chats*, *Personal Data Protection*, *Training datasets*), the Admin console overview now lists ten tabs, and the Policies section describes the current Service policy note. The website guide has three matching topics with the rendered videos.
+
+## Interface and feature refresh — October 21, 2026
+
+The product was restyled after the October walkthrough overhaul: a warm light palette, tactile buttons and toggles, and the Aperture Chat wordmark and icon as the default brand. New features also shipped without lessons. This refresh recaptured every lesson in the current interface and added a lesson for each new feature, so the in-product videos, the three guides, and the website guide describe the same product.
+
+- **Captures:** every walkthrough module was re-run on four isolated synthetic instances (two user, one administrator, one owner) plus an empty instance for first-run setup. 604 of the 606 published frames were recaptured; `chat-images.png` and `chat-images-download.png` were kept because no image-generation model is available locally, and the lesson says so. Modules that the new interface broke (branding uploads, the moved connectors, the API-source grant) were fixed. The deck, document, and mobile frames that legacy scripts produced now come from walkthrough modules (`user-drafts.cjs`, `user-deck-editing.cjs`, `user-documents.cjs`) or `capture-user-support-frames.cjs`; `capture-deck-frames.cjs` is retired to a stub and the `drafts` mode of `capture-training-refresh.cjs` is removed.
+- **New lessons (8):** user *Report a problem and follow it up* (`report-and-follow-up`), *Hand a chat request to Drafts* (`chat-to-drafts`), *Open a Word or PDF file and keep its formatting* (`draft-word-pdf`), *Start from a template and set the page layout* (`document-templates`), and *Edit slides: layouts, pictures, and text* (`deck-editing`); administrator *Manage workspace connectors* (`admin-connectors`) and *Work reported problems in Reports* (`admin-reports`); owner *Share reports with the Aperture Chat maintainers* (`owner-reports-sharing`).
+- **Reworked lessons:** connector setup moved from the owner's *Policies, budget, and the connector ceiling* to the administrator connectors lesson, leaving the owner the Off for all / Allow all ceiling; *Platform branding* teaches the separate Logo and Icon cards; *Build a slide deck* now teaches the slide panel and fit check; *Draft documents*, *Save, organize, and recover your drafts*, *Knowledge bases*, *Tools and the Library*, *Agent profiles*, *Groups and permissions*, *Policies and memory governance*, *Tenant SSO and provisioning*, both alerts lessons, and *Review feedback and reported issues* follow the current labels and locks; *Response actions and connector responsibilities* is now *Response actions and Library connections*.
+- **Real services:** replies come from a local Qwen 3.5 9B; sign-in uses a local Keycloak 26.8; the Elastic lesson used a real Elasticsearch and Kibana; alert email was delivered over verified STARTTLS to a local relay with a private test CA; a local SearXNG passed the Web Search test; cloud connector tests show the vendors' real rejections of synthetic credentials. Support tickets were filed, answered, resolved, and reopened through the real user and administrator interfaces, and a redacted copy was sent to the instance's own community hub. Publishing from the hub to GitHub, web image search, AI pictures, and provider content-filter messages could not be produced locally; they are taught with an instruction card, the real unavailable state, or the written guide.
+- **Narration:** 30 tracks were regenerated with the same Kokoro voice and compared with their scripts by Whisper (agreement 0.943–0.998; the lowest scores are number and acronym spellings).
+- **Focus and layout:** every focus region was measured against the exact published PNG bytes, and every scene of every lesson was rendered through the composition and checked for overlap; the remaining accepted overlaps are full-height highlights on a phone frame and a Keycloak dialog.
+- **Guides:** the user, administrator, and owner PDFs were regenerated (95, 150, and 208 pages) with sections for every new lesson, the connector and reports changes, the current tab counts and permissions, and the shipped icon on the cover. Every page was rasterized and inspected, and each pair of copies is byte-identical.
+- **Product fixes made during the refresh:** bold text in an automation's run output no longer renders as separate headings, and the Tools library's MCP and Prompt Library notices point to Admin console → Connections → Connectors.
+
+## WorkOS sign-in lesson — October 26, 2026
+
+Optional WorkOS AuthKit sign-in (see [WORKOS_SSO.md](WORKOS_SSO.md)) is taught by a new owner lesson, *Single sign-on with WorkOS* (`sso-workos`, 15 scenes, 4 instruction cards, 250 seconds), placed in the *Single sign-on* track after Google Workspace. It is a complete loop: choose WorkOS AuthKit, copy the redirect URI, enter the client ID and organization ID, set allowed domains (Group claim switches to roles), paste the API key last, save, pass Test connection, add the Initiate login URI, sign a new person in from a fresh browser, confirm the account in Users, map the WorkOS `litigation` role to the Litigation group, and prove membership syncs at the next sign-in.
+
+- **Evidence:** `walkthroughs/sso-workos.cjs` ran against the official WorkOS API emulator (`@workos/emulate`, the emulator behind `workos emulate`), with the isolated API's `APERTURE_WORKOS_API_BASE_URL` pointed at it. The module creates the WorkOS side (the role, the Example Corporation organization and its verified domain, and the synthetic person with a membership) through the WorkOS API, so the same calls work against a real staging environment. Test connection, the code redemption, access-token verification, provisioning, and role sync all ran for real. The emulator's own sign-in page is not captured; the lesson teaches the real AuthKit page and the WorkOS dashboard with instruction cards. The API key is pasted after the form frames and cleared before the next one, so no published frame contains it.
+- **Narration:** one new Kokoro track, checked with Whisper (agreement 0.982; the misses are "bills"/"billed" heard as "builds"/"build").
+- **Focus and layout:** 11 focus regions were measured from the live DOM and imported against the published PNG bytes; all 15 scenes were rendered through the composition with no overlap between title cards, captions, and highlights.
+- **Administrator guidance:** *Tenant SSO and provisioning* gained a WorkOS (AuthKit) path, and its troubleshooting now reflects that new SSO cards keep the display name you type.
+- **Guides:** the owner guide gained the section *Single sign-on: WorkOS AuthKit with your own account*; the user, administrator, and owner PDFs were regenerated (95, 150, and 212 pages), the changed pages were rasterized and inspected, and each pair of copies is byte-identical.

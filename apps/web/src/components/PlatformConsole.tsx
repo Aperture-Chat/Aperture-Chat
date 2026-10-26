@@ -95,7 +95,7 @@ import {
   loadChatFeedback,
   type ChatFeedbackEvent,
 } from "../lib/chatFeedback";
-import { ssoRedirectUri, type SsoTestResult } from "../lib/api";
+import { ssoInitiateLoginUri, ssoRedirectUri, type SsoTestResult } from "../lib/api";
 import {
   getPlatformUsageBudget,
   updatePlatformUsageBudget,
@@ -447,6 +447,8 @@ type OwnerSsoDraftState = {
   issuer: string;
   clientId: string;
   clientSecret: string;
+  /** WorkOS only: the organization AuthKit selects for every sign-in. */
+  workosOrganizationId: string;
   redirectUrl: string;
   entityId: string;
   samlLoginUrl: string;
@@ -742,6 +744,7 @@ export function PlatformConsole({
     issuer: data.ssoConfigs[0]?.issuer ?? "",
     clientId: data.ssoConfigs[0]?.client_id ?? "",
     clientSecret: "",
+    workosOrganizationId: data.ssoConfigs[0]?.workos_organization_id ?? "",
     redirectUrl: data.ssoConfigs[0]?.redirect_url ?? "",
     entityId: data.ssoConfigs[0]?.entity_id ?? "",
     samlLoginUrl: data.ssoConfigs[0]?.saml_login_url ?? "",
@@ -2366,13 +2369,15 @@ export function PlatformConsole({
     setPendingAction("owner-sso:save");
     try {
       const secretValue = ownerSsoDraft.clientSecret.trim();
+      const identity = ownerSsoIdentity(ownerSsoDraft, currentConfig);
       const ssoPatch: AdminSsoConfigUpdateRequest = {
-        provider: providerSlugFromName(ownerSsoDraft.name.trim() || currentConfig?.name || "OIDC"),
-        issuer_url: ownerSsoDraft.issuer.trim() || currentConfig?.issuer || "",
+        provider: identity.provider,
+        issuer_url: identity.issuerUrl,
         client_id: ownerSsoDraft.clientId.trim() || currentConfig?.client_id || "",
         enabled: true,
         settings: {
           protocol: ownerSsoDraft.protocol,
+          ...identity.settings,
           enforced: ownerSsoDraft.enforced,
           client_secret_set: secretValue.length > 0 || Boolean(currentConfig?.client_secret_set),
           mfa_enforced: mfaMethods.length > 0,
@@ -3485,6 +3490,9 @@ export function PlatformConsole({
               testResult={ssoTestResult}
               testing={pendingAction === "owner-sso:test"}
               brandName={data.currentTenant.chat_brand_name?.trim() || DEFAULT_BRANDING.chat_brand_name}
+              savedWorkosConfigId={
+                data.ssoConfigs[0]?.protocol === "WORKOS" ? data.ssoConfigs[0].id : null
+              }
             />
             <PlatformBrandingPanel
               brandingDraft={brandingDraft}
@@ -4981,6 +4989,223 @@ const SSO_ISSUER_PRESETS: Array<{ label: string; issuer: string; hint: string }>
   },
 ];
 
+/** Owner Single Sign-On wording that differs by protocol. */
+const OWNER_SSO_COPY = {
+  OIDC: {
+    testable: true,
+    redirectLabel: "Redirect URI to register with your identity provider",
+    groupClaimHint:
+      "Token claim listing the user's IdP groups. Map claim values to workspace groups in the Admin console's SSO tab; membership follows the claim on every sign-in.",
+    testTooltip: "Fetch the issuer's discovery document and signing keys to verify setup",
+    securityNote: (brandName: string) =>
+      `Secrets are vaulted server-side and never returned to the browser. Sign-in redirects users to the identity provider; ${brandName} validates the returned ID token (signature, issuer, audience, nonce, expiry) before creating a session.`,
+  },
+  WORKOS: {
+    testable: true,
+    redirectLabel: "Redirect URI to add under Redirects in the WorkOS dashboard",
+    groupClaimHint:
+      "Use roles to map WorkOS role slugs to workspace groups in the Admin console's SSO tab; membership follows the user's WorkOS roles on every sign-in.",
+    testTooltip: "Check the saved API key, client ID, and organization with WorkOS",
+    securityNote: (brandName: string) =>
+      `Secrets are vaulted server-side and never returned to the browser. Sign-in redirects users to WorkOS; ${brandName} redeems the returned code with your API key and verifies the WorkOS access token before creating a session.`,
+  },
+  OTHER: {
+    testable: false,
+    redirectLabel: "",
+    groupClaimHint:
+      "Token claim listing the user's IdP groups. Map claim values to workspace groups in the Admin console's SSO tab; membership follows the claim on every sign-in.",
+    testTooltip: "Switch the protocol to OIDC or WorkOS to run a live connection test",
+    securityNote: (brandName: string) =>
+      `Secrets are vaulted server-side and never returned to the browser. Sign-in redirects users to the identity provider; ${brandName} validates the returned ID token (signature, issuer, audience, nonce, expiry) before creating a session.`,
+  },
+} as const;
+
+function ownerSsoCopy(protocol: SsoConfig["protocol"]) {
+  if (protocol === "WORKOS" || protocol === "OIDC") return OWNER_SSO_COPY[protocol];
+  return OWNER_SSO_COPY.OTHER;
+}
+
+/** WorkOS's "Initiate login URI" names the saved configuration, so it only
+ * exists once a WorkOS baseline has been saved. */
+function workosInitiateLoginUri(protocol: SsoConfig["protocol"], savedWorkosConfigId?: string | null): string | null {
+  return protocol === "WORKOS" && savedWorkosConfigId ? ssoInitiateLoginUri(savedWorkosConfigId) : null;
+}
+
+/** Provider, issuer, and naming for a saved owner baseline. WorkOS has one
+ * fixed API host, so it stores no issuer. */
+function ownerSsoIdentity(draft: OwnerSsoDraftState, currentConfig: SsoConfig | undefined) {
+  const displayName = draft.name.trim() || currentConfig?.name || "";
+  if (draft.protocol === "WORKOS") {
+    return {
+      provider: "workos",
+      issuerUrl: "",
+      settings: { display_name: displayName, workos_organization_id: draft.workosOrganizationId.trim() },
+    };
+  }
+  return {
+    provider: providerSlugFromName(displayName || "OIDC"),
+    issuerUrl: draft.issuer.trim() || currentConfig?.issuer || "",
+    settings: { display_name: displayName },
+  };
+}
+
+/** The draft after a protocol change. Switching to WorkOS replaces defaults
+ * that only describe OIDC providers; every other change keeps the draft. */
+function withOwnerSsoProtocol(state: OwnerSsoDraftState, protocol: SsoConfig["protocol"]): OwnerSsoDraftState {
+  if (protocol !== "WORKOS" || state.protocol === "WORKOS") return { ...state, protocol };
+  return { ...state, protocol, ...workosDraftDefaults(state) };
+}
+
+function workosDraftDefaults(state: OwnerSsoDraftState): Partial<OwnerSsoDraftState> {
+  const presetName = !state.name.trim() || SSO_ISSUER_PRESETS.some((preset) => preset.label === state.name);
+  return {
+    // A preset name would mislabel the WorkOS sign-in button.
+    name: presetName ? "WorkOS" : state.name,
+    // WorkOS role slugs are the values its configurations map to groups.
+    groupClaim: state.groupClaim === "groups" ? "roles" : state.groupClaim,
+    // The Microsoft defaults describe Entra, not WorkOS: WorkOS sets its own
+    // MFA in its dashboard, so nothing is claimed here by default.
+    mfaProvider: state.mfaProvider === "Microsoft Authenticator" ? "Identity provider" : state.mfaProvider,
+    mfaMethods: state.mfaMethods === "Microsoft Authenticator, Duo Mobile" ? "" : state.mfaMethods,
+  };
+}
+
+type OwnerSsoFieldsProps = {
+  ssoDraft: OwnerSsoDraftState;
+  setSsoDraft: (updater: (current: OwnerSsoDraftState) => OwnerSsoDraftState) => void;
+};
+
+/** Issuer, client ID, and client secret: OIDC, and the stored SAML/SCIM records. */
+function OwnerOidcCredentialFields({ ssoDraft, setSsoDraft }: OwnerSsoFieldsProps) {
+  return (
+    <>
+      <label className="wide-field">
+        Issuer URL
+        <input
+          value={ssoDraft.issuer}
+          onChange={(event) => setSsoDraft((state) => ({ ...state, issuer: event.target.value }))}
+          placeholder="https://login.microsoftonline.com/{tenant-id}/v2.0"
+        />
+        <small className="field-hint">
+          The discovery document is fetched from {"{issuer}"}/.well-known/openid-configuration.
+        </small>
+      </label>
+      <label>
+        Client ID
+        <input
+          value={ssoDraft.clientId}
+          onChange={(event) => setSsoDraft((state) => ({ ...state, clientId: event.target.value }))}
+        />
+      </label>
+      <label>
+        {`Client secret ${ssoDraft.protocol === "SCIM" ? "/ SCIM token" : ""}`}
+        <input
+          type="password"
+          value={ssoDraft.clientSecret}
+          onChange={(event) => setSsoDraft((state) => ({ ...state, clientSecret: event.target.value }))}
+          placeholder="Saved server-side only"
+        />
+      </label>
+    </>
+  );
+}
+
+/** WorkOS needs no issuer: the client ID, API key, and an optional organization. */
+function OwnerWorkosCredentialFields({ ssoDraft, setSsoDraft }: OwnerSsoFieldsProps) {
+  return (
+    <>
+      <p className="muted-note wide-field">
+        WorkOS runs the sign-in page with your own WorkOS account: your organization&apos;s SSO connection, plus
+        any other sign-in methods you turn on in the WorkOS dashboard. Copy the client ID and API key from API
+        Keys in that dashboard.
+      </p>
+      <label>
+        WorkOS client ID
+        <input
+          value={ssoDraft.clientId}
+          placeholder="client_..."
+          onChange={(event) => setSsoDraft((state) => ({ ...state, clientId: event.target.value }))}
+        />
+      </label>
+      <label>
+        WorkOS API key
+        <input
+          type="password"
+          value={ssoDraft.clientSecret}
+          onChange={(event) => setSsoDraft((state) => ({ ...state, clientSecret: event.target.value }))}
+          placeholder="sk_... — saved server-side only"
+        />
+      </label>
+      <label className="wide-field">
+        WorkOS organization ID
+        <input
+          value={ssoDraft.workosOrganizationId}
+          onChange={(event) => setSsoDraft((state) => ({ ...state, workosOrganizationId: event.target.value }))}
+          placeholder="org_... (optional)"
+        />
+        <small className="field-hint">
+          Optional. Sends everyone straight to this organization&apos;s sign-in. Leave blank to let WorkOS find
+          the organization from each email.
+        </small>
+      </label>
+    </>
+  );
+}
+
+/** The redirect URI and, for a saved WorkOS baseline, its Initiate login URI. */
+function OwnerSsoRedirectUris({
+  redirectLabel,
+  initiateLoginUri,
+}: {
+  redirectLabel: string;
+  initiateLoginUri: string | null;
+}) {
+  const redirectUri = ssoRedirectUri();
+  const [copied, setCopied] = useState<"redirect" | "initiate" | null>(null);
+  const copyUri = (kind: "redirect" | "initiate", value: string) => {
+    void navigator.clipboard?.writeText(value).then(() => {
+      setCopied(kind);
+      window.setTimeout(() => setCopied(null), 2000);
+    });
+  };
+  return (
+    <>
+      <div className="sso-redirect-uri wide-field">
+        <span className="sso-redirect-label">{redirectLabel}</span>
+        <span className="sso-redirect-value">
+          <code>{redirectUri}</code>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => copyUri("redirect", redirectUri)}
+            aria-label="Copy redirect URI"
+            data-tooltip="Copy this redirect URI to register with your identity provider"
+          >
+            <Copy size={14} /> {copied === "redirect" ? "Copied" : "Copy"}
+          </button>
+        </span>
+      </div>
+      {initiateLoginUri && (
+        <div className="sso-redirect-uri wide-field">
+          <span className="sso-redirect-label">Initiate login URI for the same Redirects page</span>
+          <span className="sso-redirect-value">
+            <code>{initiateLoginUri}</code>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => copyUri("initiate", initiateLoginUri)}
+              aria-label="Copy initiate login URI"
+              data-tooltip="Copy the address WorkOS uses to start a sign-in from this workspace"
+            >
+              <Copy size={14} /> {copied === "initiate" ? "Copied" : "Copy"}
+            </button>
+          </span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SsoRequirementsPanel({
   ssoDraft,
   setSsoDraft,
@@ -4989,6 +5214,7 @@ function SsoRequirementsPanel({
   testResult,
   testing,
   brandName,
+  savedWorkosConfigId,
 }: {
   ssoDraft: OwnerSsoDraftState;
   setSsoDraft: (updater: (current: OwnerSsoDraftState) => OwnerSsoDraftState) => void;
@@ -4997,24 +5223,21 @@ function SsoRequirementsPanel({
   testResult: SsoTestResult | null;
   testing: boolean;
   brandName: string;
+  /** Id of the saved configuration when it is a WorkOS one. */
+  savedWorkosConfigId?: string | null;
 }) {
   const qrValidation = validateEnrollmentQrValue(ssoDraft.qrEnrollmentUri);
   const isOidc = ssoDraft.protocol === "OIDC";
-  const redirectUri = ssoRedirectUri();
-  const [copiedRedirect, setCopiedRedirect] = useState(false);
-
-  const copyRedirectUri = () => {
-    void navigator.clipboard?.writeText(redirectUri).then(() => {
-      setCopiedRedirect(true);
-      window.setTimeout(() => setCopiedRedirect(false), 2000);
-    });
-  };
+  const isWorkos = ssoDraft.protocol === "WORKOS";
+  const copy = ownerSsoCopy(ssoDraft.protocol);
+  const changeProtocol = (protocol: SsoConfig["protocol"]) =>
+    setSsoDraft((state) => withOwnerSsoProtocol(state, protocol));
 
   return (
     <Panel
       className="sso-requirements-panel"
       title={<><Mail size={18} /> Single Sign-On</>}
-      subtitle="Live OIDC sign-in: users are redirected to your identity provider, and ID tokens are cryptographically verified before a session is issued."
+      subtitle="Live OIDC or WorkOS sign-in: users are redirected to your identity provider, and every identity is verified before a session is issued."
       defaultCollapsed
     >
       <div className="owner-section owner-section-connected">
@@ -5027,9 +5250,10 @@ function SsoRequirementsPanel({
             Protocol
             <SelectControl
               value={ssoDraft.protocol}
-              onChange={(event) => setSsoDraft((state) => ({ ...state, protocol: event.target.value as SsoConfig["protocol"] }))}
+              onChange={(event) => changeProtocol(event.target.value as SsoConfig["protocol"])}
             >
               <option value="OIDC">OIDC (supported)</option>
+              <option value="WORKOS">WorkOS AuthKit (your WorkOS account)</option>
               {/* SAML stays visible so a stored SAML config remains honest and
                   readable, but it cannot be chosen: the runtime does not
                   implement SAML login (auth options report it as deferred). */}
@@ -5063,47 +5287,17 @@ function SsoRequirementsPanel({
             </div>
           )}
 
-          <label className="wide-field">
-            Issuer URL
-            <input
-              value={ssoDraft.issuer}
-              onChange={(event) => setSsoDraft((state) => ({ ...state, issuer: event.target.value }))}
-              placeholder="https://login.microsoftonline.com/{tenant-id}/v2.0"
-            />
-            <small className="field-hint">
-              The discovery document is fetched from {"{issuer}"}/.well-known/openid-configuration.
-            </small>
-          </label>
-          <label>
-            Client ID
-            <input value={ssoDraft.clientId} onChange={(event) => setSsoDraft((state) => ({ ...state, clientId: event.target.value }))} />
-          </label>
-          <label>
-            Client secret {ssoDraft.protocol === "SCIM" ? "/ SCIM token" : ""}
-            <input
-              type="password"
-              value={ssoDraft.clientSecret}
-              onChange={(event) => setSsoDraft((state) => ({ ...state, clientSecret: event.target.value }))}
-              placeholder="Saved server-side only"
-            />
-          </label>
+          {isWorkos ? (
+            <OwnerWorkosCredentialFields ssoDraft={ssoDraft} setSsoDraft={setSsoDraft} />
+          ) : (
+            <OwnerOidcCredentialFields ssoDraft={ssoDraft} setSsoDraft={setSsoDraft} />
+          )}
 
-          {isOidc ? (
-            <div className="sso-redirect-uri wide-field">
-              <span className="sso-redirect-label">Redirect URI to register with your identity provider</span>
-              <span className="sso-redirect-value">
-                <code>{redirectUri}</code>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={copyRedirectUri}
-                  aria-label="Copy redirect URI"
-                  data-tooltip="Copy this redirect URI to register with your identity provider"
-                >
-                  <Copy size={14} /> {copiedRedirect ? "Copied" : "Copy"}
-                </button>
-              </span>
-            </div>
+          {isOidc || isWorkos ? (
+            <OwnerSsoRedirectUris
+              redirectLabel={copy.redirectLabel}
+              initiateLoginUri={workosInitiateLoginUri(ssoDraft.protocol, savedWorkosConfigId)}
+            />
           ) : (
             <label>
               Redirect URI / ACS URL
@@ -5115,7 +5309,7 @@ function SsoRequirementsPanel({
             </label>
           )}
 
-          {!isOidc && (
+          {!isOidc && !isWorkos && (
             <>
               <label>
                 Entity ID / audience
@@ -5186,10 +5380,7 @@ function SsoRequirementsPanel({
           <label>
             Group claim
             <input value={ssoDraft.groupClaim} onChange={(event) => setSsoDraft((state) => ({ ...state, groupClaim: event.target.value }))} />
-            <small className="field-hint">
-              Token claim listing the user's IdP groups. Map claim values to workspace groups in
-              the Admin console's SSO tab; membership follows the claim on every sign-in.
-            </small>
+            <small className="field-hint">{copy.groupClaimHint}</small>
           </label>
           <label>
             Authenticator app
@@ -5297,12 +5488,8 @@ function SsoRequirementsPanel({
               className="secondary-button form-submit-button"
               type="button"
               onClick={onTestSso}
-              disabled={testing || !isOidc}
-              data-tooltip={
-                isOidc
-                  ? "Fetch the issuer's discovery document and signing keys to verify setup"
-                  : "Switch the protocol to OIDC to run a live connection test"
-              }
+              disabled={testing || !copy.testable}
+              data-tooltip={copy.testTooltip}
             >
               <DatabaseZap size={15} /> {testing ? "Testing…" : "Test connection"}
             </button>
@@ -5325,11 +5512,7 @@ function SsoRequirementsPanel({
             </div>
           )}
 
-          <p className="muted-note wide-field">
-            Secrets are vaulted server-side and never returned to the browser. Sign-in redirects users to the
-            identity provider; {brandName} validates the returned ID token (signature, issuer, audience, nonce,
-            expiry) before creating a session.
-          </p>
+          <p className="muted-note wide-field">{copy.securityNote(brandName)}</p>
         </div>
       </div>
     </Panel>

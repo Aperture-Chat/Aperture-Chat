@@ -1,7 +1,8 @@
 /* Workspace controls in the Admin console, performed for real.
  *
- * admin-policies: read Policy Controls, grant one Default Users capability
- * and confirm it in the group, change the memory retention, purge a person's
+ * admin-policies: read Policy Controls (the seven Default Users switches and
+ * the Service policy note), grant one Default Users capability (which unlocks
+ * API sources) and confirm it in the group, change the memory retention, purge a person's
  * synthetic memories through the confirmation, and record the Memory
  * governance panel while the platform owner has memory off (the owner switch
  * is setup through the API and restored afterwards).
@@ -27,7 +28,21 @@ const adminPolicies = {
     await tidyFixture(kit);
     const settings = await kit.api("owner", "GET", "/api/platform/settings");
     if (!settings.memory_enabled) await kit.api("owner", "PATCH", "/api/platform/settings", { memory_enabled: true });
-    const stats = await kit.api("admin", "GET", "/api/admin/memory/stats");
+    // Setup for a rerun: Default Users starts without knowledge-base building
+    // (granted on camera below), and Jane has synthetic memories to purge.
+    const defaultGroup = (await kit.api("admin", "GET", "/api/admin/groups")).find((group) => group.default_group || group.name === "Default Users");
+    if (defaultGroup.permissions?.knowledge_authoring) {
+      await kit.api("admin", "PATCH", `/api/admin/groups/${defaultGroup.id}`, {
+        permissions: { ...defaultGroup.permissions, knowledge_authoring: false, api_source_authoring: false },
+      });
+    }
+    let stats = await kit.api("admin", "GET", "/api/admin/memory/stats");
+    if (!stats.some((stat) => stat.user_id === "user-jane" && stat.count > 0)) {
+      for (const content of ["Prefers short bullet-point summaries with the key date first.", "Writes for in-house counsel; keep the tone plain and direct."]) {
+        await kit.api("user", "POST", "/api/memory", { content });
+      }
+      stats = await kit.api("admin", "GET", "/api/admin/memory/stats");
+    }
     if (!stats.some((stat) => stat.user_id === "user-jane" && stat.count > 0)) throw new Error("Jane needs saved synthetic memories to purge.");
     const memory = await kit.api("admin", "GET", "/api/admin/memory/policy");
     if (memory.retention_days !== 365) await kit.api("admin", "PATCH", "/api/admin/memory/policy", { retention_days: 365 });
@@ -39,10 +54,13 @@ const adminPolicies = {
 
     // 1. Policy Controls: what the service policy allows, then the defaults.
     const controls = await expandPanel(page, "Policy Controls");
-    await scrollTo(page, controls, "start");
+    // The Service policy note at the bottom names only what limits this
+    // organization; with nothing limited there is no note.
+    const serviceNote = controls.locator(".policy-service-note");
+    await serviceNote.waitFor();
+    await scrollTo(page, serviceNote, "center");
     await shot("pol-status");
-    const defaultsCallout = controls.locator(".policy-callout").filter({ hasText: "Downstream defaults apply" });
-    await scrollTo(page, defaultsCallout, "start");
+    await scrollTo(page, controls, "start");
     await shot("pol-defaults");
     const knowledge = controls.getByRole("switch", { name: "Default users can build knowledge bases" });
     if ((await knowledge.getAttribute("aria-checked")) === "true") {
@@ -51,6 +69,8 @@ const adminPolicies = {
     }
     await knowledge.click();
     await toast(page, "Default user policy saved.");
+    // API sources live inside a person's own knowledge base, so that switch unlocks now.
+    await controls.locator(".policy-toggle-row").filter({ hasText: "Default users can add API sources" }).getByText("Allow people in Default Users to connect API endpoints", { exact: false }).waitFor();
     await scrollTo(page, controls.locator(".policy-toggle-row").filter({ hasText: "Default users can build knowledge bases" }), "center");
     await shot("pol-default-saved");
     await dismissToast(page);
@@ -61,7 +81,7 @@ const adminPolicies = {
     await defaults.getByRole("button", { name: "Manage" }).click();
     const editor = page.locator(".selected-group-panel");
     await editor.getByRole("tab", { name: "Permissions" }).click();
-    const row = editor.locator(".permission-row").filter({ hasText: "Can build knowledge bases" });
+    const row = editor.locator(".permission-row").filter({ has: page.locator("strong", { hasText: /^Can build knowledge bases$/ }) });
     if ((await row.getByRole("switch").getAttribute("aria-checked")) !== "true") throw new Error("The Default Users grant did not reach the group.");
     await scrollTo(page, row, "center");
     await shot("pol-verify");
@@ -140,6 +160,8 @@ const adminTools = {
     await openTab(page, "Connections");
     const panel = page.locator(".panel").filter({ hasText: "Chat output actions" }).first();
     await panel.waitFor();
+    // Connectors comes first on this tab (its own lesson); actions sit below it.
+    await scrollTo(page, panel, "start");
     await shot("tools-panel");
 
     // 1. The builder.

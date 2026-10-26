@@ -1,4 +1,4 @@
-/* Organization policy, the workspace budget, shared connectors, and the
+/* Organization policy, the workspace budget, the connector ceiling, and the
  * search index, performed for real on the synthetic instance. Run each module
  * from a freshly reset instance.
  *
@@ -7,26 +7,34 @@
  * the real refusal a user then receives, and sets the ceiling back to
  * unlimited.
  *
- * owner-connectors configures Web Search (DuckDuckGo, tested live) and a keyed
- * engine without a key; and saves and tests Google Drive, OneDrive /
- * SharePoint, Box, and iManage with synthetic identifiers, recording the real
- * result each test returns. Vendor consent screens are taught with
- * instruction cards. Secret fields hold random placeholders typed only after
- * each frame, so every frame shows them empty.
+ * owner-connectors opens Admin console › Connections as the platform owner,
+ * turns one source off for every workspace through the browser's
+ * confirmation, shows the tenant administrator's locked row, and allows the
+ * source again. Per-source setup, testing, and Hide are taught in the
+ * administrator documentation.
  *
  * owner-search-index reads the index status and runs a real rebuild.
  */
-const crypto = require("node:crypto");
-
-const placeholder = (prefix) => `${prefix}-${crypto.randomBytes(9).toString("hex")}`;
-
-function selectIn(scope, label) {
-  return scope.locator("label").filter({ hasText: new RegExp(`^\\s*${label}`) }).locator("select").first();
-}
-
 async function scrollTo(page, locator, block = "center") {
   await locator.evaluate((element, where) => element.scrollIntoView({ block: where }), block);
   await page.waitForTimeout(350);
+}
+
+/* Web search defaults on for a new chat. DuckDuckGo refuses automated
+ * searches from the recording network (a real reply would read "Web search
+ * (duckduckgo) is unavailable: … Turn off Web for this reply to continue
+ * without it."), so the person turns Web off in Send options first. */
+async function webOff(page) {
+  const menu = page.locator(".send-options-menu");
+  if (!(await menu.isVisible())) await page.locator("form.composer .send-options-button").click();
+  await menu.waitFor();
+  const web = menu.locator(".send-option").filter({ has: page.locator("strong:text-is('Web')") });
+  if ((await web.getAttribute("aria-checked")) === "true") await web.click();
+  await page.waitForTimeout(300);
+  if ((await web.getAttribute("aria-checked")) !== "false") throw new Error("Web did not turn off.");
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "hidden" }).catch(() => {});
+  await page.waitForTimeout(300);
 }
 
 async function expand(page, title) {
@@ -47,6 +55,15 @@ const policies = {
   ],
   async run(kit) {
     const { shot } = kit;
+    // Setup (not captured): a real chat today, so the workspace has
+    // provider-reported usage in the current UTC day before a ceiling is set.
+    const warmup = await kit.app("user", "/");
+    await webOff(warmup);
+    await warmup.getByRole("textbox", { name: "Message" }).fill("List five short tips for writing a clear meeting agenda.");
+    await warmup.getByRole("button", { name: "Send message" }).click();
+    await warmup.getByRole("button", { name: "Send positive feedback" }).last().waitFor({ timeout: 1200000 });
+    await warmup.close();
+
     const page = await kit.app("owner", "/platform/org-settings");
     await page.locator(".search-index-card").waitFor();
     await page.waitForTimeout(600);
@@ -92,10 +109,14 @@ const policies = {
     await budget.getByRole("button", { name: "Save budget policy" }).click();
     await budget.getByText(/Workspace ceiling saved at 1,000 tokens/).waitFor();
     await page.waitForTimeout(600);
+    const usage = Number(((await budget.locator(".budget-usage-card").innerText()).match(/([\d,]+) tokens/) ?? [])[1]?.replaceAll(",", "") ?? 0);
+    if (usage < 1000) throw new Error(`Today's usage (${usage} tokens) is below the ceiling; the refusal would not happen.`);
+    console.log(`  today's usage: ${usage} tokens`);
     await shot("pc-budget-saved");
 
     // A person's next message is refused with the real budget message.
     const user = kit.use(await kit.app("user", "/"));
+    await webOff(user);
     await user.getByRole("textbox", { name: "Message" }).fill("Summarize this week's open action items.");
     await user.getByRole("button", { name: "Send message" }).click();
     // The client currently retries a 429 for several minutes before it shows
@@ -118,149 +139,73 @@ const policies = {
   },
 };
 
-async function connectorBlock(page, panel, name) {
-  const block = panel.locator(".connector-config-block").filter({ has: page.locator(".connector-row-name", { hasText: new RegExp(`^${name}$`) }) });
+async function connectorRow(page, name) {
+  const block = page.locator(".connector-config-block").filter({ has: page.locator(".connector-row-name", { hasText: new RegExp(`^${name}$`) }) });
   await block.waitFor();
   return block;
 }
 
-async function configure(page, panel, name) {
-  const block = await connectorBlock(page, panel, name);
-  if ((await block.getByRole("button", { name: "Configure" }).getAttribute("aria-expanded")) !== "true") {
-    await block.getByRole("button", { name: "Configure" }).click();
-  }
-  const form = block.locator(".connector-config-form");
-  await form.waitFor();
-  return { block, form };
-}
-
-async function fillFields(form, values) {
-  for (const [label, value] of Object.entries(values)) {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    await form.locator("label").filter({ has: form.page().locator(".connector-field-label", { hasText: new RegExp(`^${escaped}\\s*\\*?$`) }) }).locator("input").first().fill(value);
-  }
-}
-
-async function secretField(form) {
-  return form.locator("input[type='password']").first();
-}
-
-async function saveAndTest(page, form) {
-  await form.getByRole("button", { name: "Save configuration" }).click();
-  const test = form.getByRole("button", { name: "Test connection" });
-  // Test connection unlocks once the saved configuration exists.
-  for (let i = 0; i < 80; i += 1) {
-    if (!(await test.isDisabled())) break;
-    await page.waitForTimeout(250);
-  }
-  await page.waitForTimeout(600);
-  await test.click();
-  await form.locator(".sso-test-result").waitFor({ timeout: 60000 });
-  for (let i = 0; i < 120 && /Testing/.test(await test.innerText()); i += 1) await page.waitForTimeout(250);
+async function connectionsTab(kit, audience) {
+  const page = await kit.app(audience, "/admin/tools");
+  await page.locator(panelSelector("Connectors")).waitFor();
   await page.waitForTimeout(800);
-  return (await form.locator(".sso-test-result").innerText()).trim();
+  return page;
 }
 
-async function closeConfigure(block) {
-  const button = block.getByRole("button", { name: "Configure" });
-  if ((await button.getAttribute("aria-expanded")) === "true") await button.click();
+function panelSelector(title) {
+  return `.panel:has(> .panel-header h2:text-is(${JSON.stringify(title)}))`;
 }
+
+const SOURCE = "Box";
 
 const connectors = {
   role: "owner",
-  description: "Configure and test Web Search, Google Drive, OneDrive / SharePoint, Box, and iManage.",
-  frames: [
-    "owner/cn-panel", "owner/cn-web-tested", "owner/cn-web-keyed", "owner/cn-gdrive-form", "owner/cn-gdrive-tested",
-    "owner/cn-graph-form", "owner/cn-graph-tested", "owner/cn-box-tested", "owner/cn-imanage-tested",
-  ],
+  description: "Turn a connector off for every workspace from Admin console › Connections, see what an administrator sees, and allow it again.",
+  frames: ["owner/pc-connections", "owner/pc-ceiling-off", "owner/pc-ceiling-admin", "owner/pc-ceiling-allowed"],
   async run(kit) {
     const { shot } = kit;
-    const page = await kit.app("owner", "/platform/org-settings");
-    const panel = await expand(page, "Connectors");
-    await scrollTo(page, panel, "start");
-    await shot("cn-panel");
+    // Connectors are configured per workspace in the Admin console; the owner
+    // sees the same panel with the deployment-wide ceiling on every row.
+    const page = await connectionsTab(kit, "owner");
+    if ((await page.locator(".connector-ceiling-button").count()) < 3) throw new Error("The owner's Off for all buttons are missing.");
+    let row = await connectorRow(page, SOURCE);
+    if (await row.getByText("Off for all workspaces").count()) throw new Error(`Start with ${SOURCE} allowed in every workspace.`);
+    await shot("pc-connections");
 
-    // Web Search: DuckDuckGo needs no key; the test runs a real query.
-    let { block, form } = await configure(page, panel, "Web Search");
-    await selectIn(form, "Search engine").selectOption("duckduckgo");
-    let web = await saveAndTest(page, form);
-    // DuckDuckGo rate-limits automated queries; a real retry is what a person would do.
-    for (let attempt = 0; attempt < 4 && /failed/i.test(web); attempt += 1) {
-      await page.waitForTimeout(20000);
-      await form.getByRole("button", { name: "Test connection" }).click();
-      await page.waitForTimeout(1500);
-      for (let i = 0; i < 120 && /Testing/.test(await form.getByRole("button", { name: /Test connection|Testing/ }).innerText()); i += 1) await page.waitForTimeout(250);
-      await page.waitForTimeout(800);
-      web = (await form.locator(".sso-test-result").innerText()).trim();
-    }
-    console.log(`  web search test: ${web.split("\n")[0].slice(0, 160)}`);
-    await scrollTo(page, block, "start");
-    await shot("cn-web-tested");
-    // A keyed engine reuses a provider key; this workspace has no OpenAI key.
-    await selectIn(form, "Search engine").selectOption("openai");
-    await saveAndTest(page, form);
-    await scrollTo(page, block, "start");
-    await shot("cn-web-keyed");
-    await selectIn(form, "Search engine").selectOption("duckduckgo");
-    await form.getByRole("button", { name: "Save configuration" }).click();
-    await page.waitForTimeout(1200);
-    await closeConfigure(block);
-
-    // Google Drive: OAuth client fields, saved and tested.
-    ({ block, form } = await configure(page, panel, "Google Drive"));
-    await selectIn(form, "Authentication method").selectOption("oauth-client");
-    await fillFields(form, {
-      "OAuth client ID": "000000000000-examplecorp.apps.googleusercontent.com",
-      "Drive folder ID": "1ExampleFolderIdForPolicyLibrary",
-      "Source label": "Policy Library",
+    // Off for all: the browser asks for confirmation first.
+    page.once("dialog", (prompt) => {
+      if (!/^Turn Box off for every workspace\? Workspace admins can't turn it back on until you allow it again\.$/.test(prompt.message())) {
+        throw new Error(`Unexpected confirmation: ${prompt.message()}`);
+      }
+      return prompt.accept();
     });
-    await scrollTo(page, block, "start");
-    await shot("cn-gdrive-form");
-    await (await secretField(form)).fill(placeholder("synthetic-secret"));
-    await saveAndTest(page, form);
-    await scrollTo(page, form.locator(".connector-config-actions"), "start");
-    await page.evaluate(() => window.scrollBy(0, -220));
-    await page.waitForTimeout(300);
-    await shot("cn-gdrive-tested");
-    await closeConfigure(block);
+    await row.getByRole("button", { name: `Turn ${SOURCE} off for every workspace` }).click();
+    await page.getByText(`${SOURCE} is off for every workspace.`).waitFor();
+    await row.getByText("Off for all workspaces").waitFor();
+    await row.getByRole("button", { name: `Allow ${SOURCE} in every workspace` }).waitFor();
+    await page.waitForTimeout(800);
+    await shot("pc-ceiling-off");
 
-    // OneDrive / SharePoint through Microsoft Graph, app-only.
-    ({ block, form } = await configure(page, panel, "OneDrive / SharePoint / Outlook"));
-    await selectIn(form, "Authentication method").selectOption("client-credentials");
-    await fillFields(form, {
-      "Directory (tenant) ID": "11111111-2222-3333-4444-555555555555",
-      "Application (client) ID": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-    });
-    await scrollTo(page, block, "start");
-    await shot("cn-graph-form");
-    await (await secretField(form)).fill(placeholder("synthetic-secret"));
-    await saveAndTest(page, form);
-    await scrollTo(page, form.locator(".connector-config-actions"), "start");
-    await page.evaluate(() => window.scrollBy(0, -220));
-    await page.waitForTimeout(300);
-    await shot("cn-graph-tested");
-    await closeConfigure(block);
+    // A tenant administrator: the pill, and a switch they cannot turn on.
+    const admin = kit.use(await connectionsTab(kit, "admin"));
+    const adminRow = await connectorRow(admin, SOURCE);
+    await adminRow.getByText("Off for all workspaces").waitFor();
+    if (await admin.locator(".connector-ceiling-button").count()) throw new Error("An administrator was offered the owner ceiling.");
+    if (!(await adminRow.getByRole("switch").isDisabled())) throw new Error("The administrator can still switch the connector on.");
+    await shot("pc-ceiling-admin");
 
-    // Box: Client Credentials Grant.
-    ({ block, form } = await configure(page, panel, "Box"));
-    await selectIn(form, "Authentication method").selectOption("client-credentials");
-    await fillFields(form, { "Client ID": "examplecorpboxclient000000000000", "Enterprise ID": "123456", "Folder ID": "12345" });
-    await (await secretField(form)).fill(placeholder("synthetic-secret"));
-    await saveAndTest(page, form);
-    await scrollTo(page, block, "start");
-    await shot("cn-box-tested");
-    await closeConfigure(block);
-
-    // iManage: each person signs in; the test explains how verification finishes.
-    ({ block, form } = await configure(page, panel, "iManage"));
-    await selectIn(form, "Authentication method").selectOption("oauth-client");
-    await fillFields(form, { "Instance URL": "https://imanage.example.com", "API key (client ID)": "examplecorp-aperture", "Customer ID": "100", "Library ID": "ACTIVE" });
-    await (await secretField(form)).fill(placeholder("synthetic-secret"));
-    await saveAndTest(page, form);
-    await scrollTo(page, form.locator(".connector-config-actions"), "start");
-    await page.evaluate(() => window.scrollBy(0, -260));
-    await page.waitForTimeout(300);
-    await shot("cn-imanage-tested");
+    // Allow all reopens the ceiling; each workspace's own switch decides again.
+    kit.use(page);
+    await page.reload();
+    await page.locator(panelSelector("Connectors")).waitFor();
+    row = await connectorRow(page, SOURCE);
+    await row.getByRole("button", { name: `Allow ${SOURCE} in every workspace` }).click();
+    await page.getByText(`${SOURCE} is allowed in every workspace again. Each workspace's own switch decides whether it is on.`).waitFor();
+    await row.getByRole("button", { name: `Turn ${SOURCE} off for every workspace` }).waitFor();
+    await page.waitForTimeout(800);
+    await shot("pc-ceiling-allowed");
+    const state = (await kit.api("owner", "GET", "/api/bootstrap").catch(() => null))?.connectors?.find((connector) => connector.name === SOURCE);
+    if (state) console.log(`  ${SOURCE} after Allow all: deployment_enabled=${state.deployment_enabled} tenant_enabled=${state.tenant_enabled}`);
   },
 };
 

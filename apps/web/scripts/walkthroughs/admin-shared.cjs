@@ -145,6 +145,20 @@ async function ssoSignIn(kit, person, passwordValue, { beforeContinue, atProvide
   return page;
 }
 
+/* Document-style requests ("Draft a … notice") now stop at the chat's Drafts
+ * handoff card ("Write this in Drafts?"). These lessons need the reply in
+ * chat, so choose Continue in chat when the card appears, as a person would. */
+async function continueInChat(page) {
+  const choice = page.getByRole("button", { name: /^(Continue in chat|Draft slides in chat)$/ }).last();
+  try {
+    await choice.waitFor({ timeout: 1500 });
+  } catch {
+    return false;
+  }
+  await choice.click();
+  return true;
+}
+
 /* The shared fixture carries four approved "Morgan Example" accounts left by
  * an earlier access-request capture. They are synthetic but crowd every Users
  * frame, so each module that shows the Users table removes them first. */
@@ -172,5 +186,5 @@ async function removeGroups(kit, names) {
 module.exports = {};
 Object.defineProperty(module.exports, "helpers", {
   enumerable: false,
-  value: { tidyFixture, removeUsers, removeGroups, scrollTo, toast, dismissToast, openTab, expandPanel, keycloak, ssoSignIn },
+  value: { tidyFixture, removeUsers, removeGroups, scrollTo, toast, dismissToast, openTab, expandPanel, keycloak, ssoSignIn, continueInChat },
 });
