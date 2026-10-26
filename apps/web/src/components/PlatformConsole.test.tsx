@@ -669,6 +669,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "Single sign-on with Microsoft Entra ID",
     "Single sign-on with Okta",
     "Single sign-on with Google Workspace",
+    "Single sign-on with WorkOS",
     "Go live: groups, MFA, and enforcement",
     "Policies, budget, and the connector ceiling",
     "Platform branding",

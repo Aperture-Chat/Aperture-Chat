@@ -85,7 +85,7 @@ const SECTIONS = [
       list([
         "Open the web address your organization gave you for Aperture Chat in a modern browser (Chrome, Edge, Safari, or Firefox).",
         "On the sign-in screen, type your work email address in the field marked you@company.com.",
-        "If your organization uses single sign-on (SSO), the screen recognizes your email domain and offers Continue with SSO. Click it — you are sent to your organization's identity provider (for example Microsoft or Google), sign in there as usual, and return to Aperture Chat already signed in.",
+        "If your organization uses single sign-on (SSO), the screen recognizes your email domain and offers Continue with SSO. Click it — you are sent to your organization's identity provider (for example Microsoft, Google, or a WorkOS sign-in page), sign in there as usual, and return to Aperture Chat already signed in.",
         "When both methods are offered, choose Organization SSO or Email & password. The password field appears in Email & password mode; enter your password and click Sign in. Pressing Enter submits the method you selected.",
       ]),
       note(
@@ -1212,7 +1212,7 @@ const SECTIONS = [
       lesson("admin", "admin-sso"),
       note(
         "info",
-        "The steps inside each identity provider's console (Microsoft Entra ID, Okta, Google Workspace, Keycloak) are spelled out step by step in the Identity provider setup topics of the interactive guide at https://aperturechat.com/guide.html. The redirect URI to register is the one shown in the Add SSO configuration form.",
+        "The steps inside each identity provider's console (Microsoft Entra ID, Okta, Google Workspace, Keycloak) are spelled out step by step in the Identity provider setup topics of the interactive guide at https://aperturechat.com/guide.html. The redirect URI to register is the one shown in the Add SSO configuration form. For WorkOS, the WorkOS (AuthKit) path above lists the dashboard steps; the WorkOS card also lists the Initiate login URI to add after creating it.",
       ),
       note(
         "warning",
@@ -1624,7 +1624,7 @@ const SECTIONS = [
     summary: "How sign-in through your identity provider works, and the complete setup loop from app registration to the first signed-in person.",
     blocks: [
       p(
-        "Single sign-on sends people to your organization's identity provider to sign in. The provider returns a signed ID token; Aperture Chat verifies its signature, issuer, audience, nonce, and expiry, then opens a session. OpenID Connect (OIDC) is the working sign-in protocol. SAML appears in the Protocol list but is deferred and cannot sign anyone in.",
+        "Single sign-on sends people to your organization's identity provider to sign in. The provider returns a signed ID token; Aperture Chat verifies its signature, issuer, audience, nonce, and expiry, then opens a session. OpenID Connect (OIDC) is the working sign-in protocol for direct connections. WorkOS AuthKit is an optional alternative that uses your own WorkOS account (see Single sign-on: WorkOS AuthKit). SAML appears in the Protocol list but is deferred and cannot sign anyone in.",
       ),
       table(
         ["Where", "Who", "Use it for"],
@@ -1665,6 +1665,43 @@ const SECTIONS = [
       lesson("owner", "sso-entra"),
       lesson("owner", "sso-okta"),
       lesson("owner", "sso-google"),
+    ],
+  },
+  {
+    id: "owner-sso-workos",
+    part: "owner",
+    minRole: "owner",
+    title: "Single sign-on: WorkOS AuthKit with your own account",
+    summary: "Let WorkOS run the sign-in page and your organizations' SSO connections, using your own WorkOS keys.",
+    blocks: [
+      p(
+        "WorkOS is optional. Choose it when you want WorkOS to run sign-in for you: its hosted AuthKit page, each organization's SAML or OIDC connection, and any other sign-in methods you turn on in the WorkOS dashboard. Aperture Chat has no shared WorkOS account. Every deployment enters its own client ID and API key, so WorkOS bills that deployment, and a deployment that never saves WorkOS keys never contacts WorkOS.",
+      ),
+      table(
+        ["Where", "What you set"],
+        [
+          ["WorkOS dashboard › API Keys", "The client ID and an API key. Staging and production environments have separate keys."],
+          ["WorkOS dashboard › Redirects", "The redirect URI from Single Sign-On, and after saving, the Initiate login URI. Production requires HTTPS."],
+          ["WorkOS dashboard › Organizations", "Each organization, its verified domain, and its SSO connection (or an Admin Portal invitation for its IT team)."],
+          ["Platform console › Org Settings › Single Sign-On", "Protocol WorkOS AuthKit, the client ID, the API key, an optional organization ID, allowed domains, provisioning, and enforcement."],
+          ["Admin console › SSO", "The same configuration as a card (Identity provider › WorkOS (AuthKit)), Test connection, and WorkOS role mapping."],
+        ],
+      ),
+      p(
+        "At sign-in, Aperture Chat sends the person to WorkOS with a signed state and a PKCE challenge, and passes the email they typed so WorkOS can fill it in. WorkOS returns a one-time code. The server redeems it with your API key, verifies the WorkOS access token against the signing keys WorkOS publishes for your client ID, and then applies the same rules as every provider: allowed domains, verified email, the account's existing identity binding, provisioning, group mapping, the platform authenticator rule, and enforcement.",
+      ),
+      p(
+        "Costs at the time of writing: staging environments are free; in production, AuthKit is free up to 1 million monthly active users, and enterprise SSO connections are billed per connection. Check workos.com/pricing before you plan a rollout.",
+      ),
+      lesson("owner", "sso-workos"),
+      note(
+        "info",
+        "Group claim switches to roles for WorkOS. WorkOS can assign roles from the identity provider's groups, so map those role slugs to workspace groups in Admin console › SSO. To use one WorkOS account for several workspaces, give each workspace's configuration its own organization ID and allowed domains.",
+      ),
+      note(
+        "warning",
+        "Accounts that already signed in through another provider stay bound to that provider's identity. Their first WorkOS sign-in is refused with \"This email now belongs to a different identity at the provider.\" until an administrator resets the account once. Signing out of Aperture Chat does not end the person's WorkOS session.",
+      ),
     ],
   },
   {

@@ -4,16 +4,16 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **64 lessons, 689 scenes, 64 MP3 tracks, and 9,929 seconds of narration timelines (165 minutes 29 seconds)**. Its 627 measured focus-map entries comprise 259 user targets and 368 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **65 lessons, 704 scenes, 65 MP3 tracks, and 10,179 seconds of narration timelines (169 minutes 39 seconds)**. Its 638 measured focus-map entries comprise 259 user targets and 379 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | User | 28 | 274 | 259 | 28 | 3577 | 31 |
 | Administrator | 17 | 207 | 197 | 17 | 2902 | 49 |
-| Platform owner | 19 | 208 | 171 | 19 | 3450 | 69 |
-| Total | 64 | 689 | 627 | 64 | 9929 | — |
+| Platform owner | 20 | 223 | 182 | 20 | 3700 | 70 |
+| Total | 65 | 704 | 638 | 65 | 10179 | — |
 
-All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 31/49/69 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
+All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 31/49/70 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
 Lesson counts and timings below are generated from the TypeScript catalog with `--include-drafts`; focus maps, MP3 counts, guide sections, and PDF-copy equality are checked separately. Including drafts inventories proposed content; it never publishes a lesson.
 
@@ -136,6 +136,7 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Platform owner | Single sign-on | Single sign-on with Microsoft Entra ID | `sso-entra` | 9 | 4 | 157 |
 | Platform owner | Single sign-on | Single sign-on with Okta | `sso-okta` | 8 | 5 | 125 |
 | Platform owner | Single sign-on | Single sign-on with Google Workspace | `sso-google` | 6 | 4 | 98 |
+| Platform owner | Single sign-on | Single sign-on with WorkOS | `sso-workos` | 15 | 4 | 250 |
 | Platform owner | Single sign-on | Go live: groups, MFA, and enforcement | `sso-security` | 7 | 1 | 128 |
 | Platform owner | Policies and branding | Policies, budget, and the connector ceiling | `policies-connectors` | 15 | 1 | 240 |
 | Platform owner | Policies and branding | Platform branding | `branding` | 11 | 0 | 197 |
@@ -351,3 +352,13 @@ The product was restyled after the October walkthrough overhaul: a warm light pa
 - **Focus and layout:** every focus region was measured against the exact published PNG bytes, and every scene of every lesson was rendered through the composition and checked for overlap; the remaining accepted overlaps are full-height highlights on a phone frame and a Keycloak dialog.
 - **Guides:** the user, administrator, and owner PDFs were regenerated (95, 150, and 208 pages) with sections for every new lesson, the connector and reports changes, the current tab counts and permissions, and the shipped icon on the cover. Every page was rasterized and inspected, and each pair of copies is byte-identical.
 - **Product fixes made during the refresh:** bold text in an automation's run output no longer renders as separate headings, and the Tools library's MCP and Prompt Library notices point to Admin console → Connections → Connectors.
+
+## WorkOS sign-in lesson — October 26, 2026
+
+Optional WorkOS AuthKit sign-in (see [WORKOS_SSO.md](WORKOS_SSO.md)) is taught by a new owner lesson, *Single sign-on with WorkOS* (`sso-workos`, 15 scenes, 4 instruction cards, 250 seconds), placed in the *Single sign-on* track after Google Workspace. It is a complete loop: choose WorkOS AuthKit, copy the redirect URI, enter the client ID and organization ID, set allowed domains (Group claim switches to roles), paste the API key last, save, pass Test connection, add the Initiate login URI, sign a new person in from a fresh browser, confirm the account in Users, map the WorkOS `litigation` role to the Litigation group, and prove membership syncs at the next sign-in.
+
+- **Evidence:** `walkthroughs/sso-workos.cjs` ran against the official WorkOS API emulator (`@workos/emulate`, the emulator behind `workos emulate`), with the isolated API's `APERTURE_WORKOS_API_BASE_URL` pointed at it. The module creates the WorkOS side (the role, the Example Corporation organization and its verified domain, and the synthetic person with a membership) through the WorkOS API, so the same calls work against a real staging environment. Test connection, the code redemption, access-token verification, provisioning, and role sync all ran for real. The emulator's own sign-in page is not captured; the lesson teaches the real AuthKit page and the WorkOS dashboard with instruction cards. The API key is pasted after the form frames and cleared before the next one, so no published frame contains it.
+- **Narration:** one new Kokoro track, checked with Whisper (agreement 0.982; the misses are "bills"/"billed" heard as "builds"/"build").
+- **Focus and layout:** 11 focus regions were measured from the live DOM and imported against the published PNG bytes; all 15 scenes were rendered through the composition with no overlap between title cards, captions, and highlights.
+- **Administrator guidance:** *Tenant SSO and provisioning* gained a WorkOS (AuthKit) path, and its troubleshooting now reflects that new SSO cards keep the display name you type.
+- **Guides:** the owner guide gained the section *Single sign-on: WorkOS AuthKit with your own account*; the user, administrator, and owner PDFs were regenerated (95, 150, and 212 pages), the changed pages were rasterized and inspected, and each pair of copies is byte-identical.
