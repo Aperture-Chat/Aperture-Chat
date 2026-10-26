@@ -13,6 +13,7 @@ for Aperture Chat.
 - [Training coverage and regeneration](TRAINING.md)
 - [Personal data protection and training datasets](PRIVACY_AND_TRAINING_DATA.md)
 - [Support tickets and the community hub](SUPPORT_TICKETS.md)
+- [Optional WorkOS sign-in](WORKOS_SSO.md)
 - [README images and capture maintenance](images/README.md)
 - [Security policy](../SECURITY.md)
 - [License](../LICENSE.md)

@@ -158,7 +158,7 @@ export function mapSsoConfigRecordToDisplay(record: SsoConfigRecord, index = 0):
   const enforced = Boolean(record.enabled && (record.settings.enforced ?? true));
   return {
     id: record.id || `sso-${index}`,
-    name: ssoProviderName(record.provider),
+    name: ssoDisplayName(record),
     protocol: ssoProtocol(record),
     status: ssoStatus(record, enforced),
     enforced,
@@ -186,6 +186,7 @@ export function mapSsoConfigRecordToDisplay(record: SsoConfigRecord, index = 0):
     jit_provisioning: Boolean(record.settings.jit_provisioning),
     require_platform_mfa: Boolean(record.settings.require_platform_mfa),
     mapped_groups: record.mapped_groups ?? {},
+    workos_organization_id: nullableStringSetting(record.settings, "workos_organization_id"),
     last_tested: stringSetting(record.settings, "last_tested") ?? "Loaded from API",
     admin_notes:
       stringSetting(record.settings, "admin_notes") ??
@@ -453,6 +454,15 @@ function titleFromSlug(value: string): string {
     .join(" ");
 }
 
+/** The name an admin typed, else the provider's label. */
+function ssoDisplayName(record: SsoConfigRecord): string {
+  return stringSetting(record.settings, "display_name")?.trim() ?? ssoProviderName(record.provider);
+}
+
+function nullableStringSetting(settings: Record<string, unknown>, key: string): string | null {
+  return stringSetting(settings, key) ?? null;
+}
+
 function ssoProviderName(provider: string): string {
   const labels: Record<string, string> = {
     "entra-id": "Microsoft Entra ID",
@@ -460,13 +470,17 @@ function ssoProviderName(provider: string): string {
     okta: "Okta",
     auth0: "Auth0",
     scim: "SCIM Provisioning",
+    workos: "WorkOS",
   };
   return labels[provider.toLowerCase()] ?? titleFromSlug(provider);
 }
 
 function ssoProtocol(record: SsoConfigRecord): SsoConfig["protocol"] {
   const configured = stringSetting(record.settings, "protocol")?.toUpperCase();
-  if (configured === "SAML" || configured === "SCIM" || configured === "OIDC") return configured;
+  if (configured === "SAML" || configured === "SCIM" || configured === "OIDC" || configured === "WORKOS") {
+    return configured;
+  }
+  if (record.provider.toLowerCase() === "workos") return "WORKOS";
   const source = `${record.provider} ${record.issuer_url}`.toLowerCase();
   if (source.includes("saml")) return "SAML";
   if (source.includes("scim")) return "SCIM";

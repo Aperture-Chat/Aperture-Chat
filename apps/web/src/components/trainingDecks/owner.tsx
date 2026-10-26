@@ -40,6 +40,17 @@ export type OwnerFocus =
   | "oktaPreset"
   | "googlePreset"
   | "googleTestPassed"
+  | "workosProtocol"
+  | "workosRedirectCopied"
+  | "workosFields"
+  | "workosAccess"
+  | "workosTestPassed"
+  | "workosInitiateUri"
+  | "workosSignIn"
+  | "workosWelcome"
+  | "workosJitUser"
+  | "workosRoleMapping"
+  | "workosRoleSynced"
   | "brandPreview"
   | "brandThemeColors"
   | "brandActions"
@@ -219,6 +230,19 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   oktaPreset: { frame: "training/owner/sso-preset-okta.png", rect: { x: 282, y: 410, w: 847, h: 201 } },
   googlePreset: { frame: "training/owner/sso-preset-google.png", rect: { x: 282, y: 410, w: 847, h: 201 } },
   googleTestPassed: { frame: "training/owner/sso-google-tested.png", rect: { x: 282, y: 368, w: 847, h: 118 } },
+  // WorkOS walkthrough: real captures from capture-walkthroughs.cjs sso-workos
+  // against the official WorkOS API emulator (@workos/emulate).
+  workosProtocol: { frame: "training/owner/workos-protocol.png", rect: { x: 282, y: 125, w: 847, h: 126 } },
+  workosRedirectCopied: { frame: "training/owner/workos-redirect-copied.png", rect: { x: 282, y: 383, w: 847, h: 90 } },
+  workosFields: { frame: "training/owner/workos-form-filled.png", rect: { x: 282, y: 139, w: 847, h: 162 } },
+  workosAccess: { frame: "training/owner/workos-access.png", rect: { x: 282, y: 0, w: 847, h: 213 } },
+  workosTestPassed: { frame: "training/owner/workos-tested.png", rect: { x: 282, y: 356, w: 847, h: 142 } },
+  workosInitiateUri: { frame: "training/owner/workos-initiate-uri.png", rect: { x: 282, y: 383, w: 847, h: 90 } },
+  workosSignIn: { frame: "training/owner/workos-signin.png", rect: { x: 101, y: 339, w: 405, h: 354 } },
+  workosWelcome: { frame: "training/owner/workos-welcome.png", rect: { x: 258, y: 21, w: 895, h: 259 } },
+  workosJitUser: { frame: "training/owner/workos-jit-user.png", rect: { x: 262, y: 750, w: 887, h: 61 } },
+  workosRoleMapping: { frame: "training/owner/workos-role-mapping.png", rect: { x: 297, y: 379, w: 390, h: 181 } },
+  workosRoleSynced: { frame: "training/owner/workos-role-synced.png", rect: { x: 262, y: 642, w: 887, h: 61 } },
   brandPreview: { frame: "training/owner/br-panel.png", rect: { x: 262, y: 0, w: 887, h: 203 } },
   brandThemeColors: { frame: "training/owner/br-colors.png", rect: { x: 282, y: 199, w: 847, h: 255 } },
   brandActions: { frame: "training/owner/br-reset.png", rect: { x: 282, y: 399, w: 847, h: 105 } },
@@ -2092,6 +2116,242 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
             "Leave the SSO tab's group mapping empty for Google.",
           ],
         },
+      },
+    ],
+  },
+  {
+    id: "sso-workos",
+    audioSrc: "training/owner/sso-workos.mp3",
+    title: "Single sign-on with WorkOS",
+    description: "Let WorkOS run sign-in with your own WorkOS account: choose WorkOS AuthKit, add your keys, test them, sign the first person in, and map WorkOS roles to groups.",
+    icon: "identity",
+    track: "Single sign-on",
+    outcomes: ["WorkOS keys saved and tested", "Sign in with WorkOS on the sign-in screen", "First person signed in", "WorkOS roles mapped to groups"],
+    prerequisites: [
+      "Your own WorkOS account. Aperture Chat has no shared WorkOS account: each deployment enters its own keys, so WorkOS bills that deployment. Staging environments are free for testing.",
+      "In the WorkOS dashboard: the client ID and an API key from API Keys, and an organization with your verified email domain.",
+      "For enterprise SSO, the organization's SAML or OIDC connection, set up in the WorkOS dashboard or by the customer's IT team through the WorkOS Admin Portal.",
+      "The email domains your people sign in with, and a test account on one of them.",
+      "A platform owner account that signs in with a local password on a domain you will not enforce. It is your way back in.",
+    ],
+    setupSteps: [
+      "Open Platform console › Org Settings and expand Single Sign-On.",
+      "Set Protocol to WorkOS AuthKit (your WorkOS account). The issuer field disappears, because WorkOS has one fixed API address.",
+      "Choose Copy beside the redirect URI.",
+      "WorkOS dashboard › Redirects: add the redirect URI. Production environments accept only HTTPS.",
+      "WorkOS dashboard › API Keys: copy the client ID and an API key. Use the staging environment's keys while you test.",
+      "WorkOS dashboard › Organizations: create the organization, add and verify your domain, and set up its SSO connection. Copy the organization ID.",
+      "Back in Single Sign-On, enter the WorkOS client ID and the WorkOS organization ID. Leave the organization ID blank to let WorkOS find each person's organization from their email.",
+      "List the allowed email domains. Group claim switches to roles: the WorkOS role slugs you can map to workspace groups.",
+      "Paste the WorkOS API key last, choose Save SSO, then Test connection. API key, Client ID, Organization, and Sign-in readiness must pass.",
+      "Copy the Initiate login URI that appears after saving, and add it on the same WorkOS Redirects page.",
+      "In a private window, enter the test account's email and choose Continue with SSO. WorkOS shows your sign-in page, then returns the person to the workspace.",
+      "Confirm the account in Admin console › Users. To grant groups by role, open Admin console › SSO, map a WorkOS role slug to a workspace group, and choose Save mappings.",
+    ],
+    paths: [
+      {
+        label: "Platform console (shown in the video)",
+        steps: [
+          "Org Settings › Single Sign-On › Protocol: WorkOS AuthKit (your WorkOS account).",
+          "WorkOS client ID, WorkOS API key, optional WorkOS organization ID, and Allowed email domains, then Save SSO and Test connection.",
+          "The redirect URI and, after saving, the Initiate login URI are shown with Copy buttons.",
+        ],
+      },
+      {
+        label: "Admin console › SSO",
+        steps: [
+          "Choose Add SSO configuration, then Identity provider › WorkOS (AuthKit).",
+          "Enter the WorkOS client ID, WorkOS API key, optional WorkOS organization ID, and Allowed email domains. Create SSO configuration stays unavailable until the client ID and API key are entered.",
+          "Add the redirect URI shown under the form in the WorkOS dashboard under Redirects, then choose Create SSO configuration.",
+          "On the new card, choose Test connection, and add the Initiate login URI the card lists.",
+        ],
+      },
+      {
+        label: "Without an organization ID",
+        steps: [
+          "Leave WorkOS organization ID blank. WorkOS asks for the email and routes the person to their organization's connection, or to any other sign-in method you turned on in the WorkOS dashboard.",
+          "Allowed email domains still decide who can enter the workspace.",
+        ],
+      },
+      {
+        label: "One WorkOS account for several workspaces",
+        steps: [
+          "Use the same client ID and API key in each workspace's configuration.",
+          "Give each workspace its own WorkOS organization ID and allowed domains.",
+        ],
+      },
+    ],
+    verify: [
+      "Test connection lists API key, Client ID, Organization, and Sign-in readiness as passed.",
+      "The sign-in screen shows Sign in with WorkOS under Organization SSO.",
+      "The test person reaches the workspace, and Admin console › Users lists them with sso under Auth.",
+      "After their next sign-in, Users filtered to the mapped group lists them.",
+    ],
+    troubleshooting: [
+      { symptom: "\"WorkOS rejected the API key. Copy it again from API Keys in the WorkOS dashboard.\"", fix: "Paste the key again, and check that the key and the client ID come from the same WorkOS environment (staging or production)." },
+      { symptom: "\"WorkOS has no signing keys for this client ID. Copy it again from the WorkOS dashboard.\"", fix: "The client ID is mistyped or belongs to another environment." },
+      { symptom: "WorkOS shows an invalid redirect URI error", fix: "Add the exact redirect URI under Redirects in the WorkOS dashboard. Production environments accept only HTTPS." },
+      { symptom: "\"This WorkOS account belongs to more than one organization. An administrator must add the WorkOS organization ID to this sign-in configuration.\"", fix: "Enter the WorkOS organization ID in Single Sign-On and choose Save SSO." },
+      { symptom: "\"This sign-in did not come from the WorkOS organization configured for this workspace.\"", fix: "The person signed in through a different WorkOS organization. Add them to the configured organization, or clear the organization ID." },
+      { symptom: "\"This email now belongs to a different identity at the provider.\"", fix: "The account was bound to another identity provider before WorkOS. An administrator resets the account's password once; the next WorkOS sign-in binds it to WorkOS." },
+      { symptom: "Mapped groups never change", fix: "Map the WorkOS role slug exactly, keep Group claim set to roles, and give the person that role in their WorkOS organization membership." },
+    ],
+    scenes: [
+      {
+        title: "Before you begin",
+        caption: "Your own WorkOS account, an organization with your domain, your domains, a test account, and a way back in.",
+        narration:
+          "This lesson connects WorkOS, which runs your sign-in page and your organization's single sign-on connection. Before you begin, have your own WorkOS account, an organization with your verified email domain, your email domains, a test account, and an owner who still signs in with a local password.",
+        durationSeconds: 21,
+        card: {
+          label: "Checklist",
+          where: "Have these ready",
+          steps: [
+            "Your own WorkOS account. A staging environment is free.",
+            "A WorkOS organization with your verified domain and its SSO connection.",
+            "Your email domains, and a test account on one of them.",
+            "A way back in: an owner who signs in with a local password.",
+          ],
+        },
+      },
+      {
+        title: "Your WorkOS account, your bill",
+        caption: "Each deployment uses its own WorkOS keys. WorkOS stays off until you save them.",
+        narration:
+          "WorkOS is optional. Aperture Chat has no shared WorkOS account: each deployment enters its own keys, so WorkOS bills that deployment. Staging is free for testing. In production, AuthKit is free up to one million monthly active users, and each enterprise S S O connection is billed per connection. If you connect Entra, Okta, or Google directly, you don't need WorkOS.",
+        durationSeconds: 27,
+        card: {
+          label: "Good to know",
+          where: "Before you start",
+          steps: [
+            "Each deployment enters its own WorkOS keys; nothing is shared.",
+            "Staging environments are free for testing.",
+            "Production: AuthKit is free up to 1 million monthly active users; enterprise SSO connections are billed per connection.",
+            "WorkOS stays off until you save it. Direct OIDC providers keep working.",
+          ],
+        },
+      },
+      {
+        title: "Choose WorkOS AuthKit",
+        caption: "Org Settings › Single Sign-On › Protocol: WorkOS AuthKit. There is no issuer to enter.",
+        narration:
+          "Open Platform console, Org Settings, and expand Single Sign-On. Set Protocol to WorkOS AuthKit. The form changes: there is no issuer to enter, because WorkOS has one fixed address, and the note explains that WorkOS runs the sign-in page with your own account.",
+        durationSeconds: 20,
+        focus: "workosProtocol",
+      },
+      {
+        title: "Copy the redirect URI",
+        caption: "Choose Copy beside the redirect URI. You add it in the WorkOS dashboard next.",
+        narration:
+          "Choose Copy beside the redirect U R I. You add it in the WorkOS dashboard next.",
+        durationSeconds: 7,
+        focus: "workosRedirectCopied",
+      },
+      {
+        title: "Set up the WorkOS dashboard",
+        caption: "Redirects, API Keys, and an organization with your domain and its SSO connection.",
+        narration:
+          "In the WorkOS dashboard, open Redirects and add the redirect U R I. Open API Keys and copy the client I D and an API key; use staging keys while you test. Then open Organizations, create the organization, add your domain, and set up its S S O connection, or invite the customer's I T team to do it through the Admin Portal. Copy the organization I D.",
+        durationSeconds: 26,
+        card: {
+          where: "WorkOS dashboard",
+          steps: [
+            "Redirects: add the redirect URI.",
+            "API Keys: copy the client ID and an API key.",
+            "Organizations: create the organization and add your verified domain.",
+            "Set up the organization's SSO connection, or invite its IT team through the Admin Portal.",
+            "Copy the organization ID (org_…).",
+          ],
+          values: [{ label: "Redirect URI", value: "https://your-instance.example/api/auth/sso/callback" }],
+        },
+      },
+      {
+        title: "Enter the WorkOS details",
+        caption: "WorkOS client ID and organization ID. Leave the API key for last.",
+        narration:
+          "Back in Single Sign-On, enter the WorkOS client I D and the organization I D. The organization I D is optional: with it, everyone goes straight to that organization's sign-in; without it, WorkOS finds the organization from each email. Leave the API key for last.",
+        durationSeconds: 20,
+        focus: "workosFields",
+      },
+      {
+        title: "Domains and roles",
+        caption: "Allowed email domains decide who can enter. Group claim is roles.",
+        narration:
+          "List your allowed email domains. Only these addresses can enter, even after WorkOS vouches for someone. Group claim switches to roles, so you can map WorkOS roles to workspace groups.",
+        durationSeconds: 14,
+        focus: "workosAccess",
+      },
+      {
+        title: "Save and test",
+        caption: "Test connection checks the API key, the client ID, and the organization with WorkOS.",
+        narration:
+          "Paste the API key, choose Save S S O, then Test connection. Aperture Chat checks the API key and the client I D with WorkOS and looks up the organization and its domain. Every check passes.",
+        durationSeconds: 15,
+        calloutPlacement: "upper-right",
+        focus: "workosTestPassed",
+      },
+      {
+        title: "Add the Initiate login URI",
+        caption: "After saving, copy the Initiate login URI to the same WorkOS Redirects page.",
+        narration:
+          "Saving adds one more address: the Initiate login U R I. Copy it and add it on the same WorkOS Redirects page. WorkOS uses it when a sign-in has to start from Aperture Chat, for example after an email link.",
+        durationSeconds: 16,
+        focus: "workosInitiateUri",
+      },
+      {
+        title: "Sign in with WorkOS",
+        caption: "The sign-in screen shows Sign in with WorkOS. Enter the email and choose Continue with SSO.",
+        narration:
+          "Now sign in as the test person from a private window. The sign-in screen shows Sign in with WorkOS. Enter the email and choose Continue with S S O. The email is passed along, so the person doesn't type it twice.",
+        durationSeconds: 16,
+        focus: "workosSignIn",
+      },
+      {
+        title: "Finish at WorkOS",
+        caption: "WorkOS runs the sign-in, then Aperture Chat verifies it before creating a session.",
+        narration:
+          "WorkOS shows your sign-in page with the email filled in. The person signs in through their organization's identity provider, and WorkOS sends them back. Aperture Chat redeems the result with your API key and verifies it before it creates a session.",
+        durationSeconds: 18,
+        card: {
+          where: "WorkOS sign-in page",
+          steps: [
+            "WorkOS shows your AuthKit sign-in page with the email filled in.",
+            "The person signs in with their organization's identity provider, or another method you turned on in WorkOS.",
+            "WorkOS returns them to Aperture Chat, which verifies the sign-in before creating a session.",
+          ],
+        },
+      },
+      {
+        title: "Signed in",
+        caption: "The person lands in the workspace with their own account.",
+        narration:
+          "The person lands in the workspace with their own account.",
+        durationSeconds: 5,
+        focus: "workosWelcome",
+      },
+      {
+        title: "The account WorkOS created",
+        caption: "Admin console › Users lists the new account with sso under Auth.",
+        narration:
+          "In Admin console, Users, the new account is listed with S S O under Auth. It was created at the first sign-in because Provision new users is on.",
+        durationSeconds: 12,
+        focus: "workosJitUser",
+      },
+      {
+        title: "Map WorkOS roles to groups",
+        caption: "Admin console › SSO: map a WorkOS role slug to a workspace group, then Save mappings.",
+        narration:
+          "To grant access by WorkOS role, open Admin console, S S O. On the WorkOS card, choose Add mapping, enter the role slug, here litigation, pick the workspace group, and choose Save mappings. WorkOS can assign roles from your identity provider's groups.",
+        durationSeconds: 19,
+        focus: "workosRoleMapping",
+      },
+      {
+        title: "Groups follow WorkOS roles",
+        caption: "At the next sign-in, membership follows the person's WorkOS role.",
+        narration:
+          "At the person's next sign-in, membership follows their WorkOS role. Filtered to Litigation, Users now lists them. To require WorkOS for your domains, follow the Go live lesson.",
+        durationSeconds: 14,
+        focus: "workosRoleSynced",
       },
     ],
   },

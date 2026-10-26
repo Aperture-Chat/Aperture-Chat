@@ -325,20 +325,35 @@ export async function completePresessionMfaChallenge(
   });
 }
 
-/** Absolute URL that begins the real OIDC redirect flow for a provider. */
-export function ssoAuthorizeUrl(providerId: string): string {
+/** Absolute URL that begins the SSO redirect flow for a provider. A typed
+ * email rides along as a login hint; only WorkOS uses it, to prefill AuthKit. */
+export function ssoAuthorizeUrl(providerId: string, loginHint?: string): string {
   const returnTo = typeof window !== "undefined" ? window.location.origin : "";
-  const query = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
+  const params = [
+    returnTo ? `return_to=${encodeURIComponent(returnTo)}` : "",
+    loginHint ? `login_hint=${encodeURIComponent(loginHint)}` : "",
+  ].filter(Boolean);
+  const query = params.length ? `?${params.join("&")}` : "";
   return `${apiBase}/api/auth/sso/${encodeURIComponent(providerId)}/authorize${query}`;
 }
 
+/** The WorkOS dashboard's "Initiate login URI" for one WorkOS configuration:
+ * WorkOS sends people here when a sign-in has to start from Aperture Chat. */
+export function ssoInitiateLoginUri(configId: string): string {
+  return absoluteApiUrl(`/api/auth/sso/${encodeURIComponent(configId)}/authorize`);
+}
+
 /** Redirect URI that admins must register with their identity provider. */
-/** The callback an identity provider must allow, as an absolute URL. With the
- * default same-origin deployment apiBase is empty, and a relative path is not
- * something an identity provider will accept as a redirect URI. */
 export function ssoRedirectUri(): string {
+  return absoluteApiUrl("/api/auth/sso/callback");
+}
+
+/** An API address an identity provider can store. With the default
+ * same-origin deployment apiBase is empty, and a relative path is not
+ * something an identity provider will accept. */
+function absoluteApiUrl(path: string): string {
   const base = apiBase || (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base}/api/auth/sso/callback`;
+  return `${base}${path}`;
 }
 
 /** Resume a session from a stored signed token (used after the SSO redirect). */

@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 
-from app.core import clock, connector_auth, hermes, oidc
+from app.core import clock, connector_auth, hermes, oidc, workos
 from app.core.alerting import (
     normalize_action_patterns,
     validate_detector_ids,
@@ -1877,6 +1877,53 @@ def delete_sso_config(
         return {"status": "deleted", "id": config.id}
 
 
+def _test_workos_sso_config(config: SsoConfig, actor: User, store: SeedStore) -> dict[str, Any]:
+    checks = workos.check_connection(
+        client_id=config.client_id,
+        api_key=store.configuration_secret("sso", config.id),
+        organization=workos.organization_id(config.settings),
+    )
+    failed = [check["name"] for check in checks if check["status"] != "ok"]
+    has_domains = bool(_config_domains_list(config))
+    if failed:
+        status_value = "failed"
+        message = "WorkOS could not verify: " + ", ".join(failed) + "."
+    elif not has_domains:
+        status_value = "incomplete"
+        message = "WorkOS verified, but sign-in stays disabled until you add allowed email domains."
+    else:
+        status_value = "ok"
+        message = (
+            "WorkOS verified. Sign-in is ready: users on the allowed domains continue to your "
+            "WorkOS sign-in page."
+        )
+    if failed:
+        readiness = "Fix the failed checks, then test again."
+    elif has_domains:
+        readiness = "People on " + ", ".join(_config_domains_list(config)) + " can sign in with WorkOS."
+    else:
+        readiness = "Add allowed email domains to show WorkOS on the sign-in screen."
+    checks.append(
+        {
+            "name": "Sign-in readiness",
+            "status": "ok" if status_value == "ok" else "incomplete",
+            "detail": readiness,
+        }
+    )
+    store.record_audit(
+        actor,
+        "admin.sso_config_tested",
+        config.id,
+        {"status": status_value, "issuer": workos.api_base_url()},
+    )
+    return {"status": status_value, "message": message, "checks": checks}
+
+
+def _config_domains_list(config: SsoConfig) -> list[str]:
+    raw = config.settings.get("domains") or []
+    return [str(domain).strip() for domain in raw if str(domain).strip()] if isinstance(raw, list) else []
+
+
 def _invalidate_sso_configuration_context_or_503(
     store: SeedStore,
     config: SsoConfig,
@@ -1920,59 +1967,45 @@ def test_sso_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> dict[str, Any]:
-    """Live-verify an OIDC configuration: fetch the discovery document and JWKS."""
+    """Live-verify an SSO configuration.
+
+    OIDC: fetch the discovery document and JWKS. WorkOS: call the WorkOS API
+    with the saved API key and look up the client's signing keys.
+    """
     require_admin_or_owner(actor)
     _assert_sso_management_allowed(actor, store)
     config = _get_tenant_record(config_id, store.sso_configs, actor)
 
     protocol = str(config.settings.get("protocol") or "OIDC").upper()
+    if protocol == "WORKOS":
+        return _test_workos_sso_config(config, actor, store)
     if protocol != "OIDC":
         return {
             "status": "unsupported",
             "message": "Live verification is only available for OIDC providers. SAML settings are stored but cannot be tested or used for sign-in yet.",
         }
+    return _test_oidc_sso_config(config, actor, store)
+
+
+def _test_oidc_sso_config(config: SsoConfig, actor: User, store: SeedStore) -> dict[str, Any]:
     issuer = config.issuer_url.strip()
     if not issuer:
         return {"status": "failed", "message": "Set the issuer URL before testing."}
-
-    checks: list[dict[str, str]] = []
     try:
         discovery = oidc.fetch_discovery_document(issuer)
-        checks.append(
-            {"name": "Discovery document", "status": "ok", "detail": oidc.discovery_url_for(issuer)}
-        )
     except oidc.OidcError as exc:
         return {
             "status": "failed",
             "message": str(exc),
             "checks": [{"name": "Discovery document", "status": "failed", "detail": str(exc)}],
         }
+    checks = [{"name": "Discovery document", "status": "ok", "detail": oidc.discovery_url_for(issuer)}]
+    jwks_check = _oidc_signing_keys_check(discovery["jwks_uri"])
+    checks.append(jwks_check)
+    if jwks_check["status"] != "ok":
+        return {"status": "failed", "message": f"JWKS fetch failed: {jwks_check['detail']}", "checks": checks}
 
-    try:
-        validate_public_url(discovery["jwks_uri"])
-        # No redirect-following: a JWKS URI that redirects (e.g. to an internal
-        # address) is rejected rather than followed past the egress check.
-        jwks_response = httpx.get(discovery["jwks_uri"], timeout=10.0, follow_redirects=False)
-        jwks_response.raise_for_status()
-        key_count = len(jwks_response.json().get("keys", []))
-        checks.append(
-            {
-                "name": "Signing keys (JWKS)",
-                "status": "ok",
-                "detail": f"{key_count} signing keys published",
-            }
-        )
-    except (httpx.HTTPError, ValueError, EgressBlocked) as exc:
-        checks.append({"name": "Signing keys (JWKS)", "status": "failed", "detail": str(exc)})
-        return {"status": "failed", "message": f"JWKS fetch failed: {exc}", "checks": checks}
-
-    missing: list[str] = []
-    if not config.client_id.strip():
-        missing.append("client ID")
-    if not config.secret_set:
-        missing.append("client secret")
-    if not [d for d in (config.settings.get("domains") or []) if str(d).strip()]:
-        missing.append("allowed email domains")
+    missing = _oidc_missing_sign_in_fields(config)
     status_value = "ok" if not missing else "incomplete"
     message = (
         "Issuer verified. Sign-in is ready: users on the allowed domains will be redirected to this provider."
@@ -1981,13 +2014,7 @@ def test_sso_config(
         + ", ".join(missing)
         + "."
     )
-    checks.append(
-        {
-            "name": "Sign-in readiness",
-            "status": "ok" if not missing else "incomplete",
-            "detail": message,
-        }
-    )
+    checks.append({"name": "Sign-in readiness", "status": status_value, "detail": message})
     store.record_audit(
         actor, "admin.sso_config_tested", config.id, {"status": status_value, "issuer": issuer}
     )
@@ -2000,6 +2027,30 @@ def test_sso_config(
         "jwks_uri": discovery["jwks_uri"],
         "checks": checks,
     }
+
+
+def _oidc_signing_keys_check(jwks_uri: str) -> dict[str, str]:
+    try:
+        validate_public_url(jwks_uri)
+        # No redirect-following: a JWKS URI that redirects (e.g. to an internal
+        # address) is rejected rather than followed past the egress check.
+        jwks_response = httpx.get(jwks_uri, timeout=10.0, follow_redirects=False)
+        jwks_response.raise_for_status()
+        key_count = len(jwks_response.json().get("keys", []))
+    except (httpx.HTTPError, ValueError, EgressBlocked) as exc:
+        return {"name": "Signing keys (JWKS)", "status": "failed", "detail": str(exc)}
+    return {"name": "Signing keys (JWKS)", "status": "ok", "detail": f"{key_count} signing keys published"}
+
+
+def _oidc_missing_sign_in_fields(config: SsoConfig) -> list[str]:
+    missing: list[str] = []
+    if not config.client_id.strip():
+        missing.append("client ID")
+    if not config.secret_set:
+        missing.append("client secret")
+    if not _config_domains_list(config):
+        missing.append("allowed email domains")
+    return missing
 
 
 @router.get("/knowledge-configs")

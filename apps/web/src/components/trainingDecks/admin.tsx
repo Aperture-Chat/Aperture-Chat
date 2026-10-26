@@ -1240,7 +1240,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     prerequisites: [
       "An Admin account, with SSO management allowed by service policy: the SSO tab shows Add SSO configuration. If it shows \"Organization policy makes SSO configuration read-only in this console.\" instead, ask your service team.",
-      "An OpenID Connect application at your identity provider, with its issuer URL, client ID, and client secret. The paths below list the exact settings for Keycloak, Microsoft Entra ID, Okta, and Google Workspace.",
+      "An OpenID Connect application at your identity provider, with its issuer URL, client ID, and client secret, or your own WorkOS account with its client ID and API key. The paths below list the exact settings for Keycloak, Microsoft Entra ID, Okta, Google Workspace, and WorkOS.",
       "The redirect URI shown under the Add SSO configuration form, registered exactly at the identity provider.",
       "A groups claim in the ID token if you will map groups. Google sends none.",
       "A test account at the provider with a verified email on one of your domains.",
@@ -1248,7 +1248,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     setupSteps: [
       "Choose Admin console › SSO. If it reads \"Organization policy makes SSO configuration read-only in this console.\" and has no Add SSO configuration button, ask your service team to allow SSO management.",
       "Choose Add SSO configuration.",
-      "In Identity provider, choose your preset: Microsoft Entra ID, Google Workspace, Okta, or Custom OIDC provider.",
+      "In Identity provider, choose your preset: Microsoft Entra ID, Google Workspace, Okta, Custom OIDC provider, or WorkOS (AuthKit).",
       "Enter the Issuer URL, Client ID, and Allowed email domains. Keep Provision new users on first sign-in (JIT) on.",
       "Register the redirect URI shown under the form at your identity provider.",
       "Paste the Client secret last, then choose Create SSO configuration. Enforcement starts off.",
@@ -1291,6 +1291,15 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         ],
       },
       {
+        label: "WorkOS (AuthKit)",
+        steps: [
+          "Choose WorkOS (AuthKit). WorkOS runs the sign-in page with your own WorkOS account; there is no issuer URL.",
+          "Enter the WorkOS client ID and WorkOS API key from API Keys in the WorkOS dashboard. The WorkOS organization ID is optional: with it, everyone goes straight to that organization's sign-in.",
+          "In the WorkOS dashboard under Redirects, add the redirect URI shown under the form. After creating, add the Initiate login URI the card lists.",
+          "Test connection checks API key, Client ID, and Organization with WorkOS. Map WorkOS role slugs, such as litigation, to tenant groups.",
+        ],
+      },
+      {
         label: "When SSO management is read-only (shown)",
         steps: [
           "The SSO tab shows \"Organization policy makes SSO configuration read-only in this console.\"",
@@ -1306,10 +1315,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     troubleshooting: [
       { symptom: "\"Organization policy makes SSO configuration read-only in this console.\"", fix: "Service policy does not let administrators manage SSO, so the tab has no Add SSO configuration button. Ask your service team." },
-      { symptom: "Create SSO configuration stays unavailable", fix: "Issuer URL and Client ID are required." },
+      { symptom: "Create SSO configuration stays unavailable", fix: "Issuer URL and Client ID are required. For WorkOS, the WorkOS client ID and WorkOS API key are required." },
       { symptom: "\"Issuer verified, but sign-in stays disabled until you add: client secret.\"", fix: "The secret was not saved, or allowed domains are missing. Cards cannot be edited: choose Remove and create the configuration again with every field." },
       { symptom: "Test connection fails at Discovery document", fix: "The issuer URL is wrong or unreachable from the server. Open the issuer followed by /.well-known/openid-configuration; for Entra use your tenant ID." },
-      { symptom: "The card shows Custom Oidc instead of the display name you typed", fix: "A known limitation: the card is labeled by provider type, and the display name is not kept yet. Identify cards by their issuer." },
+      { symptom: "An older card shows Custom Oidc instead of the display name you typed", fix: "New cards keep the display name you type. Cards created before that change are labeled by provider type: identify them by their issuer, or remove and create them again." },
       { symptom: "Mapped groups do not appear after sign-in", fix: "The claim value must match exactly, including case and any leading slash, and the provider must add the groups claim to the ID token. Membership updates at the next sign-in." },
       { symptom: "\"… is outside the domains allowed for this SSO provider.\"", fix: "The provider vouched for an address on another domain. Add the domain by recreating the configuration, or keep that person out." },
       { symptom: "\"SSO is enforced for this email domain; local sign-in is disabled. Use the configured identity provider.\"", fix: "Expected after enforcement. The person chooses Continue with SSO. Turn enforcement off on the card to allow passwords again." },

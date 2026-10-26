@@ -4,6 +4,7 @@ import { useState, type ForwardedRef } from "react";
 import { sampleData } from "../data/sampleData";
 import { CHAT_FEEDBACK_STORAGE_KEY, type ChatFeedbackEvent } from "../lib/chatFeedback";
 import type {
+  AdminSsoConfigUpdateRequest,
   BootstrapData,
   ElasticConnectionTestRequest,
   ElasticExportSettingsUpdateRequest,
@@ -668,6 +669,7 @@ test("documentation opens owner guide and audit replaces the old activity log ac
     "Single sign-on with Microsoft Entra ID",
     "Single sign-on with Okta",
     "Single sign-on with Google Workspace",
+    "Single sign-on with WorkOS",
     "Go live: groups, MFA, and enforcement",
     "Policies, budget, and the connector ceiling",
     "Platform branding",
@@ -2405,6 +2407,51 @@ test("sso protocol picker labels SAML as deferred and not selectable", async () 
   expect(screen.getByRole("option", { name: "OIDC (supported)" })).toBeInTheDocument();
 });
 
+
+test("owner SSO panel saves a WorkOS baseline with its own fields", async () => {
+  const data = platformOwnerData();
+  const updateSsoConfig = vi.fn(async (_configId: string, patch: AdminSsoConfigUpdateRequest) => ({
+    ...data.ssoConfigs[0],
+    protocol: "WORKOS" as const,
+    name: "WorkOS",
+    issuer: "",
+    workos_organization_id: (patch.settings?.workos_organization_id as string) ?? null,
+  }));
+  renderPlatform(data, { updateSsoConfig });
+  selectTab("Org Settings");
+  await screen.findByRole("tabpanel", { name: "Org Settings" });
+  expandPanel("Single Sign-On");
+
+  fireEvent.change(screen.getByRole("combobox", { name: "Protocol" }), { target: { value: "WORKOS" } });
+  expect(screen.queryByText("Issuer URL")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Provider name")).toHaveValue("WorkOS");
+  expect(screen.getByLabelText(/^Group claim/)).toHaveValue("roles");
+  expect(screen.getByText("Redirect URI to add under Redirects in the WorkOS dashboard")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Entity ID / audience")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("WorkOS client ID"), { target: { value: "client_01JSYNTHETIC" } });
+  fireEvent.change(screen.getByLabelText("WorkOS API key"), { target: { value: "sk_test_synthetic" } });
+  fireEvent.change(screen.getByLabelText(/^WorkOS organization ID/), { target: { value: "org_01JSYNTHETIC" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save SSO" }));
+
+  await waitFor(() =>
+    expect(updateSsoConfig).toHaveBeenCalledWith(
+      data.ssoConfigs[0].id,
+      expect.objectContaining({
+        provider: "workos",
+        issuer_url: "",
+        client_id: "client_01JSYNTHETIC",
+        client_secret: "sk_test_synthetic",
+        settings: expect.objectContaining({
+          protocol: "WORKOS",
+          display_name: "WorkOS",
+          workos_organization_id: "org_01JSYNTHETIC",
+          group_claim: "roles",
+        }),
+      }),
+    ),
+  );
+  expect(await screen.findByText("Initiate login URI for the same Redirects page")).toBeInTheDocument();
+});
 
 test("every analytics and audit section carries its own user and date filter", async () => {
   renderPlatform(platformOwnerData(), {});
