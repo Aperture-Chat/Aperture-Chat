@@ -47,7 +47,13 @@ from app.core.mfa import (
     provisioning_uri,
 )
 from app.core.personal_data import conceal_text
-from app.core.policy import knowledge_access_allowed
+from app.core.knowledge_walls import (
+    document_wall_overrides,
+    resolve_document_wall,
+    wall_field_names,
+    wall_group_ids,
+)
+from app.core.policy import knowledge_access_allowed, knowledge_chunk_visible_to_user
 from app.core.privacy import (
     conceal_alert,
     conceal_feedback,
@@ -134,6 +140,7 @@ from app.models.schemas import (
     KnowledgeChunk,
     KnowledgeConfig,
     KnowledgeDocument,
+    KnowledgeDocumentWall,
     MemoryUserStat,
     ModelConfig,
     PlatformSettings,
@@ -4909,7 +4916,7 @@ class SeedStore:
         candidates: list[KnowledgeChunk] = []
         for config_id in config_ids:
             for chunk in self.knowledge_chunks.get(config_id, []):
-                if not _chunk_visible_to_actor(actor, chunk):
+                if not knowledge_chunk_visible_to_user(actor, chunk):
                     continue
                 score = _chunk_score(chunk, query_terms, query)
                 candidates.append(chunk.model_copy(update={"score": score}))
@@ -4927,6 +4934,56 @@ class SeedStore:
                 chunk.acl_group_ids = list(acl_group_ids)
         self.vector_store.update_config_acl(config.id, acl_group_ids)
 
+    def reapply_knowledge_walls(self, config: KnowledgeConfig) -> int:
+        """Recompute every document's ethical wall from its metadata and overrides.
+
+        Run after a base's wall settings change, an override is set, or groups
+        change, so a wall naming a newly created group starts admitting it.
+        Returns how many documents now carry a different wall.
+        """
+        documents = self.knowledge_documents_for(config.id)
+        previous = {document.id: document.wall for document in documents}
+        walls = self._knowledge_walls(config, documents)
+        with self._store_lock:
+            for document in self.knowledge_documents.get(config.id, []):
+                document.wall = walls.get(document.id)
+            for chunk in self.knowledge_chunks.get(config.id, []):
+                if chunk.document_id in walls:
+                    chunk.wall_group_ids = wall_group_ids(walls[chunk.document_id])
+        self.vector_store.update_document_walls(config.id, walls)
+        return sum(1 for document_id, wall in walls.items() if previous.get(document_id) != wall)
+
+    def _knowledge_walls(
+        self, config: KnowledgeConfig, documents: list[KnowledgeDocument]
+    ) -> dict[str, KnowledgeDocumentWall | None]:
+        extra_fields = wall_field_names(config.settings)
+        overrides = document_wall_overrides(config.settings)
+        groups = list(self.groups.values())
+        return {
+            document.id: resolve_document_wall(
+                document.metadata,
+                tenant_id=config.tenant_id,
+                groups=groups,
+                extra_fields=extra_fields,
+                override=overrides.get(document.id),
+            )
+            for document in documents
+        }
+
+    def _apply_knowledge_walls(
+        self,
+        config: KnowledgeConfig,
+        documents: list[KnowledgeDocument],
+        chunks: list[KnowledgeChunk],
+    ) -> None:
+        """Stamp each document's wall onto it and its passages before indexing."""
+        walls = self._knowledge_walls(config, documents)
+        for document in documents:
+            document.wall = walls[document.id]
+        for chunk in chunks:
+            if chunk.document_id in walls:
+                chunk.wall_group_ids = wall_group_ids(walls[chunk.document_id])
+
     def knowledge_index_status(self, config_id: str) -> dict[str, Any]:
         return self.vector_store.dense_status(config_id)
 
@@ -4937,6 +4994,7 @@ class SeedStore:
         chunks: list[KnowledgeChunk],
     ) -> None:
         """Refresh one linked source (web page or API) in place by document id."""
+        self._apply_knowledge_walls(config, [document], chunks)
         with self._store_lock:
             documents = self.knowledge_documents.setdefault(config.id, [])
             for index, existing in enumerate(documents):
@@ -4981,6 +5039,7 @@ class SeedStore:
         provider_status: str,
         provider_message: str,
     ) -> tuple[KnowledgeConfig, list[KnowledgeDocument], str]:
+        self._apply_knowledge_walls(config, documents, chunks)
         self.knowledge_documents.setdefault(config.id, []).extend(documents)
         self.knowledge_chunks.setdefault(config.id, []).extend(chunks)
         self.vector_store.upsert_sources(documents, chunks)
@@ -5038,6 +5097,7 @@ class SeedStore:
         else:
             settings.pop("provider_message", None)
         config.settings = settings
+        self._apply_knowledge_walls(config, current_documents, self.knowledge_chunks.get(config_id, []))
         self.vector_store.replace_config(config_id, current_documents, self.knowledge_chunks.get(config_id, []))
         self.save_runtime_state()
         return config, self.knowledge_documents_for(config_id), synced_at
@@ -5690,18 +5750,6 @@ def knowledge_sync_status(provider_status: str) -> str:
     if provider_status == "error":
         return "error"
     return "stale"
-
-
-def _chunk_visible_to_actor(actor: User, chunk: KnowledgeChunk) -> bool:
-    if actor.role == Role.PLATFORM_OWNER:
-        return True
-    if actor.tenant_id != chunk.tenant_id:
-        return False
-    if actor.role == Role.TENANT_ADMIN:
-        return True
-    if chunk.acl_group_ids and not set(actor.group_ids).intersection(chunk.acl_group_ids):
-        return False
-    return True
 
 
 def _chunk_score(chunk: KnowledgeChunk, query_terms: set[str], query: str) -> float:

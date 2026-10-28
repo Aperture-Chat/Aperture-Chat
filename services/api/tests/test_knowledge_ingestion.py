@@ -673,3 +673,52 @@ def test_ocr_worker_count_defaults_and_env_override(monkeypatch: pytest.MonkeyPa
     for invalid in ("0", "-2", "many", " "):
         monkeypatch.setenv("APERTURE_KNOWLEDGE_OCR_WORKERS", invalid)
         assert knowledge_ingestion._ocr_worker_count() == 4
+
+
+def test_html_file_indexes_title_first_and_drops_scripts_and_boilerplate() -> None:
+    html = (
+        b"<html><head><title>Synthetic Fee Schedule</title><script>var x = 'tracker';</script></head>"
+        b"<body><nav><a href='/'>Home</a></nav><main><h2>Filing fees</h2>"
+        b"<table><tr><th>Filing</th><th>Fee</th></tr><tr><td>Motion</td><td>$40</td></tr></table>"
+        b"</main><footer>Footer links</footer></body></html>"
+    )
+
+    text = extract_text("fees.html", html)
+
+    assert text is not None
+    assert text.split("\n\n") == ["Synthetic Fee Schedule", "## Filing fees", "Filing | Fee", "Motion | $40"]
+
+
+def test_html_email_body_uses_structured_extraction() -> None:
+    message = EmailMessage()
+    message["Subject"] = "Docket alert"
+    message.set_content(
+        "<html><body><style>p { color: red }</style><ul><li>Hearing moved</li><li>Brief due</li></ul></body></html>",
+        subtype="html",
+    )
+
+    text = extract_text("alert.eml", message.as_bytes())
+
+    assert text is not None
+    assert "- Hearing moved\n\n- Brief due" in text
+    assert "color: red" not in text
+
+
+def test_msg_html_only_body_uses_structured_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    oxmsg = pytest.importorskip("oxmsg")
+
+    class FakeMessage:
+        message_headers: dict[str, str] = {}
+        sender = "counsel@example.com"
+        sent_date = None
+        subject = "HTML only"
+        body = None
+        html_body = b"<table><tr><td>Exhibit</td><td>A</td></tr></table><script>ignored()</script>"
+
+    monkeypatch.setattr(oxmsg.Message, "load", lambda _content: FakeMessage())
+
+    text = extract_text("html-only.msg", b"test-msg-bytes")
+
+    assert text is not None
+    assert "Exhibit | A" in text
+    assert "ignored" not in text

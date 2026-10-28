@@ -1,0 +1,471 @@
+/* Artifact canvas: the blade that Preview opens for a chat code block, and
+   the pull tab on the chat's right seam whenever the thread holds code.
+
+   It speaks the Drafts drawer's language, mirrored for the right edge: a
+   crisp slab that slides out from behind the seam on the platform ease, a
+   dimmed sliver of conversation left in view, and the glassy teal pull tab
+   with a thread of light along its seam. Expand takes the whole window. */
+
+.artifact-canvas-layer {
+  --artifact-canvas-sliver: 64px;
+  position: fixed;
+  inset: 0;
+  z-index: 88;
+}
+
+.artifact-canvas-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(4, 16, 24, 0.46);
+  backdrop-filter: blur(2px);
+  cursor: default;
+  animation: apx-fade 200ms var(--ease) both;
+}
+
+.artifact-canvas {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: calc(var(--artifact-canvas-left, clamp(48px, 8vw, 120px)) + var(--artifact-canvas-sliver));
+  display: grid;
+  /* Header, body, and the AI edit composer docked under the code. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  background: var(--surface);
+  box-shadow:
+    var(--shadow-lg),
+    -24px 0 60px -28px rgba(6, 40, 48, 0.45);
+  outline: none;
+  animation: artifact-canvas-in 420ms var(--ease) both;
+  transition:
+    left 380ms var(--ease),
+    border-radius 380ms var(--ease);
+}
+
+/* A thread of light settles along the seam once the blade is out. */
+.artifact-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent 8%,
+    color-mix(in srgb, var(--teal) 70%, transparent) 50%,
+    transparent 92%
+  );
+  opacity: 0.55;
+  pointer-events: none;
+  animation: artifact-canvas-seam 900ms var(--ease) both;
+}
+
+.artifact-canvas-layer.is-expanded .artifact-canvas {
+  left: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.artifact-canvas-layer.is-expanded .artifact-canvas::before {
+  opacity: 0;
+}
+
+.artifact-canvas-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+  padding: 12px 14px 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg));
+  font-family: var(--font-sans);
+}
+
+.artifact-canvas-title {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+/* Icon tiles are recessed wells. */
+.artifact-canvas-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-engraved, none);
+  color: var(--teal);
+}
+
+.artifact-canvas-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.artifact-canvas-name strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-canvas-name small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-canvas-switcher {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.artifact-canvas-position {
+  min-width: 3.6em;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+
+.artifact-canvas-view {
+  flex: 0 0 auto;
+}
+
+.artifact-canvas-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.artifact-canvas-header .icon-button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.artifact-canvas-header .md-code-action {
+  height: 32px;
+  padding: 0 11px;
+}
+
+.artifact-canvas-body {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.artifact-canvas-body.is-preview {
+  /* Generated pages assume a white page unless they paint their own. */
+  background: #ffffff;
+}
+
+.artifact-canvas-body.is-code {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* The numbered view and the editor both fill the body and scroll inside it. */
+.artifact-canvas-body.is-code > .md-code-block,
+.artifact-canvas-body.is-code > .md-code-editor-shell {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.artifact-canvas-body .code-edit-highlight,
+.artifact-canvas-body .code-edit-input {
+  font-size: 13px;
+}
+
+.artifact-canvas-ai {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* Empty while no edit is open (the Ask AI button floats outside). */
+.artifact-canvas-ai:empty {
+  display: none;
+}
+
+.artifact-canvas-body .md-code-block {
+  height: 100%;
+  max-height: none;
+  font-size: 13px;
+}
+
+.artifact-canvas-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.artifact-canvas-frame:focus {
+  outline: none;
+}
+
+.artifact-canvas-frame:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--teal) 70%, transparent);
+  outline-offset: -2px;
+}
+
+/* --- Pull tab on the chat's right seam ------------------------------------ */
+
+/* The edge never takes pointer events itself, so the conversation's
+   scrollbar under it keeps working; only the tab is a target. */
+.artifact-canvas-edge {
+  position: fixed;
+  top: 0;
+  right: var(--artifact-canvas-edge-right, 0px);
+  bottom: 0;
+  z-index: 40;
+  width: 14px;
+  pointer-events: none;
+}
+
+.artifact-canvas-edge::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent 6%,
+    color-mix(in srgb, var(--teal) 75%, transparent) 50%,
+    transparent 94%
+  );
+  opacity: 0;
+  transform: scaleY(0.3);
+  transition:
+    opacity 260ms var(--ease),
+    transform 480ms var(--ease);
+}
+
+.artifact-canvas-edge:has(.artifact-canvas-tab:hover)::before,
+.artifact-canvas-edge:has(.artifact-canvas-tab:focus-visible)::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.artifact-canvas-tab {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 26px;
+  min-width: 0;
+  height: 64px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 0 0 1px;
+  border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--border));
+  border-right: 0;
+  border-radius: 16px 0 0 16px;
+  background: linear-gradient(
+    200deg,
+    color-mix(in srgb, var(--surface) 88%, transparent),
+    color-mix(in srgb, var(--teal-soft) 88%, transparent)
+  );
+  box-shadow:
+    0 14px 30px -16px rgba(6, 40, 48, 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 45%);
+  backdrop-filter: blur(14px) saturate(1.3);
+  color: var(--teal);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  transition:
+    width 300ms var(--ease),
+    color 200ms var(--ease),
+    box-shadow 300ms var(--ease),
+    opacity 220ms var(--ease),
+    transform 300ms var(--ease);
+}
+
+.artifact-canvas-tab:hover,
+.artifact-canvas-tab:focus-visible {
+  width: 32px;
+  color: var(--teal-strong);
+  box-shadow:
+    0 18px 36px -16px rgba(6, 40, 48, 0.6),
+    inset 0 1px 0 rgb(255 255 255 / 45%);
+}
+
+.artifact-canvas-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 55%, var(--teal-2));
+  outline-offset: -2px;
+}
+
+.artifact-canvas-tab svg {
+  transition: transform 420ms var(--ease);
+}
+
+.artifact-canvas-tab:hover svg {
+  transform: translateX(-1px) scale(1.08);
+}
+
+.artifact-canvas-tab-count {
+  color: var(--teal-strong);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Tucks behind the seam while the blade is out. */
+.artifact-canvas-edge.is-covered .artifact-canvas-tab {
+  opacity: 0;
+  transform: translate(10px, -50%);
+  pointer-events: none;
+}
+
+/* While a reply is still writing code, a slow glow breathes on the tab. */
+.artifact-canvas-edge.is-working .artifact-canvas-tab {
+  animation: artifact-canvas-tab-breathe 2.4s ease-in-out infinite;
+}
+
+.artifact-canvas-tab-dot {
+  position: absolute;
+  top: 7px;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 2px var(--surface);
+  animation: apx-pulse 1.4s ease-in-out infinite;
+}
+
+@media (pointer: coarse) {
+  .artifact-canvas-tab {
+    width: 30px;
+    height: 72px;
+  }
+}
+
+/* --- Narrow screens: a full-screen sheet ---------------------------------- */
+
+@media (max-width: 720px) {
+  .artifact-canvas,
+  .artifact-canvas-layer.is-expanded .artifact-canvas {
+    left: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .artifact-canvas::before,
+  .artifact-canvas-expand {
+    display: none;
+  }
+
+  .artifact-canvas-header {
+    padding: 10px 12px;
+  }
+
+  /* Title and Close share the first row; everything else wraps below. */
+  .artifact-canvas-title {
+    flex: 1 1 calc(100% - 54px);
+  }
+
+  .artifact-canvas-actions {
+    display: contents;
+  }
+
+  .artifact-canvas-close {
+    order: 1;
+  }
+
+  .artifact-canvas-switcher,
+  .artifact-canvas-view,
+  .artifact-canvas-actions > :not(.artifact-canvas-close) {
+    order: 2;
+  }
+}
+
+@keyframes artifact-canvas-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes artifact-canvas-seam {
+  from {
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+}
+
+@keyframes artifact-canvas-tab-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 14px 30px -16px rgba(6, 40, 48, 0.5),
+      0 0 0 0 color-mix(in srgb, var(--teal) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 14px 30px -16px rgba(6, 40, 48, 0.5),
+      0 0 0 6px color-mix(in srgb, var(--teal) 16%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-canvas,
+  .artifact-canvas::before,
+  .artifact-canvas-backdrop,
+  .artifact-canvas-edge.is-working .artifact-canvas-tab,
+  .artifact-canvas-tab-dot {
+    animation: none;
+  }
+
+  .artifact-canvas,
+  .artifact-canvas-edge::before,
+  .artifact-canvas-tab,
+  .artifact-canvas-tab svg {
+    transition: none;
+  }
+}

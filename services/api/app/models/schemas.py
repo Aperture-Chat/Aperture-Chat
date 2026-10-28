@@ -1287,6 +1287,24 @@ class KnowledgeConfig(TenantScopedSecretRecord):
     matter_id: str | None = None
 
 
+class KnowledgeDocumentWall(BaseModel):
+    """An ethical wall on one knowledge document.
+
+    Only members of ``group_ids`` may retrieve the document's passages, on top
+    of the knowledge base's own sharing, and that includes administrators. An
+    empty ``group_ids`` is a closed wall: the wall named no group this tenant
+    has, so the document stays hidden from everyone until that is fixed.
+    """
+
+    source: Literal["metadata", "manual"]
+    group_ids: list[str] = Field(default_factory=list)
+    # Metadata walls keep the field and raw values they were read from, and the
+    # values that matched no group, so administrators can see why.
+    field: str | None = None
+    values: list[str] = Field(default_factory=list)
+    unresolved: list[str] = Field(default_factory=list)
+
+
 class KnowledgeDocument(BaseModel):
     id: str
     knowledge_config_id: str
@@ -1299,6 +1317,10 @@ class KnowledgeDocument(BaseModel):
     acl_group_ids: list[str] = Field(default_factory=list)
     updated_at: str
     citation_required: bool = True
+    # File properties preserved from the source: title, author, dates, custom
+    # and cloud metadata, sensitivity labels. Bounded when extracted.
+    metadata: dict[str, str] = Field(default_factory=dict)
+    wall: KnowledgeDocumentWall | None = None
 
 
 class KnowledgeChunk(BaseModel):
@@ -1317,6 +1339,19 @@ class KnowledgeChunk(BaseModel):
     locator: str | None = None
     acl_group_ids: list[str] = Field(default_factory=list)
     updated_at: str
+    # Copied from the document's wall. None means no wall; a list, even an
+    # empty one, limits retrieval to members of those groups.
+    wall_group_ids: list[str] | None = None
+    # Compact document properties (author, dates, labels) shown beside the
+    # passage so answers can cite who wrote what and when.
+    source_details: str | None = None
+
+
+class KnowledgeDocumentAccessRequest(BaseModel):
+    """Set one document's wall: follow its metadata, restrict, or open it."""
+
+    mode: Literal["metadata", "restricted", "open"]
+    group_ids: list[str] = Field(default_factory=list)
 
 
 class KnowledgeSyncRequest(BaseModel):
@@ -1334,6 +1369,12 @@ class KnowledgeWebSourceCreateRequest(BaseModel):
     name: str
     url: str
     text: str | None = None
+    # 0 reads only this page; 1-3 also read same-site pages it links to, that
+    # many links deep. Ignored for pasted text.
+    crawl_depth: int = Field(default=0, ge=0, le=3)
+    max_pages: int = Field(default=25, ge=1, le=100)
+    # Look for fresh pages on this site when a question needs them.
+    live_lookup: bool = True
 
 
 class KnowledgeApiSourceCreateRequest(BaseModel):

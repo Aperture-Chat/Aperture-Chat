@@ -55,7 +55,7 @@ export const BUILT_IN_DECK_TEMPLATES: BuiltInDeckTemplate[] = [
     category: "Pitch",
     description: "Problem, solution, market, traction, team, and ask.",
     outline:
-      "1 Title; 2 Problem (bullets); 3 Solution (bullets); 4 Market size (bullets); 5 Traction (bullets); 6 Team (two columns); 7 The ask (closing)",
+      "1 Title; 2 Problem (bullets); 3 Solution (statement: one sentence and a supporting line); 4 Market size (bullets); 5 Traction (big-number: the headline metric and what it measures); 6 Team (two columns); 7 The ask (closing)",
     build: (title) =>
       deck(title, [
         { id: slideId(), notes: "", layout: "title", title, subtitle: "Company pitch" },
@@ -69,9 +69,9 @@ export const BUILT_IN_DECK_TEMPLATES: BuiltInDeckTemplate[] = [
         {
           id: slideId(),
           notes: "",
-          layout: "title-bullets",
-          title: "Our solution",
-          bullets: bullets(["What we do in one sentence", "Why it wins", "Proof it works"]),
+          layout: "statement",
+          title: "What we do, in one sentence",
+          body: "Why it wins, and the proof that it works",
         },
         {
           id: slideId(),
@@ -83,9 +83,9 @@ export const BUILT_IN_DECK_TEMPLATES: BuiltInDeckTemplate[] = [
         {
           id: slideId(),
           notes: "",
-          layout: "title-bullets",
-          title: "Traction",
-          bullets: bullets(["Key metric and trend", "Customers or pilots", "What changed recently"]),
+          layout: "big-number",
+          title: "3x",
+          subtitle: "Traction: your headline metric and what it measures",
         },
         {
           id: slideId(),
@@ -104,10 +104,11 @@ export const BUILT_IN_DECK_TEMPLATES: BuiltInDeckTemplate[] = [
     category: "Business",
     description: "Results, wins, misses, and next-quarter plan.",
     outline:
-      "1 Title; 2 Quarter results (bullets with numbers); 3 Wins (bullets); 4 Misses and lessons (bullets); 5 Next quarter priorities (two columns: goals vs owners); 6 Risks (bullets); 7 Closing",
+      "1 Title; 2 Headline result (big-number); 3 Quarter results (bullets with numbers); 4 Wins (bullets); 5 Misses and lessons (bullets); 6 Next quarter priorities (two columns: goals vs owners); 7 Risks (bullets); 8 Closing",
     build: (title) =>
       deck(title, [
         { id: slideId(), notes: "", layout: "title", title, subtitle: "Quarterly business review" },
+        { id: slideId(), notes: "", layout: "big-number", title: "+12%", subtitle: "Headline result: the number that sums up the quarter" },
         {
           id: slideId(),
           notes: "",
@@ -203,7 +204,7 @@ export const BUILT_IN_DECK_TEMPLATES: BuiltInDeckTemplate[] = [
     category: "Business",
     description: "Client need, approach, plan, pricing, and proof.",
     outline:
-      "1 Title; 2 Your situation (bullets); 3 Our approach (bullets); 4 Plan and timeline (bullets); 5 Investment (bullets); 6 Why us (quote or proof); 7 Closing next steps",
+      "1 Title; 2 Your situation (bullets); 3 Our approach (image-bullets: a picture beside the approach); 4 Plan and timeline (bullets); 5 Investment (bullets); 6 Why us (quote or proof); 7 Closing next steps",
     build: (title) =>
       deck(title, [
         { id: slideId(), notes: "", layout: "title", title, subtitle: "Proposal" },
@@ -217,8 +218,9 @@ export const BUILT_IN_DECK_TEMPLATES: BuiltInDeckTemplate[] = [
         {
           id: slideId(),
           notes: "",
-          layout: "title-bullets",
+          layout: "image-bullets",
           title: "Our approach",
+          image: { src: "", alt: "A picture that shows the approach at work" },
           bullets: bullets(["How we would solve it", "What makes this work", "What we need from you"]),
         },
         {

@@ -1,0 +1,394 @@
+/* Structure-diagram studio: direct manipulation on the chat canvas
+   (components/StewardDiagramCanvas.tsx) and the Style tray under the
+   diagram toolbar (components/StewardDiagramStyleTray.tsx).
+
+   Follows the tactile rules in tactile-controls.css: chips are crisp slabs,
+   the current choice is lit, an open tool reads as pressed in, and every
+   focus ring sits on the control's own edge. */
+
+/* --- Canvas --------------------------------------------------------------- */
+
+.sdc-canvas.is-editable {
+  outline: none;
+}
+
+.sdc-canvas.is-editable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--teal) 70%, transparent);
+  outline-offset: -2px;
+}
+
+.sdc-canvas.is-editable svg {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.sdc-canvas.is-editable .sdc-card-shape {
+  cursor: grab;
+  touch-action: none;
+}
+
+.sdc-canvas.is-editable .sdc-text {
+  touch-action: none;
+}
+
+.sdc-canvas.is-dragging,
+.sdc-canvas.is-dragging * {
+  cursor: grabbing !important;
+}
+
+.sdc-canvas.is-dragging .sdc-text:hover {
+  text-decoration: none;
+}
+
+/* Arrows: a wide invisible stroke makes them easy to pick up. */
+.sdc-edge-hit {
+  stroke: transparent;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  cursor: pointer;
+  transition: stroke 140ms var(--ease);
+}
+
+.sdc-edge-hit:hover {
+  stroke: color-mix(in srgb, var(--teal) 14%, transparent);
+}
+
+.sdc-edge-glow {
+  stroke: color-mix(in srgb, var(--teal) 26%, transparent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sdc-select-outline {
+  stroke: var(--teal);
+}
+
+.sdc-guide {
+  stroke: var(--teal-2);
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.sdc-wire {
+  stroke: var(--teal);
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.sdc-drop-outline {
+  stroke: var(--teal);
+  fill: color-mix(in srgb, var(--teal) 7%, transparent);
+  pointer-events: none;
+}
+
+/* Handles: connector dots on a box's edges, arrow ends, and the bend grip. */
+.sdc-connector {
+  cursor: crosshair;
+  animation: sdc-fade-in 160ms var(--ease) both;
+}
+
+.sdc-connector-dot,
+.sdc-handle-dot {
+  fill: var(--surface);
+  stroke: var(--teal);
+  transition: fill 120ms var(--ease);
+}
+
+.sdc-connector:hover .sdc-connector-dot,
+.sdc-endpoint:hover .sdc-handle-dot {
+  fill: var(--teal);
+}
+
+.sdc-handle-dot.is-bend {
+  fill: var(--teal);
+  stroke: var(--surface);
+}
+
+.sdc-endpoint {
+  cursor: move;
+  touch-action: none;
+}
+
+.sdc-bend-handle {
+  touch-action: none;
+}
+
+.sdc-bend-handle.is-y {
+  cursor: ns-resize;
+}
+
+.sdc-bend-handle.is-x {
+  cursor: ew-resize;
+}
+
+/* --- Chips ---------------------------------------------------------------- */
+
+.sdc-card-chip {
+  flex-direction: column;
+  align-items: stretch;
+  animation: sdc-fade-in 140ms var(--ease) both;
+}
+
+.sdc-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sdc-chip-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 2px;
+  background: var(--border);
+}
+
+.sdc-chip button:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 40%, var(--teal-2));
+  outline-offset: -2px;
+}
+
+.sdc-chip button.is-on {
+  background: var(--surface-sunken);
+  color: var(--teal-strong);
+  box-shadow: var(--tactile-pressed, inset 0 2px 4px #00000029);
+}
+
+.sdc-chip-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
+  margin-top: 2px;
+  padding: 5px 3px 3px;
+  border-top: 1px solid var(--border);
+}
+
+.sdc-chip .sdc-swatch {
+  width: 20px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, #000000 18%, var(--swatch));
+  border-radius: 6px;
+  background: var(--swatch);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%);
+  transition: transform 120ms var(--ease);
+}
+
+.sdc-chip .sdc-swatch:hover:not(:disabled) {
+  background: var(--swatch);
+  transform: translateY(-1px);
+}
+
+.sdc-chip .sdc-swatch[aria-pressed="true"] {
+  border: 2px solid var(--text-strong);
+  box-shadow: inset 0 0 0 1.5px var(--surface);
+}
+
+/* Floats just above the selected arrow's middle so the boxes it joins stay
+   in view. */
+.sdc-edge-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 3px 3px 4px;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+  animation: sdc-fade-in 140ms var(--ease) both;
+}
+
+/* The arrow-style rail, sized for a floating chip. */
+.sdc-rail {
+  padding: 2px;
+  border-radius: 9px;
+}
+
+.sdc-rail::before {
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--rail-count, 2));
+  border-radius: 7px;
+}
+
+/* Undo the chip's square icon-key sizing for the rail's labeled options. */
+.sdc-chip .sdc-rail .rail-switch-option {
+  width: auto;
+  height: auto;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.sdc-chip .sdc-rail .rail-switch-option:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text-strong);
+}
+
+.sdc-chip .sdc-rail .rail-switch-option.is-active,
+.sdc-chip .sdc-rail .rail-switch-option.is-active:hover:not(:disabled) {
+  color: #fff;
+}
+
+.sdc-rail .rail-switch-option:focus-visible {
+  outline-offset: -2px;
+}
+
+/* --- Toolbar Style key and tray -------------------------------------------- */
+
+.md-diagram-panel .md-code-action.is-on {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--teal-strong);
+  box-shadow: var(--tactile-pressed, inset 0 2px 4px #00000029);
+}
+
+.sdc-style-tray {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-sunken) 55%, var(--surface));
+  box-shadow: inset 0 2px 5px -3px #00000026;
+  font-family: var(--font-sans);
+  animation: sdc-tray-in 200ms var(--ease) both;
+}
+
+.sdc-style-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sdc-style-label {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sdc-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 8px;
+}
+
+.sdc-theme {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 6px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--tactile-raised, 0 1px 2px #0000001a);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    transform var(--speed) var(--ease);
+}
+
+.sdc-theme:hover {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--border-strong));
+  color: var(--text-strong);
+}
+
+.sdc-theme:active {
+  transform: translateY(1px);
+  box-shadow: var(--tactile-pressed, inset 0 2px 4px #00000029);
+}
+
+.sdc-theme.is-active {
+  border-color: var(--teal);
+  box-shadow: inset 0 0 0 1px var(--teal);
+  color: var(--text-strong);
+}
+
+.sdc-theme:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.sdc-theme > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sdc-theme > span svg {
+  flex: none;
+  color: var(--teal);
+}
+
+.sdc-theme-sample {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sdc-style-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 18px;
+}
+
+.sdc-reset-layout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sdc-reset-layout:disabled {
+  opacity: 0.5;
+  box-shadow: none;
+  cursor: default;
+}
+
+@media (max-width: 560px) {
+  .sdc-reset-layout {
+    margin-left: 0;
+  }
+}
+
+@keyframes sdc-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sdc-tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sdc-connector,
+  .sdc-card-chip,
+  .sdc-edge-chip,
+  .sdc-style-tray {
+    animation: none;
+  }
+
+  .sdc-edge-hit,
+  .sdc-theme,
+  .sdc-chip .sdc-swatch,
+  .sdc-connector-dot,
+  .sdc-handle-dot {
+    transition: none;
+  }
+}

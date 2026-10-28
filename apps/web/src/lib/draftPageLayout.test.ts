@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { draftHtmlForAccount, removeDraftPageLabels } from "./draftPageLayout";
+import { draftHtmlForAccount, reflowSavedVersions, removeDraftPageLabels } from "./draftPageLayout";
 
 test("removes layout labels and heading prefixes while preserving content, links, and quoted references", () => {
   const html = '<span class="document-page-label">Page 9</span><h2><strong>Page 4 — </strong><a href="https://example.com">Launch vehicle</a></h2><p>See <span>Page 6</span> in the report.</p><blockquote><p>Page 8</p></blockquote><p>Page 10</p>';
@@ -39,4 +39,19 @@ test("re-joining a split paragraph drops empty formatting shells", () => {
     '<section class="document-page"><p>The <span style="font-weight: 500">original</span><span style="font-weight: 500"></span></p></section>' +
     '<section class="document-page"><p data-split-continuation="true"><span style="font-weight: 500"></span> continues.</p></section>';
   expect(draftHtmlForAccount(html)).toBe('<p>The <span style="font-weight: 500">original</span> continues.</p>');
+});
+
+test("a version saved while its page reflow was measuring takes the reflowed layout too", () => {
+  // Clicking Save version blurs the editor, which schedules a reflow of the
+  // HTML that the new version is about to hold.
+  const before = '<section class="document-page"><p>Plan.</p></section>';
+  const reflowed = '<section class="document-page" data-page-number="1"><p>Plan.</p></section>';
+  const versions = [
+    { id: "version-1", content: "<p>Older draft.</p>" },
+    { id: "version-2", content: before },
+  ];
+  expect(reflowSavedVersions(versions, before, reflowed)).toEqual([
+    { id: "version-1", content: "<p>Older draft.</p>" },
+    { id: "version-2", content: reflowed },
+  ]);
 });

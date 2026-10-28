@@ -41,16 +41,26 @@
   --tactile-engraved: inset 0 1px 2px #00000017;
   --tactile-slab: inset 0 1px 0 #ffffffb3, 0 1px 2px #0000000f;
   --tactile-float: inset 0 1px 0 #ffffffb3, 0 1px 2px #0000001a, 0 22px 44px -22px #00000059;
+  --tactile-switch-well: inset 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, #0000), inset 0 2px 4px #00000038;
+  --tactile-switch-well-on: inset 0 0 0 1px #ffffff26, inset 0 2px 4px #00000040;
 }
 
+/* Dark mode: a black inner shadow barely shows on a near-black surface, so
+   every well cuts deeper here. The floor sits a shade below the soft surface,
+   the rim darkens, a heavier shadow falls from the top edge, and a faint lit
+   lip along the bottom edge catches the light, as a carved recess does. */
 .theme-dark {
-  --tactile-track-shadow: inset 0 2px 5px #00000066;
+  --tactile-track: color-mix(in srgb, var(--surface-soft) 72%, var(--surface-sunken));
+  --tactile-track-border: color-mix(in srgb, var(--border-strong) 72%, #000);
+  --tactile-track-shadow: inset 0 3px 9px #000000c2, inset 0 1px 2px #000000a6, inset 0 -1px 0 #ffffff12, 0 1px 0 #ffffff0f;
   --tactile-raised: 0 1px 2px #0000004d, inset 0 1px 0 #ffffff14;
   --tactile-raised-hover: 0 2px 6px #00000059, inset 0 1px 0 #ffffff1f;
-  --tactile-pressed: inset 0 2px 4px #00000059;
-  --tactile-pressed-row: inset 0 1px 3px #00000066;
-  --tactile-field-shadow: inset 0 1px 3px #00000066;
-  --tactile-engraved: inset 0 1px 2px #00000059;
+  --tactile-pressed: inset 0 2px 6px #000000b3;
+  --tactile-pressed-row: inset 0 2px 5px #000000a6;
+  --tactile-field-shadow: inset 0 2px 6px #000000b3, inset 0 1px 1px #00000080, inset 0 -1px 0 #ffffff0f;
+  --tactile-engraved: inset 0 2px 4px #000000a6, inset 0 -1px 0 #ffffff0d;
+  --tactile-switch-well: inset 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, #0000), inset 0 2px 5px #000000a6;
+  --tactile-switch-well-on: inset 0 0 0 1px #ffffff26, inset 0 2px 5px #00000080;
   --tactile-slab: inset 0 1px 0 #ffffff0f, 0 1px 2px #00000066;
   --tactile-float: inset 0 1px 0 #ffffff12, 0 1px 2px #00000080, 0 22px 44px -22px #000000b3;
 }
@@ -82,7 +92,6 @@
 /* Everyday buttons are raised keys that press in. */
 .secondary-button:not(:disabled),
 .outline-button:not(:disabled),
-.select-button:not(:disabled),
 .icon-button:not(:disabled),
 .danger-button:not(:disabled),
 .chip-button:not(:disabled) {
@@ -91,7 +100,6 @@
 
 .secondary-button:not(:disabled):hover,
 .outline-button:not(:disabled):hover,
-.select-button:not(:disabled):hover,
 .icon-button:not(:disabled):hover,
 .danger-button:not(:disabled):hover,
 .chip-button:not(:disabled):hover {
@@ -100,7 +108,6 @@
 
 .secondary-button:not(:disabled):active,
 .outline-button:not(:disabled):active,
-.select-button:not(:disabled):active,
 .icon-button:not(:disabled):active,
 .danger-button:not(:disabled):active,
 .chip-button:not(:disabled):active {
@@ -135,12 +142,12 @@
 
 .toggle {
   background: color-mix(in srgb, var(--border-strong) 82%, var(--surface-sunken));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, #0000), inset 0 2px 4px #00000038;
+  box-shadow: var(--tactile-switch-well);
 }
 
 .toggle.is-on {
   background: var(--tactile-lit);
-  box-shadow: inset 0 0 0 1px #ffffff26, inset 0 2px 4px #00000040;
+  box-shadow: var(--tactile-switch-well-on);
 }
 
 .toggle > span {
@@ -387,8 +394,10 @@
 /* --- Wells: a recessed surround for a row of related actions ----------------------------
    Drafts top bar: the model picker, Save version, Compare versions, and Export
    sit in one sunken well beside the Document/Deck rail. Export is the lit key,
-   the others are raised keys. Under 640px the row becomes grid cells
-   (display: contents in workspace-refresh.css), so the well applies above that. */
+   the others are raised keys. Under 640px the group becomes cells of the top
+   bar grid (display: contents in workspace-refresh.css) and cannot draw a box,
+   so the top bar draws the same well behind those cells itself: a ::before grid
+   item over the model/version and action rows that workspace-refresh.css lays out. */
 
 @media (min-width: 641px) {
   .document-assistant-page .document-top-actions {
@@ -408,31 +417,52 @@
     min-height: 36px;
     border-radius: 10px;
   }
+}
 
-  .document-assistant-page .document-top-actions .document-model-menu .select-button,
-  .document-assistant-page .document-top-actions .document-save-version-button:not(:disabled),
-  .document-assistant-page .document-top-actions .document-compare-button:not(:disabled) {
-    border-color: var(--border);
-    background: var(--surface);
-    box-shadow: var(--tactile-raised);
+@media (max-width: 640px) {
+  .document-assistant-page .document-editor-topbar::before {
+    content: "";
+    grid-column: 1 / -1;
+    grid-row: 2 / 4;
+    align-self: stretch;
+    justify-self: stretch;
+    margin: -4px;
+    border: 1px solid var(--tactile-track-border);
+    border-radius: 14px;
+    background: var(--tactile-track);
+    box-shadow: var(--tactile-track-shadow);
+    pointer-events: none;
   }
+}
 
-  .document-assistant-page .document-top-actions .document-save-version-button:disabled,
-  .document-assistant-page .document-top-actions .document-compare-button:disabled {
-    border-color: transparent;
-    background: transparent;
-    box-shadow: none;
-  }
+/* The keys inside the well, at every width. */
+.document-assistant-page .document-top-actions .document-model-menu .select-button,
+.document-assistant-page .document-top-actions .document-save-version-button:not(:disabled),
+.document-assistant-page .document-top-actions .document-compare-button:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+}
 
+.document-assistant-page .document-top-actions .document-save-version-button:disabled,
+.document-assistant-page .document-top-actions .document-compare-button:disabled {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
 
-  .document-assistant-page .document-top-actions :is(.document-save-version-button, .document-compare-button, .document-export-button):active:not(:disabled) {
-    box-shadow: var(--tactile-pressed);
-    transform: translateY(1px);
-  }
+.document-assistant-page .document-top-actions :is(.document-save-version-button, .document-compare-button, .document-export-button):active:not(:disabled) {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
 
-  .document-assistant-page .document-top-actions .document-export-button:active {
-    box-shadow: var(--tactile-lit-pressed);
-  }
+.document-assistant-page .document-top-actions .document-export-button:active {
+  box-shadow: var(--tactile-lit-pressed);
+}
+
+.document-assistant-page .document-top-actions .document-model-menu .select-button:active:not(:disabled) {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
 }
 
 /* --- Marks: icon tiles as a lit key sunk into a well ---------------------------------------
@@ -542,7 +572,6 @@
 .document-assistant-page .draft-settings-action,
 .draft-history-actions button,
 .document-assistant-page .draft-history-actions button,
-.transfer-draft-button,
 .deck-design-starters,
 .document-assistant-page .deck-design-starters,
 .deck-brand-upload,
@@ -565,7 +594,6 @@
   .draft-template-upload-button,
   .draft-settings-action,
   .draft-history-actions button,
-  .transfer-draft-button,
   .deck-design-starters,
   .deck-brand-upload,
   .deck-theme-actions button,
@@ -584,7 +612,6 @@
   .draft-template-upload-button,
   .draft-settings-action,
   .draft-history-actions button,
-  .transfer-draft-button,
   .deck-design-starters,
   .deck-brand-upload,
   .deck-theme-actions button,
@@ -727,6 +754,15 @@
   color: inherit;
 }
 
+/* The original Drafts Document/Deck rail (styles.css) spelled out the light-mode track by hand,
+   so it never deepened in dark mode; it now reads the track tokens like every other rail. */
+.document-assistant-page .deck-mode-switch,
+.section-switch {
+  border-color: var(--tactile-track-border);
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+}
+
 /* --- Tabs: section tabs become a rail with the current section lit -------------------------- */
 
 .management-console-tabs,
@@ -790,12 +826,12 @@
 
 .draft-switch {
   background: color-mix(in srgb, var(--border-strong) 82%, var(--surface-sunken));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, #0000), inset 0 2px 4px #00000038;
+  box-shadow: var(--tactile-switch-well);
 }
 
 .draft-switch:checked {
   background: var(--tactile-lit);
-  box-shadow: inset 0 0 0 1px #ffffff26, inset 0 2px 4px #00000040;
+  box-shadow: var(--tactile-switch-well-on);
 }
 
 .draft-switch::before {
@@ -985,6 +1021,66 @@ span.mini-avatar.avatar-initials,
   outline: none;
 }
 
+/* --- Dropdowns: a choice you open is carved into the surface ---------------------------------------
+   A dropdown holds a value, so it is cut into the page like the rails and the composer instead of
+   sitting up like a key. The model pickers are .select-button; everything else is a native select
+   (SelectControl keeps the real element). Where a wrapper draws the field (compact filters, the
+   sign-in workspace picker) the wrapper is carved and its select stays clear. A picker that already
+   sits in a well (the Drafts top bar, above) keeps its raised key: that rule is more specific. Native
+   selects carry many feature rules, so their selector is deliberately specific enough to outrank
+   them; only fill, rim, and shadow change, so each feature keeps its own size, radius, and chevron. */
+
+.select-button:not(:disabled),
+.model-select .select-button.is-unavailable {
+  border-color: var(--tactile-track-border);
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+}
+
+.select-button:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--teal) 50%, var(--tactile-track-border));
+}
+
+/* Open, the rim lights teal. Keyboard focus keeps the key focus outline from the rule at the end. */
+.select-button[aria-expanded="true"]:not(:disabled) {
+  border-color: var(--teal);
+  box-shadow: var(--tactile-track-shadow), var(--tactile-field-focus);
+}
+
+:is(
+  select:not([multiple]):not(:is(.compact-select-field, .auth-select-wrap) select),
+  .compact-select-field,
+  .auth-select-wrap
+):not(:disabled) {
+  border-color: var(--tactile-track-border);
+  background-color: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+}
+
+:is(
+  select:not([multiple]):not(:is(.compact-select-field, .auth-select-wrap) select),
+  .compact-select-field,
+  .auth-select-wrap
+):not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--teal) 50%, var(--tactile-track-border));
+}
+
+:is(
+  select:not([multiple]):not(:is(.compact-select-field, .auth-select-wrap) select),
+  .compact-select-field,
+  .auth-select-wrap
+):not(:disabled):focus-within {
+  border-color: var(--teal);
+  box-shadow: var(--tactile-track-shadow), var(--tactile-field-focus);
+  outline: none;
+}
+
+/* Role pickers turn their label teal on hover; the light-mode ink is too dark for the dark floor. */
+.theme-dark .user-management-table .role-select:not(:disabled):hover,
+.theme-dark .access-request-role select:not(:disabled):hover {
+  color: var(--accent-ink);
+}
+
 /* --- Surfaces: crisp slabs, one consistent elevation ----------------------------------------------- */
 
 .panel,
@@ -1046,6 +1142,11 @@ span.mini-avatar.avatar-initials,
 .sidebar-dark .minor-row.is-selected {
   background: #ffffff12;
   box-shadow: inset 0 2px 4px #00000059, inset 0 0 0 1px #ffffff1f;
+}
+
+.theme-dark .sidebar-dark .nav-item.is-active,
+.theme-dark .sidebar-dark .minor-row.is-selected {
+  box-shadow: inset 0 2px 6px #000000a6, inset 0 -1px 0 #ffffff14, inset 0 0 0 1px #ffffff1f;
 }
 
 /* --- Sliders: recessed track, lit fill ---------------------------------------------------------------- */

@@ -492,17 +492,8 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
   }
   .document-assistant-page .draft-action-label-full { display: none; }
   .document-assistant-page .draft-action-label-mobile { display: inline; }
-  .document-assistant-page .document-server-save-state {
-    grid-column: 1 / -1;
-    grid-row: 4;
-    flex-wrap: wrap;
-    min-width: 0;
-    max-width: 100%;
-    white-space: normal;
-  }
   .document-assistant-page .document-export-panel { right: 14px; }
   .document-assistant-page .document-assistant-rail.is-drawer button,
-  .document-assistant-page .document-server-save-state button,
   .document-assistant-page .document-mobile-toolbar-toggle {
     min-height: 44px;
     min-width: 44px;
@@ -696,7 +687,21 @@ a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decora
 .document-assistant-page .draft-tool-drawer-header button { background: transparent; }
 .document-assistant-page .draft-tool-drawer-header button:hover { background: var(--surface-soft); color: var(--text-strong); }
 
-.document-assistant-page .draft-template-panel.is-document { grid-template-rows: auto auto minmax(56px, 1fr) auto; gap: 10px; }
+/* Template drawers scroll as one sheet: the list grows with its cards
+ * instead of squeezing into a scroll box of its own, the category pills stay
+ * pinned at the top, and the footer's actions stay pinned at the bottom, so
+ * the start button shows at every drawer height. */
+.document-assistant-page .draft-template-panel { display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain; }
+.document-assistant-page .draft-template-panel > * { flex: 0 0 auto; }
+.document-assistant-page .draft-template-panel .draft-template-list { min-height: auto; overflow: visible; scrollbar-gutter: auto; }
+.document-assistant-page .draft-template-panel .draft-template-tabs { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.document-assistant-page .draft-template-panel .draft-template-footer { position: sticky; bottom: 0; z-index: 1; margin-top: auto; background: var(--surface); padding-top: 8px; box-shadow: 0 -14px 12px -12px var(--surface); }
+/* On short windows the helper lines give their room to the list: the labels
+ * and controls still say what each does. */
+@media (max-height: 720px) {
+  .document-assistant-page .draft-template-panel .draft-switch-row { padding: 8px 12px; }
+  .document-assistant-page .draft-template-panel :is(.draft-switch-row small, .deck-brand-text small) { display: none; }
+}
 .draft-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 12px; background: color-mix(in srgb, var(--teal-soft) 38%, var(--surface-soft, var(--surface))); padding: 10px 12px; cursor: pointer; }
 .draft-switch-row > span { display: grid; gap: 2px; min-width: 0; }
 .draft-switch-row strong { color: var(--text-strong); font-size: 13px; font-weight: 650; }
@@ -724,7 +729,7 @@ a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decora
 .document-assistant-page .draft-template-card small { -webkit-line-clamp: 1; font-size: 11.5px; margin-top: 1px; }
 
 .draft-template-footer { display: flex; gap: 8px; }
-.document-assistant-page .draft-template-footer .draft-template-upload-button { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; min-height: 42px; border: 1px solid var(--draft-edge); border-radius: 12px; background: var(--surface); color: var(--teal-strong); padding: 0; }
+.document-assistant-page .draft-template-footer .draft-template-upload-button { display: grid; grid-template-columns: 1fr; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; min-height: 42px; border: 1px solid var(--draft-edge); border-radius: 12px; background: var(--surface); color: var(--teal-strong); padding: 0; }
 .document-assistant-page .draft-template-footer .draft-template-upload-button:hover { border-color: var(--teal-2, var(--teal)); background: var(--surface-soft); }
 .document-assistant-page .draft-template-footer .draft-template-start-button { flex: 1 1 auto; justify-content: center; min-width: 0; min-height: 42px; border: 0; border-radius: 12px; background: linear-gradient(145deg, var(--teal-2, var(--teal)), var(--teal-strong)); color: #fff; font-size: 13px; font-weight: 650; box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), 0 8px 18px -12px color-mix(in srgb, var(--teal) 90%, transparent); }
 .document-assistant-page .draft-template-footer .draft-template-start-button:hover:not(:disabled) { filter: brightness(1.06); }
@@ -801,18 +806,12 @@ a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decora
 .document-assistant-page .deck-layout-preview { width: 102px; height: 57px; border-radius: 7px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 6%); }
 .document-assistant-page .deck-layout-preview .deck-thumb-scale .deck-slide-canvas { transform: scale(0.10625); }
 .document-assistant-page .deck-theme-gallery > button > span { border-left: 0; border-radius: 0; padding: 0; }
-.document-assistant-page .deck-theme-gallery > button > .deck-theme-preview { position: relative; display: grid; align-content: center; gap: 5px; width: 102px; height: 57px; border-radius: 7px; padding: 0 12px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 8%); overflow: hidden; }
-.document-assistant-page .deck-theme-preview > span { display: block; height: 4px; border-radius: 2px; padding: 0; }
-.deck-theme-preview .deck-theme-preview-title { width: 60%; height: 6px; }
-.deck-theme-preview .deck-theme-preview-rule { width: 22%; height: 3px; }
-.deck-theme-preview .deck-theme-preview-line { width: 78%; height: 3px; opacity: .55; }
-.deck-theme-preview .deck-theme-preview-line.is-short { width: 50%; }
-.document-assistant-page .deck-theme-preview .deck-theme-preview-check { position: absolute; top: 5px; right: 5px; width: 14px; height: 14px; border-radius: 50%; background: #fff; color: var(--teal); }
+/* Theme cards show a real title slide in that theme's design. */
+.document-assistant-page .deck-theme-gallery > button > .deck-theme-thumb { border-radius: 7px; }
+.deck-theme-thumb .deck-theme-thumb-check { position: absolute; top: 5px; right: 5px; z-index: 1; width: 14px; height: 14px; border-radius: 50%; background: #fff; color: var(--teal); }
 
 /* Deck starters drawer mirrors the document templates drawer, with the
  * brand template as one compact card instead of three stacked boxes. */
-.document-assistant-page .draft-template-panel.is-deck { display: flex; flex-direction: column; gap: 10px; }
-.document-assistant-page .draft-template-panel.is-deck .draft-template-list { flex: 1 1 auto; min-height: 56px; }
 .document-assistant-page .draft-template-panel.is-deck .draft-template-card { grid-template-columns: 32px minmax(0, 1fr) 16px; }
 .document-assistant-page .draft-template-panel.is-deck .draft-template-start-button { flex: 1 1 auto; }
 .deck-brand-card { display: grid; gap: 10px; border: 1px solid var(--draft-edge, var(--border)); border-radius: 12px; background: var(--surface); padding: 10px; }

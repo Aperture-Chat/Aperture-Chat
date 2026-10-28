@@ -13,6 +13,7 @@
  * widths.
  */
 
+import { diagramFontCss, withSvgFontCss } from "./diagramFonts";
 import { DIAGRAM_FONT_FAMILY, diagramPalette, type DiagramPalette } from "./diagramTheme";
 import { isMindmapSource, renderMindmapSvg } from "./diagramMindmap";
 import { measureDiagramText } from "./diagramText";
@@ -722,7 +723,9 @@ async function rasterizeSvgToCanvas(svgMarkup: string, background: string): Prom
           .replace(/\s(?:width|height)="[^"]*"/g, "")
           .replace(/\sstyle="[^"]*"/, "")} width="${width}" height="${height}"${svgMarkup.slice(openTagEnd)}`
       : svgMarkup;
-  const url = URL.createObjectURL(new Blob([sized], { type: "image/svg+xml;charset=utf-8" }));
+  // An <img> cannot see the page's web fonts; carry the diagram face inside.
+  const drawn = withSvgFontCss(sized, await diagramFontCss());
+  const url = URL.createObjectURL(new Blob([drawn], { type: "image/svg+xml;charset=utf-8" }));
   try {
     const image = new Image();
     await new Promise<void>((resolve, reject) => {

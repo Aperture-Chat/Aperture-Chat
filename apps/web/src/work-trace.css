@@ -1,0 +1,438 @@
+/* Chat work trace (components/WorkTrace.tsx).
+ *
+ * The trace is drawn on the page itself, not in a card: no border, no tinted
+ * slab. While a reply runs it is one quiet line (who is working, for how
+ * long, the step in progress, a stop) with a faint "Next" hint under it.
+ * Finished, it folds to how long the run took and what its checks found.
+ * Expanded, it is a timeline: a hairline spine through small glyphs, each
+ * kind of step with its own icon. Icons share one quiet accent-tinted color,
+ * the same as the reply's copy and feedback buttons, with no backdrop, so the
+ * trace reads as part of the page. Steps arrive with a short rise,
+ * the step in progress carries a slow orbit and a shimmer, and reduced
+ * motion turns all of it off. The Drafts trace keeps .pending-trace. */
+
+.work-trace {
+  /* One icon color for every step, matching .message-icon-action, so it
+     follows the workspace accent. Only a flagged step's title keeps a
+     warning tint. */
+  --trace-icon: color-mix(in srgb, var(--muted) 78%, var(--teal));
+  --trace-flag: var(--orange);
+  --trace-spine: color-mix(in srgb, var(--border-strong) 85%, transparent);
+
+  display: grid;
+  gap: 4px;
+  max-width: 680px;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.theme-dark .work-trace {
+  --trace-flag: color-mix(in srgb, var(--orange) 70%, white);
+}
+
+/* --- The one-line bar ------------------------------------------------------ */
+
+.work-trace-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.work-trace-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 0 -6px;
+  padding: 4px 8px 4px 6px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 180ms var(--ease),
+    color 180ms var(--ease);
+}
+
+.work-trace-toggle:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
+}
+
+.work-trace-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, var(--teal-2));
+  outline-offset: -2px;
+}
+
+.work-trace-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-trace.is-complete .work-trace-title {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.work-trace-toggle:hover .work-trace-title {
+  color: var(--text);
+}
+
+.work-trace-time,
+.work-trace-summary {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.work-trace-time::before,
+.work-trace-summary::before,
+.work-trace-now::before {
+  content: "·";
+  margin-right: 7px;
+  color: var(--faint);
+  -webkit-text-fill-color: var(--faint);
+}
+
+.work-trace-now {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: work-trace-rise 360ms var(--ease) both;
+}
+
+.work-trace-caret {
+  flex: none;
+  color: var(--faint);
+  transition: transform 220ms var(--ease);
+}
+
+.work-trace.is-expanded .work-trace-caret {
+  transform: rotate(180deg);
+}
+
+/* Same quiet text control the trace has always had: it reads as part of the
+   timer line, not as a button competing with the reply. */
+.work-trace-stop {
+  flex-shrink: 0;
+  margin: 0 0 0 auto;
+  border: 0;
+  background: none;
+  padding: 4px 2px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.work-trace-stop:hover,
+.work-trace-stop:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.work-trace-stop:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, var(--teal-2));
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.work-trace-next {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  margin: 0 0 0 28px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.work-trace-next-label {
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* --- Glyphs ---------------------------------------------------------------- */
+
+.work-trace-glyph {
+  --trace-tint: var(--trace-icon);
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--trace-tint);
+}
+
+.work-trace-glyph[data-kind="next"] {
+  --trace-tint: var(--faint);
+}
+
+/* The step in progress: a thin arc orbits its glyph. */
+.work-trace-glyph.is-active::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 1.5px solid transparent;
+  border-top-color: var(--trace-tint);
+  border-right-color: color-mix(in srgb, var(--trace-tint) 35%, transparent);
+  border-radius: 50%;
+  animation: work-trace-orbit 1.2s linear infinite;
+}
+
+.work-trace-glyph.is-active[data-kind="think"] svg {
+  animation: work-trace-breathe 1.8s ease-in-out infinite;
+}
+
+/* The words of the step in progress carry a slow shimmer. */
+.work-trace.is-running .work-trace-now,
+.work-trace-step.is-active .work-trace-step-text strong {
+  background: linear-gradient(
+    100deg,
+    var(--text) 0%,
+    var(--text) 42%,
+    color-mix(in srgb, var(--text) 38%, transparent) 50%,
+    var(--text) 58%,
+    var(--text) 100%
+  );
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation:
+    work-trace-rise 360ms var(--ease) both,
+    work-trace-shimmer 2.6s linear infinite;
+}
+
+/* --- Timeline -------------------------------------------------------------- */
+
+.work-trace-steps {
+  display: grid;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-trace-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 0 0 10px;
+  animation: work-trace-rise 360ms var(--ease) both;
+}
+
+/* Hairline spine from one glyph to the next. */
+.work-trace-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 23px;
+  bottom: 3px;
+  left: 9.5px;
+  width: 1px;
+  background: var(--trace-spine);
+}
+
+.work-trace-step-text {
+  min-width: 0;
+}
+
+.work-trace-step-text strong,
+.work-trace-step-text small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.work-trace-step-text strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 20px;
+}
+
+.work-trace-step-text small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.work-trace-step[data-kind="flag"] .work-trace-step-text strong {
+  color: color-mix(in srgb, var(--trace-flag) 70%, var(--text));
+}
+
+.work-trace-step.is-next {
+  padding-bottom: 2px;
+  opacity: 0.72;
+}
+
+.work-trace-step.is-next .work-trace-glyph {
+  border: 1px dashed color-mix(in srgb, var(--faint) 70%, transparent);
+}
+
+.work-trace-step.is-next .work-trace-step-text strong {
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* --- Thinking the model exposed --------------------------------------------- */
+
+.work-trace-thinking {
+  margin: 2px 0 0 30px;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--trace-icon) 35%, transparent);
+}
+
+.work-trace-thinking summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+
+.work-trace-thinking summary::-webkit-details-marker {
+  display: none;
+}
+
+.work-trace-thinking summary:hover {
+  color: var(--text);
+}
+
+.work-trace-thinking summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, var(--teal-2));
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.work-trace-thinking summary svg:first-child {
+  color: var(--trace-icon);
+}
+
+.work-trace-thinking-caret {
+  color: var(--faint);
+  transition: transform 200ms var(--ease);
+}
+
+.work-trace-thinking[open] .work-trace-thinking-caret {
+  transform: rotate(180deg);
+}
+
+.work-trace-thinking-body {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  margin-top: 6px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.work-trace-thinking-entry .markdown {
+  color: inherit;
+}
+
+/* --- Narrow screens ---------------------------------------------------------- */
+
+@media (max-width: 560px) {
+  /* Two rows: glyph, title, timer, and caret first (the stop stays beside
+     them), then the step in progress on a line of its own. */
+  .work-trace-toggle {
+    display: grid;
+    grid-template-columns: 20px minmax(0, max-content) auto auto;
+    column-gap: 8px;
+    row-gap: 1px;
+    align-items: center;
+  }
+
+  .work-trace-now {
+    grid-row: 2;
+    grid-column: 2 / -1;
+  }
+
+  .work-trace-now::before {
+    content: none;
+  }
+}
+
+/* --- Motion ------------------------------------------------------------------ */
+
+@keyframes work-trace-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes work-trace-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes work-trace-breathe {
+  50% {
+    transform: scale(1.14);
+    opacity: 0.75;
+  }
+}
+
+@keyframes work-trace-shimmer {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -130% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-trace-now,
+  .work-trace-step,
+  .work-trace-glyph.is-active::after,
+  .work-trace-glyph.is-active[data-kind="think"] svg {
+    animation: none;
+  }
+
+  .work-trace.is-running .work-trace-now,
+  .work-trace-step.is-active .work-trace-step-text strong {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+
+  .work-trace-toggle,
+  .work-trace-caret,
+  .work-trace-thinking-caret {
+    transition: none;
+  }
+}

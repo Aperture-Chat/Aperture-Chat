@@ -3772,11 +3772,8 @@ a.nav-item {
   overflow-y: auto;
 }
 
-/* The templates panel manages its own height: fixed rows for the toggle,
- * upload, categories, and create button, with only the card list flexing
- * and scrolling. Everything actionable stays visible at any drawer height;
- * overflow-y is a last resort for windows shorter than the fixed rows and
- * only then shows a panel scrollbar instead of clipping the create button. */
+/* The templates panel is the drawer's one scroll area; its footer actions
+ * stay pinned at the bottom of it (workspace-refresh.css). */
 .draft-tool-drawer > .draft-template-panel {
   overflow-y: auto;
 }
@@ -4833,6 +4830,12 @@ a.nav-item {
   color: var(--teal);
 }
 
+/* The format waiting on the save step. */
+.document-export-choice.is-pending {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-ring);
+}
+
 .document-export-choice:disabled {
   border-color: var(--border);
   background: var(--surface-soft);
@@ -4892,13 +4895,25 @@ a.nav-item {
   padding: 10px 11px;
 }
 
+/* The save step leads the export panel whenever the draft has unsaved edits. */
 .document-export-save-notice {
   display: grid;
-  gap: 9px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--amber, #b45309) 32%, var(--border));
   border-radius: 12px;
   background: color-mix(in srgb, #f59e0b 9%, var(--surface));
-  padding: 10px 11px;
+  padding: 11px 12px;
+}
+
+.document-export-save-notice > svg {
+  margin-top: 1px;
+  color: #b45309;
+}
+
+.theme-dark .document-export-save-notice > svg {
+  color: #fbbf24;
 }
 
 .document-export-save-notice span {
@@ -4920,6 +4935,7 @@ a.nav-item {
 }
 
 .document-export-save-notice button {
+  grid-column: 1 / -1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5425,18 +5441,6 @@ a.nav-item {
 .document-toolbar .document-edits-toggle:hover {
   border-color: var(--border);
   background: var(--surface-soft);
-}
-
-.document-toolbar .document-edits-toggle.is-on {
-  color: var(--teal-strong);
-}
-
-.document-toolbar .document-edits-toggle.is-editing {
-  color: #92400e;
-}
-
-.document-toolbar .document-edits-toggle.is-saved {
-  color: var(--green);
 }
 
 .document-change-summary {
@@ -7592,96 +7596,6 @@ a.nav-item {
   line-height: 1.45;
 }
 
-.thinking-trace {
-  margin: 2px 0 0 min(28px, 4vw);
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 78%, var(--teal-soft));
-}
-
-.thinking-trace summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 14px;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 7px 10px;
-  color: var(--text);
-  cursor: pointer;
-  list-style: none;
-}
-
-.thinking-trace summary::-webkit-details-marker {
-  display: none;
-}
-
-.thinking-trace summary:hover {
-  background: color-mix(in srgb, var(--teal-soft) 48%, transparent);
-}
-
-.thinking-trace-title {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-}
-
-.thinking-trace-title svg {
-  flex: 0 0 auto;
-  color: var(--teal);
-}
-
-.thinking-trace-title strong {
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 780;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thinking-trace summary > small {
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.thinking-trace-caret {
-  color: var(--faint);
-  transition: transform 0.18s ease;
-}
-
-.thinking-trace[open] .thinking-trace-caret {
-  transform: rotate(180deg);
-}
-
-.thinking-trace-body {
-  display: grid;
-  gap: 12px;
-  max-height: 360px;
-  overflow: auto;
-  border-top: 1px solid color-mix(in srgb, var(--teal) 14%, var(--border));
-  padding: 10px 12px 12px;
-  scrollbar-color: color-mix(in srgb, var(--teal) 36%, var(--border)) transparent;
-  scrollbar-width: thin;
-}
-
-.thinking-trace-content {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.thinking-trace-content + .thinking-trace-content {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.thinking-trace-content .markdown {
-  gap: 8px;
-}
-
 .pending-trace ol {
   display: grid;
   gap: 7px;
@@ -7761,27 +7675,6 @@ a.nav-item {
   font-size: inherit;
   font-weight: inherit;
   color: inherit;
-}
-
-/* Matches the elapsed counter text exactly so the control reads as part of it. */
-.pending-trace-stop {
-  flex-shrink: 0;
-  margin: 0;
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--muted);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 720;
-  line-height: inherit;
-  cursor: pointer;
-}
-
-.pending-trace-stop:hover,
-.pending-trace-stop:focus-visible {
-  color: var(--text);
-  text-decoration: underline;
 }
 
 .pending-trace-caret-button {
@@ -8350,12 +8243,15 @@ a.nav-item {
   outline: none;
 }
 
+/* A code block is carved into the reply: a recessed well (the tactile track
+   rim and shadow) with its toolbar keys standing raised on the floor. */
 .md-code-panel {
   margin: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tactile-track-border);
   border-radius: var(--radius-sm);
   background: var(--surface-sunken);
+  box-shadow: var(--tactile-track-shadow);
   color: var(--text-strong);
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -8369,7 +8265,7 @@ a.nav-item {
   gap: 10px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 76%, var(--surface-sunken));
+  background: transparent;
   font-family: var(--font-sans);
   font-size: 12px;
 }
@@ -8434,6 +8330,21 @@ a.nav-item {
   box-shadow: 0 0 0 3px var(--teal-ring);
 }
 
+/* In the carved code well the toolbar buttons are raised keys that press in;
+   their focus edge sits inside the key. */
+.md-code-panel > .md-code-toolbar .md-code-action {
+  box-shadow: var(--tactile-raised);
+}
+
+.md-code-panel > .md-code-toolbar .md-code-action:active {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+.md-code-panel > .md-code-toolbar .md-code-action:focus-visible {
+  box-shadow: var(--tactile-raised), inset 0 0 0 1px var(--teal);
+}
+
 .md-code-block {
   margin: 0;
   max-height: min(68vh, 720px);
@@ -8446,6 +8357,13 @@ a.nav-item {
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.55;
+}
+
+/* Where both scrollbars meet, show the well's floor. The global corner color
+   drew a white square in the bottom-right of every long, wide block. */
+.md-code-block::-webkit-scrollbar-corner,
+.md-code-editor-shell::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .md-code-block code {
@@ -8515,61 +8433,9 @@ a.nav-item {
   line-height: 1.55;
 }
 
-.md-code-editor {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-strong);
-  padding: 10px 14px;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.55;
-  outline: 0;
-  resize: vertical;
-  tab-size: 2;
-  white-space: pre;
-}
-
 .md-code-panel.is-editing {
-  border-color: color-mix(in srgb, var(--teal) 48%, var(--border));
-  box-shadow: 0 0 0 3px var(--teal-ring);
-}
-
-.code-preview-modal {
-  width: min(1080px, calc(100vw - 32px));
-  max-height: calc(100dvh - 24px);
-}
-
-.code-preview-body {
-  height: min(72vh, 760px);
-  margin-top: 12px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: #ffffff;
-  padding: 0;
-}
-
-.code-preview-frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #ffffff;
-}
-
-.code-preview-source {
-  height: 100%;
-  margin: 0;
-  overflow: auto;
-  background: var(--surface-sunken);
-  color: var(--text-strong);
-  padding: 14px;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.55;
-  white-space: pre;
+  border-color: var(--teal);
+  box-shadow: var(--tactile-track-shadow), inset 0 0 0 1px var(--teal);
 }
 
 .diagram-editor-modal {
@@ -8963,39 +8829,67 @@ a.nav-item {
   color: var(--teal-strong);
 }
 
+/* Transfer to Drafts: a raised key seated in a thin carved well. The button's
+   own box is the well and ::before draws the key, so the rim stays part of
+   one click target. The focus ring sits inside, on the key. */
 .transfer-draft-button {
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 38px;
   margin-left: auto;
-  border: 1px solid color-mix(in srgb, var(--teal) 38%, var(--border));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--teal-soft) 50%, var(--surface));
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 13px;
+  background: var(--tactile-track);
   color: var(--teal-strong);
-  padding: 6px 9px;
+  padding: 6px 13px;
   font-size: 12px;
   font-weight: 750;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--tactile-track-shadow);
 }
 
-.transfer-draft-button:hover {
+.transfer-draft-button::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+  transition:
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    transform var(--speed) var(--ease);
+}
+
+.transfer-draft-button:hover::before {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--border-strong));
+  box-shadow: var(--tactile-raised-hover);
+}
+
+.transfer-draft-button:focus-visible {
+  outline: none;
+}
+
+.transfer-draft-button:focus-visible::before {
   border-color: var(--teal);
-  background: color-mix(in srgb, var(--teal-soft) 70%, var(--surface));
-  transform: translateY(-1px);
+  box-shadow: var(--tactile-raised), inset 0 0 0 1px var(--teal);
+}
+
+.transfer-draft-button:active::before {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+.transfer-draft-button:active > * {
+  transform: translateY(1px);
 }
 
 .theme-dark .transfer-draft-button {
-  border-color: var(--teal);
-  background: color-mix(in srgb, var(--teal-soft) 34%, transparent);
-  color: #ffffff;
-  box-shadow: none;
-}
-
-.theme-dark .transfer-draft-button:hover {
-  border-color: var(--teal);
-  background: color-mix(in srgb, var(--teal-soft) 52%, transparent);
   color: #ffffff;
 }
 
@@ -17656,6 +17550,15 @@ button.retention-tagged-title:focus-visible strong {
 .sso-mapping-row input,
 .sso-mapping-row select {
   min-width: 0;
+  min-height: var(--control-height);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 var(--control-padding-x);
+  font: inherit;
+  font-size: var(--control-font-size);
+  font-weight: 650;
 }
 
 .sso-redirect-hint code {
@@ -20046,6 +19949,18 @@ button.retention-tagged-title:focus-visible strong {
     max-width: 100%;
     min-height: 0;
     max-height: 58vh;
+  }
+
+  /* In the drawer rail an open tool takes the chat history's place, as it
+     covers the chat on wide screens, so it gets the room between the context
+     strip and the composer instead of a sliver beside the chat. */
+  .document-assistant-rail.is-drawer:has(> .draft-tool-drawer) > .draft-activity-panel {
+    display: none;
+  }
+
+  .document-assistant-rail.is-drawer > .draft-tool-drawer {
+    flex: 1 1 auto;
+    max-height: none;
   }
 
   .document-editor-workspace {
@@ -23826,74 +23741,58 @@ button.retention-tagged-title:focus-visible strong {
 
 /* --- Visual redline (read-only version comparison) ---------------------- */
 
+/* A column whose difference list takes the height that is left, so a long
+   comparison scrolls inside the list while the controls stay in view. */
 .draft-redline-modal {
-  display: grid;
-  gap: 12px;
-  width: min(880px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(940px, 100%);
+  max-height: min(880px, calc(100dvh - 40px));
+  overflow: hidden;
 }
 
 .draft-redline-header {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
 }
 
-.draft-redline-heading {
+.draft-redline-title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-}
-
-.draft-redline-heading strong {
-  color: var(--text-strong);
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
+  gap: 4px 10px;
 }
 
 /* The "Not DOCX tracked changes" qualification stays visible at all times. */
 .draft-redline-qualifier {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   min-height: 22px;
-  border: 0;
-  background: none;
+  border: 1px solid color-mix(in srgb, #b45309 28%, var(--border));
+  border-radius: var(--radius-pill, 999px);
+  background: color-mix(in srgb, #f59e0b 10%, var(--surface));
   color: #92400e;
-  padding: 0;
-  font-size: 11.5px;
+  padding: 0 9px;
+  font-size: 11px;
   font-weight: 760;
+  white-space: nowrap;
 }
 
-.draft-redline-header > button {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--muted);
-}
-
-.draft-redline-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.45;
+.theme-dark .draft-redline-qualifier {
+  background: color-mix(in srgb, #f59e0b 14%, var(--surface));
+  color: #fcd34d;
 }
 
 .draft-redline-selectors {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
   gap: 10px;
 }
 
 .draft-redline-selectors label {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -23916,6 +23815,18 @@ button.retention-tagged-title:focus-visible strong {
   font-size: 13px;
 }
 
+/* Base → comparison: the arrow says which way the changes read. */
+.draft-redline-direction {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
 .draft-redline-fallback {
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--amber, #b45309) 32%, var(--border));
@@ -23932,30 +23843,109 @@ button.retention-tagged-title:focus-visible strong {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
+/* The totals double as the legend: each swatch is the edge color its rows
+   carry below. */
 .draft-redline-stats {
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 660;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.draft-redline-nav {
+.draft-redline-stats li {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0 10px 0 9px;
+  font-size: 12px;
+  font-weight: 660;
+}
+
+.draft-redline-stats li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--redline-edge, var(--border-strong));
+}
+
+.draft-redline-stats strong {
+  color: var(--text-strong);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.draft-redline-stats li.is-zero strong {
+  color: var(--muted);
+}
+
+.draft-redline-stats li.is-zero::before {
+  opacity: 0.4;
+}
+
+.draft-redline-stats .is-changed,
+.redline-row.is-changed {
+  --redline-edge: #d97706;
+}
+
+.draft-redline-stats .is-inserted,
+.redline-row.is-inserted {
+  --redline-edge: var(--green);
+}
+
+.draft-redline-stats .is-removed,
+.redline-row.is-removed {
+  --redline-edge: var(--red);
+}
+
+/* Position readout, then the previous/next pair joined into one control. */
+.draft-redline-nav {
+  display: inline-flex;
+  align-items: center;
+}
+
+.draft-redline-nav-status {
+  order: -1;
+  margin-right: 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
 }
 
 .draft-redline-nav button {
   display: grid;
   place-items: center;
-  width: 30px;
+  width: 34px;
   height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
   background: var(--surface);
   color: var(--text-strong);
+}
+
+.draft-redline-nav button:first-of-type {
+  border-radius: 9px 0 0 9px;
+}
+
+.draft-redline-nav button:last-of-type {
+  margin-left: -1px;
+  border-radius: 0 9px 9px 0;
+}
+
+.draft-redline-nav button:hover:not(:disabled) {
+  background: var(--surface-soft);
+  color: var(--teal-strong);
 }
 
 .draft-redline-nav button:disabled {
@@ -23963,102 +23953,161 @@ button.retention-tagged-title:focus-visible strong {
   background: var(--surface-soft);
 }
 
-.draft-redline-nav-status {
-  min-width: 104px;
-  color: var(--muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Long comparisons scroll inside the dialog instead of stretching it. */
 .draft-redline-body {
   display: grid;
-  gap: 0;
-  max-height: min(46vh, 460px);
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--surface);
+  padding: 6px;
 }
 
 .redline-row {
+  position: relative;
   display: grid;
-  gap: 4px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  padding: 9px 12px;
+  gap: 6px;
+  border-radius: 10px;
+  padding: 9px 14px 9px 20px;
+  scroll-margin: 8px;
 }
 
-.redline-row:last-child {
-  border-bottom: 0;
+/* A change carries a colored edge bar and a light wash, so it stands out in
+   a long column of unchanged text without boxing every row. */
+.redline-row:not(.is-unchanged) {
+  background: color-mix(in srgb, var(--redline-edge) 6%, var(--surface));
+}
+
+.redline-row:not(.is-unchanged)::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 7px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--redline-edge);
 }
 
 .redline-row:focus-visible,
 .redline-row[aria-current="true"] {
-  outline: 2px solid var(--teal);
-  outline-offset: -2px;
-  border-radius: 8px;
-}
-
-.redline-row.is-inserted {
-  background: color-mix(in srgb, var(--green) 7%, var(--surface));
-}
-
-.redline-row.is-removed {
-  background: color-mix(in srgb, var(--red) 6%, var(--surface));
-}
-
-.redline-row.is-changed {
-  background: color-mix(in srgb, #f59e0b 5%, var(--surface));
+  outline: none;
+  box-shadow:
+    inset 0 0 0 2px var(--teal),
+    0 0 0 3px var(--teal-ring);
 }
 
 .redline-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--faint);
   font-size: 10.5px;
   font-weight: 800;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+.redline-row-kind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--redline-edge) 14%, transparent);
+  color: color-mix(in srgb, var(--redline-edge) 78%, var(--text-strong));
+  padding: 0 7px;
+}
+
+/* --redline-ink is each run's text color, kept in a property so a blank,
+   whose underscores are hidden, can still draw its line in that color. */
 .redline-text {
+  --redline-ink: var(--text-strong);
   margin: 0;
-  color: var(--text-strong);
-  font-size: 13.5px;
-  line-height: 1.55;
+  color: var(--redline-ink);
+  font-size: 14px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
+}
+
+.redline-row.is-unchanged .redline-text {
+  --redline-ink: color-mix(in srgb, var(--text) 74%, var(--surface));
+}
+
+.redline-row.is-heading .redline-text {
+  font-size: 15px;
+  font-weight: 760;
 }
 
 /* Redundant cues on purpose: semantic ins/del elements, color, and
    underline/strikethrough so no single channel carries the meaning. */
+.redline-ins,
+.redline-del {
+  border-radius: 3px;
+  padding: 1px 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
 .redline-ins {
+  --redline-ink: color-mix(in srgb, var(--green) 72%, var(--text-strong));
   background: color-mix(in srgb, var(--green) 14%, transparent);
-  color: color-mix(in srgb, var(--green) 72%, var(--text-strong));
+  color: var(--redline-ink);
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
-  text-underline-offset: 2px;
+  text-underline-offset: 3px;
 }
 
 .redline-del {
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  color: color-mix(in srgb, var(--red) 72%, var(--text-strong));
+  --redline-ink: color-mix(in srgb, var(--red) 72%, var(--text-strong));
+  background: color-mix(in srgb, var(--red) 11%, transparent);
+  color: var(--redline-ink);
   text-decoration: line-through;
   text-decoration-thickness: 1.5px;
 }
 
+/* A fill-in blank (a run of underscores) draws as one solid line in its
+   run's color: the underscores keep their width and copy as text but are not
+   painted, so a removed blank is a red line, not a strike line stacked over a
+   dashed one. */
+.redline-text .redline-blank {
+  color: transparent;
+  text-decoration-line: underline;
+  text-decoration-color: var(--redline-ink);
+  text-decoration-thickness: 1.5px;
+  text-decoration-skip-ink: none;
+}
+
 .theme-dark .redline-ins {
-  color: color-mix(in srgb, var(--green) 46%, #eaf6ee);
+  --redline-ink: color-mix(in srgb, var(--green) 46%, #eaf6ee);
 }
 
 .theme-dark .redline-del {
-  color: color-mix(in srgb, var(--red) 48%, #f8ecec);
+  --redline-ink: color-mix(in srgb, var(--red) 48%, #f8ecec);
 }
 
 @media (max-width: 640px) {
+  .draft-redline-modal {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .draft-redline-header {
+    align-items: start;
+  }
+
   .draft-redline-selectors {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .draft-redline-body {
-    max-height: min(52vh, 420px);
+  .draft-redline-direction {
+    display: none;
+  }
+
+  .redline-row {
+    padding-right: 10px;
   }
 }
 
@@ -24635,6 +24684,11 @@ button.retention-tagged-title:focus-visible strong {
   display: block;
   border-radius: 2px;
   pointer-events: none;
+}
+
+/* Orbit's circles; the canvas clips the ones that bleed off its edges. */
+.deck-decoration.is-ellipse {
+  border-radius: 50%;
 }
 
 .deck-block {

@@ -161,6 +161,14 @@ class Settings(BaseSettings):
     knowledge_ocr_enabled: bool = True
     knowledge_ocr_max_pages: int = Field(default=250, ge=1, le=2000)
     knowledge_ocr_page_timeout_seconds: float = Field(default=45.0, ge=1.0, le=300.0)
+    # Read handwriting, stamps, and pictures with the workspace's best
+    # image-capable model (Gemini Flash, GPT-4.1/5 on Azure AI Foundry, ...);
+    # Tesseract remains the fallback. Each knowledge base can turn it off.
+    knowledge_vision_ocr_enabled: bool = True
+    knowledge_vision_ocr_max_pages: int = Field(default=60, ge=0, le=1000)
+    knowledge_vision_ocr_concurrency: int = Field(default=4, ge=1, le=16)
+    # Optional upstream model id (or model id) to prefer for page reading.
+    knowledge_vision_ocr_model: str = ""
     knowledge_dense_embeddings_enabled: bool = True
     knowledge_embedding_model: str = "BAAI/bge-small-en-v1.5"
     knowledge_embedding_cache_dir: str = "/opt/aperture-models"
