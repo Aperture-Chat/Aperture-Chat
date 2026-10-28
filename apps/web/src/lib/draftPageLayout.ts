@@ -54,3 +54,17 @@ export function draftHtmlForAccount(html: string): string {
   });
   return template.innerHTML;
 }
+
+/** A page reflow is a layout normalization, not a user edit. Every saved
+ * version holding exactly the reflowed HTML is the same document, so it takes
+ * the new layout too. Matching on content rather than on the version selected
+ * when the reflow was scheduled keeps a version saved mid-reflow current. */
+export function reflowSavedVersions<T extends { content: string }>(
+  versions: T[],
+  sourceHtml: string,
+  reflowedHtml: string,
+): T[] {
+  return versions.map((version) =>
+    version.content === sourceHtml ? { ...version, content: reflowedHtml } : version,
+  );
+}

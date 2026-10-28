@@ -1,23 +1,34 @@
 from __future__ import annotations
 
-import html
+import logging
 import mimetypes
 import os
 import re
 import zipfile
 from bisect import bisect_right
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from email import policy
 from email.parser import BytesParser
 from io import BytesIO
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Protocol
 
 from defusedxml import ElementTree
-from defusedxml.common import DefusedXmlException
 
+from app.core.document_metadata import (
+    bounded_metadata,
+    email_metadata,
+    image_metadata,
+    office_metadata,
+    outlook_metadata,
+    pdf_metadata,
+)
+from app.core.document_metadata import parse_xml as _parse_xml
+from app.core.html_extract import parse_html
 from app.core.pdfium_lock import PDFIUM_LOCK
+
+logger = logging.getLogger("aperture.knowledge_ingestion")
 
 MAX_EXTRACTED_TEXT_CHARS = 10_000_000
 DEFAULT_CHUNK_CHARS = 1200
@@ -25,6 +36,14 @@ DEFAULT_CHUNK_OVERLAP = 160
 DEFAULT_OCR_MAX_PAGES = 250
 DEFAULT_OCR_PAGE_TIMEOUT_SECONDS = 45.0
 MIN_PDF_PAGE_TEXT_CHARS = 40
+# Pictures smaller than this are logos, icons, and signature-block decoration.
+MIN_VISION_IMAGE_BYTES = 12_000
+MAX_VISION_IMAGES_PER_FILE = 12
+# Typed pages whose images cover this share of the page get a vision pass.
+MIN_IMAGE_COVERAGE = 0.12
+MAX_ATTACHMENTS = 20
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_ATTACHMENT_DEPTH = 2
 _OCR_WORKERS_ENV = "APERTURE_KNOWLEDGE_OCR_WORKERS"
 _DEFAULT_MAX_OCR_WORKERS = 4
 _MAX_OCR_WORKERS = 16
@@ -42,6 +61,7 @@ _TEXT_EXTENSIONS = {
 }
 _HTML_EXTENSIONS = {".htm", ".html"}
 _IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+_VISION_IMAGE_EXTENSIONS = _IMAGE_EXTENSIONS
 
 _DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PPTX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -68,15 +88,49 @@ class ExtractedSegment:
     locator: str | None = None
 
 
+class PageReader(Protocol):
+    """Reads a rendered page or picture with a vision model.
+
+    ``mode`` is ``"full"`` (transcribe everything on a scanned page),
+    ``"extras"`` (the typed text is already captured; return only handwriting,
+    stamps, signatures, and image content), or ``"image"`` (a picture embedded
+    in a document). Returns None or "" when there is nothing, the model is
+    unavailable, or its page budget is spent, so callers fall back.
+    """
+
+    concurrency: int
+
+    def read_page(self, image: Any, *, mode: str, label: str) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedDocument:
+    """Extracted passages plus the properties the file carries about itself."""
+
+    segments: list[ExtractedSegment]
+    metadata: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class _Options:
+    max_chars: int
+    ocr_enabled: bool
+    ocr_max_pages: int
+    ocr_page_timeout_seconds: float
+    vision: PageReader | None = None
+    depth: int = 0
+
+
 def extract_text(
     filename: str,
-    content: bytes,
+    content: BinarySource,
     mime_type: str | None = None,
     *,
     max_chars: int = MAX_EXTRACTED_TEXT_CHARS,
     ocr_enabled: bool = True,
     ocr_max_pages: int = DEFAULT_OCR_MAX_PAGES,
     ocr_page_timeout_seconds: float = DEFAULT_OCR_PAGE_TIMEOUT_SECONDS,
+    vision: PageReader | None = None,
 ) -> str | None:
     return _segments_text(
         extract_segments(
@@ -87,133 +141,132 @@ def extract_text(
             ocr_enabled=ocr_enabled,
             ocr_max_pages=ocr_max_pages,
             ocr_page_timeout_seconds=ocr_page_timeout_seconds,
+            vision=vision,
         )
     )
 
 
 def extract_segments(
     filename: str,
-    content: bytes,
+    content: BinarySource,
     mime_type: str | None = None,
     *,
     max_chars: int = MAX_EXTRACTED_TEXT_CHARS,
     ocr_enabled: bool = True,
     ocr_max_pages: int = DEFAULT_OCR_MAX_PAGES,
     ocr_page_timeout_seconds: float = DEFAULT_OCR_PAGE_TIMEOUT_SECONDS,
+    vision: PageReader | None = None,
 ) -> list[ExtractedSegment]:
+    """Extract ordered segments from bytes or a seekable binary file."""
     return _extract_segments_from_source(
         filename,
         content,
         mime_type,
-        max_chars=max_chars,
-        ocr_enabled=ocr_enabled,
-        ocr_max_pages=ocr_max_pages,
-        ocr_page_timeout_seconds=ocr_page_timeout_seconds,
+        _Options(max_chars, ocr_enabled, ocr_max_pages, ocr_page_timeout_seconds, vision),
     )
 
 
-def extract_text_from_file(
+# Spooled uploads are read in place; both entry points accept bytes or a file.
+extract_text_from_file = extract_text
+extract_segments_from_file = extract_segments
+
+
+def extract_document(
     filename: str,
-    file: BinaryIO,
+    source: BinarySource,
     mime_type: str | None = None,
     *,
     max_chars: int = MAX_EXTRACTED_TEXT_CHARS,
     ocr_enabled: bool = True,
     ocr_max_pages: int = DEFAULT_OCR_MAX_PAGES,
     ocr_page_timeout_seconds: float = DEFAULT_OCR_PAGE_TIMEOUT_SECONDS,
-) -> str | None:
-    return _segments_text(
-        extract_segments_from_file(
-            filename,
-            file,
-            mime_type,
-            max_chars=max_chars,
-            ocr_enabled=ocr_enabled,
-            ocr_max_pages=ocr_max_pages,
-            ocr_page_timeout_seconds=ocr_page_timeout_seconds,
-        )
-    )
+    vision: PageReader | None = None,
+) -> ExtractedDocument:
+    """Extract passages and the file's own properties in one pass per format."""
 
-
-def extract_segments_from_file(
-    filename: str,
-    file: BinaryIO,
-    mime_type: str | None = None,
-    *,
-    max_chars: int = MAX_EXTRACTED_TEXT_CHARS,
-    ocr_enabled: bool = True,
-    ocr_max_pages: int = DEFAULT_OCR_MAX_PAGES,
-    ocr_page_timeout_seconds: float = DEFAULT_OCR_PAGE_TIMEOUT_SECONDS,
-) -> list[ExtractedSegment]:
-    return _extract_segments_from_source(
-        filename,
-        file,
-        mime_type,
-        max_chars=max_chars,
-        ocr_enabled=ocr_enabled,
-        ocr_max_pages=ocr_max_pages,
-        ocr_page_timeout_seconds=ocr_page_timeout_seconds,
-    )
+    options = _Options(max_chars, ocr_enabled, ocr_max_pages, ocr_page_timeout_seconds, vision)
+    segments = _extract_segments_from_source(filename, source, mime_type, options)
+    reader = _METADATA_READERS.get(_source_kind(filename, mime_type))
+    pairs = reader(source) if reader is not None else []
+    return ExtractedDocument(segments=segments, metadata=bounded_metadata(pairs))
 
 
 def _extract_segments_from_source(
     filename: str,
     source: BinarySource,
     mime_type: str | None,
-    *,
-    max_chars: int,
-    ocr_enabled: bool,
-    ocr_max_pages: int,
-    ocr_page_timeout_seconds: float,
+    options: _Options,
 ) -> list[ExtractedSegment]:
-    extension = _extension(filename)
-    guessed_mime = (mime_type or mimetypes.guess_type(filename)[0] or "").split(";", 1)[0]
-    guessed_mime = guessed_mime.strip().lower()
+    reader = _SEGMENT_READERS.get(_source_kind(filename, mime_type))
+    segments = reader(source, options) if reader is not None else []
+    return _limit_segments(segments, max_chars=options.max_chars)
 
-    segments: list[ExtractedSegment]
-    if extension == ".docx" or guessed_mime == _DOCX_MIME_TYPE:
-        segments = _extract_docx_segments(source)
-    elif extension == ".xlsx" or guessed_mime == _XLSX_MIME_TYPE:
-        segments = _extract_xlsx_segments(source)
-    elif extension == ".pptx" or guessed_mime == _PPTX_MIME_TYPE:
-        segments = _extract_pptx_segments(source)
-    elif extension == ".eml" or guessed_mime in _EML_MIME_TYPES:
-        segments = _extract_eml_segments(source)
-    elif extension == ".msg" or guessed_mime in _MSG_MIME_TYPES:
-        segments = _extract_msg_segments(source)
-    elif extension in _HTML_EXTENSIONS or guessed_mime == "text/html":
-        content = _read_source_bytes(source, max_chars=max_chars)
-        text = _extract_html_text(_decode_text(content))
-        segments = [ExtractedSegment(text=text)] if text else []
-    elif extension == ".pdf" or guessed_mime == "application/pdf":
-        segments = _extract_pdf_segments(
-            source,
-            ocr_enabled=ocr_enabled,
-            ocr_max_pages=ocr_max_pages,
-            ocr_page_timeout_seconds=ocr_page_timeout_seconds,
-        )
-    elif extension in _IMAGE_EXTENSIONS or guessed_mime.startswith("image/"):
-        if not ocr_enabled:
-            segments = []
-        else:
-            segments = _extract_image_segments(
-                source,
-                ocr_max_pages=ocr_max_pages,
-                ocr_page_timeout_seconds=ocr_page_timeout_seconds,
-            )
-    elif (
+
+# Checked in order; a file matches by extension or by declared MIME type.
+_KIND_RULES: tuple[tuple[str, frozenset[str], frozenset[str]], ...] = (
+    ("docx", frozenset({".docx"}), frozenset({_DOCX_MIME_TYPE})),
+    ("xlsx", frozenset({".xlsx"}), frozenset({_XLSX_MIME_TYPE})),
+    ("pptx", frozenset({".pptx"}), frozenset({_PPTX_MIME_TYPE})),
+    ("eml", frozenset({".eml"}), frozenset(_EML_MIME_TYPES)),
+    ("msg", frozenset({".msg"}), frozenset(_MSG_MIME_TYPES)),
+    ("html", frozenset(_HTML_EXTENSIONS), frozenset({"text/html"})),
+    ("pdf", frozenset({".pdf"}), frozenset({"application/pdf"})),
+    ("rtf", frozenset({".rtf"}), frozenset()),
+)
+
+
+def _source_kind(filename: str, mime_type: str | None) -> str:
+    extension = _extension(filename)
+    mime = (mime_type or mimetypes.guess_type(filename)[0] or "").split(";", 1)[0]
+    mime = mime.strip().lower()
+    for kind, extensions, mime_types in _KIND_RULES:
+        if extension in extensions or mime in mime_types:
+            return kind
+    if extension in _IMAGE_EXTENSIONS or mime.startswith("image/"):
+        return "image"
+    return "text" if _is_plain_text(extension, mime) else "unknown"
+
+
+def is_html_source(filename: str, mime_type: str | None) -> bool:
+    """True when extraction treats this source as an HTML page."""
+
+    return _source_kind(filename, mime_type) == "html"
+
+
+def _is_plain_text(extension: str, mime: str) -> bool:
+    return (
         extension in _TEXT_EXTENSIONS
-        or guessed_mime.startswith("text/")
-        or guessed_mime in {"application/json", "application/xml"}
-    ):
-        content = _read_source_bytes(source, max_chars=max_chars)
-        text = _decode_text(content)
-        if extension == ".rtf":
-            text = _extract_rtf_text(text)
-        segments = [ExtractedSegment(text=text)] if text else []
-    else:
-        segments = []
-    return _limit_segments(segments, max_chars=max_chars)
+        or mime.startswith("text/")
+        or mime in {"application/json", "application/xml"}
+    )
+
+
+def _read_text(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    text = decode_text(_read_source_bytes(source, max_chars=options.max_chars))
+    return [ExtractedSegment(text=text)] if text else []
+
+
+def _read_rtf(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    text = decode_text(_read_source_bytes(source, max_chars=options.max_chars))
+    text = _extract_rtf_text(text)
+    return [ExtractedSegment(text=text)] if text else []
+
+
+def _read_html(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    content = _read_source_bytes(source, max_chars=options.max_chars)
+    text = _extract_html_text(decode_text(content))
+    return [ExtractedSegment(text=text)] if text else []
+
+
+def _read_xlsx(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    del options
+    return _extract_xlsx_segments(source)
+
+
+def _read_image(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    if not options.ocr_enabled and options.vision is None:
+        return []
+    return _extract_image_segments(source, options)
 
 
 def chunk_text(
@@ -279,44 +332,194 @@ def _extension(filename: str) -> str:
     return f".{filename.rsplit('.', 1)[-1].lower()}"
 
 
-def _decode_text(content: bytes) -> str:
+def decode_text(content: bytes) -> str:
     try:
         return content.decode("utf-8")
     except UnicodeDecodeError:
         return content.decode("latin-1", errors="replace")
 
 
-def _extract_docx_segments(source: BinarySource) -> list[ExtractedSegment]:
+def _read_docx(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    parts = _zip_parts(source, _is_docx_text_part)
+    body = _docx_body_segments(parts.get("word/document.xml") if parts else None)
+    if not body:
+        return []
+    segments = body + _docx_extra_segments(parts or {})
+    if options.vision is not None:
+        segments += _office_image_segments(source, "word/media/", options.vision)
+    return segments
+
+
+def _docx_body_segments(document_xml: bytes | None) -> list[ExtractedSegment]:
+    root = _parse_xml(document_xml)
+    if root is None:
+        return []
+    body = next((element for element in root.iter() if _local_name(element.tag) == "body"), None)
+    blocks = [text for element in (body if body is not None else []) if (text := _word_block(element))]
+    return [ExtractedSegment(text="\n\n".join(blocks))] if blocks else []
+
+
+def _word_block(element: ElementTree.Element) -> str:
+    """Text of one top-level body element: a paragraph or a table."""
+
+    name = _local_name(element.tag)
+    if name == "p":
+        return _word_paragraph_text(element)
+    if name == "tbl":
+        return _word_table_text(element)
+    return ""
+
+
+_DOCX_HEADER_FOOTER = re.compile(r"word/(header|footer)(\d*)\.xml")
+_DOCX_NOTE_PARTS = (("word/footnotes.xml", "Footnotes"), ("word/endnotes.xml", "Endnotes"))
+
+
+def _is_docx_text_part(name: str) -> bool:
+    return (
+        name in {"word/document.xml", "word/comments.xml"}
+        or name in dict(_DOCX_NOTE_PARTS)
+        or _DOCX_HEADER_FOOTER.fullmatch(name) is not None
+    )
+
+
+def _docx_extra_segments(parts: dict[str, bytes]) -> list[ExtractedSegment]:
+    """Headers, footers, notes, and reviewer comments live outside document.xml."""
+
+    def header_order(name: str) -> tuple[int, int]:
+        match = _DOCX_HEADER_FOOTER.fullmatch(name)
+        assert match is not None
+        return (0 if match.group(1) == "header" else 1, int(match.group(2) or 0))
+
+    header_names = sorted(
+        (name for name in parts if _DOCX_HEADER_FOOTER.fullmatch(name)), key=header_order
+    )
+    sections = [("Headers and footers", _unique(_paragraphs(parts[name]) for name in header_names))]
+    sections += [
+        (label, _unique([_paragraphs(parts.get(name))])) for name, label in _DOCX_NOTE_PARTS
+    ]
+    sections.append(("Comments", _word_comments(parts.get("word/comments.xml"))))
+    return [
+        ExtractedSegment(text="\n\n".join(lines), locator=label)
+        for label, lines in sections
+        if lines
+    ]
+
+
+def _paragraphs(xml: bytes | None) -> list[str]:
+    root = _parse_xml(xml)
+    if root is None:
+        return []
+    return [
+        text
+        for element in root.iter()
+        if _local_name(element.tag) == "p" and (text := _word_paragraph_text(element))
+    ]
+
+
+def _unique(groups: Iterable[list[str]]) -> list[str]:
+    seen: dict[str, None] = {}
+    for group in groups:
+        for line in group:
+            seen.setdefault(line, None)
+    return list(seen)
+
+
+def _word_comments(xml: bytes | None) -> list[str]:
+    root = _parse_xml(xml)
+    if root is None:
+        return []
+    comments: list[str] = []
+    for element in root.iter():
+        if _local_name(element.tag) != "comment":
+            continue
+        text = " ".join(
+            line
+            for paragraph in element.iter()
+            if _local_name(paragraph.tag) == "p" and (line := _word_paragraph_text(paragraph))
+        )
+        author = _local_attribute(element, "author")
+        if text:
+            comments.append(f"{author}: {text}" if author else text)
+    return comments
+
+
+def _local_attribute(element: ElementTree.Element, name: str) -> str:
+    for key, value in element.attrib.items():
+        if _local_name(key) == name:
+            return str(value).strip()
+    return ""
+
+
+def _zip_parts(source: BinarySource, wanted: Callable[[str], bool]) -> dict[str, bytes] | None:
     try:
         _rewind_source(source)
         archive_source = BytesIO(source) if isinstance(source, bytes) else source
         with zipfile.ZipFile(archive_source) as archive:
-            document_xml = archive.read("word/document.xml")
+            return {name: archive.read(name) for name in archive.namelist() if wanted(name)}
     except (KeyError, OSError, zipfile.BadZipFile):
-        return []
+        return None
+
+
+def _office_image_segments(
+    source: BinarySource, prefix: str, vision: PageReader
+) -> list[ExtractedSegment]:
+    """Read pictures embedded in a Word file (scanned exhibits, signatures)."""
+
+    media = _zip_parts(
+        source, lambda name: name.startswith(prefix) and _extension(name) in _VISION_IMAGE_EXTENSIONS
+    )
+    blobs = [
+        blob
+        for _name, blob in sorted((media or {}).items(), key=lambda item: _natural_key(item[0]))
+        if len(blob) >= MIN_VISION_IMAGE_BYTES
+    ][:MAX_VISION_IMAGES_PER_FILE]
+    labels = [f"Embedded image {index}" for index in range(1, len(blobs) + 1)]
+    texts = _read_pictures(blobs, labels, vision)
+    return [
+        ExtractedSegment(text=texts[index], locator=label)
+        for index, label in enumerate(labels)
+        if texts.get(index)
+    ]
+
+
+def _read_pictures(
+    blobs: list[bytes], labels: list[str], vision: PageReader
+) -> dict[int, str]:
+    if not blobs:
+        return {}
+
+    def read(index: int, image: Any) -> str:
+        return _vision_text(vision, image, mode="image", label=labels[index])
+
+    return _read_page_images(
+        _picture_pages(blobs), workers=min(vision.concurrency, len(blobs)), read=read
+    )
+
+
+def _picture_pages(blobs: list[bytes]) -> Iterator[_OcrPage]:
+    from PIL import Image  # type: ignore[import-not-found]
+
+    for index, blob in enumerate(blobs):
+        try:
+            with Image.open(BytesIO(blob)) as opened:
+                image = opened.convert("RGB")
+        except Exception:
+            continue
+        yield _OcrPage(index, image, (image,))
+
+
+def _vision_text(vision: PageReader, image: Any, *, mode: str, label: str) -> str:
     try:
-        root = ElementTree.fromstring(document_xml)
-    except (ElementTree.ParseError, DefusedXmlException):
-        return []
+        text = vision.read_page(image, mode=mode, label=label)
+    except Exception:
+        # A reader failure must never fail extraction, but it must not vanish.
+        logger.warning("Vision page reader failed on %s", label, exc_info=True)
+        return ""
+    return _normalize_text(text or "")
 
-    body = next((element for element in root.iter() if _local_name(element.tag) == "body"), None)
-    if body is None:
-        return []
 
-    blocks: list[str] = []
-    for element in body:
-        name = _local_name(element.tag)
-        if name == "p":
-            text = _word_paragraph_text(element)
-            if text:
-                blocks.append(text)
-        elif name == "tbl":
-            table_text = _word_table_text(element)
-            if table_text:
-                blocks.append(table_text)
-    if not blocks:
-        return []
-    return [ExtractedSegment(text="\n\n".join(blocks))]
+def _natural_key(name: str) -> tuple[object, ...]:
+    return tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name))
 
 
 def _word_paragraph_text(paragraph: ElementTree.Element) -> str:
@@ -403,7 +606,7 @@ def _spreadsheet_cell_text(value: object) -> str:
     return str(value).strip()
 
 
-def _extract_pptx_segments(source: BinarySource) -> list[ExtractedSegment]:
+def _read_pptx(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
     try:
         from pptx import Presentation  # type: ignore[import-not-found]
     except ImportError:
@@ -411,18 +614,73 @@ def _extract_pptx_segments(source: BinarySource) -> list[ExtractedSegment]:
 
     try:
         presentation = Presentation(BytesIO(_read_all_source_bytes(source)))
+        slides = list(presentation.slides)
     except Exception:
         return []
 
+    images = _slide_image_texts(slides, options.vision)
     segments: list[ExtractedSegment] = []
-    for index, slide in enumerate(presentation.slides, start=1):
-        blocks: list[str] = []
-        for shape in slide.shapes:
-            blocks.extend(_pptx_shape_blocks(shape))
+    for index, slide in enumerate(slides, start=1):
+        blocks = [block for shape in slide.shapes for block in _pptx_shape_blocks(shape)]
+        blocks += [f"Image: {text}" for text in images.get(index, [])]
+        notes = _pptx_notes(slide)
+        if notes:
+            blocks.append(f"Speaker notes: {notes}")
         text = "\n\n".join(block for block in blocks if block.strip())
         if text:
             segments.append(ExtractedSegment(text=text, locator=f"Slide {index}"))
     return segments
+
+
+def _slide_image_texts(slides: list[Any], vision: PageReader | None) -> dict[int, list[str]]:
+    """What the vision reader saw in each slide's pictures, keyed by slide number."""
+
+    if vision is None:
+        return {}
+    pictures = _slide_pictures(slides)
+    texts = _read_pictures(
+        [blob for _slide, blob in pictures],
+        [f"Slide {slide} image" for slide, _blob in pictures],
+        vision,
+    )
+    by_slide: dict[int, list[str]] = {}
+    for position, (slide_number, _blob) in enumerate(pictures):
+        if texts.get(position):
+            by_slide.setdefault(slide_number, []).append(texts[position])
+    return by_slide
+
+
+def _pptx_notes(slide: Any) -> str:
+    try:
+        if not slide.has_notes_slide:
+            return ""
+        frame = slide.notes_slide.notes_text_frame
+        return str(frame.text or "").strip() if frame is not None else ""
+    except Exception:
+        return ""
+
+
+def _slide_pictures(slides: list[Any]) -> list[tuple[int, bytes]]:
+    pictures: list[tuple[int, bytes]] = []
+    for index, slide in enumerate(slides, start=1):
+        for shape in slide.shapes:
+            pictures += [(index, blob) for blob in _shape_pictures(shape)]
+    return [item for item in pictures if len(item[1]) >= MIN_VISION_IMAGE_BYTES][
+        :MAX_VISION_IMAGES_PER_FILE
+    ]
+
+
+def _shape_pictures(shape: Any) -> list[bytes]:
+    blobs: list[bytes] = []
+    try:
+        image = getattr(shape, "image", None)
+        if image is not None and f".{image.ext}".lower() in _VISION_IMAGE_EXTENSIONS:
+            blobs.append(image.blob)
+    except Exception:
+        pass
+    for nested in getattr(shape, "shapes", None) or []:
+        blobs += _shape_pictures(nested)
+    return blobs
 
 
 def _pptx_shape_blocks(shape: object) -> list[str]:
@@ -451,10 +709,9 @@ def _pptx_shape_blocks(shape: object) -> list[str]:
     return blocks
 
 
-def _extract_eml_segments(source: BinarySource) -> list[ExtractedSegment]:
-    try:
-        message = BytesParser(policy=policy.default).parsebytes(_read_all_source_bytes(source))
-    except Exception:
+def _read_eml(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    message = _parse_eml(source)
+    if message is None:
         return []
 
     headers = _email_header_lines(
@@ -468,7 +725,70 @@ def _extract_eml_segments(source: BinarySource) -> list[ExtractedSegment]:
     )
     body = _email_message_body(message)
     text = "\n\n".join(part for part in (headers, body) if part)
-    return [ExtractedSegment(text=text)] if text else []
+    segments = [ExtractedSegment(text=text)] if text else []
+    return segments + _attachment_segments(_eml_attachments(message), options)
+
+
+def _parse_eml(source: BinarySource) -> Any:
+    try:
+        return BytesParser(policy=policy.default).parsebytes(_read_all_source_bytes(source))
+    except Exception:
+        return None
+
+
+def _eml_metadata(source: BinarySource) -> list[tuple[str, Any]]:
+    message = _parse_eml(source)
+    return email_metadata(message) if message is not None else []
+
+
+def _eml_attachments(message: Any) -> list[tuple[str, bytes, str | None]]:
+    attachments: list[tuple[str, bytes, str | None]] = []
+    try:
+        parts = list(message.iter_attachments())
+    except Exception:
+        return []
+    for part in parts:
+        content_type = part.get_content_type()
+        if content_type == "message/rfc822":
+            nested = part.get_payload()
+            payload = nested[0].as_bytes() if isinstance(nested, list) and nested else None
+            name = part.get_filename() or "attached-message.eml"
+        else:
+            payload = part.get_payload(decode=True)
+            name = part.get_filename()
+        if name and isinstance(payload, bytes):
+            attachments.append((name, payload, content_type))
+    return attachments
+
+
+def _attachment_segments(
+    attachments: list[tuple[str, bytes, str | None]], options: _Options
+) -> list[ExtractedSegment]:
+    """Extract attached files, each passage located as "Attachment: name, Page n".
+
+    Page numbers belong to the attachment rather than the message, so they
+    stay in the locator text instead of the email's page fields.
+    """
+
+    if options.depth >= MAX_ATTACHMENT_DEPTH:
+        return []
+    nested_options = replace(options, depth=options.depth + 1)
+    segments: list[ExtractedSegment] = []
+    for name, payload, mime_type in attachments[:MAX_ATTACHMENTS]:
+        if len(payload) > MAX_ATTACHMENT_BYTES or _is_decoration(name, mime_type, payload):
+            continue
+        for segment in _extract_segments_from_source(name, payload, mime_type, nested_options):
+            locator = f"Attachment: {name}"
+            if segment.locator:
+                locator = f"{locator}, {segment.locator}"
+            segments.append(ExtractedSegment(text=segment.text, locator=locator))
+    return segments
+
+
+def _is_decoration(name: str, mime_type: str | None, payload: bytes) -> bool:
+    """Signature logos and inline icons are images too small to carry content."""
+
+    return _source_kind(name, mime_type) == "image" and len(payload) < MIN_VISION_IMAGE_BYTES
 
 
 def _email_message_body(message: object) -> str:
@@ -494,20 +814,17 @@ def _email_message_body(message: object) -> str:
     return ""
 
 
-def _extract_msg_segments(source: BinarySource) -> list[ExtractedSegment]:
-    try:
-        from oxmsg import Message  # type: ignore[import-not-found]
-    except ImportError:
+def _read_msg(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
+    message = _parse_msg(source)
+    if message is None:
         return []
 
-    content = _read_all_source_bytes(source)
-    if not content:
-        return []
-    try:
-        message = Message.load(content)
-    except Exception:
-        return []
+    text = "\n\n".join(part for part in (_msg_headers(message), _msg_body(message)) if part)
+    segments = [ExtractedSegment(text=text)] if text else []
+    return segments + _attachment_segments(_msg_attachments(message), options)
 
+
+def _msg_headers(message: Any) -> str:
     raw_headers = getattr(message, "message_headers", {})
     headers_by_name = (
         {str(name).casefold(): value for name, value in raw_headers.items()}
@@ -515,7 +832,7 @@ def _extract_msg_segments(source: BinarySource) -> list[ExtractedSegment]:
         else {}
     )
     sent_date = getattr(message, "sent_date", None)
-    headers = _email_header_lines(
+    return _email_header_lines(
         {
             "From": getattr(message, "sender", None) or headers_by_name.get("from"),
             "To": headers_by_name.get("to"),
@@ -524,18 +841,50 @@ def _extract_msg_segments(source: BinarySource) -> list[ExtractedSegment]:
             "Subject": getattr(message, "subject", None) or headers_by_name.get("subject"),
         }
     )
+
+
+def _msg_body(message: Any) -> str:
     plain_body = getattr(message, "body", None)
     if plain_body is not None:
-        body = str(plain_body)
-    else:
-        body = ""
-        html_body = getattr(message, "html_body", None)
-        if isinstance(html_body, bytes):
-            html_body = _decode_text(html_body)
-        if isinstance(html_body, str):
-            body = _extract_html_text(html_body)
-    text = "\n\n".join(part for part in (headers, body) if part)
-    return [ExtractedSegment(text=text)] if text else []
+        return str(plain_body)
+    html_body = getattr(message, "html_body", None)
+    if isinstance(html_body, bytes):
+        html_body = decode_text(html_body)
+    return _extract_html_text(html_body) if isinstance(html_body, str) else ""
+
+
+def _parse_msg(source: BinarySource) -> Any:
+    try:
+        from oxmsg import Message  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+
+    content = _read_all_source_bytes(source)
+    if not content:
+        return None
+    try:
+        return Message.load(content)
+    except Exception:
+        return None
+
+
+def _msg_metadata(source: BinarySource) -> list[tuple[str, Any]]:
+    message = _parse_msg(source)
+    return outlook_metadata(message) if message is not None else []
+
+
+def _msg_attachments(message: Any) -> list[tuple[str, bytes, str | None]]:
+    attachments: list[tuple[str, bytes, str | None]] = []
+    try:
+        items = list(getattr(message, "attachments", []) or [])
+    except Exception:
+        return []
+    for attachment in items:
+        name = getattr(attachment, "file_name", None)
+        payload = getattr(attachment, "file_bytes", None)
+        if name and isinstance(payload, bytes):
+            attachments.append((str(name), payload, getattr(attachment, "mime_type", None)))
+    return attachments
 
 
 def _email_header_lines(values: dict[str, object]) -> str:
@@ -553,9 +902,7 @@ def _email_header_lines(values: dict[str, object]) -> str:
 
 
 def _extract_html_text(text: str) -> str:
-    without_scripts = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)
-    without_tags = re.sub(r"(?s)<[^>]+>", " ", without_scripts)
-    return html.unescape(without_tags)
+    return parse_html(text).text
 
 
 def _extract_rtf_text(text: str) -> str:
@@ -565,51 +912,224 @@ def _extract_rtf_text(text: str) -> str:
     return text
 
 
-def _extract_pdf_segments(
-    source: BinarySource,
-    *,
-    ocr_enabled: bool,
-    ocr_max_pages: int,
-    ocr_page_timeout_seconds: float,
-) -> list[ExtractedSegment]:
+def _read_pdf(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
     try:
         from pypdf import PdfReader  # type: ignore[import-not-found]
     except ImportError:
         return []
     try:
         _rewind_source(source)
-        reader_source = BytesIO(source) if isinstance(source, bytes) else source
-        reader = PdfReader(reader_source)
-        page_texts = [_normalize_text(page.extract_text() or "") for page in reader.pages]
+        reader = PdfReader(BytesIO(source) if isinstance(source, bytes) else source)
+        typed = [_normalize_text(page.extract_text() or "") for page in reader.pages]
+        annotations = [_pdf_page_annotations(page) for page in reader.pages]
     except Exception:
         return []
 
-    if ocr_enabled:
-        pages_needing_ocr = [
-            index
-            for index, text in enumerate(page_texts[:ocr_max_pages])
-            if len(text) < MIN_PDF_PAGE_TEXT_CHARS
-        ]
-        if pages_needing_ocr:
-            ocr_text = _ocr_pdf_pages(
-                source,
-                pages_needing_ocr,
-                timeout_seconds=ocr_page_timeout_seconds,
-            )
-            for page_index, text in ocr_text.items():
-                if text:
-                    page_texts[page_index] = text
-
-    return [
+    page_texts = _read_scanned_pages(source, typed, options)
+    visual_notes = _read_page_markings(source, typed, annotations, options)
+    segments = [
         ExtractedSegment(
-            text=text,
+            text=_pdf_page_text(text, visual_notes.get(index - 1), annotations[index - 1]),
             page_start=index,
             page_end=index,
             locator=f"Page {index}",
         )
         for index, text in enumerate(page_texts, start=1)
-        if text
     ]
+    segments = [segment for segment in segments if segment.text]
+    form = _pdf_form_segment(reader)
+    return segments + ([form] if form is not None else [])
+
+
+@dataclass(frozen=True, slots=True)
+class _PageAnnotations:
+    comments: tuple[str, ...] = ()
+    # Ink drawings and stamps carry no text, only marks a vision model can read.
+    marked: bool = False
+
+
+_PDF_SKIPPED_ANNOTATIONS = {"/Link", "/Widget", "/Popup"}
+_PDF_MARKING_ANNOTATIONS = {"/Ink", "/Stamp"}
+
+
+def _pdf_page_annotations(page: Any) -> _PageAnnotations:
+    comments: list[str] = []
+    marked = False
+    try:
+        annotations = [item.get_object() for item in page.get("/Annots") or []]
+    except Exception:
+        return _PageAnnotations()
+    for annotation in annotations:
+        subtype = str(annotation.get("/Subtype") or "")
+        marked = marked or subtype in _PDF_MARKING_ANNOTATIONS
+        if subtype in _PDF_SKIPPED_ANNOTATIONS:
+            continue
+        contents = _pdf_string(annotation.get("/Contents"))
+        author = _pdf_string(annotation.get("/T"))
+        if contents:
+            comments.append(f"{author}: {contents}" if author else contents)
+    return _PageAnnotations(tuple(comments), marked)
+
+
+def _pdf_page_text(text: str, visual_notes: str | None, annotations: _PageAnnotations) -> str:
+    parts = [text] if text else []
+    if visual_notes:
+        parts.append(f"Handwriting, stamps, and images on this page:\n\n{visual_notes}")
+    if annotations.comments:
+        bullets = "\n\n".join(f"- {comment}" for comment in annotations.comments)
+        parts.append(f"Comments on this page:\n\n{bullets}")
+    return "\n\n".join(parts)
+
+
+def _pdf_form_segment(reader: Any) -> ExtractedSegment | None:
+    """Filled-in form values live in fields, not in the page text."""
+
+    try:
+        fields = reader.get_fields() or {}
+    except Exception:
+        return None
+    lines: list[str] = []
+    for name, field in fields.items():
+        value = _pdf_string(field.get("/V")).lstrip("/")
+        if not value or value == "Off":
+            continue
+        label = _pdf_string(field.get("/TU")) or str(name)
+        lines.append(f"{label}: {value}")
+    if not lines:
+        return None
+    return ExtractedSegment(text="\n\n".join(lines), locator="Form fields")
+
+
+def _pdf_string(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        resolved = value.get_object() if hasattr(value, "get_object") else value
+    except Exception:
+        return ""
+    if isinstance(resolved, (list, tuple)):
+        return ", ".join(_pdf_string(item) for item in resolved if _pdf_string(item))
+    return " ".join(str(resolved).split())
+
+
+def _read_scanned_pages(
+    source: BinarySource, typed: list[str], options: _Options
+) -> list[str]:
+    """Fill pages with no text layer from the vision reader, then Tesseract."""
+
+    scanned = [
+        index
+        for index, text in enumerate(typed[: options.ocr_max_pages])
+        if len(text) < MIN_PDF_PAGE_TEXT_CHARS
+    ]
+    page_texts = list(typed)
+    if not scanned:
+        return page_texts
+    if options.vision is not None:
+        results = _read_pdf_page_images(
+            source,
+            scanned,
+            read=_page_reader(options, mode="full"),
+            workers=options.vision.concurrency,
+        )
+    elif options.ocr_enabled:
+        results = _ocr_pdf_pages(
+            source, scanned, timeout_seconds=options.ocr_page_timeout_seconds
+        )
+    else:
+        results = {}
+    for page_index, text in results.items():
+        if text:
+            page_texts[page_index] = text
+    return page_texts
+
+
+def _read_page_markings(
+    source: BinarySource,
+    typed: list[str],
+    annotations: list[_PageAnnotations],
+    options: _Options,
+) -> dict[int, str]:
+    """Ask the vision reader about handwriting and images on typed pages."""
+
+    if options.vision is None:
+        return {}
+    typed_pages = [
+        index
+        for index, text in enumerate(typed[: options.ocr_max_pages])
+        if len(text) >= MIN_PDF_PAGE_TEXT_CHARS
+    ]
+    marked = {index for index in typed_pages if annotations[index].marked}
+    candidates = sorted(marked | set(_image_heavy_pages(source, typed_pages)))
+    if not candidates:
+        return {}
+    results = _read_pdf_page_images(
+        source,
+        candidates,
+        read=_page_reader(options, mode="extras"),
+        workers=options.vision.concurrency,
+    )
+    return {index: text for index, text in results.items() if text}
+
+
+def _page_reader(options: _Options, *, mode: str) -> Callable[[int, Any], str]:
+    vision = options.vision
+
+    def read(index: int, image: Any) -> str:
+        if vision is not None:
+            text = _vision_text(vision, image, mode=mode, label=f"Page {index + 1}")
+            if text:
+                return text
+        if mode == "full" and options.ocr_enabled:
+            return _ocr_image(image, timeout_seconds=options.ocr_page_timeout_seconds)
+        return ""
+
+    return read
+
+
+def _image_heavy_pages(source: BinarySource, page_indexes: list[int]) -> list[int]:
+    """Pages where pictures cover enough area to hold handwriting or scans."""
+
+    if not page_indexes:
+        return []
+    try:
+        import pypdfium2 as pdfium  # type: ignore[import-not-found]
+        import pypdfium2.raw as pdfium_c  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    _rewind_source(source)
+    try:
+        with PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(source)
+    except Exception:
+        return []
+    heavy: list[int] = []
+    try:
+        with PDFIUM_LOCK:
+            page_count = len(pdf)
+            for index in page_indexes:
+                if index < page_count and _image_coverage(pdf[index], pdfium_c) >= MIN_IMAGE_COVERAGE:
+                    heavy.append(index)
+    except Exception:
+        return heavy
+    finally:
+        with PDFIUM_LOCK:
+            pdf.close()
+    return heavy
+
+
+def _image_coverage(page: Any, pdfium_c: Any) -> float:
+    """Share of the page area covered by image objects (caller holds the lock)."""
+
+    try:
+        width, height = page.get_size()
+        area = 0.0
+        for item in page.get_objects(filter=(pdfium_c.FPDF_PAGEOBJ_IMAGE,), max_depth=3):
+            left, bottom, right, top = item.get_bounds()
+            area += max(0.0, right - left) * max(0.0, top - bottom)
+        return min(1.0, area / (width * height)) if width and height else 0.0
+    finally:
+        page.close()
 
 
 def _ocr_pdf_pages(
@@ -617,6 +1137,21 @@ def _ocr_pdf_pages(
     page_indexes: list[int],
     *,
     timeout_seconds: float,
+) -> dict[int, str]:
+    return _read_pdf_page_images(
+        source,
+        page_indexes,
+        read=lambda _index, image: _ocr_image(image, timeout_seconds=timeout_seconds),
+        workers=_ocr_worker_count(),
+    )
+
+
+def _read_pdf_page_images(
+    source: BinarySource,
+    page_indexes: list[int],
+    *,
+    read: Callable[[int, Any], str],
+    workers: int,
 ) -> dict[int, str]:
     try:
         import pypdfium2 as pdfium  # type: ignore[import-not-found]
@@ -635,10 +1170,10 @@ def _ocr_pdf_pages(
         with PDFIUM_LOCK:
             page_count = len(pdf)
         indexes = [page_index for page_index in page_indexes if page_index < page_count]
-        return _ocr_pages(
+        return _read_page_images(
             _render_pdf_pages(pdf, indexes),
-            workers=min(_ocr_worker_count(), len(indexes)),
-            timeout_seconds=timeout_seconds,
+            workers=min(workers, len(indexes)),
+            read=read,
         )
     finally:
         with PDFIUM_LOCK:
@@ -661,12 +1196,7 @@ def _render_pdf_pages(pdf: Any, page_indexes: list[int]) -> Iterator[_OcrPage]:
         yield _OcrPage(page_index, image, (image, bitmap, page))
 
 
-def _extract_image_segments(
-    source: BinarySource,
-    *,
-    ocr_max_pages: int,
-    ocr_page_timeout_seconds: float,
-) -> list[ExtractedSegment]:
+def _extract_image_segments(source: BinarySource, options: _Options) -> list[ExtractedSegment]:
     try:
         from PIL import Image  # type: ignore[import-not-found]
     except ImportError:
@@ -674,13 +1204,17 @@ def _extract_image_segments(
 
     _rewind_source(source)
     image_source = BytesIO(source) if isinstance(source, bytes) else source
+    max_frames = options.ocr_max_pages
     try:
         with Image.open(image_source) as image:
-            multi_frame = ocr_max_pages > 1 and bool(getattr(image, "is_animated", False))
-            texts = _ocr_pages(
-                _copy_image_frames(image, ocr_max_pages),
-                workers=_ocr_worker_count() if multi_frame else 1,
-                timeout_seconds=ocr_page_timeout_seconds,
+            multi_frame = max_frames > 1 and bool(getattr(image, "is_animated", False))
+            concurrency = (
+                options.vision.concurrency if options.vision is not None else _ocr_worker_count()
+            )
+            texts = _read_page_images(
+                _copy_image_frames(image, max_frames),
+                workers=concurrency if multi_frame else 1,
+                read=_page_reader(options, mode="full"),
             )
     except Exception:
         return []
@@ -750,24 +1284,24 @@ def _ocr_worker_count() -> int:
     return max(1, min(_DEFAULT_MAX_OCR_WORKERS, (os.cpu_count() or 2) - 1))
 
 
-def _ocr_pages(
+def _read_page_images(
     pages: Iterable[_OcrPage],
     *,
     workers: int,
-    timeout_seconds: float,
+    read: Callable[[int, Any], str],
 ) -> dict[int, str]:
-    """OCR pages into ``{page index: text}``, skipping any page that fails.
+    """Read page images into ``{page index: text}``, skipping any page that fails.
 
     ``pages`` is consumed, and every page closed, on the calling thread; only
-    ``_ocr_image`` runs on worker threads. At most ``2 * workers`` pages are held
-    at once so long scanned documents do not accumulate rendered images.
+    ``read`` runs on worker threads. At most ``2 * workers`` pages are held at
+    once so long scanned documents do not accumulate rendered images.
     """
 
     results: dict[int, str] = {}
     if workers <= 1:
         for page in pages:
             try:
-                results[page.index] = _ocr_image(page.image, timeout_seconds=timeout_seconds)
+                results[page.index] = read(page.index, page.image)
             except Exception:
                 continue
             finally:
@@ -783,9 +1317,7 @@ def _ocr_pages(
         try:
             for page in pages:
                 try:
-                    future = executor.submit(
-                        _ocr_image, page.image, timeout_seconds=timeout_seconds
-                    )
+                    future = executor.submit(read, page.index, page.image)
                 except BaseException:
                     page.close()
                     raise
@@ -1039,3 +1571,26 @@ def _fill_cut(
         return start, start
     end = start + max(1, room)
     return end, end
+
+
+_SEGMENT_READERS: dict[str, Callable[[BinarySource, _Options], list[ExtractedSegment]]] = {
+    "docx": _read_docx,
+    "xlsx": _read_xlsx,
+    "pptx": _read_pptx,
+    "eml": _read_eml,
+    "msg": _read_msg,
+    "html": _read_html,
+    "pdf": _read_pdf,
+    "rtf": _read_rtf,
+    "image": _read_image,
+    "text": _read_text,
+}
+_METADATA_READERS: dict[str, Callable[[BinarySource], list[tuple[str, Any]]]] = {
+    "docx": office_metadata,
+    "xlsx": office_metadata,
+    "pptx": office_metadata,
+    "pdf": pdf_metadata,
+    "image": image_metadata,
+    "eml": _eml_metadata,
+    "msg": _msg_metadata,
+}

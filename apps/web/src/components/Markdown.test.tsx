@@ -33,7 +33,7 @@ test("code blocks expose copy, preview, line numbers, and inline editing", async
     />,
   );
 
-  expect(screen.queryByRole("dialog", { name: "Artifact preview" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Artifact canvas" })).not.toBeInTheDocument();
   expect(screen.getByText("html")).toBeInTheDocument();
   expect(screen.getByText("2 lines")).toBeInTheDocument();
   expect(screen.getByText("1")).toBeInTheDocument();
@@ -47,9 +47,85 @@ test("code blocks expose copy, preview, line numbers, and inline editing", async
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("<h1>New title</h1>\n<button>Run</button>"));
 
   fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-  const dialog = screen.getByRole("dialog", { name: "Artifact preview" });
-  expect(within(dialog).getByTitle("html artifact preview")).toBeInTheDocument();
-  expect(within(dialog).getByText(/HTML/)).toBeInTheDocument();
+  const canvas = screen.getByRole("dialog", { name: "Artifact canvas" });
+  const frame = within(canvas).getByTitle("new-title.html preview");
+  expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  expect(frame.getAttribute("srcdoc")).toContain("<h1>New title</h1>");
+  expect(within(canvas).getByText("new-title.html")).toBeInTheDocument();
+  expect(within(canvas).getByText(/HTML/)).toBeInTheDocument();
+});
+
+function blobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
+function captureDownloads() {
+  const blobs: Blob[] = [];
+  const names: string[] = [];
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: (blob: Blob) => {
+      blobs.push(blob);
+      return `blob:download-${blobs.length}`;
+    },
+  });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => undefined });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    names.push(this.download);
+  });
+  return {
+    blobs,
+    names,
+    restore() {
+      click.mockRestore();
+      Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
+    },
+  };
+}
+
+test("Download saves the current code under a name drawn from the code itself", async () => {
+  const downloads = captureDownloads();
+  try {
+    render(<Markdown content={"## Board setup\n\n```python\nclass SnakeGame:\n    pass\n```"} />);
+    const download = screen.getByRole("button", { name: "Download" });
+    expect(download).toHaveAttribute("data-tooltip", "Download as snake_game.py");
+    fireEvent.click(download);
+    expect(downloads.names).toEqual(["snake_game.py"]);
+    expect(downloads.blobs[0]!.type).toBe("text/plain;charset=utf-8");
+    expect(await blobText(downloads.blobs[0]!)).toBe("class SnakeGame:\n    pass");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Editable python code" }), {
+      target: { value: "WIDTH = 20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    // No symbol left: the heading above the block names the edited copy.
+    expect(downloads.names[1]).toBe("board-setup.py");
+    expect(await blobText(downloads.blobs[1]!)).toBe("WIDTH = 20");
+  } finally {
+    downloads.restore();
+  }
+});
+
+test("a fence that names its file keeps that name and shows its language", () => {
+  const downloads = captureDownloads();
+  try {
+    render(<Markdown content={"```js:server.js\nconsole.log(1)\n```"} />);
+    expect(screen.getByText("js")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(downloads.names).toEqual(["server.js"]);
+    expect(downloads.blobs[0]!.type).toBe("text/javascript;charset=utf-8");
+  } finally {
+    downloads.restore();
+  }
 });
 
 test("mermaid code fences render as diagrams with copy and export actions", async () => {
@@ -514,21 +590,57 @@ test("hovering a box surfaces move and delete controls that commit instantly", a
   expect(JSON.parse(onUpdateDiagram.mock.calls[0][1]).rows[0].map((card) => card.id)).toEqual(["b", "a"]);
 });
 
-test("artifact preview traps Tab, supports Escape, and restores its opener", () => {
-  render(<Markdown content={'```html\n<h1>Preview</h1>\n```'} />);
+test("the artifact canvas focuses the running preview, traps Tab, and Escape restores its opener", async () => {
+  render(<Markdown content={'```html\n<title>Pong</title>\n<h1>Preview</h1>\n```'} />);
   const opener = screen.getByRole("button", { name: "Preview" });
   opener.focus();
   fireEvent.click(opener);
-  const dialog = screen.getByRole("dialog", { name: "Artifact preview" });
-  const close = within(dialog).getByRole("button", { name: "Close artifact preview" });
-  expect(close).toHaveFocus();
-  fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
-  expect(within(dialog).getByRole("button", { name: "Done" })).toHaveFocus();
-  fireEvent.keyDown(document.activeElement!, { key: "Tab" });
-  expect(close).toHaveFocus();
-  fireEvent.keyDown(close, { key: "Escape" });
-  expect(screen.queryByRole("dialog", { name: "Artifact preview" })).not.toBeInTheDocument();
+  const canvas = screen.getByRole("dialog", { name: "Artifact canvas" });
+  const frame = within(canvas).getByTitle("pong.html preview");
+  // Keyboard games respond immediately: the running preview takes focus.
+  await waitFor(() => expect(frame).toHaveFocus());
+  fireEvent.keyDown(frame, { key: "Tab" });
+  expect(within(canvas).getByRole("radio", { name: "Preview" })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Tab", shiftKey: true });
+  expect(frame).toHaveFocus();
+  fireEvent.keyDown(frame, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Artifact canvas" })).not.toBeInTheDocument();
   expect(opener).toHaveFocus();
+});
+
+/** Highlighting splits a line into colored spans, so compare whole lines. */
+function canvasLines(canvas: HTMLElement) {
+  return [...canvas.querySelectorAll(".md-code-line-text")].map((line) => line.textContent);
+}
+
+test("the canvas flips between the running preview and numbered code, and expands", () => {
+  render(<Markdown content={'```html\n<title>Pong</title>\n<canvas></canvas>\n```'} />);
+  fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+  const canvas = screen.getByRole("dialog", { name: "Artifact canvas" });
+  fireEvent.click(within(canvas).getByRole("radio", { name: "Code" }));
+  expect(within(canvas).queryByTitle("pong.html preview")).not.toBeInTheDocument();
+  expect(canvasLines(canvas)).toContain("<canvas></canvas>");
+  expect(within(canvas).queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+
+  const expand = within(canvas).getByRole("button", { name: "Expand the canvas to the full window" });
+  fireEvent.click(expand);
+  expect(document.querySelector(".artifact-canvas-layer")).toHaveClass("is-expanded");
+  expect(within(canvas).getByRole("button", { name: "Restore the canvas beside the chat" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  fireEvent.click(within(canvas).getByRole("button", { name: "Close the artifact canvas" }));
+  expect(screen.queryByRole("dialog", { name: "Artifact canvas" })).not.toBeInTheDocument();
+});
+
+test("code with no live preview opens straight to its source", () => {
+  render(<Markdown content={"```python\nprint('hi')\n```"} />);
+  fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+  const canvas = screen.getByRole("dialog", { name: "Artifact canvas" });
+  expect(within(canvas).queryByRole("radiogroup", { name: "Artifact view" })).not.toBeInTheDocument();
+  expect(within(canvas).queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+  expect(canvasLines(canvas)).toContain("print('hi')");
+  expect(within(canvas).getByText(/Source/)).toBeInTheDocument();
 });
 
 test("switching response versions replaces code and closes the previous version's preview", async () => {
@@ -536,12 +648,13 @@ test("switching response versions replaces code and closes the previous version'
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Editable html code" }), { target: { value: "<h1>Local edit</h1>" } });
   fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-  expect(screen.getByRole("dialog", { name: "Artifact preview" })).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Artifact canvas" })).toBeInTheDocument();
   view.rerender(<Markdown content={'```html\n<h1>Second version</h1>\n```'} />);
-  expect(screen.queryByRole("dialog", { name: "Artifact preview" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Artifact canvas" })).not.toBeInTheDocument();
   expect(screen.queryByRole("textbox", { name: "Editable html code" })).not.toBeInTheDocument();
-  expect(screen.getByText("<h1>Second version</h1>")).toBeInTheDocument();
-  expect(screen.queryByText("<h1>Local edit</h1>")).not.toBeInTheDocument();
+  // Highlighting splits a line into colored spans, so compare whole lines.
+  expect(document.querySelector(".md-code-line-text")).toHaveTextContent("<h1>Second version</h1>");
+  expect(document.querySelector(".md-code-panel")).not.toHaveTextContent("<h1>Local edit</h1>");
 });
 
 test("a diagram drawn as text renders as a figure with its notes, and Code shows what was written", async () => {

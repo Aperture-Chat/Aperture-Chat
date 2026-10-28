@@ -231,6 +231,59 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.15
+
+- **Knowledge that keeps what files carry.** Uploads keep their own
+  properties (Office core and custom properties, Microsoft Purview
+  sensitivity labels, PDF and email headers, photo EXIF without location),
+  and connectors add Box metadata, SharePoint columns, Google Drive
+  properties, and iManage profile fields. Properties are searchable and shown
+  beside every cited passage. Extraction also keeps Word headers, footers,
+  footnotes, and comments, slide speaker notes, PDF reviewer comments and
+  filled form fields, and email attachments.
+- **Handwriting and pictures.** Scanned pages, stamps, and handwriting are
+  read by the workspace's best image-capable model (for example Gemini Flash
+  on OpenRouter or GPT-4.1 on Azure AI Foundry), metered as `knowledge-ocr`,
+  with Tesseract as the fallback. Each knowledge base can switch this off to
+  keep pages on the server.
+- **Ethical walls.** A file whose metadata has an **Ethical wall** or
+  **Information barrier** field naming a group is limited to that group's
+  members, administrators and platform owners included; administrators can
+  also set a wall per document. A wall naming no known group admits nobody.
+- **Web sites, not just pages.** Adding a web page can bring in the linked
+  pages of the same site (robots.txt and sign-in pages respected, up to 100
+  pages), cite each exact page, and, when a question needs a page that was
+  not read up front, look it up on that site live (its links and its own
+  search box) and cite it without storing it.
+- **Code in chat.** Code blocks are colored with highlight.js, can be edited
+  in place and saved into the message, and offer **AI edit** on a highlighted
+  selection with a line-by-line review. **Download** names the file from its
+  contents, and HTML previews open in a canvas at the right edge.
+- **Diagrams and work trace.** Structure diagrams gain eight themes,
+  connector and corner styles, draggable cards, bendable arrows, per-card
+  colors, and **Reset layout**; PNG, Word, and Drafts exports keep the font
+  chat used. A work trace shows what a reply is doing while it streams.
+- **Decks and Drafts.** Decks gain seven theme designs and statement,
+  big-number, and picture-with-bullets layouts. The Export panel starts with
+  **Save your edits first** when edits are unsaved, one save status sits
+  beside **Insert** in both document and deck toolbars, and the visual
+  redline is restyled and draws fill-in blanks as lines.
+- **Carved controls.** Dropdowns, code blocks, and the Transfer to Drafts
+  button use the carved tactile style, and dark-mode wells are deeper.
+- Fixes: Word export downloads the document when the browser or desktop host
+  refuses file-system access instead of leaving an empty file, a saved
+  version no longer reads **Editing** right after saving, and inline AI
+  edits keep blank lines.
+- No database migrations. Optional settings:
+  `APERTURE_KNOWLEDGE_VISION_OCR_ENABLED` (default on),
+  `APERTURE_KNOWLEDGE_VISION_OCR_MAX_PAGES`,
+  `APERTURE_KNOWLEDGE_VISION_OCR_CONCURRENCY`, and
+  `APERTURE_KNOWLEDGE_VISION_OCR_MODEL`. Upgrading from v0.5.15 changes both
+  the API and web images.
+- API and web images publish as `v0.5.16-dev`, `v0.5.16-test`, and
+  `v0.5.16-main`. Stable `v0.5.16` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.14
 
 - **Optional WorkOS sign-in with your own account.** Single sign-on can now

@@ -16,6 +16,7 @@ import type {
   User,
   KnowledgeBase,
   KnowledgeConfigRecord,
+  KnowledgeDocumentWallOverride,
   KnowledgeLinkedSource,
   ModelConfig,
   PlatformSettings,
@@ -240,7 +241,25 @@ export function mapKnowledgeConfigRecordToKnowledgeBase(
     owner_group_id: record.acl_group_ids[0] ?? "",
     owner_user_id: record.owner_user_id,
     enabled: record.enabled,
+    vision_ocr: record.settings.vision_ocr !== false,
+    wall_fields: stringArraySetting(record.settings, "wall_fields"),
+    document_walls: documentWallsSetting(record.settings),
   };
+}
+
+function documentWallsSetting(settings: ConfigSettings): Record<string, KnowledgeDocumentWallOverride> {
+  const raw = settings.document_walls;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).flatMap(([documentId, value]) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+      const record = value as Record<string, unknown>;
+      const groupIds = Array.isArray(record.group_ids)
+        ? record.group_ids.filter((item): item is string => typeof item === "string")
+        : [];
+      return [[documentId, { mode: String(record.mode ?? ""), group_ids: groupIds }]];
+    }),
+  );
 }
 
 function linkedSourcesSetting(settings: ConfigSettings): KnowledgeLinkedSource[] {
@@ -248,25 +267,30 @@ function linkedSourcesSetting(settings: ConfigSettings): KnowledgeLinkedSource[]
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item): KnowledgeLinkedSource[] => {
     if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    const kind = record.kind === "web" || record.kind === "api" ? record.kind : null;
-    if (!kind) return [];
-    const text = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : undefined);
-    return [
-      {
-        document_id: text("document_id") ?? null,
-        kind,
-        name: text("name") ?? text("url") ?? text("base_url") ?? "Source",
-        url: text("url"),
-        base_url: text("base_url"),
-        path: text("path"),
-        method: text("method"),
-        auth_type: text("auth_type"),
-        refresh: record.refresh === true,
-        awaiting_authorization: record.awaiting_authorization === true,
-      },
-    ];
+    const source = linkedSourceRecord(item as Record<string, unknown>);
+    return source ? [source] : [];
   });
+}
+
+function linkedSourceRecord(record: Record<string, unknown>): KnowledgeLinkedSource | null {
+  const kind = record.kind === "web" || record.kind === "api" ? record.kind : null;
+  if (!kind) return null;
+  const text = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : undefined);
+  return {
+    document_id: text("document_id") ?? null,
+    kind,
+    name: text("name") ?? text("url") ?? text("base_url") ?? "Source",
+    url: text("url"),
+    base_url: text("base_url"),
+    path: text("path"),
+    method: text("method"),
+    auth_type: text("auth_type"),
+    refresh: record.refresh === true,
+    awaiting_authorization: record.awaiting_authorization === true,
+    crawl_depth: numberSetting(record, "crawl_depth"),
+    page_count: numberSetting(record, "page_count"),
+    live_lookup: record.live_lookup === true,
+  };
 }
 
 export function mapToolConfigRecordToDisplay(record: ToolConfigRecord): ToolConfig {

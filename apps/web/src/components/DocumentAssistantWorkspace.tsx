@@ -1,5 +1,5 @@
 import { connectorHidden } from "../lib/connectors";
-import { draftHtmlForAccount, removeDraftPageLabels } from "../lib/draftPageLayout";
+import { draftHtmlForAccount, reflowSavedVersions, removeDraftPageLabels } from "../lib/draftPageLayout";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
 import { DeckBlade, DECK_BLADE_DEFAULT_WIDTH } from "./DeckBlade";
 import { DeckLayoutGallery, DeckPicturePanel, type DeckWebImageChoice } from "./DeckBladePanels";
@@ -61,6 +61,8 @@ import { DraftPencilMark } from "./DraftPencilMark";
 import { formatMlaDocument } from "../lib/draftMla";
 import { DictationControl } from "./DictationControl";
 import { DraftModelMenu } from "./DraftModelMenu";
+import { DraftSaveStatus } from "./DraftSaveStatus";
+import { draftSaveStatus, type DraftServerSaveState } from "../lib/draftSaveStatus";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
 import type { DraftHandoffRequest } from "../lib/draftHandoff";
 import { SelectControl } from "./SelectControl";
@@ -71,6 +73,7 @@ import {
   AlignLeft,
   AlignRight,
   ArrowDown,
+  ArrowRight,
   CalendarDays,
   GripHorizontal,
   Keyboard,
@@ -97,7 +100,6 @@ import {
   Clipboard,
   ClipboardList,
   Clock3,
-  CloudOff,
   Code2,
   Copy,
   Download,
@@ -230,6 +232,7 @@ import {
 } from "../lib/docxExport";
 import type { BootstrapData, ChatCitation } from "../lib/types";
 import { printSavedDraftVersion } from "../lib/draftPrint";
+import { splitFillInBlanks } from "../lib/fillInBlanks";
 import {
   computeDraftRedline,
   sanitizeDocumentHtml,
@@ -280,8 +283,10 @@ import {
   deckRunsText,
   deckSlideBackgroundSource,
   deckSlideOutline,
+  deckSlidePicture,
   deckSlideRegionContent,
   deckSlidesEqual,
+  deckThemeDesign,
   defaultDeckTheme,
   isDeckBulletList,
   nextDeckSlideId,
@@ -289,6 +294,8 @@ import {
   pruneDeckBackgroundLibrary,
   serializeSlideDeck,
   withDeckBackground,
+  withDeckSlidePicture,
+  type DeckDesign,
   type DeckBullet,
   type DeckRichText,
   type DeckSlide,
@@ -307,11 +314,14 @@ import {
   DECK_LOGO_BOX,
   DECK_PREVIEW_HEIGHT_PX,
   DECK_PREVIEW_WIDTH_PX,
+  deckRoleColor,
   resolvedMediaBox,
   resolvedTextRegions,
   slideDecorations,
+  slideRegionNames,
   slideTextRegions,
   type DeckBox,
+  type DeckDecorationSpec,
   type DeckTextRegionSpec,
 } from "../lib/deck/deckGeometry";
 import { deckFromDocumentHtml, textRunsFromElement } from "../lib/deck/deckFromDocument";
@@ -338,6 +348,12 @@ import {
   type DeckFitIssue,
 } from "../lib/deck/deckLayoutCheck";
 import { BUILT_IN_DECK_TEMPLATES, builtInDeckTemplate } from "../lib/deck/deckTemplates";
+import {
+  DECK_THEME_PRESETS,
+  deckThemePresetActive,
+  deckThemeWithPreset,
+  type DeckThemePreset,
+} from "../lib/deck/deckThemes";
 import { parseDeckTemplate, type DeckTemplateParseResponse } from "../lib/api/deckTemplates";
 import { markdownOutlineFromDeck } from "../lib/deck/deckToDocument";
 import { PPTX_MIME_TYPE, buildPptxExportDocument } from "../lib/pptxExport";
@@ -421,17 +437,6 @@ type DraftDocumentHistoryItem = DraftSyncFields & {
   events?: AssistantEvent[];
 };
 
-/** Honest server persistence state for the current document. "saved" is set
- * only after a 2xx server response; anything else must never claim "Saved". */
-type DraftServerSaveState =
-  | { kind: "idle" }
-  | { kind: "saving" }
-  | { kind: "saved"; revision: number }
-  | { kind: "local-only"; message: string }
-  // The browser refused to store this draft (quota); nothing was written.
-  | { kind: "not-stored"; message: string }
-  | { kind: "conflict"; serverId: string; message: string };
-
 /** Snapshot handed to the server-sync queue; retained for explicit retries. */
 type DraftServerSyncSnapshot = {
   historyId: string;
@@ -493,6 +498,8 @@ type ExportReceipt = {
   label: string;
   delivery: ExportDelivery;
   href?: string;
+  /** A second line when delivery did not go as asked. */
+  note?: string;
 };
 
 type FileSystemWritableFileStreamLike = {
@@ -505,6 +512,7 @@ type FileSystemFileHandleLike = {
   createWritable: () => Promise<FileSystemWritableFileStreamLike>;
   getFile?: () => Promise<Blob>;
   remove?: () => Promise<void>;
+  queryPermission?: (descriptor: { mode: "readwrite" }) => Promise<PermissionState>;
 };
 
 type SaveFilePickerWindow = Window & {
@@ -915,6 +923,9 @@ const OUTLINE_PREFERENCE_KEY = "aperture.drafts.outline";
 const ZOOM_PREFERENCE_KEY = "aperture.drafts.zoom";
 const DECK_BLADE_WIDTH_PREFERENCE_KEY = "aperture.drafts.deckBladeWidth";
 const DECK_LAYOUT_STRIP_PREFERENCE_KEY = "aperture.drafts.deckLayoutStrip";
+/** Set once this browser refuses writes to a file picked in its save dialog,
+ * so exports stop offering a location they cannot fill. */
+const EXPORT_PICKER_REFUSED_KEY = "aperture.drafts.exportPickerRefused";
 
 /** Status lines for the slide text toolbar's toggles. */
 const DECK_TEXT_COMMAND_LABELS: Record<DeckTextCommand, string> = {
@@ -994,13 +1005,14 @@ const DECK_EXPORT_OPTIONS: Array<{
 ];
 
 /** Built-in slide palettes: name, accent, background, heading, body. */
-const DECK_COLOR_PALETTES: Array<[string, string, string, string, string]> = [
-  ["Aperture", "#087d8b", "#ffffff", "#0c1a26", "#22313f"],
-  ["Midnight", "#66d9ef", "#122033", "#ffffff", "#dbe5f0"],
-  ["Editorial", "#a44932", "#faf4e8", "#38271f", "#514237"],
-  ["Violet", "#7952c8", "#f7f4ff", "#2e1c4b", "#4b3c62"],
-  ["Forest", "#397b52", "#f1f6ef", "#193823", "#35533d"],
-];
+/** The title slide each theme card shows, so a card previews the real look. */
+const DECK_THEME_SAMPLE_SLIDE: DeckSlide = {
+  id: "theme-sample",
+  notes: "",
+  layout: "title",
+  title: [{ text: "Quarterly review" }],
+  subtitle: [{ text: "Plans and priorities" }],
+};
 
 const DRAFT_ATTACHMENT_CONNECTORS: DraftConnectorOption[] = [
   {
@@ -2133,6 +2145,9 @@ export function DocumentAssistantWorkspace({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exportDelivery, setExportDelivery] = useState<ExportDelivery>("picker");
   const [pendingSaveExportFormat, setPendingSaveExportFormat] = useState<ExportAction | null>(null);
+  // The version the export panel's save step just made, confirmed in the
+  // panel until another version is selected or the draft is edited again.
+  const [exportSavedVersion, setExportSavedVersion] = useState<DraftVersion | null>(null);
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
   const [lastExport, setLastExport] = useState<ExportReceipt | null>(null);
   const [printPreparing, setPrintPreparing] = useState(false);
@@ -2581,6 +2596,9 @@ export function DocumentAssistantWorkspace({
     deckState?.slides.find((slide) => slide.id === selectedSlideId) ??
     deckState?.slides[0] ??
     null;
+  const selectedPicture = selectedSlide ? deckSlidePicture(selectedSlide) : null;
+  const selectedMediaBox =
+    selectedSlide && deckState ? resolvedMediaBox(selectedSlide, deckThemeDesign(deckState.theme)) : null;
   const selectedSlideHasOwnBackground = Boolean(
     selectedSlide?.backgroundId || selectedSlide?.background,
   );
@@ -2616,7 +2634,7 @@ export function DocumentAssistantWorkspace({
   useEffect(() => {
     if (!deckImageDialog.open || !selectedSlide || deckImageDialog.slideId === selectedSlide.id) return;
     if (deckImageDialog.working) return;
-    if (selectedSlide.layout !== "image-caption") {
+    if (!deckSlidePicture(selectedSlide)) {
       closeDeckImageDialog();
       return;
     }
@@ -2642,6 +2660,8 @@ export function DocumentAssistantWorkspace({
         : selectedVersion.content !== content)),
   );
   hasUnsavedEditsRef.current = hasUnsavedEdits || serverSaveState.kind === "not-stored";
+  const exportSaveReceipt =
+    !hasUnsavedEdits && exportSavedVersion?.id === selectedVersionId ? exportSavedVersion : null;
   useEffect(() => {
     const protectUnsavedWork = (event: BeforeUnloadEvent) => {
       if (!hasUnsavedEditsRef.current) return;
@@ -2656,19 +2676,7 @@ export function DocumentAssistantWorkspace({
     versions.length > 1 &&
     Boolean(latestSavedVersion) &&
     dismissedChangeSummaryVersionId !== latestSavedVersion.id;
-  // "Saved" is only honest while the server copy is not known to be behind;
-  // a failed or conflicted server save downgrades the label to "Local only".
-  const serverSaveDegraded =
-    serverSaveState.kind === "local-only" ||
-    serverSaveState.kind === "not-stored" ||
-    serverSaveState.kind === "conflict";
-  const reviewModeLabel = hasUnsavedEdits
-    ? "Editing"
-    : serverSaveState.kind === "not-stored"
-      ? "Not saved"
-      : serverSaveDegraded
-        ? "Local only"
-        : "Saved";
+  const saveStatus = draftSaveStatus(hasUnsavedEdits, serverSaveState);
   // Compare versions is honest only with two genuinely different saved
   // snapshots; identical restore copies do not count.
   const canCompareVersions = useMemo(
@@ -2758,11 +2766,6 @@ export function DocumentAssistantWorkspace({
     };
   }, [completionUserId, draftScope, draftTenantSlug]);
   const aiEditTrail = useMemo(() => aiEditTrailFromHtml(content), [content]);
-  const reviewModeStatus = hasUnsavedEdits
-    ? "Editing in progress. Save a version when the document is ready."
-    : serverSaveDegraded
-      ? "Current version is kept on this device only — the server save did not complete."
-      : "Current version is saved.";
   const documentPageCount = countDocumentPages(content);
   const isPaginatedDocument = documentPageCount > 0;
   // A document opened from Word or PDF carries its page setup; the canvas
@@ -2851,25 +2854,14 @@ export function DocumentAssistantWorkspace({
     return () => window.clearTimeout(timer);
   }, [content, completionUserId]);
 
-  function applyRebalancedLayout(
-    sourceHtml: string,
-    healedHtml: string,
-    versionId = selectedVersionId,
-  ) {
+  function applyRebalancedLayout(sourceHtml: string, healedHtml: string) {
     const editor = editorRef.current;
     if (!editor || editor.innerHTML !== sourceHtml) return false;
     normalizedLayoutHtmlRef.current = healedHtml;
     setContent(healedHtml);
-    // Reflow is a layout normalization, not a new user edit. If the source
-    // was the selected saved version, update that version in lockstep so
-    // Export does not incorrectly demand another save.
-    setVersions((current) =>
-      current.map((version) =>
-        version.id === versionId && version.content === sourceHtml
-          ? { ...version, content: healedHtml }
-          : version,
-      ),
-    );
+    // Saved versions holding the source move in lockstep, so neither Export
+    // nor the save status demands another save after a reflow.
+    setVersions((current) => reflowSavedVersions(current, sourceHtml, healedHtml));
     return true;
   }
 
@@ -2879,7 +2871,6 @@ export function DocumentAssistantWorkspace({
   function scheduleSheetOverflowHeal(sourceHtml: string) {
     if (isAutomatedTestMode() || !sourceHtml.trim()) return;
     const runId = ++sheetHealRunRef.current;
-    const versionIdAtSchedule = selectedVersionId;
     window.setTimeout(() => {
       void (async () => {
         if (sheetHealRunRef.current !== runId) return;
@@ -2897,7 +2888,7 @@ export function DocumentAssistantWorkspace({
           return;
         }
         // The user may have edited while we measured; never clobber newer content.
-        if (!applyRebalancedLayout(sourceHtml, healed, versionIdAtSchedule)) return;
+        if (!applyRebalancedLayout(sourceHtml, healed)) return;
         setStatus("Pages rebalanced to fit the page layout.");
       })();
     }, 250);
@@ -3938,7 +3929,7 @@ export function DocumentAssistantWorkspace({
     const computed = element && typeof window.getComputedStyle === "function" ? window.getComputedStyle(element) : null;
     const weight = computed?.fontWeight ?? "";
     const theme = deckState?.theme ?? defaultDeckTheme();
-    const spec = resolvedTextRegions(slide)[region];
+    const spec = resolvedTextRegions(slide, deckThemeDesign(theme))[region];
     const content = deckSlideRegionContent(slide, region);
     // Only this box is measured: it runs on every selection change.
     const issue = content?.length ? auditDeckLayout({ theme, slides: [slide] }, { regions: [region] })[0] : undefined;
@@ -4028,7 +4019,7 @@ export function DocumentAssistantWorkspace({
     let fitNote = "";
     if (options.fitNote) {
       const issue = auditDeckLayout(next, { slideIds: [slide.id], regions: [entry.region] })[0];
-      const spec = resolvedTextRegions(updated)[entry.region];
+      const spec = resolvedTextRegions(updated, deckThemeDesign(next.theme))[entry.region];
       const content = deckSlideRegionContent(updated, entry.region);
       if (issue?.problem === "overflow" || issue?.problem === "broken-word") {
         fitNote = " It no longer fits its box and will spill over in PowerPoint: shorten it, size it down, or drag a corner to make the box bigger.";
@@ -4172,7 +4163,7 @@ export function DocumentAssistantWorkspace({
     // A real description only: the picture's own, the words around it, or the
     // deck's name — never a placeholder word that would search for nothing.
     const suggestion =
-      (slide?.layout === "image-caption" ? slide.image.alt.trim() : "") ||
+      (slide ? deckSlidePicture(slide)?.alt.trim() : "") ||
       (slide ? deckPictureContextAlt(slide) : "") ||
       (documentTitle.trim() !== EMPTY_DOCUMENT_TITLE ? documentTitle.trim() : "");
     setDeckImageDialog((current) => {
@@ -4206,7 +4197,7 @@ export function DocumentAssistantWorkspace({
       return;
     }
     if (!selectedSlide) return;
-    openDeckImageDialog(selectedSlide.id, selectedSlide.layout === "image-caption" ? "image" : null, trigger);
+    openDeckImageDialog(selectedSlide.id, deckSlidePicture(selectedSlide) ? "image" : null, trigger);
   }
 
   /** Switches a slide without a picture to a layout with one from the picture
@@ -4223,11 +4214,10 @@ export function DocumentAssistantWorkspace({
     if (!deckState || !slideId) return;
     setDeckState({
       ...deckState,
-      slides: deckState.slides.map((slide) =>
-        slide.id === slideId && slide.layout === "image-caption" && slide.image.src
-          ? { ...slide, image: { ...slide.image, alt: alt.slice(0, 500) } }
-          : slide,
-      ),
+      slides: deckState.slides.map((slide) => {
+        const picture = slide.id === slideId ? deckSlidePicture(slide) : null;
+        return picture?.src ? withDeckSlidePicture(slide, { ...picture, alt: alt.slice(0, 500) }) : slide;
+      }),
     });
   }
 
@@ -4279,21 +4269,17 @@ export function DocumentAssistantWorkspace({
   function applyDeckSlideImage(slideId: string, src: string, alt: string, caption?: string): boolean {
     const deck = flushDeckTextEdits();
     if (!deck) return false;
-    if (deck.slides.find((slide) => slide.id === slideId)?.layout !== "image-caption") {
+    const target = deck.slides.find((slide) => slide.id === slideId);
+    if (!target || !deckSlidePicture(target)) {
       setStatus("That slide no longer holds a picture.");
       return false;
     }
     const slides = deck.slides.map((slide) => {
-      if (slide.id !== slideId || slide.layout !== "image-caption") return slide;
-      return {
-        ...slide,
-        image: { src, alt },
-        caption: deckRunsText(slide.caption).trim()
-          ? slide.caption
-          : caption
-            ? deckRichText(caption)
-            : slide.caption,
-      };
+      if (slide.id !== slideId) return slide;
+      const placed = withDeckSlidePicture(slide, { src, alt });
+      // A suggested caption fills an empty caption; it never overwrites one.
+      if (placed.layout !== "image-caption" || deckRunsText(placed.caption).trim() || !caption) return placed;
+      return { ...placed, caption: deckRichText(caption) };
     });
     const next = { ...deck, slides };
     if (utf8ByteLength(serializeSlideDeck(next)) > MAX_DECK_CONTENT_BYTES) {
@@ -4312,9 +4298,7 @@ export function DocumentAssistantWorkspace({
     const deck = flushDeckTextEdits();
     if (!deck) return;
     const slides = deck.slides.map((slide) =>
-      slide.id === slideId && slide.layout === "image-caption"
-        ? { ...slide, image: { src: "", alt: "" } }
-        : slide,
+      slide.id === slideId ? withDeckSlidePicture(slide, { src: "", alt: "" }) : slide,
     );
     commitDeck({ ...deck, slides }, "Slide image removed.", serializeSlideDeck(deck));
   }
@@ -4943,7 +4927,9 @@ export function DocumentAssistantWorkspace({
             const after = deckFitScore(auditDeckLayout(fitted.deck, { slideIds: fittedIds }));
             const keeps =
               fittedIds.length === fitIds.length &&
-              fitted.slides.every((slide, index) => deckFitFixKeepsContent(proposed[index], slide));
+              fitted.slides.every((slide, index) =>
+                deckFitFixKeepsContent(proposed[index], slide, deckThemeDesign(deckNow.theme)),
+              );
             if (after < before && keeps) {
               parsed = fitted;
               raw = fitRaw;
@@ -5153,13 +5139,13 @@ export function DocumentAssistantWorkspace({
     // slides — the photo is that slide's visual, an art backdrop behind an
     // empty frame reads as a mistake.
     const captionTargets = deck.slides
-      .filter((slide) => slide.layout === "image-caption" && !slide.image?.src)
+      .filter((slide) => deckSlidePicture(slide)?.src === "")
       .slice(0, 6);
     const backgroundTargets = deck.slides
-      .filter((slide) => !slide.backgroundId && slide.layout !== "image-caption")
+      .filter((slide) => !slide.backgroundId && !deckSlidePicture(slide))
       .slice(0, 12);
     const skipped =
-      deck.slides.filter((slide) => !slide.backgroundId && slide.layout !== "image-caption").length -
+      deck.slides.filter((slide) => !slide.backgroundId && !deckSlidePicture(slide)).length -
       backgroundTargets.length;
     const totalTargets = captionTargets.length + backgroundTargets.length;
     if (!totalTargets) return;
@@ -5174,19 +5160,18 @@ export function DocumentAssistantWorkspace({
         `Generating slide picture ${step} of ${totalTargets} with ${imageGenerationAgent.name}…`,
       );
       const subject =
-        (slide.layout === "image-caption" &&
-          (slide.image?.alt?.trim() || deckRunsText(slide.caption ?? []).trim())) ||
+        deckSlidePicture(slide)?.alt.trim() ||
+        (slide.layout === "image-caption" ? deckRunsText(slide.caption).trim() : "") ||
         deckSlideOutline(slide).split("\n")[0]?.trim() ||
         working.title;
       try {
         const dataUrl = await generateSlideImageDataUrl(subject.slice(0, 240), "photo");
         const candidate: SlideDeck = {
           ...working,
-          slides: working.slides.map((item) =>
-            item.id === slide.id && item.layout === "image-caption"
-              ? { ...item, image: { ...item.image, src: dataUrl } }
-              : item,
-          ),
+          slides: working.slides.map((item) => {
+            const picture = item.id === slide.id ? deckSlidePicture(item) : null;
+            return picture ? withDeckSlidePicture(item, { ...picture, src: dataUrl }) : item;
+          }),
         };
         if (utf8ByteLength(serializeSlideDeck(candidate)) > MAX_DECK_CONTENT_BYTES) {
           failures.push(`slide picture: the deck reached its size limit`);
@@ -5273,29 +5258,27 @@ export function DocumentAssistantWorkspace({
     setDeckImagesWorking(false);
   }
 
-  /** Fills empty image-caption slides with a real public web image matched
-   * from the slide's own picture description. Slides with no usable match
-   * keep their empty frame — never a placeholder pretending to be art. */
+  /** Fills empty picture slides with a real public web image matched from
+   * the slide's own picture description. Slides with no usable match keep
+   * their empty frame — never a placeholder pretending to be art. */
   async function fillDeckCaptionImages(deck: SlideDeck): Promise<SlideDeck> {
     const targets = deck.slides
-      .filter(
-        (slide): slide is DeckSlide & { layout: "image-caption"; image: { src: string; alt: string } } =>
-          slide.layout === "image-caption" && !slide.image?.src && Boolean(slide.image?.alt?.trim()),
-      )
+      .flatMap((slide) => {
+        const picture = deckSlidePicture(slide);
+        return picture && !picture.src && picture.alt.trim() ? [{ slide, picture }] : [];
+      })
       .slice(0, 6);
     if (!targets.length) return deck;
     let working: SlideDeck = deck;
     let filled = 0;
-    for (const slide of targets) {
-      setStatus(`Finding a web image for "${slide.image.alt.slice(0, 60)}"…`);
-      const result = await resolveWebImageResult(slide.image.alt.trim());
+    for (const { slide, picture } of targets) {
+      setStatus(`Finding a web image for "${picture.alt.slice(0, 60)}"…`);
+      const result = await resolveWebImageResult(picture.alt.trim());
       if (result.source === "Aperture local fallback") continue;
       working = {
         ...working,
         slides: working.slides.map((item) =>
-          item.id === slide.id && item.layout === "image-caption"
-            ? { ...item, image: { ...item.image, src: result.url } }
-            : item,
+          item.id === slide.id ? withDeckSlidePicture(item, { ...picture, src: result.url }) : item,
         ),
       };
       filled += 1;
@@ -5331,7 +5314,7 @@ export function DocumentAssistantWorkspace({
    * budget. Slides with no usable result keep their theme colors. */
   async function applyWebBackgroundsForDeck(deck: SlideDeck) {
     const targets = deck.slides
-      .filter((slide) => !slide.backgroundId && slide.layout !== "image-caption")
+      .filter((slide) => !slide.backgroundId && !deckSlidePicture(slide))
       .slice(0, 8);
     if (!targets.length) return;
     setDeckImagesWorking(true);
@@ -5451,15 +5434,15 @@ export function DocumentAssistantWorkspace({
     );
   }
 
-  function applyDeckPalette(name: string, accent: string, background: string, heading: string, body: string) {
+  function applyDeckThemePreset(preset: DeckThemePreset) {
     endDeckEditSession();
     const deck = flushDeckTextEdits() ?? deckState;
     if (!deck) return;
-    commitDeck({ ...deck, theme: { ...deck.theme, sourceLabel: name,
-      // The surface color draws the divider bars; a hair off the background
-      // keeps them visible instead of vanishing into it.
-      colors: { ...deck.theme.colors, accent1: accent, accent2: accent, background, heading, body, surface: mixHexColors(background, heading, 0.14) },
-    } }, `${name} colors applied to the deck.`, serializeSlideDeck(deck));
+    commitDeck(
+      { ...deck, theme: deckThemeWithPreset(deck.theme, preset) },
+      `${preset.name} theme applied to the deck.`,
+      serializeSlideDeck(deck),
+    );
   }
 
   function triggerDeckBrandUpload() {
@@ -5732,9 +5715,10 @@ export function DocumentAssistantWorkspace({
     try {
       advanceDraftTrace("context");
       const fallbackTitle = documentTitle.trim() || EMPTY_DOCUMENT_TITLE;
+      const promptDesign = deckThemeDesign((revising ? (currentDeck as SlideDeck) : deckState)?.theme ?? {});
       const basePrompt = revising
-        ? providerDeckRevisionPrompt(deckJsonForPrompt(currentDeck as SlideDeck), request)
-        : providerDeckPrompt(selectedDeckTemplateOutline(), request, contextOptions);
+        ? providerDeckRevisionPrompt(deckJsonForPrompt(currentDeck as SlideDeck), request, promptDesign)
+        : providerDeckPrompt(selectedDeckTemplateOutline(), request, contextOptions, promptDesign);
       advanceDraftTrace("generate");
       const keptBackgrounds = new Map<string, DeckSlide>(
         (currentDeck?.slides ?? []).map((slide) => [slide.id, slide]),
@@ -6105,7 +6089,7 @@ export function DocumentAssistantWorkspace({
   function deckBlockBoxCurrent(slideId: string, region: string): DeckBox | null {
     const slide = deckState?.slides.find((item) => item.id === slideId) ?? null;
     if (!slide) return null;
-    return deckBlockBoxForRegion(slide, region);
+    return deckBlockBoxForRegion(slide, region, deckThemeDesign(deckState?.theme ?? {}));
   }
 
   function applyDeckBlockBox(
@@ -6217,10 +6201,11 @@ export function DocumentAssistantWorkspace({
 
   /** Every other box on the slide (text regions and media), for guides. */
   function otherDeckBoxes(slide: DeckSlide, region: string): DeckBox[] {
-    const boxes = Object.entries(resolvedTextRegions(slide))
-      .filter(([name]) => name !== region && deckRegionContent(slide, name) !== null)
+    const design = deckThemeDesign(deckState?.theme ?? {});
+    const boxes = Object.entries(resolvedTextRegions(slide, design))
+      .filter(([name]) => name !== region && deckSlideRegionContent(slide, name) !== null)
       .map(([, spec]) => spec.box);
-    const media = region === "image" ? null : resolvedMediaBox(slide);
+    const media = region === "image" ? null : resolvedMediaBox(slide, design);
     return media ? [...boxes, media] : boxes;
   }
 
@@ -6479,8 +6464,8 @@ export function DocumentAssistantWorkspace({
     const reportUnstored = (reason: string) => reportSaveState({
       kind: snapshot.storedLocally ? "local-only" : "not-stored",
       message: snapshot.storedLocally
-        ? `Local only — ${reason}. Your changes are kept on this device.`
-        : `Not saved — ${reason}, and browser storage could not keep a copy. Keep this workspace open and retry or export your changes.`,
+        ? `${reason}. Your changes are kept on this device.`
+        : `${reason}, and browser storage could not keep a copy. Keep this workspace open and retry or export your changes.`,
     });
     // Titles made from long requests can pass the server's limit; the account
     // copy gets a shortened title rather than a rejected save.
@@ -6488,8 +6473,8 @@ export function DocumentAssistantWorkspace({
     if (utf8ByteLength(snapshot.content) > maxDraftContentBytes(kind)) {
       reportUnstored(
         kind === "deck"
-          ? "this deck exceeds the 8 MB server deck limit"
-          : "this draft exceeds the 2 MB server draft limit",
+          ? "This deck exceeds the 8 MB server deck limit"
+          : "This draft exceeds the 2 MB server draft limit",
       );
       return;
     }
@@ -6563,7 +6548,7 @@ export function DocumentAssistantWorkspace({
             "This draft changed somewhere else (another tab or device) before this save. Reload the server copy to continue from it — nothing was overwritten.",
         });
       } else {
-        reportUnstored(`server save failed (${draftErrorText(error)})`);
+        reportUnstored(`Server save failed (${draftErrorText(error)})`);
       }
     }
   }
@@ -7432,26 +7417,26 @@ export function DocumentAssistantWorkspace({
     }
   }
 
-  function saveManualVersion() {
+  function saveManualVersion(): DraftVersion | null {
     if (draftKind === "deck") {
       endDeckEditSession();
       const editedDeck = flushDeckTextEdits();
-      if (!editedDeck) return;
+      if (!editedDeck) return null;
       const deck = { ...editedDeck, title: documentTitle.trim() || EMPTY_DOCUMENT_TITLE };
       const serialized = serializeSlideDeck(deck);
       if (selectedVersion && selectedVersion.content === serialized && documentTitle.trim() === savedDocumentTitle.trim()) {
         setStatus("Current version already matches the deck.");
-        return;
+        return null;
       }
       const nextVersion = appendDeckVersion(deck, "Manual deck edit snapshot");
       setDeckState(deck);
       setStatus(`${nextVersion.label} saved from deck edits.`);
       rememberDeckSnapshot(documentTitle, serialized, nextVersion.summary);
-      return;
+      return nextVersion;
     }
     if (!hasUnsavedEdits) {
       setStatus("Current version already matches the editor.");
-      return;
+      return null;
     }
     const nextVersionNumber = versions.length + 1;
     const executedAt = draftNowIso();
@@ -7467,6 +7452,7 @@ export function DocumentAssistantWorkspace({
     setSelectedVersionId(nextVersion.id);
     setStatus(`${nextVersion.label} saved from manual edits.`);
     rememberDocumentSnapshot(documentTitle, content, nextVersion.summary);
+    return nextVersion;
   }
 
   async function applyProviderRevision(
@@ -7843,6 +7829,7 @@ export function DocumentAssistantWorkspace({
    * one-click save + export. */
   function requestExport(action: ExportAction) {
     if (exportInFlightRef.current) return;
+    setExportSavedVersion(null);
     if (hasUnsavedEdits) {
       setPendingSaveExportFormat(action);
       setStatus("Save a version first so the export matches your latest edits.");
@@ -7858,11 +7845,18 @@ export function DocumentAssistantWorkspace({
     void handleExport(action);
   }
 
-  function saveVersionAndExport() {
+  /** The export panel's save step. With a format already picked it saves and
+   * exports in one click; opened before any pick, it saves and confirms the
+   * new version so the next pick exports it. */
+  function saveVersionFromExportPanel() {
     const action = pendingSaveExportFormat;
-    if (!action || exportInFlightRef.current) return;
-    if (hasUnsavedEdits) saveManualVersion();
+    if (exportInFlightRef.current) return;
+    const savedVersion = hasUnsavedEdits ? saveManualVersion() : null;
     setPendingSaveExportFormat(null);
+    if (!action) {
+      setExportSavedVersion(savedVersion);
+      return;
+    }
     if (action === "print") {
       // saveManualVersion snapshots the current `content`, so this prints the
       // version that was just saved.
@@ -7970,7 +7964,6 @@ export function DocumentAssistantWorkspace({
       return;
     }
     const preferredDelivery = delivery ?? (canUseFileSavePicker() ? exportDelivery : "download");
-    const versionIdAtExport = selectedVersionId;
     const buildCurrentExport = async () => {
       let exportHtml = content;
       if (
@@ -7982,7 +7975,7 @@ export function DocumentAssistantWorkspace({
         const rebalanced = await repaginateOverfullDocumentPages(content);
         if (rebalanced) {
           exportHtml = rebalanced;
-          applyRebalancedLayout(content, rebalanced, versionIdAtExport);
+          applyRebalancedLayout(content, rebalanced);
         } else {
           normalizedLayoutHtmlRef.current = content;
         }
@@ -8006,6 +7999,7 @@ export function DocumentAssistantWorkspace({
 
     exportInFlightRef.current = true;
     setExportingFormat(format);
+    let refusedFilename: string | null = null;
     try {
       if (preferredDelivery === "picker" && canUseFileSavePicker()) {
         // Open the save dialog immediately, while the click's user activation
@@ -8020,6 +8014,14 @@ export function DocumentAssistantWorkspace({
             setStatus("Export canceled.");
             return;
           }
+          handle = null;
+        }
+        if (handle && (await exportWriteRefused(handle))) {
+          // The dialog already created the file, empty, and this browser will
+          // not let the page write, read, or remove it. Download instead and
+          // stop offering a location here.
+          writeDraftPreference(EXPORT_PICKER_REFUSED_KEY, "1");
+          refusedFilename = descriptor.filename;
           handle = null;
         }
         if (handle) {
@@ -8069,7 +8071,11 @@ export function DocumentAssistantWorkspace({
       }
       const exportFile: ExportFile = { ...descriptor, blob };
       const retainedHref = downloadBlob(exportFile, setStatus);
-      rememberExportReceipt(exportFile, "download", retainedHref);
+      const refusedNote = refusedFilename
+        ? `This browser can't save to a folder you choose. The empty ${refusedFilename} it made there can be deleted.`
+        : undefined;
+      rememberExportReceipt(exportFile, "download", retainedHref, refusedNote);
+      if (refusedNote) setStatus(`${refusedNote} The full file was sent to your browser downloads.`);
     } catch {
       setStatus(`Could not export ${descriptor.filename}. Try again from the export menu.`);
     } finally {
@@ -8078,7 +8084,7 @@ export function DocumentAssistantWorkspace({
     }
   }
 
-  function rememberExportReceipt(exportFile: ExportFile, delivery: ExportDelivery, href?: string) {
+  function rememberExportReceipt(exportFile: ExportFile, delivery: ExportDelivery, href?: string, note?: string) {
     if (exportObjectUrlRef.current && exportObjectUrlRef.current !== href) {
       revokeRetainedExportUrl(exportObjectUrlRef.current);
     }
@@ -8088,6 +8094,7 @@ export function DocumentAssistantWorkspace({
       label: exportFile.label,
       delivery,
       href,
+      note,
     });
   }
 
@@ -11509,63 +11516,6 @@ export function DocumentAssistantWorkspace({
                 onSetDefault={setDefaultDraftingModel}
                 unavailableReason={draftAiUnavailableReason}
               />
-              {serverSaveState.kind !== "idle" && (
-                <span
-                  className={`document-server-save-state is-${serverSaveState.kind}`}
-                  role="status"
-                  aria-label="Server save state"
-                  data-tooltip={
-                    serverSaveState.kind === "saved"
-                      ? `Saved to your account (revision ${serverSaveState.revision})`
-                      : serverSaveState.kind === "saving"
-                        ? "Saving this version to your account"
-                        : serverSaveState.kind === "not-stored"
-                          ? undefined
-                          : serverSaveState.message
-                  }
-                >
-                  {serverSaveState.kind === "saving" ? (
-                    <LoaderCircle size={15} aria-hidden="true" />
-                  ) : serverSaveState.kind === "saved" ? (
-                    <CheckCircle2 size={15} aria-hidden="true" />
-                  ) : serverSaveState.kind === "conflict" ? (
-                    <TriangleAlert size={15} aria-hidden="true" />
-                  ) : (
-                    <CloudOff size={15} aria-hidden="true" />
-                  )}
-                  {/* The reason stays in the tooltip, except when this tab holds the
-                      only copy: that warning is spelled out in full. */}
-                  <span className="document-server-save-label">
-                    {serverSaveState.kind === "saving"
-                      ? "Saving…"
-                      : serverSaveState.kind === "saved"
-                        ? "Saved"
-                        : serverSaveState.kind === "not-stored"
-                          ? serverSaveState.message
-                          : serverSaveState.kind === "local-only"
-                            ? "Local only — server save failed"
-                            : "Draft changed elsewhere"}
-                  </span>
-                  {(serverSaveState.kind === "local-only" || serverSaveState.kind === "not-stored") && (
-                    <button
-                      className="document-server-save-action"
-                      type="button"
-                      onClick={retryDraftServerSync}
-                    >
-                      Retry
-                    </button>
-                  )}
-                  {serverSaveState.kind === "conflict" && (
-                    <button
-                      className="document-server-save-action"
-                      type="button"
-                      onClick={() => void reloadServerDraftCopy(serverSaveState.serverId)}
-                    >
-                      Reload server copy
-                    </button>
-                  )}
-                </span>
-              )}
               <button
                 className="document-save-version-button"
                 type="button"
@@ -11612,6 +11562,7 @@ export function DocumentAssistantWorkspace({
                 disabled={Boolean(exportingFormat)}
                 onClick={() => {
                   setPendingSaveExportFormat(null);
+                  setExportSavedVersion(null);
                   setExportMenuOpen((value) => !value);
                 }}
               >
@@ -11645,12 +11596,58 @@ export function DocumentAssistantWorkspace({
                       data-tooltip="Close the export panel without saving a file"
                       onClick={() => {
                         setPendingSaveExportFormat(null);
+                        setExportSavedVersion(null);
                         setExportMenuOpen(false);
                       }}
                     >
                       <X size={15} />
                     </button>
                   </div>
+                  {hasUnsavedEdits && (
+                    <div
+                      className="document-export-save-notice"
+                      role={pendingSaveExportFormat ? "alert" : "status"}
+                    >
+                      <TriangleAlert size={17} aria-hidden="true" />
+                      <span>
+                        <strong>Save your edits first</strong>
+                        <small>
+                          {pendingSaveExportFormat === "print"
+                            ? "This draft has unsaved edits, and printing uses only a saved version. Save to continue."
+                            : pendingSaveExportFormat
+                              ? "This draft has unsaved edits, and downloads only run from a saved version. Save to continue."
+                              : "Exports use a saved version. Save your edits as a new version so the file includes them."}
+                        </small>
+                      </span>
+                      <button
+                        type="button"
+                        data-tooltip={
+                          pendingSaveExportFormat === "print"
+                            ? "Save a version of your edits, then open the print dialog"
+                            : pendingSaveExportFormat
+                              ? "Save a version of your edits, then download the file"
+                              : "Save a version of your edits, then choose a format"
+                        }
+                        onClick={saveVersionFromExportPanel}
+                      >
+                        <Save size={15} />
+                        {pendingSaveExportFormat === "print"
+                          ? "Save version and print"
+                          : pendingSaveExportFormat
+                            ? "Save version and export"
+                            : "Save version"}
+                      </button>
+                    </div>
+                  )}
+                  {exportSaveReceipt && (
+                    <div className="document-export-receipt" role="status">
+                      <CheckCircle2 size={16} aria-hidden="true" />
+                      <span>
+                        <strong>Saved as {exportSaveReceipt.label}</strong>
+                        <small>Your edits are in this version. Choose a format to export it.</small>
+                      </span>
+                    </div>
+                  )}
                   {canChooseExportLocation && (
                     <label className="document-export-destination">Save to
                       <select aria-label="Export destination" value={exportDelivery}
@@ -11672,7 +11669,7 @@ export function DocumentAssistantWorkspace({
                         return (
                           <button
                             key={option.format}
-                            className="document-export-choice"
+                            className={`document-export-choice${pendingSaveExportFormat === option.format ? " is-pending" : ""}`}
                             type="button"
                             data-tooltip={`Save a ${option.label} copy of this draft to your device`}
                             disabled={Boolean(exportingFormat)}
@@ -11689,7 +11686,7 @@ export function DocumentAssistantWorkspace({
                     )}
                     {draftKind === "document" && (
                       <button
-                        className="document-export-choice"
+                        className={`document-export-choice${pendingSaveExportFormat === "print" ? " is-pending" : ""}`}
                         type="button"
                         data-tooltip="Open the browser print dialog with the saved version of this draft"
                         disabled={Boolean(exportingFormat) || printPreparing}
@@ -11739,32 +11736,6 @@ export function DocumentAssistantWorkspace({
                       </span>
                     </div>
                   )}
-                  {pendingSaveExportFormat && hasUnsavedEdits && (
-                    <div className="document-export-save-notice" role="alert">
-                      <span>
-                        <strong>Save your edits first</strong>
-                        <small>
-                          {pendingSaveExportFormat === "print"
-                            ? "This draft has unsaved edits, and printing uses only a saved version. Save to continue."
-                            : "This draft has unsaved edits, and downloads only run from a saved version. Save to continue."}
-                        </small>
-                      </span>
-                      <button
-                        type="button"
-                        data-tooltip={
-                          pendingSaveExportFormat === "print"
-                            ? "Save a version of your edits, then open the print dialog"
-                            : "Save a version of your edits, then download the file"
-                        }
-                        onClick={saveVersionAndExport}
-                      >
-                        <Save size={15} />
-                        {pendingSaveExportFormat === "print"
-                          ? "Save version and print"
-                          : "Save version and export"}
-                      </button>
-                    </div>
-                  )}
                   {lastExport && (
                     <div className="document-export-receipt" role="status">
                       <CheckCircle2 size={16} />
@@ -11775,6 +11746,7 @@ export function DocumentAssistantWorkspace({
                             ? "Saved to your selected location."
                             : "Sent to your browser downloads."}
                         </small>
+                        {lastExport.note && <small>{lastExport.note}</small>}
                         {lastExport.href && (
                           <a
                             className="document-export-retained-link"
@@ -12321,24 +12293,20 @@ export function DocumentAssistantWorkspace({
                   </div>
                 )}
               </div>
-              <button
-                className={`document-edits-toggle ${showEdits ? "is-on" : ""} ${
-                  hasUnsavedEdits ? "is-editing" : serverSaveDegraded ? "is-local" : "is-saved"
-                }`}
-                type="button"
-                aria-pressed={showEdits}
-                onClick={() => {
+            </div>
+            </div>
+            <DraftSaveStatus
+              status={saveStatus}
+              onRetry={retryDraftServerSync}
+              onReload={(serverId) => void reloadServerDraftCopy(serverId)}
+              highlights={{
+                on: showEdits,
+                onToggle: () => {
                   setShowEdits((value) => !value);
-                  setStatus(reviewModeStatus);
-                }}
-                aria-label={reviewModeStatus}
-                data-tooltip="Show or hide the AI edit highlights in the document"
-              >
-                {serverSaveDegraded && !hasUnsavedEdits ? <CloudOff size={18} /> : <CheckCircle2 size={18} />}
-                {reviewModeLabel}
-              </button>
-            </div>
-            </div>
+                  setStatus(saveStatus.detail);
+                },
+              }}
+            />
           </div>
           )}
 
@@ -12521,7 +12489,7 @@ export function DocumentAssistantWorkspace({
                   data-tooltip={
                     !selectedSlide
                       ? "Add a slide first"
-                      : selectedSlide.layout === "image-caption"
+                      : selectedPicture
                         ? "Add or replace this slide's picture: upload, web, or AI"
                         : "Add a picture: this layout has none, so pick a layout with a picture first"
                   }
@@ -12762,6 +12730,11 @@ export function DocumentAssistantWorkspace({
                 </button>
               </div>
               </div>
+              <DraftSaveStatus
+                status={saveStatus}
+                onRetry={retryDraftServerSync}
+                onReload={(serverId) => void reloadServerDraftCopy(serverId)}
+              />
             </div>
           )}
 
@@ -12960,7 +12933,7 @@ export function DocumentAssistantWorkspace({
                     </button>
                   </div>
                   {!deckLayoutStripOpen ? null : deckDesignTab === "layouts" ? (
-                    <div className="deck-layout-gallery" id="deck-design-gallery" aria-label="Browse slide layouts">
+                    <div key="layouts" className="deck-layout-gallery" id="deck-design-gallery" aria-label="Browse slide layouts">
                       {SUPPORTED_DECK_LAYOUTS.map(layout => (
                         <button type="button" key={layout} aria-label={`Apply ${DECK_LAYOUT_LABELS[layout]} layout`}
                           data-tooltip={`Switch the selected slide to the ${DECK_LAYOUT_LABELS[layout]} layout`}
@@ -12971,22 +12944,21 @@ export function DocumentAssistantWorkspace({
                       ))}
                     </div>
                   ) : (
-                    <div className="deck-theme-gallery" id="deck-design-gallery" role="group" aria-label="Deck color themes">
-                      {DECK_COLOR_PALETTES.map(([name, accent, background, heading, body]) => {
-                        const active = deckState.theme.colors.accent1 === accent && deckState.theme.colors.background === background;
+                    <div key="themes" className="deck-theme-gallery" id="deck-design-gallery" role="group" aria-label="Deck themes">
+                      {DECK_THEME_PRESETS.map((preset) => {
+                        const active = deckThemePresetActive(deckState.theme, preset);
                         return (
-                          <button key={name} type="button" aria-label={`Apply ${name} color theme`}
-                            data-tooltip={`Recolor every slide with the ${name} palette; your text stays as written`}
+                          <button key={preset.name} type="button" aria-label={`Apply ${preset.name} theme`}
+                            data-tooltip={`Restyle every slide with ${preset.look}; your text stays as written`}
                             aria-pressed={active}
-                            onClick={() => applyDeckPalette(name, accent, background, heading, body)}>
-                            <span className="deck-theme-preview" aria-hidden="true" style={{ background }}>
-                              <span className="deck-theme-preview-title" style={{ background: heading }} />
-                              <span className="deck-theme-preview-rule" style={{ background: accent }} />
-                              <span className="deck-theme-preview-line" style={{ background: body }} />
-                              <span className="deck-theme-preview-line is-short" style={{ background: body }} />
-                              {active && <CheckCircle2 className="deck-theme-preview-check" size={14} />}
+                            onClick={() => applyDeckThemePreset(preset)}>
+                            <span className="deck-layout-preview deck-theme-thumb" aria-hidden="true">
+                              <span className="deck-thumb-scale">
+                                <DeckSlideStatic slide={DECK_THEME_SAMPLE_SLIDE} theme={deckThemeWithPreset(deckState.theme, preset)} />
+                              </span>
+                              {active && <CheckCircle2 className="deck-theme-thumb-check" size={14} />}
                             </span>
-                            <span>{name}</span>
+                            <span>{preset.name}</span>
                           </button>
                         );
                       })}
@@ -13022,23 +12994,24 @@ export function DocumentAssistantWorkspace({
                           ...deckCanvasBackground(selectedSlide, deckState.theme),
                         }}
                       >
+                        <DeckSlideDecorations slide={selectedSlide} theme={deckState.theme} />
                         <DeckSlideMedia slide={selectedSlide} theme={deckState.theme} />
-                        {selectedSlide.layout === "image-caption" && (
+                        {selectedPicture && selectedMediaBox && (
                           <div
                             className={`deck-media-slot ${
-                              selectedSlide.image.src ? "has-image" : "is-empty"
+                              selectedPicture.src ? "has-image" : "is-empty"
                             }`}
                             onClick={() =>
                               setDeckActiveBlock({ slideId: selectedSlide.id, region: "image" })
                             }
                             style={{
-                              left: resolvedMediaBox(selectedSlide)?.x,
-                              top: resolvedMediaBox(selectedSlide)?.y,
-                              width: resolvedMediaBox(selectedSlide)?.w,
-                              height: resolvedMediaBox(selectedSlide)?.h,
+                              left: selectedMediaBox.x,
+                              top: selectedMediaBox.y,
+                              width: selectedMediaBox.w,
+                              height: selectedMediaBox.h,
                             }}
                           >
-                            {!selectedSlide.image.src && (
+                            {!selectedPicture.src && (
                               <>
                                 <ImageIcon size={26} />
                                 <span>No image yet</span>
@@ -13053,9 +13026,9 @@ export function DocumentAssistantWorkspace({
                                   openDeckImageDialog(selectedSlide.id, "image", event.currentTarget);
                                 }}
                               >
-                                {selectedSlide.image.src ? "Replace image" : "Add image"}
+                                {selectedPicture.src ? "Replace image" : "Add image"}
                               </button>
-                              {selectedSlide.image.src && (
+                              {selectedPicture.src && (
                                 <button
                                   type="button"
                                   data-tooltip="Remove this slide's image"
@@ -13067,25 +13040,9 @@ export function DocumentAssistantWorkspace({
                             </span>
                           </div>
                         )}
-                        {slideDecorations(selectedSlide.layout).map((decoration, index) => (
-                          <span
-                            key={`decoration-${index}`}
-                            className="deck-decoration"
-                            style={{
-                              left: decoration.box.x,
-                              top: decoration.box.y,
-                              width: decoration.box.w,
-                              height: decoration.box.h,
-                              background: deckDecorationColor(
-                                deckState.theme,
-                                decoration.colorRole,
-                              ),
-                            }}
-                          />
-                        ))}
-                        {Object.entries(resolvedTextRegions(selectedSlide)).map(
+                        {Object.entries(resolvedTextRegions(selectedSlide, deckThemeDesign(deckState.theme))).map(
                           ([region, spec]) => {
-                            if (deckRegionContent(selectedSlide, region) === null) return null;
+                            if (deckSlideRegionContent(selectedSlide, region) === null) return null;
                             const isBullets = deckRegionIsBullets(selectedSlide, region);
                             return (
                               <div
@@ -13146,6 +13103,7 @@ export function DocumentAssistantWorkspace({
                             const frameBox = deckBlockBoxForRegion(
                               selectedSlide,
                               deckActiveBlock.region,
+                              deckThemeDesign(deckState.theme),
                             );
                             if (!frameBox) return null;
                             return (
@@ -13404,17 +13362,14 @@ export function DocumentAssistantWorkspace({
                     />
                     <DeckPicturePanel
                       picture={
-                        selectedSlide.layout === "image-caption"
-                          ? (() => {
-                              const box = resolvedMediaBox(selectedSlide);
-                              return {
-                                label: "Slide picture",
-                                w: box?.w ?? 640,
-                                h: box?.h ?? 334,
-                                src: selectedSlide.image.src,
-                                alt: selectedSlide.image.alt,
-                              };
-                            })()
+                        selectedPicture
+                          ? {
+                              label: "Slide picture",
+                              w: selectedMediaBox?.w ?? 640,
+                              h: selectedMediaBox?.h ?? 334,
+                              src: selectedPicture.src,
+                              alt: selectedPicture.alt,
+                            }
                           : null
                       }
                       prompt={deckImageDialog.prompt}
@@ -13879,24 +13834,30 @@ export function DocumentAssistantWorkspace({
                 if (event.key === "Escape") closeVersionCompare();
               }}
             >
-              <header className="draft-redline-header">
-                <div className="draft-redline-heading">
-                  <strong>Visual redline</strong>
-                  <span className="draft-redline-qualifier">Not DOCX tracked changes</span>
+              <header className="modal-head draft-redline-header">
+                <span className="modal-icon" aria-hidden="true">
+                  <FileDiff size={20} />
+                </span>
+                <div>
+                  <div className="draft-redline-title">
+                    <h2>Visual redline</h2>
+                    <span className="draft-redline-qualifier">Not DOCX tracked changes</span>
+                  </div>
+                  <p>
+                    Read-only comparison of two saved versions. Pick any two snapshots; comparing
+                    never alters, merges, or saves either one.
+                  </p>
                 </div>
                 <button
+                  className="icon-button"
                   type="button"
                   aria-label="Close visual redline"
                   data-tooltip="Close the comparison without changing either version"
                   onClick={closeVersionCompare}
                 >
-                  <X size={16} />
+                  <X size={17} />
                 </button>
               </header>
-              <p className="draft-redline-note">
-                Read-only comparison of two saved versions. Pick any two snapshots; comparing
-                never alters, merges, or saves either one.
-              </p>
               <div className="draft-redline-selectors">
                 <label>
                   <span>Base version</span>
@@ -13912,6 +13873,9 @@ export function DocumentAssistantWorkspace({
                     ))}
                   </SelectControl>
                 </label>
+                <span className="draft-redline-direction" aria-hidden="true">
+                  <ArrowRight size={16} />
+                </span>
                 <label>
                   <span>Comparison version</span>
                   <SelectControl
@@ -13934,10 +13898,16 @@ export function DocumentAssistantWorkspace({
                 </p>
               )}
               <div className="draft-redline-toolbar">
-                <span className="draft-redline-stats">
-                  {redlineDiff.stats.changed} changed · {redlineDiff.stats.inserted} inserted ·{" "}
-                  {redlineDiff.stats.removed} removed · {redlineDiff.stats.unchanged} unchanged
-                </span>
+                <ul className="draft-redline-stats" aria-label="Comparison totals">
+                  {REDLINE_ROW_TYPES.map((type) => (
+                    <li
+                      key={type}
+                      className={`is-${type}${redlineDiff.stats[type] ? "" : " is-zero"}`}
+                    >
+                      <strong>{redlineDiff.stats[type]}</strong> {type}
+                    </li>
+                  ))}
+                </ul>
                 <div className="draft-redline-nav">
                   <button
                     type="button"
@@ -13970,7 +13940,7 @@ export function DocumentAssistantWorkspace({
                 {annotatedRedlineRows.map(({ row, changeIndex }, index) => (
                   <div
                     key={index}
-                    className={`redline-row is-${row.type}`}
+                    className={`redline-row is-${row.type}${redlineRowBlockLabel(row) === "Heading" ? " is-heading" : ""}`}
                     tabIndex={changeIndex >= 0 ? -1 : undefined}
                     aria-current={
                       changeIndex >= 0 && changeIndex === redlineChangeCursor ? "true" : undefined
@@ -13983,7 +13953,16 @@ export function DocumentAssistantWorkspace({
                         : undefined
                     }
                   >
-                    <span className="redline-row-label">{redlineRowLabel(row)}</span>
+                    {/* Unchanged rows read like the document itself; only
+                        changes carry a visible label. */}
+                    {row.type === "unchanged" ? (
+                      <span className="sr-only">{redlineRowBlockLabel(row)} · unchanged</span>
+                    ) : (
+                      <span className="redline-row-label">
+                        {redlineRowBlockLabel(row)}
+                        <span className="redline-row-kind">{row.type}</span>
+                      </span>
+                    )}
                     <p className="redline-text">{renderRedlineRowContent(row)}</p>
                   </div>
                 ))}
@@ -13996,9 +13975,11 @@ export function DocumentAssistantWorkspace({
   );
 }
 
-function redlineRowLabel(row: RedlineRow) {
-  if (row.type === "changed") return `${row.base.label} · changed`;
-  return `${row.block.label} · ${row.type}`;
+/** Legend order for the comparison totals; each is also a row type. */
+const REDLINE_ROW_TYPES = ["changed", "inserted", "removed", "unchanged"] as const;
+
+function redlineRowBlockLabel(row: RedlineRow) {
+  return row.type === "changed" ? row.base.label : row.block.label;
 }
 
 function redlineBlockBody(block: RedlineBlock) {
@@ -14008,35 +13989,46 @@ function redlineBlockBody(block: RedlineBlock) {
   return block.text;
 }
 
-/** Diff tokens render as plain text inside semantic ins/del elements — stored
- * HTML is never reinstated through innerHTML here. */
+/** Draws one run of redline text. A fill-in blank becomes the single line the
+ * document shows, inside the same ins/del mark as its neighbors, instead of a
+ * row of underscores (struck through when removed). Tokens render as plain
+ * text inside semantic elements — stored HTML is never reinstated through
+ * innerHTML here. */
+function renderRedlineRun(text: string, change: "ins" | "del" | null) {
+  return splitFillInBlanks(text).map((segment, index) => {
+    const className = [change && `redline-${change}`, segment.blank && "redline-blank"]
+      .filter(Boolean)
+      .join(" ");
+    if (change) {
+      const Mark = change;
+      return (
+        <Mark key={index} className={className}>
+          {segment.text}
+        </Mark>
+      );
+    }
+    if (segment.blank) {
+      return (
+        <span key={index} className={className}>
+          {segment.text}
+        </span>
+      );
+    }
+    return <Fragment key={index}>{segment.text}</Fragment>;
+  });
+}
+
 function renderRedlineRowContent(row: RedlineRow) {
   if (row.type === "changed") {
-    return row.tokens.map((token, index) => {
-      const spacer = index > 0 ? " " : "";
-      if (token.type === "ins") {
-        return (
-          <Fragment key={index}>
-            {spacer}
-            <ins className="redline-ins">{token.text}</ins>
-          </Fragment>
-        );
-      }
-      if (token.type === "del") {
-        return (
-          <Fragment key={index}>
-            {spacer}
-            <del className="redline-del">{token.text}</del>
-          </Fragment>
-        );
-      }
-      return <Fragment key={index}>{`${spacer}${token.text}`}</Fragment>;
-    });
+    return row.tokens.map((token, index) => (
+      <Fragment key={index}>
+        {index > 0 ? " " : ""}
+        {renderRedlineRun(token.text, token.type === "same" ? null : token.type)}
+      </Fragment>
+    ));
   }
-  const body = redlineBlockBody(row.block);
-  if (row.type === "inserted") return <ins className="redline-ins">{body}</ins>;
-  if (row.type === "removed") return <del className="redline-del">{body}</del>;
-  return body;
+  const change = row.type === "inserted" ? "ins" : row.type === "removed" ? "del" : null;
+  return renderRedlineRun(redlineBlockBody(row.block), change);
 }
 
 function draftTemplatesFromData(data: BootstrapData): DraftTemplate[] {
@@ -18364,8 +18356,21 @@ async function openExportSaveHandle(descriptor: ExportDescriptor): Promise<Expor
 function canUseFileSavePicker() {
   return (
     typeof window !== "undefined" &&
-    typeof (window as SaveFilePickerWindow).showSaveFilePicker === "function"
+    typeof (window as SaveFilePickerWindow).showSaveFilePicker === "function" &&
+    readDraftPreference(EXPORT_PICKER_REFUSED_KEY) !== "1"
   );
+}
+
+/** True when the browser has already refused writes to the picked file. An
+ * app's embedded preview pane can show the save dialog, which creates the
+ * file, and then deny writing, reading, or removing it. */
+async function exportWriteRefused(handle: ExportSaveHandle) {
+  if (!handle.queryPermission) return false;
+  try {
+    return (await handle.queryPermission({ mode: "readwrite" })) === "denied";
+  } catch {
+    return false;
+  }
 }
 
 /** Chrome creates the chosen file, empty, as soon as a save location is
@@ -18670,46 +18675,17 @@ function deckPlainTextFromElement(root: HTMLElement): string {
 
 /** Content of one editable region as HTML, from the model. */
 function deckRegionHtml(slide: DeckSlide, region: string): string {
-  const content = deckRegionContent(slide, region);
+  const content = deckSlideRegionContent(slide, region);
   if (content === null) return "";
   if (isDeckBulletList(content)) return deckBulletsToHtml(content);
   return deckRichTextToHtml(content);
-}
-
-function deckRegionContent(
-  slide: DeckSlide,
-  region: string,
-): DeckRichText | DeckBullet[] | null {
-  switch (slide.layout) {
-    case "title":
-    case "section":
-      return region === "title" ? slide.title : region === "subtitle" ? slide.subtitle : null;
-    case "title-bullets":
-      return region === "title" ? slide.title : region === "bullets" ? slide.bullets : null;
-    case "two-column":
-      return region === "title"
-        ? slide.title
-        : region === "left"
-          ? slide.left
-          : region === "right"
-            ? slide.right
-            : null;
-    case "image-caption":
-      return region === "title" ? slide.title : region === "caption" ? slide.caption : null;
-    case "quote":
-      return region === "quote" ? slide.quote : region === "attribution" ? slide.attribution : null;
-    case "chart":
-      return region === "title" ? slide.title : null;
-    case "closing":
-      return region === "title" ? slide.title : region === "body" ? slide.body : null;
-  }
 }
 
 /** Bullet regions are the only ones that carry list structure; every other
  * region is flat rich text. Derived from the layout, not from the current
  * content, so an emptied region keeps its kind. */
 function deckRegionIsBullets(slide: DeckSlide, region: string): boolean {
-  if (slide.layout === "title-bullets") return region === "bullets";
+  if (slide.layout === "title-bullets" || slide.layout === "image-bullets") return region === "bullets";
   if (slide.layout === "two-column") return region === "left" || region === "right";
   return false;
 }
@@ -18724,15 +18700,10 @@ function normalizeDeckRuns(
   region: string,
   theme: DeckTheme | undefined,
 ): DeckTextRun[] {
-  const spec = slideTextRegions(slide.layout)[region];
-  if (!spec || !theme) return runs;
-  const roleColor =
-    spec.colorRole === "heading"
-      ? theme.colors.heading
-      : spec.colorRole === "accent1"
-        ? theme.colors.accent1
-        : theme.colors.body;
-  const defaultColor = (slide.textColor ?? roleColor).toLowerCase();
+  if (!theme) return runs;
+  const spec = slideTextRegions(slide.layout, deckThemeDesign(theme))[region];
+  if (!spec) return runs;
+  const defaultColor = (slide.textColor ?? deckRoleColor(theme, spec.colorRole)).toLowerCase();
   const defaultFont = theme.fonts[spec.font]?.toLowerCase() ?? "";
   return runs.map((run) => {
     const next = { ...run };
@@ -18758,7 +18729,9 @@ function deckSlideWithRegionFromElement(
       ...bullet,
       runs: normalizeDeckRuns(bullet.runs, slide, region, theme),
     }));
-    if (slide.layout === "title-bullets" && region === "bullets") return { ...slide, bullets };
+    if ((slide.layout === "title-bullets" || slide.layout === "image-bullets") && region === "bullets") {
+      return { ...slide, bullets };
+    }
     if (slide.layout === "two-column" && region === "left") return { ...slide, left: bullets };
     if (slide.layout === "two-column" && region === "right") return { ...slide, right: bullets };
     return slide;
@@ -18767,12 +18740,14 @@ function deckSlideWithRegionFromElement(
   switch (slide.layout) {
     case "title":
     case "section":
+    case "big-number":
       return region === "title"
         ? { ...slide, title: text }
         : region === "subtitle"
           ? { ...slide, subtitle: text }
           : slide;
     case "title-bullets":
+    case "image-bullets":
       return region === "title" ? { ...slide, title: text } : slide;
     case "two-column":
       return region === "title" ? { ...slide, title: text } : slide;
@@ -18791,6 +18766,7 @@ function deckSlideWithRegionFromElement(
     case "chart":
       return region === "title" ? { ...slide, title: text } : slide;
     case "closing":
+    case "statement":
       return region === "title"
         ? { ...slide, title: text }
         : region === "body"
@@ -18817,9 +18793,11 @@ function remapDeckSlideLayout(
   switch (slide.layout) {
     case "title":
     case "section":
+    case "big-number":
       pushLine(slide.subtitle);
       break;
     case "title-bullets":
+    case "image-bullets":
       lines.push(...slide.bullets);
       break;
     case "two-column":
@@ -18834,6 +18812,7 @@ function remapDeckSlideLayout(
     case "chart":
       break;
     case "closing":
+    case "statement":
       pushLine(slide.body);
       break;
   }
@@ -18846,15 +18825,20 @@ function remapDeckSlideLayout(
   } as DeckSlide;
   const lineRuns = (index: number): DeckRichText => lines[index]?.runs ?? [];
   const hasTitle = deckRunsText(title).trim().length > 0;
+  // The picture belongs to the slide's content: moving between the two
+  // picture layouts keeps it.
+  const picture = deckSlidePicture(slide);
   let next: DeckSlide = base;
   let used = 0;
   switch (layout) {
     case "title":
     case "section":
+    case "big-number":
       next = { ...base, layout, title, subtitle: lineRuns(0) } as DeckSlide;
       used = lines[0] ? 1 : 0;
       break;
     case "title-bullets":
+    case "image-bullets":
       next = { ...base, layout, title, bullets: lines.slice(0, 8).length ? lines.slice(0, 8) : (base as DeckSlide & { bullets: DeckBullet[] }).bullets } as DeckSlide;
       used = Math.min(8, lines.length);
       break;
@@ -18882,6 +18866,7 @@ function remapDeckSlideLayout(
       used = hasTitle ? (lines[0] ? 1 : 0) : Math.min(2, lines.length);
       break;
     case "closing":
+    case "statement":
       next = { ...base, layout, title, body: lineRuns(0) } as DeckSlide;
       used = lines[0] ? 1 : 0;
       break;
@@ -18894,10 +18879,13 @@ function remapDeckSlideLayout(
       used = 0;
       break;
   }
+  if (picture) next = withDeckSlidePicture(next, picture);
   return { slide: next, hiddenCount: Math.max(0, lines.length - used) };
 }
 
 function deckRegionPlaceholder(slide: DeckSlide, region: string): string {
+  if (slide.layout === "big-number") return region === "title" ? "42%" : "What the number measures";
+  if (slide.layout === "statement") return region === "title" ? "One big idea" : "A line that supports it";
   if (region === "title") return slide.layout === "section" ? "Section title" : "Slide title";
   if (region === "subtitle") return "Subtitle";
   if (region === "bullets" || region === "left" || region === "right") return "Add a bullet…";
@@ -18920,9 +18908,9 @@ const DECK_CORNER_LABELS: Record<DeckResizeCorner, string> = {
 };
 
 /** The on-screen box for any adjustable slide element, override-aware. */
-function deckBlockBoxForRegion(slide: DeckSlide, region: string): DeckBox | null {
-  if (region === "image") return resolvedMediaBox(slide);
-  return resolvedTextRegions(slide)[region]?.box ?? null;
+function deckBlockBoxForRegion(slide: DeckSlide, region: string, design: DeckDesign): DeckBox | null {
+  if (region === "image") return resolvedMediaBox(slide, design);
+  return resolvedTextRegions(slide, design)[region]?.box ?? null;
 }
 
 /** Applies a corner drag to a box, clamped to the 960×540 canvas with the
@@ -18959,13 +18947,7 @@ function deckRegionStyle(
   slide?: DeckSlide,
   region?: string,
 ): CSSProperties {
-  const color =
-    slide?.textColor ??
-    (spec.colorRole === "heading"
-      ? theme.colors.heading
-      : spec.colorRole === "accent1"
-        ? theme.colors.accent1
-        : theme.colors.body);
+  const color = slide?.textColor ?? deckRoleColor(theme, spec.colorRole);
   // PowerPoint's shrink on overflow, measured once for the stage and the
   // export (deckTextFit). The box lays its text out at full size in a box
   // 1/scale as large and is drawn scaled, which wraps exactly like the
@@ -19024,36 +19006,6 @@ function deckThemePalette(theme: DeckTheme): Array<{ color: string; label: strin
     .filter(({ color }) => (seen.has(color) ? false : (seen.add(color), true)));
 }
 
-/** Linear mix of two #RRGGBB colors; `amount` is the share of `b`. */
-function mixHexColors(a: string, b: string, amount: number) {
-  const parse = (hex: string) => {
-    const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-    const value = match ? parseInt(match[1], 16) : 0xffffff;
-    return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
-  };
-  const [ar, ag, ab] = parse(a);
-  const [br, bg, bb] = parse(b);
-  const mix = (x: number, y: number) => Math.round(x + (y - x) * amount).toString(16).padStart(2, "0");
-  return `#${mix(ar, br)}${mix(ag, bg)}${mix(ab, bb)}`.toUpperCase();
-}
-
-function deckDecorationColor(theme: DeckTheme, role: string): string {
-  switch (role) {
-    case "accent1":
-      return theme.colors.accent1;
-    case "accent2":
-      return theme.colors.accent2;
-    case "surface":
-      return theme.colors.surface;
-    case "heading":
-      return theme.colors.heading;
-    case "body":
-      return theme.colors.body;
-    default:
-      return theme.colors.background;
-  }
-}
-
 /** Bottom-right contain-fit box for the brand logo — identical math to the
  * PPTX exporter's placement, so preview and file agree. */
 function deckLogoRenderBox(theme: DeckTheme) {
@@ -19094,17 +19046,40 @@ function AiPenIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+/** The design's shapes behind a slide's words, drawn from the same table and
+ * colors the PowerPoint export uses. */
+function DeckSlideDecorations({ slide, theme }: { slide: DeckSlide; theme: DeckTheme }) {
+  return (
+    <>
+      {slideDecorations(slide.layout, deckThemeDesign(theme)).map((decoration: DeckDecorationSpec, index) => (
+        <span
+          key={`decoration-${index}`}
+          className={`deck-decoration${decoration.shape === "ellipse" ? " is-ellipse" : ""}`}
+          style={{
+            left: decoration.box.x,
+            top: decoration.box.y,
+            width: decoration.box.w,
+            height: decoration.box.h,
+            background: deckRoleColor(theme, decoration.colorRole, decoration.tint),
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 /** Shared media overlays (slide image, brand logo) for canvas renderers. */
 function DeckSlideMedia({ slide, theme }: { slide: DeckSlide; theme: DeckTheme }) {
-  const mediaBox = resolvedMediaBox(slide);
+  const mediaBox = resolvedMediaBox(slide, deckThemeDesign(theme));
+  const picture = deckSlidePicture(slide);
   const logoBox = deckLogoRenderBox(theme);
   return (
     <>
-      {slide.layout === "image-caption" && slide.image.src && mediaBox && (
+      {picture?.src && mediaBox && (
         <img
           className="deck-media-image"
-          src={slide.image.src}
-          alt={slide.image.alt}
+          src={picture.src}
+          alt={picture.alt}
           style={{
             left: mediaBox.x,
             top: mediaBox.y,
@@ -19468,8 +19443,10 @@ function previewDeckLayout(layout: DeckSlideLayout): DeckSlide {
   const points = [{ runs: text("Key point"), level: 0 as const }, { runs: text("Supporting detail"), level: 0 as const }];
   if ("title" in slide) slide.title = text(DECK_LAYOUT_LABELS[layout]);
   if ("subtitle" in slide) slide.subtitle = text("Your story starts here");
-  if (slide.layout === "title-bullets") slide.bullets = points;
+  if (slide.layout === "title-bullets" || slide.layout === "image-bullets") slide.bullets = points;
   if (slide.layout === "two-column") { slide.left = points; slide.right = points; }
+  if (slide.layout === "big-number") { slide.title = text("42%"); slide.subtitle = text("of customers renew"); }
+  if (slide.layout === "statement") { slide.title = text("One big idea"); slide.body = text("Said simply"); }
   if (slide.layout === "image-caption") slide.caption = text("Image caption");
   if (slide.layout === "quote") { slide.quote = text("An idea worth sharing"); slide.attribution = text("Speaker"); }
   if (slide.layout === "closing") slide.body = text("Next steps and questions");
@@ -19477,7 +19454,7 @@ function previewDeckLayout(layout: DeckSlideLayout): DeckSlide {
 }
 
 function DeckSlideStatic({ slide, theme }: { slide: DeckSlide; theme: DeckTheme }) {
-  const regions = resolvedTextRegions(slide);
+  const regions = resolvedTextRegions(slide, deckThemeDesign(theme));
   return (
     <div
       className="deck-slide-canvas is-static"
@@ -19488,19 +19465,7 @@ function DeckSlideStatic({ slide, theme }: { slide: DeckSlide; theme: DeckTheme 
       }}
       aria-hidden="true"
     >
-      {slideDecorations(slide.layout).map((decoration, index) => (
-        <span
-          key={`decoration-${index}`}
-          className="deck-decoration"
-          style={{
-            left: decoration.box.x,
-            top: decoration.box.y,
-            width: decoration.box.w,
-            height: decoration.box.h,
-            background: deckDecorationColor(theme, decoration.colorRole),
-          }}
-        />
-      ))}
+      <DeckSlideDecorations slide={slide} theme={theme} />
       <DeckSlideMedia slide={slide} theme={theme} />
       {Object.entries(regions).map(([region, spec]) => {
         const html = deckRegionHtml(slide, region);
@@ -19800,7 +19765,12 @@ function washSlideBackground(
 /** Display slides can carry more vivid art; text-dense layouts need a heavy
  * wash behind their body copy. */
 function backgroundWashStrength(layout: DeckSlide["layout"]): "light" | "strong" {
-  return layout === "title" || layout === "section" || layout === "quote" || layout === "closing"
+  return layout === "title" ||
+    layout === "section" ||
+    layout === "quote" ||
+    layout === "closing" ||
+    layout === "statement" ||
+    layout === "big-number"
     ? "light"
     : "strong";
 }
@@ -19869,28 +19839,44 @@ const DECK_LAYOUT_RULE_SHAPES: Array<[DeckSlideLayout, string]> = [
     "image-caption",
     '- {"layout":"image-caption","title":"...","image":{"src":"","alt":"<describe the picture to add>"},"caption":"..."} — always leave src empty; images attach in the editor.',
   ],
+  [
+    "image-bullets",
+    '- {"layout":"image-bullets","title":"...","image":{"src":"","alt":"<describe the picture to add>"},"bullets":[bullets]} — a picture beside a short list; always leave src empty.',
+  ],
+  ["statement", '- {"layout":"statement","title":"<one big idea>","body":"<one supporting line>"} — a single message in large type.'],
+  [
+    "big-number",
+    '- {"layout":"big-number","title":"<the figure itself, e.g. 42% or $3.1M>","subtitle":"<what it measures>"} — one key number.',
+  ],
   ["quote", '- {"layout":"quote","quote":"...","attribution":"..."}.'],
   ["closing", '- {"layout":"closing","title":"...","body":"..."}.'],
 ];
 
-const DECK_LAYOUT_RULES = [
-  "Each slide has: \"id\" (short unique string), \"notes\" (1-3 sentence speaker notes), \"layout\", and the layout's fields:",
-  ...DECK_LAYOUT_RULE_SHAPES.map(([layout, rule]) => `${rule} Fits: ${deckLayoutCapacityLine(layout)}.`),
-  'Each layout lists what its fields hold at the layout\'s own type size ("Fits"). Stay inside those sizes: the editor lays out every slide as PowerPoint will and sends back any text that does not fit its box.',
-];
+/** The layout list as the deck's design sizes it. */
+function deckLayoutRules(design: DeckDesign): string[] {
+  return [
+    "Each slide has: \"id\" (short unique string), \"notes\" (1-3 sentence speaker notes), \"layout\", and the layout's fields:",
+    ...DECK_LAYOUT_RULE_SHAPES.map(([layout, rule]) => `${rule} Fits: ${deckLayoutCapacityLine(layout, design)}.`),
+    'Each layout lists what its fields hold at the layout\'s own type size ("Fits"). Stay inside those sizes: the editor lays out every slide as PowerPoint will and sends back any text that does not fit its box.',
+    'Vary the layouts: use "statement" for a key message, "big-number" for a headline figure, and the picture layouts where a picture helps, instead of making every slide a bullet list.',
+  ];
+}
 
-const DECK_JSON_CONTRACT = [
-  'Return ONLY a fenced ```json code block containing one JSON object, no prose before or after.',
-  "The object shape:",
-  '{"schema":"aperture-deck-v1","title":"<deck title>","slides":[...]}',
-  ...DECK_LAYOUT_RULES,
-  'Do NOT include a "theme" field. Keep slide text tight: bullets are short phrases of at most ~12 words, never paragraphs. Prefer more focused slides over dense ones.',
-].join("\n");
+function deckJsonContract(design: DeckDesign): string {
+  return [
+    'Return ONLY a fenced ```json code block containing one JSON object, no prose before or after.',
+    "The object shape:",
+    '{"schema":"aperture-deck-v1","title":"<deck title>","slides":[...]}',
+    ...deckLayoutRules(design),
+    'Do NOT include a "theme" field. Keep slide text tight: bullets are short phrases of at most ~12 words, never paragraphs. Prefer more focused slides over dense ones.',
+  ].join("\n");
+}
 
 function providerDeckPrompt(
   templateOutline: string | null,
   request: string,
   contextOptions: DraftContextOptions,
+  design: DeckDesign,
 ): string {
   const contextLines = [
     `Drafting agent: ${contextOptions.agentName}.`,
@@ -19915,7 +19901,7 @@ function providerDeckPrompt(
     "User request:",
     request,
     "",
-    DECK_JSON_CONTRACT,
+    deckJsonContract(design),
   ].join("\n");
 }
 
@@ -19941,9 +19927,8 @@ function slideJsonForPrompt(slide: DeckSlide) {
     textColor: _textColor,
     ...content
   } = slide as DeckSlide & { background?: unknown };
-  if (content.layout === "image-caption") {
-    return { ...content, image: { src: "", alt: content.image.alt } };
-  }
+  const picture = deckSlidePicture(content as DeckSlide);
+  if (picture) return withDeckSlidePicture(content as DeckSlide, { src: "", alt: picture.alt });
   return content;
 }
 
@@ -19956,14 +19941,15 @@ function restoreKeptSlideFields(entry: Record<string, unknown>, kept: DeckSlide 
   if (kept.backgroundId && restored.backgroundId === undefined) restored.backgroundId = kept.backgroundId;
   if (kept.textColor && restored.textColor === undefined) restored.textColor = kept.textColor;
   if (kept.boxes && restored.boxes === undefined && restored.layout === kept.layout) restored.boxes = kept.boxes;
-  if (kept.layout === "image-caption" && restored.layout === "image-caption" && kept.image.src) {
+  const keptPicture = deckSlidePicture(kept);
+  if (keptPicture?.src && restored.image !== undefined) {
     const image = (restored.image && typeof restored.image === "object" ? restored.image : {}) as Record<string, unknown>;
-    if (!image.src) restored.image = { ...image, src: kept.image.src, alt: image.alt || kept.image.alt };
+    if (!image.src) restored.image = { ...image, src: keptPicture.src, alt: image.alt || keptPicture.alt };
   }
   return restored;
 }
 
-function providerDeckRevisionPrompt(deckJson: string, request: string): string {
+function providerDeckRevisionPrompt(deckJson: string, request: string, design: DeckDesign): string {
   return [
     "You are revising an existing slide deck. Apply the user's instruction and return the COMPLETE revised deck.",
     "Keep slide ids stable for slides you keep; give new slides new ids. Keep text you were not asked to change.",
@@ -19978,7 +19964,7 @@ function providerDeckRevisionPrompt(deckJson: string, request: string): string {
     "User instruction:",
     request,
     "",
-    DECK_JSON_CONTRACT,
+    deckJsonContract(design),
   ].join("\n");
 }
 
@@ -20010,7 +19996,7 @@ function providerSlideEditPrompt(deck: SlideDeck, slide: DeckSlide, instruction:
     "- Pictures are not shown to you: leave image src empty and the editor keeps the current picture.",
     "- Slide text stays tight: short phrases of at most ~12 words, never paragraphs.",
     "",
-    ...DECK_LAYOUT_RULES,
+    ...deckLayoutRules(deckThemeDesign(deck.theme)),
     "",
     "Deck outline, for context only:",
     outline,
@@ -20152,7 +20138,7 @@ function providerDeckFitPrompt(deck: SlideDeck, issues: DeckFitIssue[]): string 
       .map((id) => `"${id}"`)
       .join(", ")}.`,
     "",
-    ...DECK_LAYOUT_RULES,
+    ...deckLayoutRules(deckThemeDesign(deck.theme)),
     "",
     "Deck outline, for context only:",
     outline,
@@ -20220,14 +20206,14 @@ function applyDeckFitReply(
  * region that had words keeps some, and the slide keeps most of its words —
  * or, for a slide holding several times what its layout fits, at least a
  * fifth of what the layout can hold (a modest, readable slide). */
-function deckFitFixKeepsContent(before: DeckSlide, after: DeckSlide): boolean {
-  const regions = (slide: DeckSlide) => Object.keys(slideTextRegions(slide.layout));
+function deckFitFixKeepsContent(before: DeckSlide, after: DeckSlide, design: DeckDesign): boolean {
+  const regions = (slide: DeckSlide) => slideRegionNames(slide.layout);
   const text = (slide: DeckSlide, region: string) => deckRegionPlainText(deckSlideRegionContent(slide, region)).trim();
   const size = (slide: DeckSlide) => regions(slide).reduce((total, region) => total + text(slide, region).length, 0);
   if (before.layout === after.layout && regions(before).some((region) => text(before, region) && !text(after, region))) {
     return false;
   }
-  const capacity = Object.entries(slideTextRegions(before.layout)).reduce((total, [region, spec]) => {
+  const capacity = Object.entries(slideTextRegions(before.layout, design)).reduce((total, [region, spec]) => {
     const { lines, charsPerLine } = deckRegionCapacity(spec, region);
     return total + lines * charsPerLine;
   }, 0);
@@ -20242,7 +20228,7 @@ function acceptDeckFitFixes(current: SlideDeck, candidate: SlideDeck, slideIds: 
   const slides = current.slides.map((slide) => {
     if (!slideIds.includes(slide.id)) return slide;
     const replacement = candidate.slides.find((item) => item.id === slide.id);
-    if (!replacement || !deckFitFixKeepsContent(slide, replacement)) return slide;
+    if (!replacement || !deckFitFixKeepsContent(slide, replacement, deckThemeDesign(current.theme))) return slide;
     const scoreBefore = deckFitScore(before.filter((issue) => issue.slideId === slide.id));
     const scoreAfter = deckFitScore(after.filter((issue) => issue.slideId === slide.id));
     if (scoreAfter >= scoreBefore) return slide;

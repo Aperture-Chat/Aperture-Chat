@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { DEFAULT_ROUTE, parsePath, routeToPath, type AppRoute } from "./appRoute";
+import { DEFAULT_ROUTE, parsePath, routeToPath, viewKeyForRoute, type AppRoute } from "./appRoute";
 
 const listeners = new Set<() => void>();
 
@@ -37,6 +37,17 @@ function carriedSearch(): string {
 }
 
 export type NavigateOptions = { replace?: boolean };
+
+/**
+ * A different screen opens at its top, as a page load would. Narrow layouts
+ * scroll the document itself and chat pins it to the newest reply, so that
+ * offset would otherwise land the next screen at its bottom. Moves within a
+ * screen (a new chat getting its id, a console section) keep their scroll.
+ */
+function openScreenAtTop(from: string, to: AppRoute) {
+  if (viewKeyForRoute(parsePath(from) ?? DEFAULT_ROUTE) === viewKeyForRoute(to)) return;
+  document.documentElement.scrollTop = 0;
+}
 
 /**
  * Called on browser back/forward before the route is applied. The URL has
@@ -99,6 +110,7 @@ export function useAppRoute(interceptPop?: PopInterceptor): AppRouter {
       return;
     }
     const url = `${path}${carriedSearch()}`;
+    openScreenAtTop(readPathname(), route);
     if (options.replace) window.history.replaceState({}, "", url);
     else window.history.pushState({}, "", url);
     emit();

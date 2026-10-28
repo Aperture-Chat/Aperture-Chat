@@ -28,9 +28,9 @@ function deckOf(...slides: DeckSlide[]): SlideDeck {
 }
 
 test("each layout's capacity is stated in the prompt's own terms", () => {
-  const line = deckLayoutCapacityLine("title-bullets");
+  const line = deckLayoutCapacityLine("title-bullets", "rule");
   expect(line).toMatch(/^title ≤\d+ chars; bullets ≤\d+ one-line bullets of ~\d+ chars$/);
-  expect(deckLayoutCapacityLine("quote")).toMatch(/^quote ≤\d+ lines of ~\d+ chars; attribution ≤\d+ chars$/);
+  expect(deckLayoutCapacityLine("quote", "rule")).toMatch(/^quote ≤\d+ lines of ~\d+ chars; attribution ≤\d+ chars$/);
 });
 
 test("a slide written to its capacity has no fit issues", () => {
@@ -65,7 +65,7 @@ test("a word wider than its box is reported as breaking mid-word", () => {
 });
 
 test("a long title shrinks to fit the way PowerPoint autofits, and the export records it", () => {
-  const spec = slideTextRegions("title-bullets").title;
+  const spec = slideTextRegions("title-bullets", "rule").title;
   const theme = blankSlideDeck("x").theme;
   const short = deckRegionFitWith(spec, [{ text: "Results" }], theme, measure);
   expect(short).toEqual({ fit: DECK_NO_FIT, fits: true });
@@ -85,4 +85,22 @@ test("a revision checks only the slides whose words, layout, or boxes changed", 
     bulletsSlide("d", ["Brand new"]),
   );
   expect(changedDeckSlideIds(before, after)).toEqual(["b", "c", "d"]);
+});
+
+test("capacity and the fit check follow the deck's design", () => {
+  // Split sets content titles in a narrow side column.
+  const classicChars = Number(/title ≤(\d+) chars/.exec(deckLayoutCapacityLine("title-bullets", "rule"))?.[1]);
+  const splitLine = deckLayoutCapacityLine("title-bullets", "split");
+  expect(splitLine).toMatch(/^title ≤\d+ lines of ~\d+ chars; bullets/);
+  expect(Number(/title ≤\d+ lines of ~(\d+) chars/.exec(splitLine)?.[1])).toBeLessThan(classicChars);
+
+  // Orbit sets the figure inside a circle, so a long figure that fits the
+  // classic slide has to shrink past readable there.
+  const figure = createDeckSlide("big-number", "n1");
+  if (figure.layout !== "big-number") throw new Error("layout");
+  const slide = { ...figure, title: [{ text: "1,250,000,000" }] };
+  const classic = deckOf(slide);
+  expect(auditDeckLayout(classic, { measure })).toEqual([]);
+  const orbit = { ...classic, theme: { ...classic.theme, design: "orbit" as const } };
+  expect(auditDeckLayout(orbit, { measure }).map((issue) => issue.region)).toEqual(["title"]);
 });

@@ -1,7 +1,11 @@
 import json
 import re
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from html import escape
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -29,11 +33,23 @@ from app.core.api_source_fetch import (
     fetch_api_source,
     parse_header_lines,
 )
+from app.core.knowledge_walls import (
+    DOCUMENT_WALLS_SETTING,
+    document_wall_overrides,
+    wall_group_ids,
+)
+from app.core.document_metadata import (
+    PROPERTIES_LOCATOR,
+    bounded_metadata,
+    descriptive_properties,
+    metadata_summary,
+)
 from app.core.knowledge_ingestion import (
+    ExtractedDocument,
     ExtractedSegment,
+    PageReader,
     chunk_segments,
-    extract_segments,
-    extract_segments_from_file,
+    extract_document,
 )
 from app.core.knowledge_ingestion import _limit_segments as limit_extracted_segments
 from app.core.media_transcription import (
@@ -52,7 +68,20 @@ from app.core.usage_budget_runtime import (
     UsageTenantScopeError,
     map_usage_budget_error,
 )
-from app.core.web_fetch import WebFetchError, fetch_web_source
+from app.core.site_crawl import (
+    CRAWLER_USER_AGENT,
+    LINKED_SOURCES_KEY,
+    CrawledPage,
+    CrawlLimits,
+    CrawlResult,
+    crawl_recipe_fields,
+    crawl_site,
+    single_page_result,
+    site_recipe,
+)
+from app.core.vision_ocr import VisionPageReader, resolve_vision_model
+from app.core.web_fetch import FetchedWebSource, WebFetchError, fetch_web_source
+from app.core.model_gateway import ModelGatewayRoute
 from app.core.policy import (
     api_source_authoring_allowed,
     assert_api_source_authoring,
@@ -61,6 +90,7 @@ from app.core.policy import (
     is_tenant_admin,
     knowledge_access_allowed,
     knowledge_authoring_allowed,
+    knowledge_wall_allows,
 )
 from app.models.schemas import (
     ConnectorConfig,
@@ -68,12 +98,14 @@ from app.models.schemas import (
     KnowledgeConfig,
     KnowledgeApiSourceCreateRequest,
     KnowledgeDocument,
+    KnowledgeDocumentAccessRequest,
     KnowledgeIndexStatus,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     KnowledgeSyncRequest,
     KnowledgeSyncResponse,
     KnowledgeWebSourceCreateRequest,
+    ModelConfig,
     Role,
     User,
 )
@@ -332,6 +364,14 @@ def documents(
 ) -> list[KnowledgeDocument]:
     config = _get_viewable_config(config_id, actor, store)
     documents = store.knowledge_documents_for(config.id)
+    if not _operates(config, actor, store):
+        # Readers outside an ethical wall must not learn the document exists;
+        # the people who manage the base still see it with its wall.
+        documents = [
+            document
+            for document in documents
+            if knowledge_wall_allows(actor, wall_group_ids(document.wall))
+        ]
     store.record_audit(
         actor,
         "knowledge.documents_listed",
@@ -345,17 +385,34 @@ def documents(
 @router.get("/limits")
 def limits(actor: User = Depends(current_user), store: SeedStore = Depends(get_store)) -> dict[str, Any]:
     """Upload and indexing limits the Library shows next to its upload controls."""
-    del actor
     settings = get_settings()
     return {
         "upload_max_mb": settings.knowledge_upload_max_mb,
         "max_extracted_chars": settings.knowledge_max_extracted_chars,
         "ocr_enabled": settings.knowledge_ocr_enabled,
         "ocr_max_pages": settings.knowledge_ocr_max_pages,
+        "vision_ocr": _vision_ocr_status(actor, store),
         "semantic_search": store.vector_store.dense_status("")["semantic_search"],
         # Provider sign-ins must be registered with the exact callback the
         # server sends, so the UI shows this rather than guessing an origin.
         "oauth_callback_base": f"{get_settings().api_base_url.rstrip('/')}/api/knowledge",
+    }
+
+
+def _vision_ocr_status(actor: User, store: SeedStore) -> dict[str, Any]:
+    """Which model reads handwriting and images for this person's workspace."""
+    settings = get_settings()
+    selection = (
+        resolve_vision_model(
+            store, tenant_id=actor.tenant_id, preferred=settings.knowledge_vision_ocr_model
+        )
+        if settings.knowledge_vision_ocr_enabled and settings.knowledge_vision_ocr_max_pages > 0
+        else None
+    )
+    return {
+        "available": selection is not None,
+        "model_name": selection[0].name if selection is not None else None,
+        "max_pages": settings.knowledge_vision_ocr_max_pages,
     }
 
 
@@ -379,13 +436,29 @@ def sync(
     payload: KnowledgeSyncRequest | None = None,
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
+    usage_orchestrator: TenantUsageBudgetOrchestrator = Depends(get_usage_budget_orchestrator),
 ) -> KnowledgeSyncResponse:
     config = _get_operable_config(config_id, actor, store)
+    # Groups named by a wall may have been created or renamed since indexing.
+    store.reapply_knowledge_walls(config)
     if config.source_type not in CONNECTOR_SOURCE_TYPES:
         return _refresh_linked_sources(config, actor, store, force=bool(payload and payload.force))
-    sync_documents, sync_chunks, provider_status, provider_message = _provider_sync_documents(
-        config, store
+    usage = _LazyUsage(
+        lambda: _begin_knowledge_media_usage(
+            usage_orchestrator, actor=actor, store=store, tenant_id=config.tenant_id, tenant_slug=None
+        )
     )
+    readers = _ReaderLog(_vision_reader_factory(config, store, usage.get))
+    try:
+        sync_documents, sync_chunks, provider_status, provider_message = _provider_sync_documents(
+            config, store, readers.new
+        )
+    finally:
+        if usage.context is not None:
+            _close_knowledge_media_usage(usage.context)
+    provider_message = " ".join(
+        part for part in (provider_message, readers.summary()) if part
+    ) or None
     config, documents, synced_at = store.sync_knowledge_config(
         config.id,
         sync_documents,
@@ -430,90 +503,31 @@ async def upload_documents(
     new_chunks: list[KnowledgeChunk] = []
     notes: list[str] = []
     uploaded_bytes = 0
-    settings = get_settings()
-    usage_context: UsageBudgetRequestContext | None = None
-    try:
+    usage = _LazyUsage(
+        lambda: _begin_knowledge_media_usage(
+            usage_orchestrator,
+            actor=actor,
+            store=store,
+            tenant_id=config.tenant_id,
+            tenant_slug=tenant_slug,
+        )
+    )
+    new_vision_reader = _vision_reader_factory(config, store, usage.get)
+    with _metered_upload(usage):
         for file in files:
-            filename = _safe_source_name(file.filename, fallback="uploaded-source")
-            file_bytes = await validate_upload_within_limit(
+            indexed = await _index_uploaded_file(
                 file,
-                settings.knowledge_upload_max_bytes,
-                detail=(
-                    f"'{filename}' exceeds the {settings.knowledge_upload_max_mb} MB "
-                    "knowledge upload limit."
-                ),
-            )
-            uploaded_bytes += file_bytes
-            if is_media_upload(filename, file.content_type):
-                content = await file.read()
-                if usage_context is None:
-                    usage_context = _begin_knowledge_media_usage(
-                        usage_orchestrator,
-                        actor=actor,
-                        store=store,
-                        tenant_id=config.tenant_id,
-                        tenant_slug=tenant_slug,
-                    )
-                result = await run_in_threadpool(
-                    _transcribe_knowledge_media,
-                    content,
-                    filename,
-                    file.content_type,
-                    store,
-                    config.tenant_id,
-                    usage_context,
-                )
-                segments = [ExtractedSegment(text=result.text, locator="transcript")]
-                truncated = False
-            else:
-                segments, truncated = await run_in_threadpool(
-                    _extract_upload_segments,
-                    filename,
-                    file.file,
-                    file.content_type,
-                    settings.knowledge_max_extracted_chars,
-                )
-            # Chunking a multi-million-character file is CPU work; keep it off
-            # the event loop so other requests are served meanwhile.
-            document, chunks = await run_in_threadpool(
-                _document_from_segments,
-                config,
-                name=filename,
-                source_type="upload",
-                source_uri=f"upload://knowledge/{config.id}/{uuid4()}-{filename}",
-                segments=segments,
+                config=config,
+                actor=actor,
+                store=store,
+                usage=usage,
+                new_vision_reader=new_vision_reader,
                 synced_at=synced_at,
             )
-            if document.status == "metadata-only":
-                notes.append(
-                    f"No readable text was found in {filename}, so only its name is searchable."
-                )
-            elif truncated:
-                notes.append(
-                    f"Only the first {settings.knowledge_max_extracted_chars:,} characters of "
-                    f"{filename} were indexed."
-                )
-            new_documents.append(document)
-            new_chunks.extend(chunks)
-        if usage_context is not None:
-            _close_knowledge_media_usage(usage_context)
-    except MediaTranscriptionError as exc:
-        if usage_context is not None:
-            _fail_knowledge_media_usage(usage_context)
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    except UsageBudgetError as exc:
-        if usage_context is not None:
-            _fail_knowledge_media_usage(usage_context)
-        failure = map_usage_budget_error(exc)
-        raise HTTPException(
-            status_code=failure.status_code,
-            detail=failure.detail,
-            headers=dict(failure.headers),
-        ) from exc
-    except Exception:
-        if usage_context is not None:
-            _fail_knowledge_media_usage(usage_context)
-        raise
+            uploaded_bytes += indexed.byte_count
+            notes.extend(indexed.notes)
+            new_documents.append(indexed.document)
+            new_chunks.extend(indexed.chunks)
     readable = [document for document in new_documents if document.status != "metadata-only"]
     passages = sum(document.chunk_count for document in readable)
     provider_message = " ".join(
@@ -576,6 +590,9 @@ def delete_document(
         for source in removed_sources:
             if source.get("secret_ref"):
                 store.delete_configuration_secret("knowledge-api-source", str(source["secret_ref"]))
+    overrides = document_wall_overrides(config.settings)
+    if overrides.pop(document_id, None) is not None:
+        config.settings = {**config.settings, DOCUMENT_WALLS_SETTING: overrides}
     result = store.delete_knowledge_document(config, document_id, synced_at=synced_at)
     if result is None:
         raise HTTPException(
@@ -605,6 +622,114 @@ def delete_document(
     )
 
 
+@router.put("/{config_id}/documents/{document_id}/access")
+def set_document_access(
+    config_id: str,
+    document_id: str,
+    payload: KnowledgeDocumentAccessRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> KnowledgeSyncResponse:
+    """Set one document's ethical wall.
+
+    ``metadata`` follows the file's own wall field, ``restricted`` limits it to
+    the chosen groups, and ``open`` lifts a metadata wall. Lifting a wall is for
+    administrators only, so a knowledge base owner cannot undo a firm wall.
+    """
+    config = _get_operable_config(config_id, actor, store)
+    document = _knowledge_document_or_404(config, document_id, store)
+    if payload.mode == "open" and not (is_tenant_admin(actor) or actor.role == Role.PLATFORM_OWNER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can lift an ethical wall.",
+        )
+    group_ids = _wall_group_choice(payload, config, store)
+    overrides = document_wall_overrides(config.settings)
+    previous_group_ids = wall_group_ids(document.wall)
+    if payload.mode == "metadata":
+        overrides.pop(document_id, None)
+    else:
+        overrides[document_id] = {"mode": payload.mode, "group_ids": group_ids}
+    config.settings = {**config.settings, DOCUMENT_WALLS_SETTING: overrides}
+    store.reapply_knowledge_walls(config)
+    store.record_audit(
+        actor,
+        "knowledge.document_wall_changed",
+        config.id,
+        {
+            "document_id": document_id,
+            "document_name": document.name,
+            "mode": payload.mode,
+            "group_ids": group_ids,
+            "previous_group_ids": previous_group_ids,
+        },
+    )
+    documents = store.knowledge_documents_for(config.id)
+    updated = next(item for item in documents if item.id == document_id)
+    return KnowledgeSyncResponse(
+        config=config,
+        documents=documents,
+        status=str(config.settings.get("status") or "synced"),
+        synced_at=str(config.settings.get("last_sync") or "Not synced"),
+        provider_status="unchanged",
+        provider_message=_wall_message(updated, store),
+    )
+
+
+def _knowledge_document_or_404(
+    config: KnowledgeConfig, document_id: str, store: SeedStore
+) -> KnowledgeDocument:
+    for document in store.knowledge_documents_for(config.id):
+        if document.id == document_id:
+            return document
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown knowledge document.")
+
+
+def _wall_group_choice(
+    payload: KnowledgeDocumentAccessRequest, config: KnowledgeConfig, store: SeedStore
+) -> list[str]:
+    if payload.mode != "restricted":
+        return []
+    group_ids = list(dict.fromkeys(item.strip() for item in payload.group_ids if item.strip()))
+    if not group_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Choose at least one group that may see this document.",
+        )
+    unknown = [
+        group_id
+        for group_id in group_ids
+        if (group := store.groups.get(group_id)) is None or group.tenant_id != config.tenant_id
+    ]
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown group: {', '.join(unknown)}.",
+        )
+    return group_ids
+
+
+def _wall_message(document: KnowledgeDocument, store: SeedStore) -> str:
+    wall = document.wall
+    if wall is None:
+        return f"Everyone who can use this knowledge base can now find {document.name}."
+    if not wall.group_ids:
+        return f"{document.name} is hidden from everyone until its wall names a known group."
+    names = [
+        store.groups[group_id].name if group_id in store.groups else group_id
+        for group_id in wall.group_ids
+    ]
+    return f"Only members of {', '.join(names)} can now find {document.name}."
+
+
+def _operates(config: KnowledgeConfig, actor: User, store: SeedStore) -> bool:
+    try:
+        _get_operable_config(config.id, actor, store)
+    except HTTPException:
+        return False
+    return True
+
+
 @router.post("/{config_id}/web-sources")
 def add_web_source(
     config_id: str,
@@ -619,52 +744,61 @@ def add_web_source(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Web source URL is required."
         )
-    name = payload.name.strip() or url
     manual_text = (payload.text or "").strip()
     if manual_text:
-        text = manual_text
-        provider_message = (
-            f"Indexed the text you provided for {url}; the page itself was not fetched."
+        document, chunks = _document_from_text(
+            config,
+            name=payload.name.strip() or url,
+            source_type="web",
+            source_uri=url,
+            text=manual_text,
+            synced_at=synced_at,
+        )
+        read = _WebSourceRead(
+            document,
+            chunks,
+            f"Indexed the text you provided for {url}; the page itself was not fetched.",
         )
     else:
         # Fetch failures raise an HTTP error so no fake "indexed" document is created.
-        text, provider_message = _fetch_web_source(url)
-    document, chunks = _document_from_text(
-        config,
-        name=name,
-        source_type="web",
-        source_uri=url,
-        text=text,
-        synced_at=synced_at,
-    )
+        read = _read_web_source(
+            config,
+            url=url,
+            name=payload.name.strip(),
+            crawl_depth=payload.crawl_depth,
+            max_pages=payload.max_pages,
+            live_lookup=payload.live_lookup,
+            synced_at=synced_at,
+        )
     _save_linked_sources(
         config,
         [
             *_linked_sources(config),
             {
-                "document_id": document.id,
+                "document_id": read.document.id,
                 "kind": "web",
-                "name": name,
+                "name": read.document.name,
                 "url": url,
                 # Pasted text has no live page behind it, so Sync leaves it alone.
                 "refresh": not manual_text,
+                **read.fields,
             },
         ],
     )
     config, documents, synced_at = _append_indexed_sources(
         store,
         config,
-        [document],
-        chunks,
+        [read.document],
+        read.chunks,
         synced_at=synced_at,
         provider_status="live",
-        provider_message=provider_message,
+        provider_message=read.message,
     )
     store.record_audit(
         actor,
         "knowledge.web_source_added",
         config.id,
-        {"url": url, "chunk_count": len(chunks), "fetched": not manual_text},
+        {"url": url, "chunk_count": len(read.chunks), "fetched": not manual_text, **read.audit},
     )
     return KnowledgeSyncResponse(
         config=config,
@@ -672,7 +806,7 @@ def add_web_source(
         status=knowledge_sync_status("live"),
         synced_at=synced_at,
         provider_status="live",
-        provider_message=provider_message,
+        provider_message=read.message,
     )
 
 
@@ -925,7 +1059,7 @@ def _fail_knowledge_media_usage(context: UsageBudgetRequestContext) -> None:
 
 CONNECTOR_SOURCE_TYPES = frozenset({"box", "microsoft-graph", "google-drive", "imanage"})
 _API_AUTH_TYPES = frozenset({"none", "api-key", "bearer-token", "oauth-client"})
-_LINKED_SOURCES_KEY = "linked_sources"
+_LINKED_SOURCES_KEY = LINKED_SOURCES_KEY
 
 
 def _linked_sources(config: KnowledgeConfig) -> list[dict[str, Any]]:
@@ -942,19 +1076,134 @@ def _save_linked_sources(config: KnowledgeConfig, sources: list[dict[str, Any]])
     config.settings = settings
 
 
-def _extract_upload_segments(
+@contextmanager
+def _metered_upload(usage: "_LazyUsage") -> Iterator[None]:
+    """Settle the upload's metered request, or fail it and report an HTTP error."""
+    try:
+        yield
+        if usage.context is not None:
+            _close_knowledge_media_usage(usage.context)
+    except MediaTranscriptionError as exc:
+        _fail_upload_usage(usage)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except UsageBudgetError as exc:
+        _fail_upload_usage(usage)
+        failure = map_usage_budget_error(exc)
+        raise HTTPException(
+            status_code=failure.status_code,
+            detail=failure.detail,
+            headers=dict(failure.headers),
+        ) from exc
+    except Exception:
+        _fail_upload_usage(usage)
+        raise
+
+
+def _fail_upload_usage(usage: "_LazyUsage") -> None:
+    if usage.context is not None:
+        _fail_knowledge_media_usage(usage.context)
+
+
+@dataclass(frozen=True, slots=True)
+class _IndexedUpload:
+    document: KnowledgeDocument
+    chunks: list[KnowledgeChunk]
+    notes: list[str]
+    byte_count: int
+
+
+async def _index_uploaded_file(
+    file: UploadFile,
+    *,
+    config: KnowledgeConfig,
+    actor: User,
+    store: SeedStore,
+    usage: "_LazyUsage",
+    new_vision_reader: Callable[[], VisionPageReader | None],
+    synced_at: str,
+) -> _IndexedUpload:
+    """Validate, extract (or transcribe), and chunk one uploaded file."""
+    settings = get_settings()
+    filename = _safe_source_name(file.filename, fallback="uploaded-source")
+    file_bytes = await validate_upload_within_limit(
+        file,
+        settings.knowledge_upload_max_bytes,
+        detail=(
+            f"'{filename}' exceeds the {settings.knowledge_upload_max_mb} MB "
+            "knowledge upload limit."
+        ),
+    )
+    vision = None
+    if is_media_upload(filename, file.content_type):
+        content = await file.read()
+        usage_context = await run_in_threadpool(usage.get)
+        result = await run_in_threadpool(
+            _transcribe_knowledge_media,
+            content,
+            filename,
+            file.content_type,
+            store,
+            config.tenant_id,
+            usage_context,
+        )
+        extracted = ExtractedDocument(
+            segments=[ExtractedSegment(text=result.text, locator="transcript")], metadata={}
+        )
+        truncated = False
+    else:
+        vision = new_vision_reader()
+        extracted, truncated = await run_in_threadpool(
+            _extract_upload_document,
+            filename,
+            file.file,
+            file.content_type,
+            settings.knowledge_max_extracted_chars,
+            vision,
+        )
+    # Chunking a multi-million-character file is CPU work; keep it off the
+    # event loop so other requests are served meanwhile.
+    document, chunks = await run_in_threadpool(
+        _document_from_segments,
+        config,
+        name=filename,
+        source_type="upload",
+        source_uri=f"upload://knowledge/{config.id}/{uuid4()}-{filename}",
+        segments=extracted.segments,
+        synced_at=synced_at,
+        metadata=_with_upload_properties(
+            extracted.metadata, file_bytes=file_bytes, actor=actor, synced_at=synced_at
+        ),
+    )
+    notes = _vision_notes(filename, vision) + _extraction_notes(
+        filename, document, truncated=truncated, max_chars=settings.knowledge_max_extracted_chars
+    )
+    return _IndexedUpload(document, chunks, notes, file_bytes)
+
+
+def _extraction_notes(
+    filename: str, document: KnowledgeDocument, *, truncated: bool, max_chars: int
+) -> list[str]:
+    if document.status == "metadata-only":
+        return [f"No readable text was found in {filename}, so only its name is searchable."]
+    if truncated:
+        return [f"Only the first {max_chars:,} characters of {filename} were indexed."]
+    return []
+
+
+def _extract_upload_document(
     filename: str,
     file: Any,
     content_type: str | None,
     max_chars: int,
-) -> tuple[list[ExtractedSegment], bool]:
+    vision: PageReader | None = None,
+) -> tuple[ExtractedDocument, bool]:
     """Extract an upload and report whether it was cut at the character limit.
 
     Extraction asks for one character more than the limit, so a document that
     is exactly at the limit is never reported as truncated.
     """
     settings = get_settings()
-    segments = extract_segments_from_file(
+    extracted = extract_document(
         filename,
         file,
         content_type,
@@ -962,11 +1211,124 @@ def _extract_upload_segments(
         ocr_enabled=settings.knowledge_ocr_enabled,
         ocr_max_pages=settings.knowledge_ocr_max_pages,
         ocr_page_timeout_seconds=settings.knowledge_ocr_page_timeout_seconds,
+        vision=vision,
     )
+    segments = extracted.segments
     joined_length = sum(len(segment.text) for segment in segments) + 2 * max(0, len(segments) - 1)
     if joined_length <= max_chars:
-        return segments, False
-    return limit_extracted_segments(segments, max_chars=max_chars), True
+        return extracted, False
+    limited = limit_extracted_segments(segments, max_chars=max_chars)
+    return ExtractedDocument(segments=limited, metadata=extracted.metadata), True
+
+
+class _LazyUsage:
+    """Open the request's usage-budget context only when a provider call needs it.
+
+    Media transcription and AI page reading share one metered request per
+    upload; plain documents never open one.
+    """
+
+    def __init__(self, begin: Callable[[], UsageBudgetRequestContext]) -> None:
+        self._begin = begin
+        self._lock = Lock()
+        self.context: UsageBudgetRequestContext | None = None
+
+    def get(self) -> UsageBudgetRequestContext:
+        with self._lock:
+            if self.context is None:
+                self.context = self._begin()
+            return self.context
+
+
+VISION_OCR_SETTING = "vision_ocr"
+
+
+def _vision_reader_factory(
+    config: KnowledgeConfig,
+    store: SeedStore,
+    usage: Callable[[], UsageBudgetRequestContext],
+) -> Callable[[], VisionPageReader | None]:
+    """Make one page reader per file, or None when AI reading is off.
+
+    The model is resolved once, on first use, so uploads that never need it
+    never touch provider credentials.
+    """
+    settings = get_settings()
+    enabled = settings.knowledge_vision_ocr_enabled and config.settings.get(
+        VISION_OCR_SETTING, True
+    ) is not False
+    selection: list[tuple[ModelConfig, ModelGatewayRoute] | None] = []
+
+    def make() -> VisionPageReader | None:
+        if not enabled or settings.knowledge_vision_ocr_max_pages <= 0:
+            return None
+        if not selection:
+            selection.append(
+                resolve_vision_model(
+                    store,
+                    tenant_id=config.tenant_id,
+                    preferred=settings.knowledge_vision_ocr_model,
+                )
+            )
+        if selection[0] is None:
+            return None
+        model, route = selection[0]
+        return VisionPageReader(
+            model=model,
+            route=route,
+            usage=usage,
+            max_pages=settings.knowledge_vision_ocr_max_pages,
+            concurrency=settings.knowledge_vision_ocr_concurrency,
+        )
+
+    return make
+
+
+def _vision_notes(filename: str, vision: VisionPageReader | None) -> list[str]:
+    if vision is None:
+        return []
+    notes: list[str] = []
+    if vision.pages_read:
+        notes.append(
+            f"{vision.model_name} read handwriting, stamps, and images on "
+            f"{vision.pages_read:,} page{'' if vision.pages_read == 1 else 's'} of {filename}."
+        )
+    if vision.skipped_for_budget:
+        notes.append(
+            f"{vision.skipped_for_budget:,} more page"
+            f"{'' if vision.skipped_for_budget == 1 else 's'} of {filename} used standard OCR "
+            f"only (AI reading is limited to {vision.max_pages:,} pages per file)."
+        )
+    if vision.problem:
+        notes.append(f"{vision.problem} Standard OCR was used for the rest of {filename}.")
+    elif vision.failures:
+        notes.append(
+            f"{vision.model_name} could not read {vision.failures:,} page"
+            f"{'' if vision.failures == 1 else 's'} of {filename}; standard OCR was used for "
+            f"{'it' if vision.failures == 1 else 'them'}."
+        )
+    return notes
+
+
+def _with_upload_properties(
+    metadata: dict[str, str], *, file_bytes: int, actor: User, synced_at: str
+) -> dict[str, str]:
+    return bounded_metadata(
+        [
+            *metadata.items(),
+            ("File size", _file_size_label(file_bytes)),
+            ("Uploaded by", actor.display_name or actor.email),
+            ("Uploaded", synced_at),
+        ]
+    )
+
+
+def _file_size_label(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    if size >= 1024:
+        return f"{max(1, size // 1024):,} KB"
+    return f"{size:,} bytes"
 
 
 def _refresh_linked_sources(
@@ -986,39 +1348,10 @@ def _refresh_linked_sources(
     # Revoking the API-source grant stops the outbound calls without deleting
     # what was already indexed.
     api_paused = not api_source_authoring_allowed(actor, store.groups)
-    paused = [
-        source
-        for source in sources
-        if api_paused and source.get("kind") == "api" and source.get("refresh")
-    ]
-    refreshable = [
-        source
-        for source in sources
-        if source.get("refresh")
-        and (source.get("kind") == "web" or source.get("kind") == "api")
-        and not source.get("awaiting_authorization")
-        and source not in paused
-    ]
-    waiting = [
-        source
-        for source in sources
-        if source.get("awaiting_authorization") and source not in paused
-    ]
-    paused_note = (
-        f"{len(paused)} API source{'' if len(paused) == 1 else 's'} skipped: API sources are "
-        "turned off for your groups, so their last content is kept."
-        if paused
-        else ""
-    )
+    paused, refreshable, waiting = _partition_linked_sources(sources, api_paused=api_paused)
+    paused_note = _paused_api_note(paused)
     if not refreshable:
-        message = (
-            paused_note
-            if paused
-            else "Waiting for the provider sign-in before this API can be fetched."
-            if waiting
-            else "Nothing to sync. Uploaded files and pasted text are indexed when you add "
-            "them; add a web page or API to keep content refreshed automatically."
-        )
+        message = paused_note or _nothing_to_refresh_message(waiting=bool(waiting))
         store.record_audit(
             actor,
             "knowledge.config_synced",
@@ -1036,49 +1369,11 @@ def _refresh_linked_sources(
         )
 
     synced_at = _sync_time()
-    documents_by_id = {document.id: document for document in store.knowledge_documents_for(config.id)}
-    refreshed = 0
-    failures: list[str] = []
-    for source in refreshable:
-        name = str(source.get("name") or source.get("url") or source.get("base_url") or "source")
-        try:
-            if source.get("kind") == "web":
-                text, _message = _fetch_web_source(str(source.get("url") or ""))
-                source_uri = str(source.get("url") or "")
-            else:
-                fetched = _fetch_linked_api_source(config, source, store)
-                text, source_uri = fetched.text, fetched.display_url
-        except HTTPException as exc:
-            failures.append(f"{name}: {exc.detail}")
-            continue
-        existing = documents_by_id.get(str(source.get("document_id") or ""))
-        document, chunks = _document_from_text(
-            config,
-            name=existing.name if existing else name,
-            source_type=str(source.get("kind")),
-            source_uri=source_uri,
-            text=text,
-            synced_at=synced_at,
-            document_id=str(source.get("document_id") or "") or None,
-        )
-        if not source.get("document_id"):
-            source["document_id"] = document.id
-        store.replace_knowledge_document(config, document, chunks)
-        refreshed += 1
+    refreshed, failures, notes = _refresh_each_linked_source(config, store, refreshable, synced_at=synced_at)
     _save_linked_sources(config, sources)
-    if failures:
-        status_value = "error"
-        provider_status = "error"
-        message = (
-            f"Refreshed {refreshed} of {len(refreshable)} linked sources. "
-            "Could not refresh " + "; ".join(failures) + ". Their previous content is kept."
-        )
-    else:
-        status_value = "synced"
-        provider_status = "live"
-        message = f"Refreshed {refreshed} linked source{'' if refreshed == 1 else 's'}."
-    if paused_note:
-        message = f"{message} {paused_note}"
+    status_value, provider_status, message = _refresh_outcome(
+        refreshed, len(refreshable), failures, [*notes, paused_note]
+    )
     config, documents, synced_at = store.record_knowledge_sync(
         config,
         status=status_value,
@@ -1094,6 +1389,7 @@ def _refresh_linked_sources(
             "refreshed": refreshed,
             "failed": len(failures),
             "force": force,
+            "provider_message": message,
             "provider_status": provider_status,
             "source_type": config.source_type,
         },
@@ -1106,6 +1402,138 @@ def _refresh_linked_sources(
         provider_status=provider_status,
         provider_message=message,
     )
+
+
+def _partition_linked_sources(
+    sources: list[dict[str, Any]], *, api_paused: bool
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split recipes into paused API sources, sources Sync re-fetches, and ones awaiting sign-in."""
+    paused = [source for source in sources if api_paused and _refreshes_api(source)]
+    refreshable = [source for source in sources if _refetchable(source) and source not in paused]
+    waiting = [
+        source
+        for source in sources
+        if source.get("awaiting_authorization") and source not in paused
+    ]
+    return paused, refreshable, waiting
+
+
+def _refreshes_api(source: dict[str, Any]) -> bool:
+    return source.get("kind") == "api" and bool(source.get("refresh"))
+
+
+def _refetchable(source: dict[str, Any]) -> bool:
+    return (
+        bool(source.get("refresh"))
+        and source.get("kind") in ("web", "api")
+        and not source.get("awaiting_authorization")
+    )
+
+
+def _paused_api_note(paused: list[dict[str, Any]]) -> str:
+    if not paused:
+        return ""
+    return (
+        f"{len(paused)} API source{'' if len(paused) == 1 else 's'} skipped: API sources are "
+        "turned off for your groups, so their last content is kept."
+    )
+
+
+def _nothing_to_refresh_message(*, waiting: bool) -> str:
+    if waiting:
+        return "Waiting for the provider sign-in before this API can be fetched."
+    return (
+        "Nothing to sync. Uploaded files and pasted text are indexed when you add "
+        "them; add a web page or API to keep content refreshed automatically."
+    )
+
+
+def _refresh_outcome(
+    refreshed: int, total: int, failures: list[str], notes: list[str]
+) -> tuple[str, str, str]:
+    """Status, provider status, and message for a Sync; notes follow the headline."""
+    if failures:
+        headline = (
+            f"Refreshed {refreshed} of {total} linked sources. "
+            "Could not refresh " + "; ".join(failures) + ". Their previous content is kept."
+        )
+        status_value = provider_status = "error"
+    else:
+        headline = f"Refreshed {refreshed} linked source{'' if refreshed == 1 else 's'}."
+        status_value, provider_status = "synced", "live"
+    return status_value, provider_status, " ".join([headline, *(note for note in notes if note)])
+
+
+def _linked_source_name(source: dict[str, Any]) -> str:
+    return str(source.get("name") or source.get("url") or source.get("base_url") or "source")
+
+
+def _refresh_each_linked_source(
+    config: KnowledgeConfig,
+    store: SeedStore,
+    refreshable: list[dict[str, Any]],
+    *,
+    synced_at: str,
+) -> tuple[int, list[str], list[str]]:
+    """Refresh each source in place; return the refreshed count, failures, and crawl notes."""
+    documents_by_id = {document.id: document for document in store.knowledge_documents_for(config.id)}
+    refreshed = 0
+    failures: list[str] = []
+    notes: list[str] = []
+    for source in refreshable:
+        name = _linked_source_name(source)
+        existing = documents_by_id.get(str(source.get("document_id") or ""))
+        try:
+            document, chunks, note = _refresh_linked_source(
+                config, source, store, name=existing.name if existing else name, synced_at=synced_at
+            )
+        except HTTPException as exc:
+            failures.append(f"{name}: {exc.detail}")
+            continue
+        if not source.get("document_id"):
+            source["document_id"] = document.id
+        store.replace_knowledge_document(config, document, chunks)
+        refreshed += 1
+        if note:
+            notes.append(f"{document.name}: {note}")
+    return refreshed, failures, notes
+
+
+def _refresh_linked_source(
+    config: KnowledgeConfig,
+    source: dict[str, Any],
+    store: SeedStore,
+    *,
+    name: str,
+    synced_at: str,
+) -> tuple[KnowledgeDocument, list[KnowledgeChunk], str]:
+    """Re-read one web page, site, or API with its saved settings."""
+    document_id = str(source.get("document_id") or "") or None
+    recipe = site_recipe(source)
+    if recipe is not None:
+        read = _read_web_source(
+            config,
+            url=recipe.url,
+            name=name,
+            crawl_depth=recipe.crawl_depth,
+            max_pages=recipe.max_pages,
+            live_lookup=recipe.live_lookup,
+            synced_at=synced_at,
+            document_id=document_id,
+        )
+        source.update(read.fields)
+        return read.document, read.chunks, read.note
+    fetched = _fetch_linked_api_source(config, source, store)
+    document, chunks = _document_from_text(
+        config,
+        name=name,
+        source_type=str(source.get("kind")),
+        source_uri=fetched.display_url,
+        text=fetched.text,
+        synced_at=synced_at,
+        document_id=document_id,
+    )
+    return document, chunks, ""
 
 
 def _fetch_linked_api_source(
@@ -1306,24 +1734,60 @@ def _get_operable_config(config_id: str, actor: User, store: SeedStore) -> Knowl
     )
 
 
+NewPageReader = Callable[[], PageReader | None]
+
+
+def _no_page_reader() -> PageReader | None:
+    return None
+
+
 def _provider_sync_documents(
     config: KnowledgeConfig,
     store: SeedStore,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[list[KnowledgeDocument] | None, list[KnowledgeChunk] | None, str, str | None]:
     if config.source_type == "box":
-        return _sync_box_documents(config, store)
+        return _sync_box_documents(config, store, new_reader)
     if config.source_type == "microsoft-graph":
-        return _sync_microsoft_graph_documents(config, store)
+        return _sync_microsoft_graph_documents(config, store, new_reader)
     if config.source_type == "google-drive":
-        return _sync_google_drive_documents(config, store)
+        return _sync_google_drive_documents(config, store, new_reader)
     if config.source_type == "imanage":
-        return _sync_imanage_documents(config, store)
+        return _sync_imanage_documents(config, store, new_reader)
     return None, None, "cached", "No live adapter is configured for this source type yet."
+
+
+class _ReaderLog:
+    """Hands out one page reader per synced file and sums what they did."""
+
+    def __init__(self, factory: NewPageReader) -> None:
+        self._factory = factory
+        self.readers: list[VisionPageReader] = []
+
+    def new(self) -> PageReader | None:
+        reader = self._factory()
+        if isinstance(reader, VisionPageReader):
+            self.readers.append(reader)
+        return reader
+
+    def summary(self) -> str:
+        pages = sum(reader.pages_read for reader in self.readers)
+        problems = list(dict.fromkeys(reader.problem for reader in self.readers if reader.problem))
+        parts: list[str] = []
+        if pages:
+            name = self.readers[0].model_name
+            parts.append(
+                f"{name} read handwriting, stamps, and images on {pages:,} "
+                f"page{'' if pages == 1 else 's'}."
+            )
+        parts += problems
+        return " ".join(parts)
 
 
 def _sync_box_documents(
     config: KnowledgeConfig,
     store: SeedStore,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[list[KnowledgeDocument] | None, list[KnowledgeChunk] | None, str, str | None]:
     connector_config = _connector_config(config, store, expected_connector_id="box")
     if connector_config is None:
@@ -1348,7 +1812,9 @@ def _sync_box_documents(
     for item in items:
         if item.type != "file":
             continue
-        document, document_chunks, used_file_text = _box_document_and_chunks(config, item, client)
+        document, document_chunks, used_file_text = _box_document_and_chunks(
+            config, item, client, new_reader
+        )
         documents.append(document)
         chunks.extend(document_chunks)
         if used_file_text:
@@ -1371,6 +1837,7 @@ def _sync_box_documents(
 def _sync_microsoft_graph_documents(
     config: KnowledgeConfig,
     store: SeedStore,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[list[KnowledgeDocument] | None, list[KnowledgeChunk] | None, str, str | None]:
     connector_config = _connector_config(config, store, expected_connector_id="microsoft-graph")
     if connector_config is None:
@@ -1420,6 +1887,7 @@ def _sync_microsoft_graph_documents(
         items,
         client,
         download_kwargs=download_kwargs,
+        new_reader=new_reader,
     )
     return _cloud_sync_result(
         provider_name="Microsoft Graph",
@@ -1434,6 +1902,7 @@ def _sync_microsoft_graph_documents(
 def _sync_google_drive_documents(
     config: KnowledgeConfig,
     store: SeedStore,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[list[KnowledgeDocument] | None, list[KnowledgeChunk] | None, str, str | None]:
     connector_config = _connector_config(config, store, expected_connector_id="google-drive")
     if connector_config is None:
@@ -1473,7 +1942,7 @@ def _sync_google_drive_documents(
         )
 
     documents, chunks, downloaded, metadata_only = _cloud_documents_and_chunks(
-        config, items, client
+        config, items, client, new_reader=new_reader
     )
     return _cloud_sync_result(
         provider_name="Google Drive",
@@ -1488,6 +1957,7 @@ def _sync_google_drive_documents(
 def _sync_imanage_documents(
     config: KnowledgeConfig,
     store: SeedStore,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[list[KnowledgeDocument] | None, list[KnowledgeChunk] | None, str, str | None]:
     connector_config = _connector_config(config, store, expected_connector_id="imanage")
     if connector_config is None:
@@ -1521,7 +1991,7 @@ def _sync_imanage_documents(
         return None, None, "error", f"iManage sync failed ({exc}); using cached indexed inventory."
 
     documents, chunks, downloaded, metadata_only = _cloud_documents_and_chunks(
-        config, items, client
+        config, items, client, new_reader=new_reader
     )
     return _cloud_sync_result(
         provider_name="iManage",
@@ -1608,6 +2078,7 @@ def _cloud_documents_and_chunks(
     client: object,
     *,
     download_kwargs: dict[str, object] | None = None,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[list[KnowledgeDocument], list[KnowledgeChunk], int, int]:
     documents: list[KnowledgeDocument] = []
     chunks: list[KnowledgeChunk] = []
@@ -1621,6 +2092,7 @@ def _cloud_documents_and_chunks(
             item,
             client,
             download_kwargs=download_kwargs or {},
+            new_reader=new_reader,
         )
         documents.append(document)
         chunks.extend(document_chunks)
@@ -1669,6 +2141,7 @@ def _cloud_document(config: KnowledgeConfig, item: CloudSourceItem) -> Knowledge
         acl_group_ids=list(config.acl_group_ids),
         updated_at=item.modified_at or "Synced now",
         citation_required=bool(config.settings.get("citation_required", True)),
+        metadata=bounded_metadata(item.properties),
     )
 
 
@@ -1678,6 +2151,7 @@ def _cloud_document_and_chunks(
     client: object,
     *,
     download_kwargs: dict[str, object],
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk], bool]:
     document = _cloud_document(config, item)
     try:
@@ -1688,9 +2162,17 @@ def _cloud_document_and_chunks(
         document.status = "metadata-only"
         return document, chunks, False
 
-    segments = extract_segments(
-        item.name, content, mime_type=_extraction_mime_type(item), **_extraction_settings()
+    extracted = extract_document(
+        item.name,
+        content,
+        mime_type=_extraction_mime_type(item),
+        vision=new_reader(),
+        **_extraction_settings(),
     )
+    segments = extracted.segments
+    # What the source system records comes first; the file's own properties
+    # fill in the rest.
+    document.metadata = bounded_metadata([*document.metadata.items(), *extracted.metadata.items()])
     chunks = _knowledge_chunks_from_segments(document, segments)
     if not chunks:
         chunks = [_inventory_chunk(config, document, 0)]
@@ -1745,6 +2227,7 @@ def _box_document(config: KnowledgeConfig, item: BoxItem) -> KnowledgeDocument:
         acl_group_ids=list(config.acl_group_ids),
         updated_at=item.modified_at or "Synced now",
         citation_required=bool(config.settings.get("citation_required", True)),
+        metadata=bounded_metadata(item.properties),
     )
 
 
@@ -1768,8 +2251,14 @@ def _box_document_and_chunks(
     config: KnowledgeConfig,
     item: BoxItem,
     client: object,
+    new_reader: NewPageReader = _no_page_reader,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk], bool]:
     document = _box_document(config, item)
+    # Template metadata (walls, matters, classifications) lives beside the
+    # file in Box, so it is read even when the file itself cannot be.
+    read_metadata = getattr(client, "file_metadata", None)
+    box_metadata = read_metadata(file_id=item.id) if callable(read_metadata) else []
+    document.metadata = bounded_metadata([*document.metadata.items(), *box_metadata])
     try:
         content = client.download_file(file_id=item.id)
     except (AttributeError, BoxError):
@@ -1778,7 +2267,11 @@ def _box_document_and_chunks(
         document.status = "metadata-only"
         return document, chunks, False
 
-    segments = extract_segments(item.name, content, **_extraction_settings())
+    extracted = extract_document(
+        item.name, content, vision=new_reader(), **_extraction_settings()
+    )
+    segments = extracted.segments
+    document.metadata = bounded_metadata([*document.metadata.items(), *extracted.metadata.items()])
     chunks = _knowledge_chunks_from_segments(document, segments)
     if not chunks:
         chunks = [_inventory_chunk(config, document, 0)]
@@ -1844,6 +2337,7 @@ def _document_from_segments(
     segments: list[ExtractedSegment],
     synced_at: str,
     document_id: str | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk]]:
     document = KnowledgeDocument(
         id=document_id or f"doc-{source_type}-{uuid4()}",
@@ -1857,6 +2351,7 @@ def _document_from_segments(
         acl_group_ids=list(config.acl_group_ids),
         updated_at=synced_at,
         citation_required=bool(config.settings.get("citation_required", True)),
+        metadata=dict(metadata or {}),
     )
     chunks = _knowledge_chunks_from_segments(document, segments)
     if not chunks:
@@ -1881,6 +2376,14 @@ def _knowledge_chunks_from_segments(
     document: KnowledgeDocument,
     segments: list[ExtractedSegment],
 ) -> list[KnowledgeChunk]:
+    """Passages for ``segments`` plus, when the file had properties, a searchable
+    "Document properties" passage so questions about authors, dates, labels, or
+    custom fields can find the file itself."""
+    chunked = chunk_segments(segments)
+    properties = descriptive_properties(document.metadata)
+    if chunked and properties:
+        chunked += chunk_segments([_properties_segment(properties)])
+    details = metadata_summary(document.metadata)
     return [
         KnowledgeChunk(
             id=f"chunk-{document.id}-{index + 1}",
@@ -1897,9 +2400,15 @@ def _knowledge_chunks_from_segments(
             locator=segment.locator,
             acl_group_ids=document.acl_group_ids,
             updated_at=document.updated_at,
+            source_details=details,
         )
-        for index, segment in enumerate(chunk_segments(segments))
+        for index, segment in enumerate(chunked)
     ]
+
+
+def _properties_segment(properties: list[tuple[str, str]]) -> ExtractedSegment:
+    lines = "\n\n".join(f"{key}: {value}" for key, value in properties)
+    return ExtractedSegment(text=f"Document properties:\n\n{lines}", locator=PROPERTIES_LOCATOR)
 
 
 def _append_indexed_sources(
@@ -1929,17 +2438,150 @@ def _safe_source_name(filename: str | None, *, fallback: str) -> str:
     return clean or fallback
 
 
-def _fetch_web_source(url: str) -> tuple[str, str]:
-    """Fetch a web source and extract indexable text, or raise an honest error."""
-    try:
-        fetched = fetch_web_source(
-            url,
-            user_agent="ApertureChat-KnowledgeIndexer/0.1",
+@dataclass(frozen=True)
+class _WebSourceRead:
+    """A web page or site read into one document, plus what its recipe and audit record."""
+
+    document: KnowledgeDocument
+    chunks: list[KnowledgeChunk]
+    message: str
+    fields: dict[str, Any] = field(default_factory=dict)
+    audit: dict[str, Any] = field(default_factory=dict)
+    # Crawl summary repeated in Sync messages; empty for single pages.
+    note: str = ""
+
+
+def _read_web_source(
+    config: KnowledgeConfig,
+    *,
+    url: str,
+    name: str,
+    crawl_depth: int,
+    max_pages: int,
+    live_lookup: bool,
+    synced_at: str,
+    document_id: str | None = None,
+) -> _WebSourceRead:
+    """Read one page (depth 0) or crawl its site; raise an honest HTTP error if the page fails."""
+    if crawl_depth == 0:
+        fetched = _fetch_web_page(url)
+        result = single_page_result(url, fetched)
+        document, chunks = _document_from_text(
+            config,
+            name=name or result.site_name or url,
+            source_type="web",
+            source_uri=url,
+            text=fetched.text,
+            synced_at=synced_at,
+            document_id=document_id,
         )
+        saved = result.inventory_note() if live_lookup else ""
+        message = " ".join(
+            part for part in (f"Fetched {url} and indexed {len(fetched.text)} extracted characters.", saved) if part
+        )
+        note = ""
+    else:
+        result = _crawl_web_site(url, crawl_depth=crawl_depth, max_pages=max_pages)
+        document, chunks = _document_from_site_pages(
+            config,
+            name=name or result.site_name or url,
+            source_uri=url,
+            pages=result.pages,
+            synced_at=synced_at,
+            document_id=document_id,
+        )
+        passages = f"{len(chunks)} passage{'' if len(chunks) == 1 else 's'}"
+        message = f"Fetched {url}: {result.summary(include_inventory=live_lookup)} Indexed {passages}."
+        note = result.summary(include_inventory=False)
+    return _WebSourceRead(
+        document,
+        chunks,
+        message,
+        fields=crawl_recipe_fields(result, crawl_depth=crawl_depth, max_pages=max_pages, live_lookup=live_lookup),
+        audit=_crawl_audit(result, crawl_depth=crawl_depth, live_lookup=live_lookup),
+        note=note,
+    )
+
+
+def _crawl_audit(result: CrawlResult, *, crawl_depth: int, live_lookup: bool) -> dict[str, Any]:
+    return {
+        "crawl_depth": crawl_depth,
+        "live_lookup": live_lookup,
+        "pages_read": len(result.pages),
+        "robots_blocked": result.robots_blocked,
+        "failed_pages": result.failed,
+        "skipped_pages": result.skipped,
+    }
+
+
+def _fetch_web_page(url: str) -> FetchedWebSource:
+    """Fetch one web page and extract indexable text, or raise an honest error."""
+    try:
+        return fetch_web_source(url, user_agent=CRAWLER_USER_AGENT)
     except WebFetchError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    text = fetched.text
-    return text, f"Fetched {url} and indexed {len(text)} extracted characters."
+
+
+def _crawl_web_site(url: str, *, crawl_depth: int, max_pages: int) -> CrawlResult:
+    """Crawl the site around ``url``; only a failure of that page itself is an error."""
+    try:
+        return crawl_site(url, limits=CrawlLimits(max_pages=max_pages, max_depth=crawl_depth))
+    except WebFetchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _document_from_site_pages(
+    config: KnowledgeConfig,
+    *,
+    name: str,
+    source_uri: str,
+    pages: tuple[CrawledPage, ...],
+    synced_at: str,
+    document_id: str | None = None,
+) -> tuple[KnowledgeDocument, list[KnowledgeChunk]]:
+    """One document for the whole site whose chunks each cite the exact page they came from."""
+    document, fallback_chunks = _document_from_segments(
+        config,
+        name=name,
+        source_type="web",
+        source_uri=source_uri,
+        segments=[],
+        synced_at=synced_at,
+        document_id=document_id,
+    )
+    chunks: list[KnowledgeChunk] = []
+    for page in pages:
+        for chunk in _knowledge_chunks_from_segments(document, [_site_page_segment(page)]):
+            chunks.append(
+                chunk.model_copy(
+                    update={
+                        "id": f"chunk-{document.id}-{len(chunks) + 1}",
+                        "ordinal": len(chunks),
+                        "source_uri": page.url,
+                    }
+                )
+            )
+    if not chunks:
+        return document, fallback_chunks
+    document.status = "indexed"
+    document.chunk_count = len(chunks)
+    return document, chunks
+
+
+def _site_page_segment(page: CrawledPage) -> ExtractedSegment:
+    """The page's text under a header naming it, so its first passage says where it is from."""
+    paragraphs = page.text.split("\n\n")
+    if page.title and paragraphs[:1] == [page.title]:
+        paragraphs = paragraphs[1:]
+    if page.description in paragraphs:
+        paragraphs.remove(page.description)
+    header = f"{page.title} ({page.url})" if page.title else page.url
+    if page.description:
+        header = f"{header} — {page.description}"
+    return ExtractedSegment(
+        text="\n\n".join([header, *paragraphs]),
+        locator=page.title or page.url,
+    )
 
 
 def _api_source_oauth_settings(config: KnowledgeConfig) -> dict[str, Any]:

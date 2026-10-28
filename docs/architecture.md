@@ -98,7 +98,31 @@ Cloud-source clients include Box, Google Drive, Microsoft Graph sources
 (OneDrive/SharePoint), and iManage. Authentication and source access depend on
 the configured connector and upstream permissions. Uploaded knowledge supports
 text extraction, optional local OCR, and a local dense-vector index; media
-transcription can call the configured model provider. Knowledge web pages and
+transcription can call the configured model provider. Extraction also returns
+each file's own properties (`app/core/document_metadata.py`); connectors add the
+metadata their systems hold (Box template instances and Shield classifications,
+SharePoint columns, Google Drive properties, iManage profile fields). Properties
+are stored on the document, made searchable as one "Document properties"
+passage, and attached to every passage as `source_details` for the prompt.
+Handwriting, stamps, and pictures are read by the best image-capable model the
+tenant can use (`app/core/vision_ocr.py`, metered as `knowledge-ocr`), with
+Tesseract as the fallback; a knowledge base can turn this off (`vision_ocr`).
+Ethical walls (`app/core/knowledge_walls.py`) come from metadata fields that
+name groups, or from an administrator's per-document override; every passage
+carries `wall_group_ids`, and `policy.knowledge_chunk_visible_to_user` enforces
+them for every role. A wall naming no known group admits nobody.
+
+Web sources are parsed with a structured HTML reader (`app/core/html_extract.py`:
+main content, headings, tables, links, a GET search form). With a crawl depth,
+`app/core/site_crawl.py` reads same-site pages breadth-first through the same
+SSRF guard, honoring robots.txt and seeding from sitemap.xml, and stores one
+document per site whose passages cite each page's URL. Up to 300 unread links
+are saved with the source. At question time `app/core/live_site_lookup.py`
+ranks those links (and the site's own search form) against the question, reads
+at most three pages within about six seconds, and adds their best passages to
+the turn as cited "Live page" excerpts; nothing it reads is stored. It is
+skipped when indexed passages already cover the question, honors the tenant's
+web switch, and inherits the site document's sharing and wall. Knowledge web pages and
 API sources are fetched through the same outbound guards (API redirects are
 refused so credentials never follow them) and re-fetched on Sync. New content
 is keyword-searchable as soon as it is stored; a background worker then adds

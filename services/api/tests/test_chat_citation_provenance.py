@@ -385,3 +385,25 @@ def test_gateway_collects_streamed_web_annotations_for_completion_metadata() -> 
     assert pieces == ["Answer"]
     assert usage_sink["annotations"] == [annotation]
     assert usage_sink["finish_reason"] == "stop"
+
+
+def test_document_properties_travel_with_each_knowledge_passage_in_the_prompt() -> None:
+    chunk = _chunk("chunk-memo", "Price is 42 million.", ordinal=0, locator="Page 1").model_copy(
+        update={"source_details": "Title: Falcon memo · Author: Avery Example"}
+    )
+    plain = _chunk("chunk-plain", "No properties here.", ordinal=1)
+    prompt = chat_route._runtime_prompt(
+        _model(),
+        {
+            "citations_enabled": True,
+            "knowledge_hits": [
+                chat_route._runtime_knowledge_hit(chunk, k_index=1),
+                chat_route._runtime_knowledge_hit(plain, k_index=2),
+            ],
+        },
+    )
+    assert (
+        "[K1] (Page 1) Shared diligence source (box://files/shared-source) "
+        "[Title: Falcon memo · Author: Avery Example]: Price is 42 million." in prompt
+    )
+    assert "[K2] Shared diligence source (box://files/shared-source): No properties here." in prompt

@@ -45,6 +45,7 @@ from app.core.script_tools import (
 )
 from app.core.model_discovery import DiscoveredModel, ModelDiscoveryError, discover_provider_models
 from app.core.connector_availability import ATTACHABLE_CONNECTOR_IDS
+from app.core.knowledge_walls import DOCUMENT_WALLS_SETTING, WALL_FIELDS_SETTING, wall_field_names
 from app.core.net_guard import EgressBlocked, validate_public_url
 from app.core.policy import (
     agent_profile_authored_by,
@@ -2106,6 +2107,27 @@ def create_knowledge_config(
     return config
 
 
+def _assert_wall_settings_update(actor: User, settings: dict[str, Any] | None) -> None:
+    """Ethical-wall settings are not ordinary settings.
+
+    Per-document overrides change only through the Library's document access
+    endpoint (which audits each one), and only administrators choose which
+    metadata fields act as walls.
+    """
+    if not settings:
+        return
+    if DOCUMENT_WALLS_SETTING in settings:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Document walls are changed one document at a time from the Library.",
+        )
+    if WALL_FIELDS_SETTING in settings and not _is_agent_profile_admin(actor):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators choose which metadata fields act as ethical walls.",
+        )
+
+
 def _assert_user_knowledge_source(source_type: str | None, connector_config_id: str | None) -> None:
     """A user-built knowledge base can't sync through a workspace connector.
 
@@ -2145,6 +2167,7 @@ def update_knowledge_config(
             )
         _assert_user_knowledge_source(payload.source_type, payload.connector_config_id)
     updates = payload.model_dump(exclude_unset=True)
+    _assert_wall_settings_update(actor, payload.settings)
     if payload.acl_group_ids is not None:
         _assert_group_scope(actor, payload.acl_group_ids, store, tenant_id=config.tenant_id)
     if payload.connector_config_id is not None:
@@ -2152,11 +2175,14 @@ def update_knowledge_config(
     if payload.owner_user_id is not None:
         _assert_knowledge_owner_scope(payload.owner_user_id, config.tenant_id, store)
     previous_acl = list(config.acl_group_ids)
+    previous_wall_fields = wall_field_names(config.settings)
     _apply_config_updates(config, updates)
     if config.acl_group_ids != previous_acl:
         # Indexed documents and chunks carry a copy of the sharing list that
         # retrieval checks; keep it in step so newly shared groups can search.
         store.update_knowledge_acl(config)
+    if wall_field_names(config.settings) != previous_wall_fields:
+        store.reapply_knowledge_walls(config)
     masked_secret = _save_secret_if_present(store, "knowledge", config.id, payload.secret_value)
     if masked_secret is not None:
         config.secret_set = True

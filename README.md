@@ -63,13 +63,14 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.15](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.15)**:
-> every training walkthrough, guide PDF, and README screenshot now shows the
-> current interface, with eight new lessons for support tickets, workspace
-> connectors, sharing reports with the maintainers, chat-to-Drafts handoff,
-> Word and PDF files, document templates, and slide editing. v0.5.14 turned
-> problem reports into support tickets and added tactile controls.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0514) and
+> **Current release: [v0.5.16](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.16)**:
+> knowledge bases keep each file's metadata, honor ethical walls, read
+> handwriting with the workspace's vision model, and crawl and look up web
+> sites; chat code blocks are colored, editable, and AI-editable; structure
+> diagrams gain themes and drag-to-arrange; and decks gain seven designs and
+> three new layouts. v0.5.15 refreshed every training walkthrough and added
+> optional WorkOS sign-in.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0515) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -133,7 +134,7 @@ policies appropriate for your organization's data.
 | --- | --- |
 | ![Company Policies knowledge base with its uploaded documents](docs/images/knowledge-dark.png) | ![Tools library showing reusable prompt templates](docs/images/tools-dark.png) |
 
-- **Knowledge bases** combine uploaded files, web pages, and API sources. Uploads are keyword-searchable as soon as their text is extracted, and semantic vectors are added in the background. OCR and embeddings run locally; media transcription uses a configured provider.
+- **Knowledge bases** combine uploaded files, web pages, and API sources. Uploads are keyword-searchable as soon as their text is extracted, and semantic vectors are added in the background. Extraction keeps what plain text extraction drops: Word headers, footers, footnotes and comments, slide speaker notes, PDF reviewer comments and filled form fields, and email attachments. Each file's own properties (title, author, dates, custom fields, Microsoft Purview sensitivity labels, Box metadata, SharePoint columns, Google Drive properties) are kept, searchable, and shown beside every cited passage. Handwriting, stamps, and pictures are read by the workspace's image-capable model (for example Gemini Flash on OpenRouter or GPT-4.1 on Azure AI Foundry), with local OCR as the fallback; each knowledge base can keep pages on the server instead. Web pages can bring in the linked pages of the same site (robots.txt and sign-in pages respected, up to 100 pages), cite each exact page, and, when a question needs a page that was not read up front, look it up on that site live (its links, its own search box) and cite it. An **ethical wall** in a file's metadata (an "Ethical wall" or "Information barrier" field naming a group) limits that file to the group's members, administrators included. Embeddings run locally; media transcription uses a configured provider.
 - **Sync** re-fetches web pages and API sources and never touches uploaded files. API requests pass the outbound guards and refuse redirects.
 - **Cloud sources.** Connect Google Drive, Box, SharePoint, OneDrive, or iManage with the provider's credentials and permissions. A successful connection does not grant every user access to every document.
 - **Tools** hold MCP connections, prompt templates, and skills. Connections are tested before they are saved, and tool use remains subject to workspace policy.
@@ -169,7 +170,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.15
+#   APERTURE_IMAGE_TAG=v0.5.16
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -190,7 +191,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.15 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.16 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -225,10 +226,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.15` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.16` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.15-dev`, `v0.5.15-test`, `v0.5.15-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.16-dev`, `v0.5.16-test`, `v0.5.16-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

@@ -502,6 +502,73 @@ test("streams the reply into the pending bubble token by token", async () => {
   expect(screen.getByText(/Oak trees grow slowly and live for centuries\./)).toBeInTheDocument();
 });
 
+test("the work trace grows from what the API reports and the reply itself, then settles with checks", async () => {
+  const sse = stagedSseResponse();
+  const savedThreads: Array<{ messages?: Array<{ role: string; status?: string; activityTrace?: Array<{ id: string }> }> }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/chat/complete")) return sse.response;
+      if (url.includes("/api/chat/threads/") && init?.method === "PUT") savedThreads.push(JSON.parse(String(init.body)));
+      return new Response("unavailable", { status: 500 });
+    }),
+  );
+  await renderApp();
+
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  sendFromComposer("Stream a short answer.");
+
+  const running = await screen.findByRole("status", { name: "Aperture Chat activity trace" });
+  expect(within(running).getByText("Thinking")).toBeInTheDocument();
+  expect(within(running).getByText("Start writing the reply")).toBeInTheDocument();
+
+  sse.push('data: {"activity":{"kind":"knowledge","passages":3,"sources":1}}\n\n');
+  sse.push('data: {"delta":"## Plan\\n\\nOak trees"}\n\n');
+  expect(await within(running).findByText("Drafting “Plan”")).toBeInTheDocument();
+  expect(within(running).getByText("Check the work and finish")).toBeInTheDocument();
+
+  sse.push('data: {"delta":"\\n\\n```html\\n<!doctype html>\\n<html>"}\n\n');
+  expect(await within(running).findByText("Writing html · 2 lines")).toBeInTheDocument();
+  fireEvent.click(within(running).getByRole("button", { name: "Expand work trace" }));
+  expect(within(running).getByText("Found 3 passages in workspace knowledge")).toBeInTheDocument();
+
+  sse.push('data: {"delta":"\\n</html>\\n```\\n\\nDone [K1]."}\n\n');
+  sse.push(
+    'data: {"activity":{"kind":"requirements","phase":"checked","checks":[{"label":"Include a markdown table","met":false}]}}\n\n',
+  );
+  sse.push(
+    'data: {"done":true,"citations":[{"id":"k1","source_name":"Policy","source_type":"knowledge","source_uri":"kb://p","snippet":"","k_index":1}],"usage":null}\n\n',
+  );
+  sse.push("data: [DONE]\n\n");
+  sse.close();
+
+  const finished = await screen.findByRole("region", { name: "Aperture Chat activity trace" });
+  expect(within(finished).getByText(/^\d+ steps · 3 checks passed · 1 flag$/)).toBeInTheDocument();
+  fireEvent.click(within(finished).getByRole("button", { name: "Expand work trace" }));
+  for (const label of [
+    "Found 3 passages in workspace knowledge",
+    "Drafted “Plan”",
+    "Wrote html",
+    "Not met: Include a markdown table",
+    "Code blocks are all closed",
+    "HTML page is complete",
+    "Every citation links to a source",
+    "Delivered the reply",
+  ]) {
+    expect(within(finished).getByText(label)).toBeInTheDocument();
+  }
+
+  // The settled trace is what the thread saves (ids, labels, details only).
+  await waitFor(() => {
+    const reply = savedThreads.at(-1)?.messages?.find((message) => message.role === "assistant");
+    expect(reply?.status).toBe("ok");
+    expect(reply?.activityTrace?.map((step) => step.id)).toEqual(
+      expect.arrayContaining(["knowledge:hits", "code:c1", "flag:req-1", "check:html-1", "done:reply"]),
+    );
+  });
+});
+
 test("a failed stream keeps the streamed text and shows a compact failure note", async () => {
   const sse = stagedSseResponse();
   stubSseChatFetch(sse);
@@ -1733,20 +1800,16 @@ test("pending assistant response shows an activity trace for enabled tools", asy
   const trace = await screen.findByRole("status", {
     name: "Aperture Chat activity trace",
   });
-  expect(
-    within(trace).getByText("Complex requests can take longer. Aperture Chat keeps working while long-form answers are assembled and checked."),
-  ).toBeInTheDocument();
-  // Collapsed by default: only the current (first) step is visible.
-  expect(within(trace).getByText("Routing request")).toBeInTheDocument();
-  expect(within(trace).queryByText("Preparing context")).not.toBeInTheDocument();
+  // Collapsed by default: one line naming what is happening right now.
+  expect(within(trace).getByText("Aperture Chat is working")).toBeInTheDocument();
+  expect(within(trace).getByText("Thinking")).toBeInTheDocument();
+  expect(within(trace).queryByText("Routed to Client Update Agent")).not.toBeInTheDocument();
   fireEvent.click(within(trace).getByRole("button", { name: "Expand work trace" }));
-  expect(within(trace).getByText("Using Client Update Agent.")).toBeInTheDocument();
-  expect(within(trace).getByText("Preparing context")).toBeInTheDocument();
-  expect(within(trace).getByText("Web search requested")).toBeInTheDocument();
-  expect(within(trace).getByText("Retrieving workspace knowledge")).toBeInTheDocument();
-  expect(within(trace).getByText("Sizing long-form deliverable")).toBeInTheDocument();
-  expect(within(trace).getByText("Generating long-form answer")).toBeInTheDocument();
-  expect(within(trace).getByText("Content validator loop")).toBeInTheDocument();
+  // Only what is known for certain is shown up front: the route and what the
+  // user switched on. No preset steps are promised before they happen.
+  expect(within(trace).getByText("Routed to Client Update Agent")).toBeInTheDocument();
+  expect(within(trace).getByText(/^With \d+ knowledge sources? and web search$/)).toBeInTheDocument();
+  expect(within(trace).queryByText("Content validator loop")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Aperture Chat is typing")).not.toBeInTheDocument();
   await waitFor(() => expect(chatRequests.at(-1)?.model).toBe("agent-client-update"));
 
@@ -1777,14 +1840,13 @@ test("exposed think tags move into a nested subsection of the work trace", async
   expect(renderedResponse).not.toHaveTextContent("<think>");
 
   const trace = screen.getByRole("region", { name: "Aperture Chat activity trace" });
-  expect(within(trace).getByText(/complete · \d+ steps · thinking/)).toBeInTheDocument();
+  expect(within(trace).getByText(/^\d+ steps · thinking$/)).toBeInTheDocument();
   fireEvent.click(within(trace).getByRole("button", { name: "Expand work trace" }));
 
-  const thinkingSummary = within(trace).getByText("Thinking traces").closest("summary");
+  const thinkingSummary = within(trace).getByText("Thinking the model exposed").closest("summary");
   expect(thinkingSummary).not.toBeNull();
   fireEvent.click(thinkingSummary!);
   expect(within(trace).getByText("I compared the available routes before choosing the approved model.")).toBeInTheDocument();
-  expect(within(trace).getByText("Exposed by the model")).toBeInTheDocument();
 });
 
 test("a pending response in one chat does not block sending from a new chat", async () => {

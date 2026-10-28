@@ -2538,6 +2538,92 @@ test("a save location that cannot be written loses its empty file and the export
   }
 });
 
+test("a browser that refuses writes to a chosen location downloads the export and stops offering locations", async () => {
+  installChatCompletionFetchMock(clientUpdateProviderDraft());
+  // Embedded browsers (an app's preview pane) can show the save dialog, which
+  // creates the chosen file empty, then refuse every write, read, and removal.
+  const refused = () => Promise.reject(new DOMException("The request is not allowed.", "NotAllowedError"));
+  const createWritable = vi.fn(refused);
+  const showSaveFilePicker = vi.fn().mockResolvedValue({
+    createWritable,
+    getFile: vi.fn(refused),
+    remove: vi.fn(refused),
+    queryPermission: vi.fn().mockResolvedValue("denied"),
+  });
+  Object.defineProperty(window, "showSaveFilePicker", {
+    configurable: true,
+    value: showSaveFilePicker,
+  });
+  const downloadSpy = installDownloadSpy();
+  try {
+    const { unmount } = render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+    await waitFor(() => expect(documentText()).toContain("Anderson v. Northstar Logistics"));
+    openExportDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+    await waitFor(() =>
+      expect(downloadSpy.downloads[0]).toMatchObject({ filename: "client-update-draft.docx" }),
+    );
+    expect(downloadSpy.downloads[0].blob.size).toBeGreaterThan(0);
+    expect(createWritable).not.toHaveBeenCalled();
+    // The receipt the person sees names the empty file left at the location,
+    // on its own line under the delivery line.
+    const refusedNote = screen.getByText(
+      "This browser can't save to a folder you choose. The empty client-update-draft.docx it made there can be deleted.",
+    );
+    expect(refusedNote.tagName).toBe("SMALL");
+    expect(refusedNote.closest(".document-export-receipt")).toHaveTextContent("Sent to your browser downloads.");
+    expect(screen.queryByRole("combobox", { name: "Export destination" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+    await waitFor(() => expect(downloadSpy.downloads).toHaveLength(2));
+    expect(showSaveFilePicker).toHaveBeenCalledTimes(1);
+
+    // The browser is remembered, so a later visit goes straight to downloads.
+    unmount();
+    render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+    await waitFor(() => expect(documentText()).toContain("Anderson v. Northstar Logistics"));
+    openExportDialog();
+    expect(screen.queryByRole("combobox", { name: "Export destination" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+    await waitFor(() => expect(downloadSpy.downloads).toHaveLength(3));
+    expect(showSaveFilePicker).toHaveBeenCalledTimes(1);
+  } finally {
+    downloadSpy.restore();
+  }
+});
+
+test("a chosen location is written when the browser grants access or cannot say", async () => {
+  installChatCompletionFetchMock(clientUpdateProviderDraft());
+  const write = vi.fn().mockResolvedValue(undefined);
+  const createWritable = vi.fn().mockResolvedValue({ write, close: vi.fn().mockResolvedValue(undefined) });
+  const queryPermission = vi
+    .fn()
+    .mockResolvedValueOnce("granted")
+    .mockRejectedValueOnce(new DOMException("Permission state unavailable", "InvalidStateError"));
+  Object.defineProperty(window, "showSaveFilePicker", {
+    configurable: true,
+    value: vi.fn().mockResolvedValue({ createWritable, queryPermission }),
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+  fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+  await waitFor(() => expect(documentText()).toContain("Anderson v. Northstar Logistics"));
+  openExportDialog();
+
+  fireEvent.click(screen.getByRole("button", { name: /Word document/ }));
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+  await screen.findByText(/Saved client-update-draft\.docx to your selected location/);
+  fireEvent.click(screen.getByRole("button", { name: /Markdown/ }));
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+  await screen.findByText(/Saved client-update-draft\.md to your selected location/);
+  expect(screen.getByRole("combobox", { name: "Export destination" })).toBeInTheDocument();
+});
+
 test("a long document title still exports under a short file name", async () => {
   installChatCompletionFetchMock(clientUpdateProviderDraft());
   const downloadSpy = installDownloadSpy();
@@ -4436,9 +4522,42 @@ function installDraftsApiFetchMock(handlers: {
   return calls;
 }
 
+/** The one save status, beside Insert at the end of the formatting toolbar. */
 function serverSaveIndicator() {
-  return screen.getByRole("status", { name: "Server save state" });
+  return screen.getByRole("status", { name: "Save status" });
 }
+
+test("the formatting toolbar holds the only save status, which says Saving… until the server confirms", async () => {
+  let resolveCreate!: (response: Response) => void;
+  installDraftsApiFetchMock({ create: () => new Promise<Response>((resolve) => { resolveCreate = resolve; }) });
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  documentBody().innerHTML = "<p>Quarterly plan.</p>";
+  fireEvent.input(documentBody());
+  expect(serverSaveIndicator()).toHaveTextContent("Editing");
+
+  fireEvent.click(screen.getByRole("button", { name: "Save version" }));
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saving…"));
+  expect(serverSaveIndicator()).not.toHaveTextContent(/\bSaved\b/);
+  expect(screen.getAllByRole("status", { name: /save/i })).toHaveLength(1);
+  expect(within(screen.getByLabelText("Document formatting")).getByRole("status", { name: "Save status" }))
+    .toBe(serverSaveIndicator());
+
+  await act(async () => {
+    resolveCreate(jsonResponse(serverDraftSnapshot("draft-one", "Untitled Draft", "<p>Quarterly plan.</p>", 1), 201));
+  });
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saved"));
+  expect(within(serverSaveIndicator()).getByRole("button", { name: "Saved" }))
+    .toHaveAttribute("data-tooltip", expect.stringContaining("Saved to your account (revision 1)"));
+});
+
+test("the save status still shows and hides the AI edit highlights", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} />);
+  const toggle = within(serverSaveIndicator()).getByRole("button", { name: "Saved" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(documentBody().closest(".show-edits")).not.toBeNull();
+});
 
 test("queued saves retain their document identity when another draft opens before the response", async () => {
   let resolveFirst!: (response: Response) => void;
@@ -4760,10 +4879,10 @@ test("a failed server save reports Local only, keeps the scoped cache, and can r
   fireEvent.input(editor);
   fireEvent.click(screen.getByRole("button", { name: "Save version" }));
 
-  await waitFor(() =>
-    expect(serverSaveIndicator()).toHaveTextContent("Local only — server save failed"),
-  );
+  await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Local only"));
   expect(serverSaveIndicator()).not.toHaveTextContent(/\bSaved\b/);
+  expect(within(serverSaveIndicator()).getByRole("button", { name: "Local only" }))
+    .toHaveAttribute("data-tooltip", expect.stringContaining("Server save failed"));
   // The local cache retains the content even though the server rejected it.
   expect(storedDraftHistory()[0]).toMatchObject({
     content: expect.stringContaining("Keep me local."),
@@ -4874,7 +4993,10 @@ test("conflict reload leaves local edits intact when their recovery copy cannot 
   const storageWrite = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("Storage full"); });
   try {
     fireEvent.click(within(serverSaveIndicator()).getByRole("button", { name: "Reload server copy" }));
-    await waitFor(() => expect(serverSaveIndicator()).toHaveAttribute("data-tooltip", expect.stringContaining("could not preserve your local edits")));
+    await waitFor(() =>
+      expect(within(serverSaveIndicator()).getByRole("button", { name: "Draft changed elsewhere" }))
+        .toHaveAttribute("data-tooltip", expect.stringContaining("could not preserve your local edits")),
+    );
     expect(documentText()).toContain("Local conflict edits.");
     expect(documentText()).not.toContain("Server original.");
   } finally {
@@ -5922,7 +6044,7 @@ test("the layouts and themes strip folds away and comes back", () => {
   expect(window.localStorage.getItem("aperture.drafts.deckLayoutStrip")).toBe("closed");
   // Picking a view brings the strip back.
   fireEvent.click(screen.getByRole("button", { name: "Themes" }));
-  expect(screen.getByRole("group", { name: "Deck color themes" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Deck themes" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Fold away layouts and themes" })).toHaveAttribute("aria-expanded", "true");
 });
 
@@ -6287,10 +6409,10 @@ test.each(['document', 'deck'] as const)('copy %s reports denied clipboard acces
     openDocumentTools('More');
     const button = screen.getByRole('button', { name: mode === 'deck' ? 'Copy deck outline' : 'Copy document' });
     fireEvent.click(button);
-    // Decks now also report their server save in a status badge; read the
+    // Decks also report their server save in the save status; read the
     // workspace status line specifically.
     const statusLine = () =>
-      screen.getAllByRole('status').filter((element) => !element.classList.contains('document-server-save-state'))[0];
+      screen.getAllByRole('status').filter((element) => element.getAttribute('aria-label') !== 'Save status')[0];
     await waitFor(() => expect(statusLine()).toHaveTextContent('Could not access the clipboard.'));
     fireEvent.click(button);
     await waitFor(() => expect(statusLine()).toHaveTextContent(`${mode === 'deck' ? 'Deck outline' : 'Document'} copied to clipboard.`));
@@ -6325,6 +6447,8 @@ test("decks save to the server as kind deck and report Saved, conflicts, and siz
   fireEvent.click(screen.getByRole("button", { name: "Convert into slides" }));
 
   await waitFor(() => expect(serverSaveIndicator()).toHaveTextContent("Saved"));
+  expect(within(screen.getByLabelText("Deck formatting")).getByRole("status", { name: "Save status" }))
+    .toBe(serverSaveIndicator());
   const createCall = calls.find((call) => call.method === "POST");
   expect(createCall?.body).toMatchObject({ kind: "deck" });
   expect(String(createCall?.body?.content)).toContain('"schema":"aperture-deck-v1"');
@@ -6390,7 +6514,10 @@ test("slide layouts are directly browsable and applied to the selected slide", (
   render(<DocumentAssistantWorkspace data={sampleData} />);
   fireEvent.click(screen.getByRole("button", { name: "Deck" }));
   const gallery = screen.getByLabelText("Browse slide layouts");
-  expect(within(gallery).getAllByRole("button")).toHaveLength(7);
+  expect(within(gallery).getAllByRole("button")).toHaveLength(10);
+  for (const layout of ["Statement", "Big number", "Picture + bullets"]) {
+    expect(within(gallery).getByRole("button", { name: `Apply ${layout} layout` })).toBeInTheDocument();
+  }
   fireEvent.click(within(gallery).getByRole("button", { name: "Apply Two columns layout" }));
   expect(within(gallery).getByRole("button", { name: "Apply Two columns layout" })).toHaveAttribute("aria-pressed", "true");
   fireEvent.click(screen.getByRole("button", { name: "Deck starters & brand themes" }));
@@ -6398,19 +6525,30 @@ test("slide layouts are directly browsable and applied to the selected slide", (
 });
 
 
-test("palette changes preserve slide text and can be undone", () => {
-  render(<DocumentAssistantWorkspace data={sampleData} />);
+test("a theme restyles the slides' shapes, keeps their text, and can be undone", () => {
+  const { container } = render(<DocumentAssistantWorkspace data={sampleData} />);
   fireEvent.click(screen.getByRole("button", { name: "Deck" }));
   const title = screen.getByRole("textbox", { name: "Title slide title" });
   title.innerHTML = "A title to keep";
   fireEvent.input(title);
+  const stageShapes = () => Array.from(container.querySelectorAll(".deck-stage .deck-decoration"));
+  // The classic look: one accent rule, no circles.
+  expect(stageShapes()).toHaveLength(1);
+  expect(container.querySelector(".deck-stage .deck-decoration.is-ellipse")).toBeNull();
+
   fireEvent.click(screen.getByRole("button", { name: "Themes", exact: true }));
-  fireEvent.click(screen.getByRole("button", { name: "Apply Midnight color theme" }));
+  const themes = screen.getByRole("group", { name: "Deck themes" });
+  expect(within(themes).getAllByRole("button")).toHaveLength(7);
+  fireEvent.click(screen.getByRole("button", { name: "Apply Midnight theme" }));
   expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("A title to keep");
-  expect(screen.getByRole("button", { name: "Apply Midnight color theme" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Apply Midnight theme" })).toHaveAttribute("aria-pressed", "true");
+  // Midnight draws circles, not a recolored rule.
+  expect(container.querySelectorAll(".deck-stage .deck-decoration.is-ellipse")).toHaveLength(2);
+
   fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
-  expect(screen.getByRole("button", { name: "Apply Aperture color theme" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Apply Aperture theme" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("A title to keep");
+  expect(container.querySelector(".deck-stage .deck-decoration.is-ellipse")).toBeNull();
 });
 
 test("local pending drafts can be archived without deleting their only copy", async () => {
@@ -6594,4 +6732,95 @@ test("a handed-over request drafts with the chat's model unless a drafting defau
   );
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1].model).toBe("draft-first");
+});
+
+test("opening export with unsaved edits asks to save them before any format is picked", async () => {
+  const downloadSpy = installDownloadSpy();
+
+  try {
+    render(
+      <DocumentAssistantWorkspace
+        data={sampleData}
+        brandName="Aperture Chat"
+        initialDraft={{
+          id: "chat-transfer-save-first",
+          title: "Save First Draft",
+          sourceLabel: "Save First Draft",
+          createdAt: "9:17 AM",
+          content: `# Save First Draft
+
+The body arrives from the transfer and is already saved as Version 1.`,
+        }}
+      />,
+    );
+
+    const editor = documentBody();
+    editor.innerHTML += "<p>An edit the user typed but has not saved.</p>";
+    fireEvent.input(editor);
+
+    openExportDialog();
+    const panel = screen.getByRole("dialog", { name: "Export document" });
+    // The save step is the first thing the panel shows, before any click.
+    expect(within(panel).getByText("Save your edits first")).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Save version" }));
+
+    expect(within(panel).queryByText("Save your edits first")).not.toBeInTheDocument();
+    expect(within(panel).getByText(/Saved as Version 2/)).toBeInTheDocument();
+
+    // Editing again retracts the confirmation and brings the save step back.
+    editor.innerHTML += "<p>A second edit after that save.</p>";
+    fireEvent.input(editor);
+    expect(within(panel).queryByText(/Saved as Version 2/)).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Save version" }));
+    expect(within(panel).getByText(/Saved as Version 3/)).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("button", { name: /Word document/ }));
+    await waitFor(() => {
+      expect(downloadSpy.downloads[0]).toMatchObject({ filename: "save-first-draft.docx" });
+    });
+    expect(within(panel).queryByText(/Saved as Version 3/)).not.toBeInTheDocument();
+    const wordXml = await readBlobAsText(downloadSpy.downloads[0].blob);
+    expect(wordXml).toContain("An edit the user typed but has not saved.");
+    expect(wordXml).toContain("A second edit after that save.");
+  } finally {
+    downloadSpy.restore();
+  }
+});
+
+test("the visual redline marks each change and draws fill-in blanks as lines, never struck-through underscores", async () => {
+  // A Word import keeps its blanks as underscore runs.
+  window.localStorage.setItem(SCOPED_DRAFT_CACHE_KEY, JSON.stringify([{
+    id: "redline-blanks", title: "Site Agreement", summary: "Local changes", sourceLabel: "Local draft",
+    updatedAt: new Date().toISOString(), status: "complete",
+    content:
+      `<p>The site is known as <span class="document-blank">____________</span> under this synthetic agreement.</p>` +
+      `<p>This synthetic recital is dropped from the next version.</p>` +
+      `<p>Signed: <span class="document-blank">________________</span></p>`,
+  }]));
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Document history" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Restore Site Agreement/ }));
+  await waitFor(() => expect(documentText()).toContain("known as"));
+
+  const editor = documentBody();
+  const paragraphs = Array.from(editor.querySelectorAll("p"));
+  paragraphs[0].querySelector("span.document-blank")!.replaceWith(document.createTextNode("Willow Bend Commons"));
+  paragraphs[1].remove();
+  paragraphs[2].insertAdjacentHTML("afterend", "<p>A synthetic notice clause is new here.</p>");
+  fireEvent.input(editor);
+  fireEvent.click(screen.getByRole("button", { name: "Save version" }));
+  fireEvent.click(screen.getByRole("button", { name: "Compare versions" }));
+
+  const redline = screen.getByRole("dialog", { name: "Visual redline" });
+  const changed = redline.querySelector(".redline-row.is-changed .redline-text")!;
+  expect(changed.textContent).toBe("The site is known as ____________ Willow Bend Commons under this synthetic agreement.");
+  const [removedBlank] = Array.from(changed.querySelectorAll("del"));
+  expect(removedBlank.textContent).toBe("____________");
+  expect(removedBlank.className).toBe("redline-del redline-blank");
+  expect(within(redline).getByText("Willow Bend Commons").className).toBe("redline-ins");
+  // Whole paragraphs that were added or dropped are marked as a unit.
+  expect(within(redline).getByText("This synthetic recital is dropped from the next version.").className).toBe("redline-del");
+  expect(within(redline).getByText("A synthetic notice clause is new here.").className).toBe("redline-ins");
+  // The untouched signature blank is drawn as a line too, with no change mark.
+  expect(within(redline).getByText("________________").className).toBe("redline-blank");
 });

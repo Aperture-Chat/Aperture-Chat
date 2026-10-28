@@ -17,7 +17,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Copy,
   FileText,
   Globe2,
@@ -107,6 +106,7 @@ import {
   loadChatAttachmentPreview,
   runCustomScriptTool,
   sendChat,
+  sendChatStream,
   submitChatFeedback,
   uploadChatAttachment,
   type ChatRuntimeOptions,
@@ -134,6 +134,9 @@ import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { DictationControl } from "./DictationControl";
 import { isMediaUploadFile } from "../lib/mediaUploads";
 import { Markdown } from "./Markdown";
+import { WorkTrace, WorkTraceStreamStatus } from "./WorkTrace";
+import { ArtifactCanvasProvider } from "./ArtifactCanvas";
+import { CodeEditAssistProvider, type CodeEditAssist } from "./CodeAiEdit";
 import { renderConcealed } from "./ConcealedText";
 import { BrandArtwork, BrandIcon, Pill } from "./Primitives";
 import { DEFAULT_BRAND_NAME, brandLockup, compactBrandSources, type BrandAssets } from "../lib/brandIcon";
@@ -1265,6 +1268,25 @@ export function ChatWorkspace({
   const lockedHermesAgents = lockedHermesAgentProfiles(data);
   const selectedAgent = selectedAgentId ? agentProfiles.find((agent) => agent.id === selectedAgentId) : undefined;
   const selectedModel = chat.enabledModels.find((model) => model.id === chat.model);
+  // Code blocks in replies call the chat's selected model for AI edits, as
+  // their own request: nothing is added to the thread.
+  const codeEditAssist = useMemo<CodeEditAssist>(
+    () => ({
+      agentName: selectedModel?.name ?? "AI",
+      unavailableReason: chat.model ? null : "Choose a model in the composer to edit code with AI.",
+      request: async (wireMessages, { signal, onDelta }) => {
+        const reply = await sendChatStream(data.me.id, {
+          model: chat.model,
+          messages: wireMessages,
+          signal,
+          onDelta,
+          runtime: { surface: "chat", webEnabled: false, citationsEnabled: false, maxCompletionTokens: 6000 },
+        });
+        return reply.content;
+      },
+    }),
+    [chat.model, data.me.id, selectedModel?.name],
+  );
   const contextWindowStatus = buildContextWindowStatus(messages, selectedModel);
   const activeRouteModel = composerTools.Agent && selectedAgent ? selectedAgent : selectedModel;
   const webSearchAvailable = supportsWebSearch(data, activeRouteModel);
@@ -3222,6 +3244,13 @@ export function ChatWorkspace({
   }
 
   return (
+    <CodeEditAssistProvider value={codeEditAssist}>
+    <ArtifactCanvasProvider
+      anchorSelector=".chat-main"
+      messages={messages}
+      onUpdateCode={chat.updateAssistantCode}
+      resetKey={activeThread?.id}
+    >
     <div className={`chat-layout ${isInspectorOpen ? "inspector-expanded" : "inspector-collapsed"}`}>
       <section className="chat-main">
         <header className="workspace-header">
@@ -3357,6 +3386,9 @@ export function ChatWorkspace({
                   }
                   onUpdateDiagram={(targetMessage, previousSource, nextSource) =>
                     chat.updateAssistantDiagram(targetMessage.id, previousSource, nextSource)
+                  }
+                  onUpdateCode={(targetMessage, previousSource, nextSource, occurrence) =>
+                    chat.updateAssistantCode(targetMessage.id, previousSource, nextSource, occurrence)
                   }
                   onStagePromptInNewSession={stagePromptInNewChat}
                   isEditingPrompt={editingPromptId === message.id}
@@ -3525,6 +3557,8 @@ export function ChatWorkspace({
         <CustomToolRunModal run={customToolRun} onClose={() => setCustomToolRun(null)} />
       )}
     </div>
+    </ArtifactCanvasProvider>
+    </CodeEditAssistProvider>
   );
 }
 
@@ -4158,6 +4192,7 @@ function MessageBubble({
   onStopResponse,
   onSelectResponseVersion,
   onUpdateDiagram,
+  onUpdateCode,
   onStagePromptInNewSession,
   isEditingPrompt,
   promptEditDisabled,
@@ -4184,6 +4219,7 @@ function MessageBubble({
   onStopResponse?: () => void;
   onSelectResponseVersion?: (message: ChatMessage, versionIndex: number) => boolean;
   onUpdateDiagram?: (message: ChatMessage, previousSource: string, nextSource: string) => boolean;
+  onUpdateCode?: (message: ChatMessage, previousSource: string, nextSource: string, occurrence: number) => boolean;
   onStagePromptInNewSession?: (message: ChatMessage) => boolean;
   isEditingPrompt?: boolean;
   promptEditDisabled?: boolean;
@@ -4408,16 +4444,13 @@ function MessageBubble({
             {/* The trace keeps working through its steps for the whole run;
                 once real tokens arrive they stream in below it, so thinking
                 and writing read as consecutive phases of one reply. */}
-            <ActivityTrace message={displayMessage} brandName={brandName} state="pending" onStop={onStopResponse} />
+            <WorkTrace message={displayMessage} brandName={brandName} state="pending" onStop={onStopResponse} />
             {streamPreviewEnabled && streamedPendingContent && (
               <>
                 <div className="message-rendered-response message-stream-live" ref={responseContentRef}>
-                  <Markdown content={streamedPendingContent} />
+                  <Markdown content={streamedPendingContent} streaming />
                 </div>
-                <div className="message-stream-status" role="status" aria-live="polite">
-                  <span className="message-stream-dot" aria-hidden="true" />
-                  <span>Streaming reply…</span>
-                </div>
+                <WorkTraceStreamStatus message={displayMessage} />
               </>
             )}
           </>
@@ -4436,7 +4469,7 @@ function MessageBubble({
           <>
             {!isUser &&
               ((displayMessage.activityTrace?.length ?? 0) > 0 || assistantContent.thinkingTraces.length > 0) && (
-              <ActivityTrace
+              <WorkTrace
                 message={displayMessage}
                 brandName={brandName}
                 state="complete"
@@ -4449,6 +4482,12 @@ function MessageBubble({
               <div className="message-rendered-response" ref={responseContentRef}>
                 <Markdown
                   content={assistantContent.visibleContent}
+                  onUpdateCode={
+                    onUpdateCode
+                      ? (previousSource, nextSource, occurrence) =>
+                          onUpdateCode(message, previousSource, nextSource, occurrence)
+                      : undefined
+                  }
                   onUpdateDiagram={
                     onUpdateDiagram
                       ? (previousSource, nextSource) => onUpdateDiagram(message, previousSource, nextSource)
@@ -4694,150 +4733,6 @@ function MessageBubble({
         )}
       </div>
     </article>
-  );
-}
-
-function ActivityTrace({
-  message,
-  brandName,
-  state,
-  onStop,
-  thinkingTraces = [],
-}: {
-  message: ChatMessage;
-  brandName: string;
-  state: "pending" | "complete";
-  onStop?: () => void;
-  thinkingTraces?: string[];
-}) {
-  const [now, setNow] = useState(Date.now());
-  const [expanded, setExpanded] = useState(false);
-  const assistantName = brandName || "The assistant";
-  const startedAt = message.startedAtMs ?? now;
-  const elapsedMs = Math.max(0, now - startedAt);
-  const elapsedSeconds = Math.floor(elapsedMs / 1000);
-  const isPending = state === "pending";
-  const steps =
-    message.activityTrace && message.activityTrace.length > 0
-      ? message.activityTrace
-      : [
-          {
-            id: "generate",
-            label: "Generating answer",
-            detail: "Waiting for the model response.",
-          },
-        ];
-  const activeIndex = isPending ? Math.min(steps.length - 1, Math.floor(elapsedMs / 8000)) : steps.length;
-  const currentIndex = Math.min(activeIndex, steps.length - 1);
-  const visibleSteps = expanded ? steps : isPending ? [steps[currentIndex]] : [];
-  const runtime = message.metadata?.chatRuntime as ChatRuntimeOptions | undefined;
-  const isAgentWorkflow =
-    Boolean(runtime?.agentEnabled) ||
-    steps.some((step) => step.id === "tools" && /agent/i.test(`${step.label} ${step.detail ?? ""}`));
-  const traceLabel = isPending ? `${assistantName} is working` : isAgentWorkflow ? "Agent work trace" : "Work trace";
-  const hasThinkingTraces = thinkingTraces.length > 0;
-
-  useEffect(() => {
-    if (!isPending) return undefined;
-    const interval = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(interval);
-  }, [isPending]);
-
-  return (
-    <div
-      className={`pending-trace ${isPending ? "" : "is-complete"} ${expanded ? "is-expanded" : "is-collapsed"}`}
-      role={isPending ? "status" : "region"}
-      aria-live={isPending ? "polite" : undefined}
-      aria-label={`${assistantName} activity trace`}
-    >
-      <div className="pending-trace-header">
-        <button
-          className="pending-trace-toggle"
-          type="button"
-          aria-expanded={expanded}
-          aria-label={expanded ? "Collapse work trace" : "Expand work trace"}
-          data-tooltip={
-            expanded
-              ? "Collapse the trace to show only the current step"
-              : "Expand the trace to see every step in this run"
-          }
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <Sparkles size={15} />
-          <span>{traceLabel}</span>
-          <small>
-            {isPending
-              ? `${elapsedSeconds}s · step ${currentIndex + 1} of ${steps.length}`
-              : `complete · ${steps.length} ${steps.length === 1 ? "step" : "steps"}${
-                  hasThinkingTraces ? " · thinking" : ""
-                }`}
-          </small>
-        </button>
-        {isPending && onStop && (
-          <button
-            className="pending-trace-stop"
-            type="button"
-            aria-label="Stop this response"
-            data-tooltip="Stop this response; the conversation is kept"
-            onClick={onStop}
-          >
-            · stop
-          </button>
-        )}
-        <button
-          className="pending-trace-caret-button"
-          type="button"
-          tabIndex={-1}
-          aria-hidden="true"
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <ChevronDown size={14} className="pending-trace-caret" />
-        </button>
-      </div>
-      {isPending && (
-        <p className="pending-trace-note">
-          Complex requests can take longer. {assistantName} keeps working while long-form answers are assembled and checked.
-        </p>
-      )}
-      {visibleSteps.length > 0 && (
-        <ol>
-          {visibleSteps.map((step) => {
-            const index = steps.indexOf(step);
-            const stepState = index < activeIndex ? "done" : index === activeIndex ? "active" : "queued";
-            return (
-              <li className={`pending-trace-step is-${stepState}`} key={step.id}>
-                <span className="pending-trace-icon" aria-hidden="true">
-                  {stepState === "done" ? <Check size={12} /> : <Clock3 size={12} />}
-                </span>
-                <span>
-                  <strong>{step.label}</strong>
-                  {step.detail && <small>{step.detail}</small>}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      {expanded && hasThinkingTraces && (
-        <details className="thinking-trace">
-          <summary>
-            <span className="thinking-trace-title">
-              <Bot size={14} aria-hidden="true" />
-              <strong>Thinking traces</strong>
-            </span>
-            <small>Exposed by the model</small>
-            <ChevronDown size={14} className="thinking-trace-caret" aria-hidden="true" />
-          </summary>
-          <div className="thinking-trace-body">
-            {thinkingTraces.map((trace, index) => (
-              <div className="thinking-trace-content" key={`${index}-${trace.slice(0, 32)}`}>
-                <Markdown content={trace} />
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-    </div>
   );
 }
 

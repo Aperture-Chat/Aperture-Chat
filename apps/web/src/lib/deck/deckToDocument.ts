@@ -26,6 +26,7 @@ export function markdownOutlineFromDeck(deck: SlideDeck): string {
     switch (slide.layout) {
       case "title":
       case "section":
+      case "big-number":
         lines.push(`## ${plain(slide.title) || `Slide ${index + 1}`}`);
         if (plain(slide.subtitle)) lines.push(plain(slide.subtitle));
         break;
@@ -43,6 +44,11 @@ export function markdownOutlineFromDeck(deck: SlideDeck): string {
         if (slide.image.src) lines.push(`![${slide.image.alt}](${slide.image.src})`);
         if (plain(slide.caption)) lines.push(plain(slide.caption));
         break;
+      case "image-bullets":
+        lines.push(`## ${plain(slide.title) || `Slide ${index + 1}`}`);
+        if (slide.image.src) lines.push(`![${slide.image.alt}](${slide.image.src})`);
+        lines.push(...bulletLines(slide.bullets));
+        break;
       case "quote":
         lines.push(`## Slide ${index + 1}`);
         if (plain(slide.quote)) lines.push(`> ${plain(slide.quote)}`);
@@ -57,6 +63,7 @@ export function markdownOutlineFromDeck(deck: SlideDeck): string {
         }
         break;
       case "closing":
+      case "statement":
         lines.push(`## ${plain(slide.title) || `Slide ${index + 1}`}`);
         if (plain(slide.body)) lines.push(plain(slide.body));
         break;

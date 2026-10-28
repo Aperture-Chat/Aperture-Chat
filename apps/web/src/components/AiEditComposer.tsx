@@ -26,6 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { diffWords, type RedlineToken } from "../lib/draftRedline";
+import { splitFillInBlanks } from "../lib/fillInBlanks";
 import {
   AI_EDIT_GROUP_LABELS,
   aiActionMatches,
@@ -104,6 +105,14 @@ const MAX_DIFF_CELLS = 1_200_000;
  * the diff, so filling it does not show the word beside it as rewritten. */
 function separateBlanks(value: string) {
   return value.replace(/_{3,}/g, " $& ").replace(/\s+/g, " ").trim();
+}
+
+/** Splits a changed run into words and fill-in blanks, so each blank can draw
+ * as the single line the document shows instead of struck-through underscores. */
+function blankSegments(text: string) {
+  return splitFillInBlanks(text)
+    .map((segment) => ({ ...segment, text: segment.text.trim() }))
+    .filter((segment) => segment.text);
 }
 
 export function AiEditComposer({
@@ -460,15 +469,19 @@ export function AiEditComposer({
             {reviewPreview ??
               (effectiveView === "changes" && diffTokens ? (
                 <p className="ai-composer-diff">
-                  {diffTokens.map((token, index) =>
-                    token.type === "same" ? (
-                      <span key={index}>{token.text} </span>
-                    ) : token.type === "del" ? (
-                      <del key={index}>{token.text}</del>
-                    ) : (
-                      <ins key={index}>{token.text}</ins>
-                    ),
-                  )}
+                  {diffTokens.map((token, index) => {
+                    if (token.type === "same") return <span key={index}>{token.text} </span>;
+                    const Change = token.type;
+                    return (
+                      <Fragment key={index}>
+                        {blankSegments(token.text).map((segment, part) => (
+                          <Change key={part} className={segment.blank ? "is-blank" : undefined}>
+                            {segment.text}
+                          </Change>
+                        ))}
+                      </Fragment>
+                    );
+                  })}
                   {!hasChanges && <em className="ai-composer-same">No wording changes.</em>}
                 </p>
               ) : (

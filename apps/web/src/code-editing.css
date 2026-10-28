@@ -1,0 +1,316 @@
+/* Code blocks: syntax colors, the in-place editor, and the AI edit review.
+ *
+ * Token classes come from highlight.js (rendered as text spans, never HTML).
+ * The palette is GitHub's, tuned for contrast on the sunken code surface in
+ * the light and dark themes. */
+
+:root {
+  --code-keyword: #b3195b;
+  --code-string: #17703a;
+  --code-number: #0a59b8;
+  --code-comment: #5f6b76;
+  --code-function: #6c3fc4;
+  --code-type: #8f3e00;
+  --code-attr: #0a59b8;
+  --code-tag: #17703a;
+  --code-meta: #8f3e00;
+  --code-add-bg: rgb(26 127 55 / 13%);
+  --code-remove-bg: rgb(207 34 46 / 11%);
+  --code-add-text: #17703a;
+  --code-remove-text: #b42330;
+}
+
+.theme-dark {
+  --code-keyword: #ff8b84;
+  --code-string: #a5d6ff;
+  --code-number: #79c0ff;
+  --code-comment: #93a1ad;
+  --code-function: #d2a8ff;
+  --code-type: #ffa657;
+  --code-attr: #79c0ff;
+  --code-tag: #7ee787;
+  --code-meta: #ffa657;
+  --code-add-bg: rgb(63 185 80 / 18%);
+  --code-remove-bg: rgb(248 81 73 / 16%);
+  --code-add-text: #7ee787;
+  --code-remove-text: #ffa198;
+}
+
+.hljs-keyword,
+.hljs-doctag,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-variable.language_,
+.hljs-selector-tag {
+  color: var(--code-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+  color: var(--code-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-operator {
+  color: var(--code-number);
+}
+
+.hljs-comment,
+.hljs-code,
+.hljs-formula,
+.hljs-quote {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--code-function);
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-variable,
+.hljs-params {
+  color: var(--code-type);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id,
+.hljs-selector-pseudo {
+  color: var(--code-attr);
+}
+
+.hljs-name,
+.hljs-tag {
+  color: var(--code-tag);
+}
+
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: var(--code-meta);
+}
+
+.hljs-deletion {
+  color: var(--code-remove-text);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong,
+.hljs-section {
+  font-weight: 700;
+}
+
+/* ---------- AI edit target ---------- */
+.md-code-line.is-marked .md-code-line-text,
+.code-edit-line.is-marked {
+  background: color-mix(in srgb, var(--teal) 13%, transparent);
+}
+
+.md-code-line.is-marked .md-code-line-number {
+  box-shadow: inset 3px 0 0 var(--teal);
+  color: var(--teal-strong);
+}
+
+/* ---------- In-place editor ---------- */
+/* The column grows to the widest line so the textarea and the colored copy
+ * under it always share one width, and the shell scrolls both together. */
+.code-edit-shell {
+  grid-template-columns: auto minmax(max-content, 1fr);
+}
+
+.code-edit-shell .md-code-editor-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-sunken);
+}
+
+.code-edit-stack {
+  display: grid;
+  min-width: 0;
+}
+
+.code-edit-highlight,
+.code-edit-input {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+  line-height: 1.55;
+  tab-size: 4;
+  white-space: pre;
+}
+
+.code-edit-highlight {
+  pointer-events: none;
+  background: transparent;
+  color: var(--text-strong);
+}
+
+.code-edit-highlight code {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
+.code-edit-line {
+  display: block;
+  min-height: 1.55em;
+}
+
+.code-edit-input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-strong);
+  outline: 0;
+}
+
+.code-edit-input::selection {
+  background: color-mix(in srgb, var(--teal) 30%, transparent);
+  -webkit-text-fill-color: transparent;
+}
+
+.code-edit-hint {
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 76%, var(--surface-sunken));
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.md-code-save-status {
+  color: var(--teal-strong);
+  font-weight: 700;
+}
+
+.md-code-save-status.is-local {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* ---------- Ask AI offer + review ---------- */
+.code-ai-offer {
+  z-index: 95;
+}
+
+.ai-composer-preview:has(.code-ai-diff) {
+  padding: 8px;
+  background: var(--surface-sunken);
+  overflow-wrap: normal;
+}
+
+.code-ai-diff {
+  display: grid;
+  gap: 6px;
+}
+
+.code-ai-diff-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.code-ai-diff-stat .is-add {
+  color: var(--code-add-text);
+}
+
+.code-ai-diff-stat .is-remove {
+  color: var(--code-remove-text);
+}
+
+.code-ai-diff-note {
+  margin-left: auto;
+  color: var(--orange);
+}
+
+.code-ai-diff-lines {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.code-ai-diff-lines code {
+  display: table;
+  min-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
+.code-ai-diff-row {
+  display: table-row;
+}
+
+.code-ai-diff-sign,
+.code-ai-diff-text {
+  display: table-cell;
+}
+
+.code-ai-diff-sign {
+  width: 1%;
+  padding: 0 8px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.code-ai-diff-text {
+  padding-right: 12px;
+  white-space: pre;
+}
+
+.code-ai-diff-row.is-add {
+  background: var(--code-add-bg);
+}
+
+.code-ai-diff-row.is-add .code-ai-diff-sign {
+  color: var(--code-add-text);
+}
+
+.code-ai-diff-row.is-remove {
+  background: var(--code-remove-bg);
+}
+
+.code-ai-diff-row.is-remove .code-ai-diff-sign {
+  color: var(--code-remove-text);
+}

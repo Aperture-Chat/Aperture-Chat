@@ -2,7 +2,13 @@ import { expect, test } from "vitest";
 import {
   DECK_SCHEMA_VERSION,
   MAX_SLIDE_BACKGROUND_CHARS,
+  SUPPORTED_DECK_LAYOUTS,
   blankSlideDeck,
+  createDeckSlide,
+  deckSlideOutline,
+  deckSlidePicture,
+  withDeckSlidePicture,
+  deckSlideRegionContent,
   deckBackgroundKey,
   deckRichText,
   contentLooksLikeDeck,
@@ -232,4 +238,107 @@ test("user-resized block boxes round-trip, clamp, and drop unknown regions", () 
   expect(clamped.deck.slides[0].boxes).toEqual({ body: { x: 0, y: 516, w: 960, h: 24 } });
   expect(clamped.warnings.join(" ")).toContain("sparkles");
   expect(clamped.warnings.join(" ")).toContain("boxes.title");
+});
+
+test("a theme's design round-trips, the classic design stays implicit, and unknown designs drop", () => {
+  const withDesign = (design: unknown) =>
+    parseSlideDeck({ ...JSON.parse(serializeSlideDeck(blankSlideDeck("Designs"))), theme: { design } });
+
+  const orbit = withDesign("orbit");
+  expect(orbit.ok).toBe(true);
+  if (!orbit.ok) return;
+  expect(orbit.deck.theme.design).toBe("orbit");
+  expect(serializeSlideDeck(orbit.deck)).toContain('"design":"orbit"');
+
+  // The classic look is the absence of a design, so decks saved before
+  // designs existed keep byte-identical content.
+  const classic = withDesign("rule");
+  expect(classic.ok).toBe(true);
+  if (classic.ok) expect(serializeSlideDeck(classic.deck)).not.toContain('"design"');
+  expect(serializeSlideDeck(blankSlideDeck("Plain"))).not.toContain('"design"');
+
+  // No design, or an explicit null, is simply the classic look: no warning.
+  for (const absent of [undefined, null]) {
+    const plain = withDesign(absent);
+    expect(plain.ok && plain.warnings).toEqual([]);
+  }
+
+  const unknown = withDesign("neon-zebra");
+  expect(unknown.ok).toBe(true);
+  if (!unknown.ok) return;
+  expect(unknown.deck.theme.design).toBeUndefined();
+  expect(unknown.warnings.join(" ")).toContain("theme.design");
+});
+
+test("statement, big-number, and picture + bullets slides parse with their own regions", () => {
+  expect(SUPPORTED_DECK_LAYOUTS).toEqual(expect.arrayContaining(["statement", "big-number", "image-bullets"]));
+  const parsed = parseSlideDeck({
+    schema: DECK_SCHEMA_VERSION,
+    title: "New layouts",
+    slides: [
+      { id: "s1", notes: "", layout: "statement", title: "Ship weekly", body: "Small batches beat big launches" },
+      { id: "s2", notes: "", layout: "big-number", title: "42%", subtitle: "of renewals came from referrals" },
+      {
+        id: "s3",
+        notes: "",
+        layout: "image-bullets",
+        title: "The new office",
+        image: { src: "", alt: "Harbor-side office at dusk" },
+        bullets: [{ runs: [{ text: "Opens in May" }], level: 0 }],
+      },
+    ],
+  });
+  expect(parsed.ok).toBe(true);
+  if (!parsed.ok) return;
+  const [statement, figure, picture] = parsed.deck.slides;
+  expect(deckSlideRegionContent(statement, "body")).toEqual([{ text: "Small batches beat big launches" }]);
+  expect(deckSlideRegionContent(figure, "subtitle")).toEqual([{ text: "of renewals came from referrals" }]);
+  expect(deckSlideRegionContent(picture, "bullets")).toEqual([{ runs: [{ text: "Opens in May" }], level: 0 }]);
+  expect(deckSlideRegionContent(picture, "caption")).toBeNull();
+  expect(deckSlideOutline(figure)).toBe("42%\nof renewals came from referrals");
+  expect(deckSlideOutline(picture)).toBe("The new office\n[Image: Harbor-side office at dusk]\n- Opens in May");
+
+  expect(createDeckSlide("image-bullets", "n1")).toMatchObject({
+    layout: "image-bullets",
+    image: { src: "", alt: "" },
+    bullets: [{ runs: [{ text: "" }], level: 0 }],
+  });
+  expect(createDeckSlide("statement", "n2")).toMatchObject({ layout: "statement", title: [], body: [] });
+  expect(createDeckSlide("big-number", "n3")).toMatchObject({ layout: "big-number", title: [], subtitle: [] });
+});
+
+test("both picture layouts expose and replace their picture; other layouts have none", () => {
+  const office = { src: "https://example.test/office.jpg", alt: "Office" };
+  for (const layout of ["image-caption", "image-bullets"] as const) {
+    const slide = withDeckSlidePicture(createDeckSlide(layout, "p"), office);
+    expect(deckSlidePicture(slide)).toEqual(office);
+    expect(slide.layout).toBe(layout);
+  }
+  const statement = createDeckSlide("statement", "s");
+  expect(deckSlidePicture(statement)).toBeNull();
+  expect(withDeckSlidePicture(statement, office)).toBe(statement);
+});
+
+test("the markdown outline carries the new layouts' words and picture", () => {
+  const deck = blankSlideDeck("Outline");
+  deck.slides = [
+    { id: "a", notes: "", layout: "statement", title: deckRichText("Ship weekly"), body: deckRichText("Small batches win") },
+    { id: "b", notes: "", layout: "big-number", title: deckRichText("42%"), subtitle: deckRichText("of renewals") },
+    {
+      id: "c",
+      notes: "",
+      layout: "image-bullets",
+      title: deckRichText("Office"),
+      image: { src: "https://example.test/office.jpg", alt: "Harbor office" },
+      bullets: [{ runs: [{ text: "Opens in May" }], level: 0 }],
+    },
+  ];
+  expect(markdownOutlineFromDeck(deck)).toBe(
+    [
+      "# Outline",
+      "## Ship weekly\n\nSmall batches win",
+      "## 42%\n\nof renewals",
+      "## Office\n\n![Harbor office](https://example.test/office.jpg)\n\n- Opens in May",
+    ].join("\n\n"),
+  );
 });

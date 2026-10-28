@@ -235,6 +235,15 @@
   gap: 12px 14px;
 }
 .library-page .knowledge-form-wide { grid-column: 1 / -1; }
+/* Option rails (RailSwitch) sit in a fieldset whose legend reads like a field label. */
+.library-page .knowledge-form-grid > fieldset { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.library-page .knowledge-form-grid > fieldset > legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--control-label-size);
+  font-weight: 700;
+}
 .library-page :is(.knowledge-form-grid, .knowledge-create-form) > label:not(.knowledge-inline-check),
 .library-page .knowledge-form-grid label:not(.knowledge-inline-check) {
   display: grid;
@@ -374,10 +383,56 @@
   .knowledge-start-options,
   .knowledge-upload-queue ul,
   .knowledge-document-rows,
-  .knowledge-row-main
+  .knowledge-row-main,
+  .knowledge-access-editor
 ) {
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+}
+
+/* Document details: preserved properties and ethical walls */
+.library-page .knowledge-document-row-item.is-expanded { background: var(--surface-soft); }
+.library-page .knowledge-details-toggle svg { transition: transform 160ms ease; }
+.library-page .knowledge-details-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.library-page .knowledge-wall-badge { display: inline-flex; align-items: center; gap: 4px; }
+.library-page .knowledge-document-details-slot { grid-column: 1 / -1; min-width: 0; }
+.library-page .knowledge-document-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 14px 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.library-page .knowledge-document-details > section { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.library-page .knowledge-properties {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  margin: 0;
+  overflow-y: auto;
+}
+.library-page .knowledge-properties > div {
+  display: grid;
+  grid-template-columns: minmax(96px, 38%) minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.library-page .knowledge-properties dt { color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
+.library-page .knowledge-properties dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.library-page .knowledge-details-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.library-page .knowledge-access-editor { display: grid; gap: 10px; min-width: 0; }
+.library-page :is(.knowledge-access-editor, .knowledge-access, .knowledge-form-wide) > .rail-switch { justify-self: start; max-width: 100%; }
+/* Phones: badges and row buttons move under the name instead of squeezing it. */
+@media (max-width: 560px) {
+  .library-page .knowledge-document-row-item { grid-template-columns: 28px minmax(0, 1fr); row-gap: 8px; }
+  .library-page .knowledge-document-row-item > .knowledge-row-actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+    justify-self: start;
+  }
 }
 
 /* ---- End Knowledge ------------------------------------------------------ */
