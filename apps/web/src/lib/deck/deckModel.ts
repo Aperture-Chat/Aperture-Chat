@@ -73,7 +73,10 @@ export type DeckSlideLayout =
   | "quote"
   | "section"
   | "chart"
-  | "closing";
+  | "closing"
+  | "statement"
+  | "big-number"
+  | "image-bullets";
 
 /** A user-adjusted block box in slide coordinates (the 960×540 canvas). */
 export type DeckSlideBox = { x: number; y: number; w: number; h: number };
@@ -123,6 +126,10 @@ export type DeckSlide = DeckSlideBase &
     | { layout: "section"; title: DeckRichText; subtitle: DeckRichText }
     | { layout: "chart"; title: DeckRichText; mermaidSource: string }
     | { layout: "closing"; title: DeckRichText; body: DeckRichText }
+    | { layout: "statement"; title: DeckRichText; body: DeckRichText }
+    /** `title` holds the figure itself; `subtitle` says what it measures. */
+    | { layout: "big-number"; title: DeckRichText; subtitle: DeckRichText }
+    | { layout: "image-bullets"; title: DeckRichText; image: DeckImageRef; bullets: DeckBullet[] }
   );
 
 export type DeckThemeColors = {
@@ -134,8 +141,17 @@ export type DeckThemeColors = {
   accent2: string;
 };
 
+/** A theme's look beyond its colors: the shapes every layout draws and where
+ * its text sits (deckGeometry.ts). "rule" is the original accent-rule look and
+ * is stored as no design at all, so decks saved before designs existed keep
+ * their exact bytes. */
+export const DECK_DESIGNS = ["rule", "band", "split", "editorial", "orbit", "frame", "swiss"] as const;
+export type DeckDesign = (typeof DECK_DESIGNS)[number];
+
 export type DeckTheme = {
   colors: DeckThemeColors;
+  /** Absent means the classic "rule" design. */
+  design?: Exclude<DeckDesign, "rule">;
   fonts: { major: string; minor: string };
   logo: { dataUrl: string; widthPx: number; heightPx: number } | null;
   /** Deck-wide background (cover) shown on every slide without its own. */
@@ -161,7 +177,10 @@ export const SUPPORTED_DECK_LAYOUTS: DeckSlideLayout[] = [
   "title",
   "title-bullets",
   "two-column",
+  "image-bullets",
   "image-caption",
+  "statement",
+  "big-number",
   "section",
   "quote",
   "closing",
@@ -176,7 +195,15 @@ export const DECK_LAYOUT_LABELS: Record<DeckSlideLayout, string> = {
   section: "Section",
   chart: "Chart",
   closing: "Closing",
+  statement: "Statement",
+  "big-number": "Big number",
+  "image-bullets": "Picture + bullets",
 };
+
+/** The design a theme draws with; no stored design is the classic one. */
+export function deckThemeDesign(theme: Pick<DeckTheme, "design">): DeckDesign {
+  return theme.design ?? "rule";
+}
 
 /** Neutral Aperture default theme — real values, matching the app's design
  * tokens, used whenever no brand template is applied. */
@@ -266,7 +293,18 @@ export function createDeckSlide(layout: DeckSlideLayout, id: string): DeckSlide 
     case "chart":
       return { ...base, layout, title: [], mermaidSource: "" };
     case "closing":
+    case "statement":
       return { ...base, layout, title: [], body: [] };
+    case "big-number":
+      return { ...base, layout, title: [], subtitle: [] };
+    case "image-bullets":
+      return {
+        ...base,
+        layout,
+        title: [],
+        image: { src: "", alt: "" },
+        bullets: [{ runs: [{ text: "" }], level: 0 }],
+      };
   }
 }
 
@@ -473,7 +511,16 @@ function parseBackgroundLibrary(value: unknown, errors: string[]): Record<string
   return library;
 }
 
-function parseTheme(value: unknown, errors: string[]): DeckTheme {
+/** A stored design must be one the editor can draw; an unknown one (a deck
+ * from a newer build) falls back to the classic look rather than failing. */
+function parseDesign(value: unknown, warnings: string[]): DeckTheme["design"] {
+  if (value === undefined || value === null || value === "rule") return undefined;
+  if ((DECK_DESIGNS as readonly unknown[]).includes(value)) return value as DeckTheme["design"];
+  warnings.push("theme.design is not a known design; the classic design is used");
+  return undefined;
+}
+
+function parseTheme(value: unknown, errors: string[], warnings: string[]): DeckTheme {
   const fallback = defaultDeckTheme();
   if (!isRecord(value)) {
     errors.push("theme must be an object");
@@ -532,7 +579,8 @@ function parseTheme(value: unknown, errors: string[]): DeckTheme {
     typeof value.sourceLabel === "string" && value.sourceLabel.trim()
       ? value.sourceLabel.slice(0, 200)
       : null;
-  return { colors, fonts, logo, backgroundImage, backgroundLibrary, sourceLabel };
+  const design = parseDesign(value.design, warnings);
+  return { colors, ...(design ? { design } : {}), fonts, logo, backgroundImage, backgroundLibrary, sourceLabel };
 }
 
 /** Accepts either a run list or a plain string (AI output and decks stored
@@ -630,12 +678,30 @@ function parseSlide(
         mermaidSource: cleanText(value.mermaidSource ?? "", 8000, `${label}.mermaidSource`, errors),
       };
     case "closing":
+    case "statement":
       return {
         id,
         notes,
         layout,
         title: title(),
         body: parseRichText(value.body, MAX_RUN_TEXT_CHARS, `${label}.body`, errors),
+      };
+    case "big-number":
+      return {
+        id,
+        notes,
+        layout,
+        title: title(),
+        subtitle: parseRichText(value.subtitle, MAX_TITLE_CHARS, `${label}.subtitle`, errors),
+      };
+    case "image-bullets":
+      return {
+        id,
+        notes,
+        layout,
+        title: title(),
+        image: parseImageRef(value.image, `${label}.image`, errors),
+        bullets: parseBullets(value.bullets, `${label}.bullets`, errors, warnings),
       };
   }
   return null;
@@ -659,7 +725,7 @@ export function parseSlideDeck(value: unknown): ParseSlideDeckResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const title = cleanText(candidate.title ?? "", MAX_TITLE_CHARS, "title", errors);
-  const theme = parseTheme(candidate.theme ?? defaultDeckTheme(), errors);
+  const theme = parseTheme(candidate.theme ?? defaultDeckTheme(), errors, warnings);
   if (!Array.isArray(candidate.slides)) {
     return { ok: false, error: "Deck slides must be an array." };
   }
@@ -764,26 +830,42 @@ export function deckSlideBackgroundSource(slide: DeckSlide, theme: DeckTheme): s
   return slide.background?.dataUrl ?? theme.backgroundImage?.dataUrl ?? null;
 }
 
+/** Each layout's text regions, in reading order. A region is named after
+ * the slide field that holds its words, so one table answers "which words
+ * live where" for the editor, the export, and the fit check. */
+export const DECK_LAYOUT_REGIONS: Record<DeckSlideLayout, readonly string[]> = {
+  title: ["title", "subtitle"],
+  section: ["title", "subtitle"],
+  "big-number": ["title", "subtitle"],
+  "title-bullets": ["title", "bullets"],
+  "image-bullets": ["title", "bullets"],
+  "two-column": ["title", "left", "right"],
+  "image-caption": ["title", "caption"],
+  quote: ["quote", "attribution"],
+  chart: ["title"],
+  closing: ["title", "body"],
+  statement: ["title", "body"],
+};
+
 /** Text content of one region on a slide, or null when the layout has no
  * such region. Bullet regions return their bullets; the rest run lists. */
 export function deckSlideRegionContent(slide: DeckSlide, region: string): DeckRichText | DeckBullet[] | null {
-  switch (slide.layout) {
-    case "title":
-    case "section":
-      return region === "title" ? slide.title : region === "subtitle" ? slide.subtitle : null;
-    case "title-bullets":
-      return region === "title" ? slide.title : region === "bullets" ? slide.bullets : null;
-    case "two-column":
-      return region === "title" ? slide.title : region === "left" ? slide.left : region === "right" ? slide.right : null;
-    case "image-caption":
-      return region === "title" ? slide.title : region === "caption" ? slide.caption : null;
-    case "quote":
-      return region === "quote" ? slide.quote : region === "attribution" ? slide.attribution : null;
-    case "chart":
-      return region === "title" ? slide.title : null;
-    case "closing":
-      return region === "title" ? slide.title : region === "body" ? slide.body : null;
-  }
+  if (!DECK_LAYOUT_REGIONS[slide.layout].includes(region)) return null;
+  return (slide as unknown as Record<string, DeckRichText | DeckBullet[]>)[region];
+}
+
+/** The layouts that carry a slide picture. */
+export const DECK_PICTURE_LAYOUTS: readonly DeckSlideLayout[] = ["image-caption", "image-bullets"];
+
+/** The picture a slide carries, or null when its layout has none. */
+export function deckSlidePicture(slide: DeckSlide): DeckImageRef | null {
+  return slide.layout === "image-caption" || slide.layout === "image-bullets" ? slide.image : null;
+}
+
+/** The slide with its picture replaced; a slide whose layout holds no
+ * picture comes back unchanged. */
+export function withDeckSlidePicture(slide: DeckSlide, image: DeckImageRef): DeckSlide {
+  return slide.layout === "image-caption" || slide.layout === "image-bullets" ? { ...slide, image } : slide;
 }
 
 /** Plain text of a region's content, bullets one per line. */
@@ -834,11 +916,17 @@ export function deckSlideOutline(slide: DeckSlide): string {
   switch (slide.layout) {
     case "title":
     case "section":
+    case "big-number":
       push(deckRunsText(slide.title));
       push(deckRunsText(slide.subtitle));
       break;
     case "title-bullets":
       push(deckRunsText(slide.title));
+      slide.bullets.forEach((bullet) => push(`${"  ".repeat(bullet.level)}- ${deckRunsText(bullet.runs)}`));
+      break;
+    case "image-bullets":
+      push(deckRunsText(slide.title));
+      push(slide.image.alt ? `[Image: ${slide.image.alt}]` : "");
       slide.bullets.forEach((bullet) => push(`${"  ".repeat(bullet.level)}- ${deckRunsText(bullet.runs)}`));
       break;
     case "two-column":
@@ -863,6 +951,7 @@ export function deckSlideOutline(slide: DeckSlide): string {
       push(slide.mermaidSource ? "[Chart]" : "");
       break;
     case "closing":
+    case "statement":
       push(deckRunsText(slide.title));
       push(deckRunsText(slide.body));
       break;

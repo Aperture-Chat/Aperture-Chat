@@ -12,6 +12,10 @@ import "./data-protection.css";
 import "./draft-editor.css";
 import "./branding.css";
 import "./support-tickets.css";
+import "./artifact-canvas.css";
+import "./diagram-studio.css";
+import "./work-trace.css";
+import "./code-editing.css";
 // Last: the shared tactile button and toggle language (see the file header).
 import "./tactile-controls.css";
 

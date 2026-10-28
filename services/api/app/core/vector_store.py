@@ -5,6 +5,7 @@ import json
 import logging
 import sqlite3
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Condition, Lock, RLock, Thread
@@ -17,7 +18,9 @@ from app.db.knowledge_import_state import (
     coordinate_knowledge_state_import,
     get_active_knowledge_import_receipt,
 )
-from app.models.schemas import KnowledgeChunk, KnowledgeDocument, Role, User
+from app.core.document_metadata import PROPERTIES_LOCATOR
+from app.core.policy import knowledge_chunk_visible_to_user
+from app.models.schemas import KnowledgeChunk, KnowledgeDocument, KnowledgeDocumentWall, User
 
 try:  # numpy ships with fastembed; retrieval falls back to pure Python without it.
     import numpy as np
@@ -35,6 +38,7 @@ DENSE_BATCH_SIZE = 32
 SEARCH_CACHE_MAX_CHUNKS = 250_000
 _EMPTY_DENSE = "[]"
 QUERY_EMBED_WAIT_SECONDS = 5.0
+PROPERTIES_WEIGHT = 0.6
 
 
 @dataclass
@@ -326,6 +330,41 @@ class LocalVectorStore:
             self._bump(config_id)
             return int(updated or 0)
 
+    def update_document_walls(
+        self, config_id: str, walls: Mapping[str, KnowledgeDocumentWall | None]
+    ) -> None:
+        """Rewrite stored documents' walls and their passages' wall groups."""
+        document_rows = [
+            (json.dumps(wall.model_dump() if wall is not None else None), config_id, document_id)
+            for document_id, wall in walls.items()
+        ]
+        chunk_rows = [
+            (
+                json.dumps(None if wall is None else list(wall.group_ids)),
+                config_id,
+                document_id,
+            )
+            for document_id, wall in walls.items()
+        ]
+        with self._lock:
+            self._connection.executemany(
+                """
+                update knowledge_documents set payload = json_set(payload, '$.wall', json(?))
+                where knowledge_config_id = ? and id = ?
+                """,
+                document_rows,
+            )
+            self._connection.executemany(
+                """
+                update knowledge_chunks
+                set payload = json_set(payload, '$.wall_group_ids', json(?))
+                where knowledge_config_id = ? and document_id = ?
+                """,
+                chunk_rows,
+            )
+            self._connection.commit()
+            self._bump(config_id)
+
     # ------------------------------------------------------- dense indexing
 
     def backfill_dense_vectors(self) -> None:
@@ -601,7 +640,7 @@ class LocalVectorStore:
             for row, chunk in enumerate(index.chunks):
                 if document_id is not None and chunk.document_id != document_id:
                     continue
-                if not _chunk_visible_to_actor(actor, chunk):
+                if not knowledge_chunk_visible_to_user(actor, chunk):
                     continue
                 searchable = index.searchable[row]
                 lexical_score = sum(searchable.count(term) for term in query_terms)
@@ -610,6 +649,7 @@ class LocalVectorStore:
                     query_vector, query_norm, index.sparse[row], index.sparse_norms[row]
                 )
                 score = exact_score + lexical_score + sparse_score + 2.0 * dense_scores[row]
+                score *= _passage_weight(chunk)
                 scored.append((score if score > 0 else 0.1, chunk))
         ranked = [item for item in scored if item[0] > 0.1] or scored
         best = heapq.nsmallest(
@@ -648,7 +688,7 @@ class LocalVectorStore:
         scored: list[tuple[float, KnowledgeChunk]] = []
         for row in rows:
             chunk = KnowledgeChunk.model_validate_json(row["payload"])
-            if not _chunk_visible_to_actor(actor, chunk):
+            if not knowledge_chunk_visible_to_user(actor, chunk):
                 continue
             score = _chunk_score(
                 chunk,
@@ -1062,20 +1102,6 @@ def _norm(values: Any) -> float:
     return sum(value * value for value in values) ** 0.5
 
 
-def _chunk_visible_to_actor(actor: User, chunk: KnowledgeChunk) -> bool:
-    if actor.role == Role.PLATFORM_OWNER:
-        return True
-    if actor.tenant_id != chunk.tenant_id:
-        return False
-    # Tenant admins may read every knowledge base in their tenant (see
-    # policy.knowledge_config_visible_to_user); chunk ACLs must agree.
-    if actor.role == Role.TENANT_ADMIN:
-        return True
-    if chunk.acl_group_ids and not set(actor.group_ids).intersection(chunk.acl_group_ids):
-        return False
-    return True
-
-
 def _chunk_score(
     chunk: KnowledgeChunk,
     query_terms: set[str],
@@ -1096,7 +1122,15 @@ def _chunk_score(
         else 0.0
     )
     score = exact_score + lexical_score + sparse_vector_score + (2.0 * dense_vector_score)
+    score *= _passage_weight(chunk)
     return score if score > 0 else 0.1
+
+
+def _passage_weight(chunk: KnowledgeChunk) -> float:
+    """A file's properties passage repeats its name and title, so it would win
+    ties against the file's own content; it ranks below content on equal terms
+    and still surfaces when only the properties match."""
+    return PROPERTIES_WEIGHT if chunk.locator == PROPERTIES_LOCATOR else 1.0
 
 
 def _cosine_similarity(

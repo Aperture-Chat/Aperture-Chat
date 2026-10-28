@@ -486,29 +486,46 @@
   border-radius: 4px;
 }
 
+/* --ai-composer-ink is the change's text color, kept in a property so a
+   blank, whose underscores are hidden, can still draw its line in it. */
 .ai-composer-diff del {
+  --ai-composer-ink: #a82020;
   background: #fdecec;
-  color: #a82020;
+  color: var(--ai-composer-ink);
   text-decoration: line-through;
   text-decoration-color: rgb(168 32 32 / 55%);
 }
 
 .ai-composer-diff ins {
+  --ai-composer-ink: #0c5f31;
   background: #e2f6e9;
-  color: #0c5f31;
+  color: var(--ai-composer-ink);
   text-decoration: none;
   box-shadow: inset 0 -1.5px 0 #38a866;
 }
 
 .theme-dark .ai-composer-diff del {
+  --ai-composer-ink: #ff9d9d;
   background: rgb(207 48 48 / 18%);
-  color: #ff9d9d;
 }
 
 .theme-dark .ai-composer-diff ins {
+  --ai-composer-ink: #8fe3ad;
   background: rgb(20 136 62 / 22%);
-  color: #8fe3ad;
   box-shadow: inset 0 -1.5px 0 #3fbf73;
+}
+
+/* A fill-in blank (a run of underscores) draws as one solid line in the
+   change color: the underscores keep their width but are not painted, so a
+   removed blank is not a strike line stacked over a dashed one. Matches the
+   Visual redline's .redline-blank in styles.css. */
+.ai-composer-diff :is(del, ins).is-blank {
+  color: transparent;
+  text-decoration: underline;
+  text-decoration-color: var(--ai-composer-ink);
+  text-decoration-thickness: 1.5px;
+  text-decoration-skip-ink: none;
+  box-shadow: none;
 }
 
 .ai-composer-same {
@@ -3459,70 +3476,104 @@ figure.document-media-align-right {
   flex: 0 0 auto;
 }
 
-/* ---------- Account save state ---------- */
-/* Shares the toolbar row with the 42px buttons: a quiet word while saving or
-   saved, and a tinted chip with its own action when the account copy is
-   behind. The full reason lives in the tooltip. */
-.document-server-save-state {
+/* ---------- Save status ---------- */
+/* The one save status ends the formatting toolbar, beside Insert: a quiet
+   word in its own color while editing, saving, or saved, and a tinted chip
+   with its own action when the account copy is behind. The full reason lives
+   in the tooltip. */
+.document-save-state {
   display: inline-flex;
   flex: 0 1 auto;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  min-height: 42px;
-  padding: 0 4px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.25;
   white-space: nowrap;
 }
 
-.document-server-save-state > svg {
+.document-toolbar .document-save-state .document-edits-toggle,
+.document-save-word {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  color: inherit;
+  font-size: 12.5px;
+  font-weight: 720;
 }
 
-.document-server-save-label {
+.document-save-word {
+  min-height: 30px;
+}
+
+.document-toolbar .document-save-state .document-edits-toggle > svg,
+.document-save-word > svg {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+}
+
+.document-save-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.document-server-save-state.is-saving > svg {
+.document-save-state.is-saving .document-save-label {
+  color: var(--muted);
+}
+
+.document-save-state.is-saving svg {
   animation: apx-spin 900ms linear infinite;
 }
 
-.document-server-save-state.is-saved {
+.document-save-state.is-saved {
   color: var(--green);
 }
 
-.document-server-save-state.is-local-only,
-.document-server-save-state.is-conflict {
-  padding: 0 5px 0 12px;
+.document-save-state.is-editing {
+  color: #92400e;
+}
+
+.document-save-state.is-local-only,
+.document-save-state.is-conflict {
+  padding: 2px 3px 2px 2px;
   border-color: var(--orange-border);
   background: var(--orange-soft);
   color: color-mix(in srgb, var(--orange) 72%, var(--text-strong));
 }
 
-/* Nothing outside this tab holds the work, so the whole warning shows and
-   wraps inside the chip. */
-.document-server-save-state.is-not-stored {
-  max-width: min(520px, 100%);
-  padding: 6px 5px 6px 12px;
+/* Nothing outside this tab holds the work, so the whole warning shows on a
+   row of its own under the tools. */
+.document-toolbar-compact:has(> .document-save-state.is-not-stored) {
+  flex-wrap: wrap;
+}
+
+.document-save-state.is-not-stored {
+  flex: 1 1 100%;
+  padding: 4px 3px 4px 2px;
   border-color: var(--red-border);
   background: var(--red-soft);
   color: color-mix(in srgb, var(--red) 80%, var(--text-strong));
   white-space: normal;
 }
 
-.document-server-save-action {
-  display: inline-flex;
+.document-save-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.document-toolbar .document-save-action {
   flex: 0 0 auto;
-  align-items: center;
-  min-height: 30px;
-  margin-left: 2px;
+  width: auto;
+  height: auto;
+  min-height: 28px;
   padding: 0 12px;
   border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
   border-radius: 6px;
@@ -3531,41 +3582,47 @@ figure.document-media-align-right {
   font: inherit;
   font-size: 12.5px;
   font-weight: 720;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background var(--speed) var(--ease),
     border-color var(--speed) var(--ease);
 }
 
-.document-server-save-action:hover {
+.document-toolbar .document-save-action:hover {
   border-color: color-mix(in srgb, currentColor 55%, transparent);
   background: var(--surface-soft);
+  color: var(--text-strong);
 }
 
-.document-server-save-action:focus-visible {
+.document-toolbar .document-save-action:focus-visible {
   outline: 2px solid var(--teal);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
-/* The status bar word matches: an account copy that is behind is not "Saved". */
-.document-toolbar .document-edits-toggle.is-local {
-  color: color-mix(in srgb, var(--orange) 72%, var(--text-strong));
-}
-
-/* Phones give the action a 44px target, so the chip grows around it; the
-   label wraps beside the action instead of pushing it to its own line. */
-@media (max-width: 640px) {
-  .document-assistant-page .document-server-save-state:not(.is-saving):not(.is-saved) {
-    padding: 4px 4px 4px 12px;
+/* Phones fold the formatting tools away; the save status stays out on its
+   own row under the expander, with 44px targets. */
+@media (max-width: 560px) {
+  .document-toolbar .document-save-state {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 8px;
   }
 
-  .document-assistant-page .document-server-save-label {
-    flex: 1 1 0;
+  .document-toolbar .document-save-state.is-not-stored {
+    width: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .document-assistant-page .document-save-state button {
+    min-height: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .document-server-save-state.is-saving > svg {
+  .document-save-state.is-saving svg {
     animation: none;
   }
 }

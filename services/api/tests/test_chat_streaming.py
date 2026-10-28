@@ -328,3 +328,208 @@ def test_continuation_failure_closes_with_streamed_content(
     ]
     assert len(done_events) == 1
     assert events[-1] == "[DONE]"
+
+
+def _activities(events: list[object]) -> list[dict]:
+    return [event["activity"] for event in events if isinstance(event, dict) and "activity" in event]
+
+
+def _stream(prompt: str = "Hello") -> list[object]:
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 200
+    return _events(response.text)
+
+
+def test_plain_stream_reports_no_activity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    monkeypatch.setattr("app.routes.chat._gateway_stream", lambda *args, **kwargs: iter(["Hi"]))
+
+    assert _activities(_stream()) == []
+
+
+def test_stream_reports_resolved_context_before_the_first_delta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.directives import Directive
+
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    monkeypatch.setattr(
+        "app.routes.chat._resolve_runtime_context",
+        lambda store, actor, request, model: {
+            "agent_profile_name": "Research desk",
+            "knowledge_config_ids": ["kb-1"],
+            "knowledge_hits": [
+                {"document_id": "doc-1", "source_name": "Policy", "snippet": "secret passage"},
+                {"document_id": "doc-1", "source_name": "Policy", "snippet": "secret passage 2"},
+                {"document_id": "doc-2", "source_name": "Memo", "snippet": "secret passage 3"},
+            ],
+            # Already searched (web_enabled stays off so the real platform
+            # search does not run again inside the test).
+            "web_search_engine": "searxng",
+            "web_results": [
+                {"title": "A", "url": "https://secret.example/a", "snippet": "secret web"},
+                {"title": "B", "url": "https://secret.example/b", "snippet": "secret web"},
+            ],
+            "fetched_urls": [{"source_name": "Page", "source_uri": "https://secret.example/p"}],
+            "mcp_servers": [{"name": "Docs", "tools": [{"name": "lookup"}]}],
+            "mcp_tool_results": [
+                {"tool_name": "lookup", "is_error": False, "result_text": "secret tool output"},
+                {"tool_name": "fetch_case", "is_error": True, "result_text": "secret failure"},
+            ],
+            "attachments": [{"name": "brief.pdf"}, {"name": "photo.png"}],
+            "image_attachment_count": 1,
+            "memory_ids": ["memory-1", "memory-2"],
+            "hermes_memories": [{"content": "secret companion memory"}],
+            "skill_files": [{"name": "Citations"}],
+            "prompt_templates": [],
+            "directives": [
+                Directive(id="table", label="Include a markdown table", instruction="secret"),
+                Directive(id="standing:1", label="secret standing rule", instruction="secret", standing=True),
+            ],
+            "privacy_concealed_prompt": "Hello [NAME]",
+        },
+    )
+    monkeypatch.setattr("app.routes.chat._gateway_stream", lambda *args, **kwargs: iter(["Hi"]))
+
+    events = _stream()
+    first_delta = next(index for index, event in enumerate(events) if isinstance(event, dict) and "delta" in event)
+    opening = _activities(events[:first_delta])
+
+    assert opening == [
+        {"kind": "agent", "name": "Research desk"},
+        {"kind": "privacy", "concealed": True},
+        {"kind": "knowledge", "passages": 3, "sources": 2},
+        {"kind": "web", "results": 2, "engine": "searxng"},
+        {"kind": "fetch", "pages": 1},
+        {
+            "kind": "tools",
+            "servers": 1,
+            "calls": [{"name": "lookup", "ok": True}, {"name": "fetch_case", "ok": False}],
+        },
+        {"kind": "attachments", "files": 2, "images": 1},
+        {"kind": "memory", "recalled": 2, "companion": 1},
+        {"kind": "skills", "skills": 1, "templates": 0},
+        {"kind": "requirements", "phase": "noted", "count": 1},
+    ]
+    # Facts only: no passages, URLs, tool output, memories, or standing rules.
+    assert "secret" not in json.dumps(_activities(events))
+
+
+def test_stream_verifies_requirements_against_the_finished_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    monkeypatch.setattr(
+        "app.routes.chat._gateway_stream",
+        lambda *args, **kwargs: iter(["| A | B |\n", "| --- | --- |\n", "| 1 | 2 |\n"]),
+    )
+
+    events = _stream("Compare them in a table and include images.")
+    checks = [item for item in _activities(events) if item.get("phase") == "checked"]
+    done_index = next(index for index, event in enumerate(events) if isinstance(event, dict) and event.get("done"))
+    checked_index = next(
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, dict) and event.get("activity", {}).get("phase") == "checked"
+    )
+
+    assert checked_index < done_index
+    assert checks == [
+        {
+            "kind": "requirements",
+            "phase": "checked",
+            "checks": [
+                {"label": "Include images or diagrams", "met": False},
+                {"label": "Include a markdown table", "met": True},
+            ],
+        }
+    ]
+
+
+def test_stream_reports_each_continuation_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    calls: list[int] = []
+
+    def fake_stream(*args, **kwargs):
+        calls.append(1)
+        usage_sink = kwargs.get("usage_sink")
+        if usage_sink is not None:
+            usage_sink["finish_reason"] = "length" if len(calls) < 3 else "stop"
+        return iter([f"Part {len(calls)}."])
+
+    monkeypatch.setattr("app.routes.chat._gateway_stream", fake_stream)
+
+    events = _stream("Write everything.")
+    sequence = [
+        ("delta", event["delta"]) if "delta" in event else ("activity", event["activity"])
+        for event in events
+        if isinstance(event, dict) and ("delta" in event or "activity" in event)
+    ]
+
+    assert sequence == [
+        ("delta", "Part 1."),
+        ("activity", {"kind": "continue", "round": 1}),
+        ("delta", "\n\nPart 2."),
+        ("activity", {"kind": "continue", "round": 2}),
+        ("delta", "\n\nPart 3."),
+    ]
+
+
+def test_stream_reports_content_rule_screening(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    monkeypatch.setattr("app.routes.chat.filters_have_output_rules", lambda filters: True)
+    monkeypatch.setattr(
+        "app.routes.chat._filtered_output_text",
+        lambda store, actor, request, model, filters, text: text.upper(),
+    )
+    monkeypatch.setattr("app.routes.chat._gateway_stream", lambda *args, **kwargs: iter(["held ", "reply"]))
+
+    events = _stream()
+    sequence = [
+        ("delta", event["delta"]) if "delta" in event else ("activity", event["activity"])
+        for event in events
+        if isinstance(event, dict) and ("delta" in event or "activity" in event)
+    ]
+
+    assert sequence == [
+        ("activity", {"kind": "screen", "phase": "hold"}),
+        ("activity", {"kind": "screen", "phase": "done"}),
+        ("delta", "HELD REPLY"),
+    ]
+
+
+def test_stream_reports_hermes_artifacts_before_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    monkeypatch.setattr("app.routes.chat._gateway_stream", lambda *args, **kwargs: iter(["Saved."]))
+    monkeypatch.setattr(
+        "app.routes.chat.hermes.capture_artifacts",
+        lambda *args, **kwargs: {
+            "memories_saved": 1,
+            "skills_saved": ["Citation style"],
+            "automations_proposed": [],
+        },
+    )
+
+    events = _stream()
+    hermes_index = next(
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, dict) and event.get("activity", {}).get("kind") == "hermes"
+    )
+    done_index = next(index for index, event in enumerate(events) if isinstance(event, dict) and event.get("done"))
+
+    assert hermes_index < done_index
+    assert events[hermes_index]["activity"] == {
+        "kind": "hermes",
+        "memories": 1,
+        "skills": ["Citation style"],
+        "automations": [],
+    }

@@ -19,7 +19,7 @@ export type MarkdownBlock =
   | { kind: "list"; ordered: boolean; items: string[] }
   | { kind: "table"; headers: string[]; rows: string[][]; aligns: MarkdownColumnAlign[] }
   | { kind: "rule" }
-  | { kind: "code"; language: string; text: string }
+  | { kind: "code"; language: string; text: string; info?: string }
   | { kind: "quote"; lines: string[] }
   | { kind: "math"; source: string; math: string };
 
@@ -55,7 +55,7 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
     if (fence) {
       flushParagraph();
       const body = readFenceBody(lines, index + 1, fence);
-      blocks.push({ kind: "code", language: fence.language, text: body.lines.join("\n") });
+      blocks.push({ kind: "code", language: fence.language, text: body.lines.join("\n"), info: fence.info });
       index = body.nextIndex;
       continue;
     }
@@ -146,7 +146,7 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
   return blocks;
 }
 
-type FenceOpener = { marker: string; char: "`" | "~"; length: number; language: string };
+type FenceOpener = { marker: string; char: "`" | "~"; length: number; language: string; info: string };
 
 function readFenceOpener(trimmed: string): FenceOpener | null {
   const match = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
@@ -160,6 +160,7 @@ function readFenceOpener(trimmed: string): FenceOpener | null {
     char: marker[0] as "`" | "~",
     length: marker.length,
     language: info.split(/\s+/)[0] ?? "",
+    info,
   };
 }
 
@@ -447,6 +448,52 @@ export function replaceDiagramFence(content: string, previousSource: string, nex
     index = body.nextIndex;
   }
   return null;
+}
+
+/** Replaces the code of the `occurrence`-th fenced block whose body reads
+ * exactly `previousSource` (as parseMarkdownBlocks reads it), keeping its
+ * fence line and info string. When the new code holds a line that would
+ * close the fence, the fence grows so the block stays one block. Returns
+ * null when no such block exists. */
+export function replaceCodeFence(
+  content: string,
+  previousSource: string,
+  nextSource: string,
+  occurrence = 0,
+): string | null {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  let seen = 0;
+  let index = 0;
+  while (index < lines.length) {
+    const fence = readFenceOpener(lines[index]!.trim());
+    if (!fence) {
+      index += 1;
+      continue;
+    }
+    const body = readFenceBody(lines, index + 1, fence);
+    if (body.lines.join("\n") === previousSource && seen++ === occurrence) {
+      const bodyEnd = index + 1 + body.lines.length;
+      const indent = /^\s*/.exec(lines[index]!)![0];
+      const marker = fenceMarkerFor(fence, nextSource);
+      const kept = marker === fence.marker;
+      const opener = kept ? lines[index]! : `${indent}${marker}${fence.info}`;
+      const closer = kept && bodyEnd < lines.length ? lines[bodyEnd]! : `${indent}${marker}`;
+      return [...lines.slice(0, index), opener, ...nextSource.split("\n"), closer, ...lines.slice(bodyEnd + 1)].join("\n");
+    }
+    index = body.nextIndex;
+  }
+  return null;
+}
+
+/** The block's own fence, or a longer one when the code holds a line that
+ * would close it early. */
+function fenceMarkerFor(fence: FenceOpener, code: string): string {
+  const closers = code.split("\n").map((line) => {
+    const trimmed = line.trim();
+    return isFenceCloser(trimmed, fence) ? trimmed.length : 0;
+  });
+  const longest = Math.max(0, ...closers);
+  return longest ? fence.char.repeat(longest + 1) : fence.marker;
 }
 
 export function unwrapFullDocumentFence(source: string): string {

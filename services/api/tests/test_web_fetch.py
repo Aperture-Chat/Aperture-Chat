@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.core.web_fetch import WebFetchError, fetch_web_source
+from app.core.web_fetch import WebFetchError, fetch_web_resource, fetch_web_source
 
 
 def test_fetch_web_source_extracts_html_with_bounded_metadata() -> None:
@@ -107,3 +107,72 @@ def test_fetch_web_source_failure_does_not_echo_query_credentials() -> None:
 
     assert exc_info.value.status_code == 502
     assert "do-not-echo" not in exc_info.value.detail
+
+
+def test_fetch_web_source_exposes_html_title_description_links_and_search_form() -> None:
+    page = (
+        b"<html><head><title>Synthetic Registry</title>"
+        b"<meta name='description' content='Public test records.'>"
+        b"<meta property='og:site_name' content='Registry Example'></head>"
+        b"<body><nav><a href='/datasets'>Datasets</a></nav>"
+        b"<form action='/search'><input type='search' name='q'></form>"
+        b"<main><p>Welcome</p></main></body></html>"
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, headers={"content-type": "text/html"}, content=page, request=request
+        )
+    )
+
+    result = fetch_web_source("https://registry.example.test/", transport=transport)
+
+    assert result.title == "Synthetic Registry"
+    assert result.description == "Public test records."
+    assert result.site_name == "Registry Example"
+    assert [(link.url, link.text) for link in result.links] == [
+        ("https://registry.example.test/datasets", "Datasets")
+    ]
+    assert result.search_form is not None
+    assert result.search_form.url_for("rare") == "https://registry.example.test/search?q=rare"
+    assert result.text.startswith("Synthetic Registry")
+
+
+def test_fetch_web_source_leaves_page_fields_empty_for_non_html() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, headers={"content-type": "text/plain"}, content=b"See https://x.test", request=request
+        )
+    )
+
+    result = fetch_web_source("https://example.test/notes.txt", transport=transport)
+
+    assert (result.title, result.description, result.links, result.search_form) == ("", "", (), None)
+
+
+def test_fetch_web_resource_returns_error_statuses_without_raising() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(404, content=b"missing", request=request)
+    )
+
+    resource = fetch_web_resource("https://example.test/robots.txt", transport=transport)
+
+    assert resource.status_code == 404
+    assert resource.content == b"missing"
+
+
+def test_fetch_web_resource_keeps_the_egress_guard_and_byte_limit() -> None:
+    redirect = httpx.MockTransport(
+        lambda request: httpx.Response(
+            302, headers={"location": "http://169.254.169.254/latest"}, request=request
+        )
+        if request.url.host == "example.test"
+        else httpx.Response(200, content=b"secret", request=request)
+    )
+    with pytest.raises(WebFetchError) as blocked:
+        fetch_web_resource("https://example.test/sitemap.xml", transport=redirect)
+    assert blocked.value.status_code == 400
+
+    large = httpx.MockTransport(lambda request: httpx.Response(200, content=b"x" * 50, request=request))
+    with pytest.raises(WebFetchError) as too_large:
+        fetch_web_resource("https://example.test/sitemap.xml", max_bytes=10, transport=large)
+    assert too_large.value.status_code == 413

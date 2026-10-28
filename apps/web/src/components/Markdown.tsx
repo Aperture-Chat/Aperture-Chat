@@ -1,7 +1,8 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { Check, Code2, Copy, Download, Eye, LoaderCircle, Pencil, TriangleAlert, Workflow, X } from "lucide-react";
+import { Check, Code2, Copy, Download, Eye, LoaderCircle, Pencil, TriangleAlert, Workflow } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { codeArtifactFilename, codeArtifactLanguage, precedingHeadings } from "../lib/codeArtifacts";
 import { copyCodeToClipboard, triggerBlobDownload } from "../lib/clipboard";
 import {
   imageFallbackUrl,
@@ -16,10 +17,14 @@ import { DiagramEditorModal } from "./DiagramEditorModal";
 import { StewardDiagramFigure } from "./StewardDiagram";
 import { StableLabel } from "./Primitives";
 import { renderConcealed } from "./ConcealedText";
-import { useModalFocus } from "../lib/useModalFocus";
+import { ArtifactCanvasBlade, downloadCode, useArtifactCanvas } from "./ArtifactCanvas";
+import { CodeLines } from "./CodeLines";
+import { CodeBlockEditor, CodeEditButtons, CodeSaveNotice } from "./CodeBlockEditor";
+import { useCodeAiEdit, useCodeEditAssist } from "./CodeAiEdit";
+import { useCodeBlockEditing, type CodeSave } from "./useCodeBlockEditing";
+import { useCopyFeedback, type CopyStatus } from "../lib/useCopyFeedback";
 
 const GENERATED_IMAGE_PREFIX = "/api/chat/generated-images/";
-const PREVIEWABLE_HTML_LANGUAGES = new Set(["html", "htm"]);
 const PREVIEW_PAGE_BUDGET = 2300;
 
 type MarkdownBlock = ReturnType<typeof parseMarkdownBlocks>[number];
@@ -144,18 +149,27 @@ function MathBlock({ math, source }: { math: string; source: string }) {
 export function Markdown({
   content,
   deferDiagrams = false,
+  onUpdateCode,
   onUpdateDiagram,
   preview = false,
   previewPageLimit = true,
+  streaming = false,
 }: {
   content: string;
   deferDiagrams?: boolean;
+  /** Saves an edited code block; `occurrence` counts identical blocks above
+   * it. Without it, code edits stay on screen only. */
+  onUpdateCode?: (previousSource: string, nextSource: string, occurrence: number) => boolean;
   onUpdateDiagram?: (previousSource: string, nextSource: string) => Promise<boolean> | boolean;
   preview?: boolean;
   previewPageLimit?: boolean;
+  /** The reply is still being written, so its code blocks stay read-only. */
+  streaming?: boolean;
 }) {
   const blocks = parseMarkdownBlocks(content);
   const renderedBlocks = preview && previewPageLimit ? previewPageBlocks(blocks) : blocks;
+  const headingHints = precedingHeadings(renderedBlocks);
+  const occurrences = codeOccurrences(renderedBlocks);
   return (
     <div className="markdown">
       {renderedBlocks.map((block, index) => {
@@ -243,7 +257,7 @@ export function Markdown({
           if (diagram?.kind === "structure") {
             return (
               <StewardDiagramFigure
-                fallback={<MarkdownCodeBlock language="json" preview={preview} text={block.text} />}
+                fallback={<MarkdownCodeBlock headingHint={headingHints[index]} language="json" preview={preview} text={block.text} />}
                 forceVisual={isDedicatedStewardDiagramLanguage(block.language)}
                 key={index}
                 onUpdate={onUpdateDiagram}
@@ -267,7 +281,19 @@ export function Markdown({
               />
             );
           }
-          return <MarkdownCodeBlock key={index} language={block.language} preview={preview} text={block.text} />;
+          return (
+            <MarkdownCodeBlock
+              headingHint={headingHints[index]}
+              info={block.info}
+              key={index}
+              language={block.language}
+              occurrence={occurrences[index]}
+              onUpdateCode={onUpdateCode}
+              preview={preview}
+              streaming={streaming}
+              text={block.text}
+            />
+          );
         }
         if (block.kind === "math") {
           return <MathBlock key={index} math={block.math} source={block.source} />;
@@ -317,206 +343,147 @@ function HermesArtifactCard({ kind, text }: { kind: string; text: string }) {
   );
 }
 
-function MarkdownCodeBlock({ language, preview = false, text }: { language: string; preview?: boolean; text: string }) {
-  const [code, setCode] = useState(text);
-  const [editing, setEditing] = useState(false);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+/** For each code block, how many identical code blocks come before it, so a
+ * save finds the right one when a reply repeats a snippet. */
+function codeOccurrences(blocks: MarkdownBlock[]): number[] {
+  const seen = new Map<string, number>();
+  return blocks.map((block) => {
+    if (block.kind !== "code") return 0;
+    const count = seen.get(block.text) ?? 0;
+    seen.set(block.text, count + 1);
+    return count;
+  });
+}
+
+function MarkdownCodeBlock({
+  headingHint,
+  info,
+  language,
+  occurrence = 0,
+  onUpdateCode,
+  preview = false,
+  streaming = false,
+  text,
+}: {
+  /** The nearest heading above the block: a naming hint for downloads. */
+  headingHint?: string;
+  /** The whole fence info string (```python title="main.py"```). */
+  info?: string;
+  language: string;
+  /** Identical code blocks above this one, so a save finds this copy. */
+  occurrence?: number;
+  onUpdateCode?: CodeSave;
+  preview?: boolean;
+  streaming?: boolean;
+  text: string;
+}) {
+  const editable = !preview && !streaming;
+  const edit = useCodeBlockEditing(text, { onSave: onUpdateCode, occurrence }, editable);
+  const { code, editing } = edit;
+  const { status: copyStatus, copy, reset: resetCopy } = useCopyFeedback();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const canvas = useArtifactCanvas();
+  const assist = useCodeEditAssist();
+  const blockRef = useRef<HTMLElement>(null);
   const lines = useMemo(() => code.split("\n"), [code]);
   const lineCount = Math.max(lines.length, 1);
-  const displayLanguage = language.trim() || "code";
+  const fenceLanguage = codeArtifactLanguage(language, info).trim();
+  const displayLanguage = fenceLanguage || "code";
+  const filename = useMemo(
+    () => codeArtifactFilename({ code, language, info, headingHint }),
+    [code, language, info, headingHint],
+  );
+  const artifact = { code, language: displayLanguage, filename };
+  const ai = useCodeAiEdit({ assist: editable ? assist : null, blockRef, code, language: fenceLanguage, onApply: edit.commit });
 
   // Response versions and streamed completions reuse the same block position.
-  // A new source must replace the previous version's local editor/preview state.
+  // A new source must replace the previous version's local copy/preview state.
   useEffect(() => {
-    setCode(text);
-    setEditing(false);
-    setCopyStatus("idle");
+    resetCopy();
     setPreviewOpen(false);
-  }, [text]);
-
-  async function copyCode() {
-    try {
-      await copyCodeToClipboard(code);
-      setCopyStatus("copied");
-      window.setTimeout(() => {
-        setCopyStatus((current) => (current === "copied" ? "idle" : current));
-      }, 1600);
-    } catch {
-      setCopyStatus("failed");
-      window.setTimeout(() => {
-        setCopyStatus((current) => (current === "failed" ? "idle" : current));
-      }, 2200);
-    }
-  }
+  }, [text, resetCopy]);
 
   return (
-    <figure className={`md-code-panel${editing ? " is-editing" : ""}`}>
+    <figure className={`md-code-panel${editing ? " is-editing" : ""}`} ref={blockRef}>
       <figcaption className="md-code-toolbar">
         <span className="md-code-toolbar-main">
           <Code2 size={15} />
           <strong>{displayLanguage}</strong>
           <span>{lineCountLabel(lineCount)}</span>
+          <CodeSaveNotice status={edit.status} />
         </span>
-        {!preview && <span className="md-code-actions">
-          <button
-            className="md-code-action"
-            type="button"
-            data-tooltip="Copy this code block"
-            onClick={() => void copyCode()}
-          >
-            {copyStatus === "copied" ? <Check size={14} /> : <Copy size={14} />}
-            <StableLabel
-              label={copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Failed" : "Copy"}
-              reserve={["Copied", "Failed", "Copy"]}
-            />
-          </button>
-          <button
-            className="md-code-action"
-            type="button"
-            data-tooltip="Open this code in an artifact preview"
-            onClick={() => setPreviewOpen(true)}
-          >
-            <Eye size={14} />
-            Preview
-          </button>
-          <button
-            className="md-code-action"
-            type="button"
-            data-tooltip={editing ? "Return to the numbered code view" : "Edit this code inline"}
-            onClick={() => setEditing((current) => !current)}
-          >
-            {editing ? <Check size={14} /> : <Pencil size={14} />}
-            {editing ? "Done" : "Edit"}
-          </button>
-        </span>}
+        {!preview && (
+          <CodeBlockActions
+            copyStatus={copyStatus}
+            editing={editing}
+            filename={filename}
+            onCopy={() => void copy(code)}
+            onDownload={() => downloadCode(code, filename)}
+            onPreview={() => (canvas ? canvas.open(artifact) : setPreviewOpen(true))}
+            onToggleEditing={edit.toggle}
+            onUndo={edit.undo}
+          />
+        )}
       </figcaption>
 
       {editing ? (
-        <div className="md-code-editor-shell">
-          <div className="md-code-editor-gutter" aria-hidden="true">
-            {lines.map((_, lineIndex) => (
-              <span key={lineIndex}>{lineIndex + 1}</span>
-            ))}
-          </div>
-          <textarea
-            aria-label={`Editable ${displayLanguage} code`}
-            className="md-code-editor"
-            spellCheck={false}
-            rows={Math.max(lineCount, 4)}
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-          />
-        </div>
+        <CodeBlockEditor language={fenceLanguage} marked={ai.marked} value={code} onChange={edit.setCode} onDone={edit.finish} />
       ) : (
-        <CodeLines lines={lines} preview={preview} />
+        <CodeLines language={fenceLanguage} lines={lines} marked={ai.marked} preview={preview} />
       )}
+      {ai.layer}
 
-      {previewOpen && (
-        <CodePreviewModal
-          code={code}
-          copyStatus={copyStatus}
-          language={displayLanguage}
-          lineCount={lineCount}
-          onClose={() => setPreviewOpen(false)}
-          onCopy={() => void copyCode()}
-        />
-      )}
+      {/* Surfaces without a canvas provider still get the blade, owned here. */}
+      {previewOpen && <ArtifactCanvasBlade artifact={artifact} onClose={() => setPreviewOpen(false)} />}
     </figure>
   );
 }
 
-function CodePreviewModal({
-  code,
+function CodeBlockActions({
   copyStatus,
-  language,
-  lineCount,
-  onClose,
+  editing,
+  filename,
   onCopy,
+  onDownload,
+  onPreview,
+  onToggleEditing,
+  onUndo,
 }: {
-  code: string;
-  copyStatus: "idle" | "copied" | "failed";
-  language: string;
-  lineCount: number;
-  onClose: () => void;
+  copyStatus: CopyStatus;
+  editing: boolean;
+  filename: string;
   onCopy: () => void;
+  onDownload: () => void;
+  onPreview: () => void;
+  /** Absent while the reply is still streaming. */
+  onToggleEditing?: () => void;
+  /** Present right after a saved edit, to put the previous code back. */
+  onUndo?: () => void;
 }) {
-  const preview = useMemo(() => buildCodePreview(code, language), [code, language]);
-  const dialogRef = useRef<HTMLElement | null>(null);
-  useModalFocus(dialogRef, true, onClose);
   return (
-    <div className="modal-backdrop code-preview-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="modal code-preview-modal"
-        ref={dialogRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Artifact preview"
-        onClick={(event) => event.stopPropagation()}
+    <span className="md-code-actions">
+      <button className="md-code-action" type="button" data-tooltip="Copy this code block" onClick={onCopy}>
+        {copyStatus === "copied" ? <Check size={14} /> : <Copy size={14} />}
+        <StableLabel
+          label={copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Failed" : "Copy"}
+          reserve={["Copied", "Failed", "Copy"]}
+        />
+      </button>
+      <button className="md-code-action" type="button" data-tooltip={`Download as ${filename}`} onClick={onDownload}>
+        <Download size={14} />
+        Download
+      </button>
+      <button
+        className="md-code-action"
+        type="button"
+        data-tooltip="Open this code in the artifact canvas"
+        onClick={onPreview}
       >
-        <div className="modal-head">
-          <span className="modal-icon">
-            <Eye size={20} />
-          </span>
-          <div>
-            <h2>Artifact preview</h2>
-            <p>
-              {language} · {lineCountLabel(lineCount)} · {preview.label}
-            </p>
-          </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Close artifact preview"
-            data-tooltip="Close preview"
-            onClick={onClose}
-          >
-            <X size={17} />
-          </button>
-        </div>
-        <div className="modal-body code-preview-body">
-          {preview.srcDoc ? (
-            <iframe
-              className="code-preview-frame"
-              sandbox="allow-scripts"
-              srcDoc={preview.srcDoc}
-              title={`${language} artifact preview`}
-            />
-          ) : (
-            <pre className="code-preview-source">
-              <code>{code}</code>
-            </pre>
-          )}
-        </div>
-        <div className="modal-actions">
-          <button className="secondary-button compact" type="button" data-tooltip="Copy this code" onClick={onCopy}>
-            {copyStatus === "copied" ? <Check size={14} /> : <Copy size={14} />}
-            {copyStatus === "copied" ? "Copied" : "Copy"}
-          </button>
-          <button className="primary-button compact" type="button" onClick={onClose}>
-            Done
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function CodeLines({ lines, preview = false }: { lines: string[]; preview?: boolean }) {
-  return (
-    <pre className="md-code-block" tabIndex={preview ? undefined : 0}>
-      <code className="md-code-lines">
-        {lines.map((line, lineIndex) => (
-          <span className="md-code-line" key={lineIndex}>
-            <span className="md-code-line-number" aria-hidden="true">
-              {lineIndex + 1}
-            </span>
-            <span className="md-code-line-text">{line}</span>
-          </span>
-        ))}
-      </code>
-    </pre>
+        <Eye size={14} />
+        Preview
+      </button>
+      <CodeEditButtons editing={editing} onToggleEditing={onToggleEditing} onUndo={onUndo} />
+    </span>
   );
 }
 
@@ -846,72 +813,4 @@ function MarkdownImage({ alt, caption, preview = false, url }: { alt: string; ca
 
 function lineCountLabel(lineCount: number) {
   return `${lineCount.toLocaleString()} line${lineCount === 1 ? "" : "s"}`;
-}
-
-function buildCodePreview(code: string, language: string): { label: string; srcDoc: string | null } {
-  const normalizedLanguage = language.toLowerCase();
-  const trimmed = code.trim();
-  if (PREVIEWABLE_HTML_LANGUAGES.has(normalizedLanguage) || /^<!doctype html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
-    return { label: "HTML", srcDoc: htmlPreviewDocument(code) };
-  }
-  if (normalizedLanguage === "svg" || /^<svg[\s>]/i.test(trimmed)) {
-    return { label: "SVG", srcDoc: svgPreviewDocument(code) };
-  }
-  if (normalizedLanguage === "css") {
-    return { label: "CSS sample", srcDoc: cssPreviewDocument(code) };
-  }
-  return { label: "Source", srcDoc: null };
-}
-
-function htmlPreviewDocument(code: string) {
-  const trimmed = code.trim();
-  if (/^<!doctype html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) return code;
-  return `<!doctype html>
-<html>
-<head>
-  <base target="_blank">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-</head>
-<body>
-${code}
-</body>
-</html>`;
-}
-
-function svgPreviewDocument(code: string) {
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    html, body { margin: 0; min-height: 100%; background: #f6f8f9; }
-    body { display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
-    svg { max-width: 100%; max-height: calc(100vh - 48px); }
-  </style>
-</head>
-<body>
-${code}
-</body>
-</html>`;
-}
-
-function cssPreviewDocument(code: string) {
-  return `<!doctype html>
-<html>
-<head>
-  <base target="_blank">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>${code}</style>
-</head>
-<body>
-  <main class="preview-sample">
-    <h1>Preview sample</h1>
-    <p>Use this sample surface to inspect the stylesheet.</p>
-    <button type="button">Primary action</button>
-  </main>
-</body>
-</html>`;
 }

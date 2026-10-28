@@ -33,6 +33,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.repositories.application_state import RetentionDeletedError
 from app.core import clock, hermes
+from app.core.stream_activity import context_activity, hermes_activity, requirement_checks
 from app.core.retention import (
     SUBJECT_TAG_NAMESPACE,
     apply_attachment_runtime_tags,
@@ -131,6 +132,7 @@ from app.core.usage_budget_runtime import (
     UsageTenantScopeError,
     map_usage_budget_error,
 )
+from app.core.live_site_lookup import live_site_hits
 from app.core.web_fetch import WebFetchError, fetch_web_source
 from app.core.web_search import (
     KEYED_SEARCH_ENGINE_KINDS,
@@ -3873,6 +3875,13 @@ def _stream_events(
         if isinstance(concealed_prompt, str):
             # Lets the client show the stored, concealed prompt right away.
             yield _sse_data({"privacy": {"concealed_prompt": concealed_prompt}})
+        # The work trace shows what was really gathered for this reply.
+        for activity in context_activity(
+            runtime_context,
+            provider_web_search=bool(gateway_web_tools),
+            screening=buffer_output,
+        ):
+            yield _sse_data({"activity": activity})
         request_messages = base_messages
         continuation_rounds = 0
         while True:
@@ -3960,6 +3969,7 @@ def _stream_events(
             # The provider stopped at the completion token budget mid-answer;
             # continue in-place so the user still receives the full output.
             continuation_rounds += 1
+            yield _sse_data({"activity": {"kind": "continue", "round": continuation_rounds}})
             request_messages = [
                 *base_messages,
                 # Trailing whitespace from a mid-token cut can violate
@@ -3975,6 +3985,7 @@ def _stream_events(
                     yield _sse_data({"delta": tail})
             accumulated = conceal(accumulated, privacy_categories).text
         if buffer_output:
+            yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
             yield _sse_data(
                 {
                     "delta": _filtered_output_text(
@@ -4086,6 +4097,7 @@ def _stream_events(
                         yield _sse_data({"delta": tail})
                 accumulated = conceal(accumulated, privacy_categories).text
             if buffer_output:
+                yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
                 yield _sse_data(
                     {
                         "delta": _filtered_output_text(
@@ -4132,6 +4144,14 @@ def _stream_events(
     finally:
         _abandon_usage_request(usage_context)
     if completed:
+        # The finished reply is checked against this turn's verifiable
+        # requirements, and Hermes reports what it saved, before closing.
+        for activity in (
+            requirement_checks(runtime_context, accumulated),
+            hermes_activity(hermes_summary),
+        ):
+            if activity is not None:
+                yield _sse_data({"activity": activity})
         done_payload: dict[str, Any] = {
             "done": True,
             "citations": [
@@ -4716,6 +4736,16 @@ def _resolve_runtime_context(
             limit=4,
         )
     )
+    # Look further on knowledge web sources when the index lacks the answer.
+    live_hits = live_site_hits(
+        store,
+        actor,
+        knowledge_configs,
+        retrieval_query,
+        known_hits=knowledge_hits,
+        web_search=web_enabled,
+    )
+    knowledge_hits = _dedupe_knowledge_hits([*knowledge_hits, *live_hits])
     fetched_urls = _fetch_chat_urls(request.fetch_urls)
     if any(tool.tool_type == "mcp" for tool in tool_configs):
         _require_workspace_connector(
@@ -4751,7 +4781,13 @@ def _resolve_runtime_context(
     # Structured draft edits and revisions embed the entire existing document
     # in the prompt, so mining it for directives would manufacture false
     # requirements ("25 pages") out of document content. Fresh requests only.
-    if _draft_inline_edit_parts(request) is not None or _draft_revision_parts(request) is not None:
+    # A code block edit embeds code the same way, and "code" in it would
+    # demand the fenced block its replacement must not have.
+    if (
+        _draft_inline_edit_parts(request) is not None
+        or _draft_revision_parts(request) is not None
+        or _is_code_inline_edit(request)
+    ):
         directives: list[Directive] = []
     else:
         extract = extract_draft_directives if request.surface == "draft" else extract_directives
@@ -4765,6 +4801,7 @@ def _resolve_runtime_context(
         "message_count": len(request.messages),
         "web_enabled": web_enabled,
         "fetched_urls": fetched_urls,
+        "live_site_urls": [hit.source_uri for hit in live_hits],
         "agent_enabled": request.agent_enabled,
         "agent_profile_id": agent_profile.id
         if agent_profile is not None
@@ -5002,6 +5039,7 @@ def _memory_capture_allowed(request: ChatCompletionRequest) -> bool:
     return (
         _draft_inline_edit_parts(request) is None
         and _draft_revision_parts(request) is None
+        and not _is_code_inline_edit(request)
     )
 
 
@@ -5652,6 +5690,20 @@ def _message_content_text(content: object) -> str:
     return "\n".join(parts)
 
 
+CODE_INLINE_EDIT_PREFIX = "You are editing a highlighted selection in a code block."
+
+
+def _is_code_inline_edit(request: ChatCompletionRequest) -> bool:
+    """Whether this is the AI edit on a chat code block, not a chat turn.
+
+    The browser embeds the whole block, which an earlier reply wrote, so its
+    text is not the user's own words (apps/web/src/lib/codeAiEdit.ts).
+    """
+    if request.surface != "chat":
+        return False
+    return _latest_user_message(request.messages).lstrip().startswith(CODE_INLINE_EDIT_PREFIX)
+
+
 def _draft_inline_edit_parts(request: ChatCompletionRequest) -> tuple[str, str] | None:
     """Extract the instruction and highlighted passage from an inline edit."""
     if request.surface != "draft":
@@ -6107,6 +6159,7 @@ def _runtime_knowledge_hit(hit: KnowledgeChunk, *, k_index: int) -> dict[str, ob
         "page_start": hit.page_start,
         "page_end": hit.page_end,
         "locator": hit.locator,
+        "source_details": hit.source_details,
         "k_index": k_index,
     }
 
@@ -6897,6 +6950,11 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
                 label = f"{label} {source_name}"
                 if source_uri:
                     label = f"{label} ({source_uri})"
+                # Document properties (author, dates, labels) travel with
+                # every passage so answers can say who wrote what and when.
+                details = str(hit.get("source_details") or "").strip()
+                if details:
+                    label = f"{label} [{details}]"
                 context_lines.append(f"- {label}: {_prompt_excerpt(text)}")
     web_results = runtime_context.get("web_results")
     if isinstance(web_results, list) and web_results:

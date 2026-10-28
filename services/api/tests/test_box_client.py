@@ -55,8 +55,8 @@ def test_box_client_lists_folder_items_with_pagination() -> None:
     assert [item.id for item in items] == ["file-1", "folder-1"]
     assert items[0].path == "Clients/Example"
     assert [str(request.url) for request in requests] == [
-        "https://api.box.test/2.0/folders/123/items?fields=id%2Ctype%2Cname%2Cmodified_at%2Csize%2Citem_status%2Cpath_collection&limit=1&offset=0",
-        "https://api.box.test/2.0/folders/123/items?fields=id%2Ctype%2Cname%2Cmodified_at%2Csize%2Citem_status%2Cpath_collection&limit=1&offset=1",
+        "https://api.box.test/2.0/folders/123/items?fields=id%2Ctype%2Cname%2Cmodified_at%2Csize%2Citem_status%2Cpath_collection%2Cdescription%2Ctags%2Ccreated_at%2Ccreated_by%2Cowned_by%2Cclassification&limit=1&offset=0",
+        "https://api.box.test/2.0/folders/123/items?fields=id%2Ctype%2Cname%2Cmodified_at%2Csize%2Citem_status%2Cpath_collection%2Cdescription%2Ctags%2Ccreated_at%2Ccreated_by%2Cowned_by%2Cclassification&limit=1&offset=1",
     ]
     assert requests[0].headers["authorization"] == "Bearer box-test-token"
 

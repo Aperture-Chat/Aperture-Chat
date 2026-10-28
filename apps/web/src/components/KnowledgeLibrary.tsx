@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Cloud,
   FileText,
   Globe,
@@ -31,6 +32,8 @@ import {
   type ReactNode,
 } from "react";
 import { OverflowMenu } from "./AgentWorkspaceConsole";
+import { KnowledgeDocumentDetails, WallBadge } from "./KnowledgeDocumentDetails";
+import { RailSwitch, type RailSwitchOption } from "./RailSwitch";
 import { StableLabel, Toggle } from "./Primitives";
 import { SelectControl } from "./SelectControl";
 import { MEDIA_UPLOAD_EXTENSIONS } from "../lib/mediaUploads";
@@ -46,17 +49,21 @@ import {
   knowledgeApiSourceOAuthCallbackUrl,
   listKnowledgeDocuments,
   mapKnowledgeConfigRecordToKnowledgeBase,
+  setKnowledgeDocumentAccess,
   syncKnowledgeBase,
   updateAdminKnowledgeConfig,
   uploadKnowledgeFile,
   type KnowledgeApiSourcePayload,
+  type KnowledgeDocumentAccessMode,
   type KnowledgeLimits,
+  type KnowledgeWebSourcePayload,
 } from "../lib/api";
 import type {
   BootstrapData,
   KnowledgeBase,
   KnowledgeDocument,
   KnowledgeIndexStatus,
+  KnowledgeLinkedSource,
   KnowledgeSyncResult,
 } from "../lib/types";
 
@@ -74,6 +81,16 @@ type UploadItem = {
   message?: string;
 };
 type Health = { label: string; tone: "ok" | "warn" | "danger" | "muted" };
+/** Settings the form changed; unchanged options are left out of the save. */
+type SettingsPatch = { name: string; groupIds: string[]; visionOcr?: boolean; wallFields?: string[] };
+type DocumentAccess = {
+  groups: BootstrapData["groups"];
+  overrides: NonNullable<KnowledgeBase["document_walls"]>;
+  canSet: boolean;
+  canOpen: boolean;
+  pending: string | null;
+  onSet: (document: KnowledgeDocument, mode: KnowledgeDocumentAccessMode, groupIds: string[]) => Promise<boolean>;
+};
 
 const CONNECTOR_TYPES = new Set(["box", "microsoft-graph", "google-drive", "imanage"]);
 /** Files the indexer can read; everything else would only be searchable by name. */
@@ -460,6 +477,26 @@ export function KnowledgeLibrary({
     }
   }
 
+  async function setDocumentAccess(
+    item: KnowledgeBase,
+    document: KnowledgeDocument,
+    mode: KnowledgeDocumentAccessMode,
+    groupIds: string[],
+  ): Promise<boolean> {
+    setPending(`access:${document.id}`);
+    try {
+      const result = await setKnowledgeDocumentAccess(userId, item.id, document.id, { mode, group_ids: groupIds });
+      applySyncResult(item.id, result);
+      setNotice({ tone: "success", message: result.provider_message ?? `Access for ${document.name} was saved.` });
+      return true;
+    } catch (error) {
+      setNotice({ tone: "danger", message: `Access for ${document.name} was not changed: ${errorText(error)}` });
+      return false;
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function createBase(draft: CreateDraft): Promise<boolean> {
     const name = draft.name.trim();
     if (!name) {
@@ -504,7 +541,7 @@ export function KnowledgeLibrary({
     }
   }
 
-  async function saveSettings(item: KnowledgeBase, patch: { name: string; groupIds: string[] }) {
+  async function saveSettings(item: KnowledgeBase, patch: SettingsPatch) {
     const name = patch.name.trim();
     if (!name) {
       setNotice({ tone: "warning", message: "The name can't be empty." });
@@ -515,6 +552,7 @@ export function KnowledgeLibrary({
       const record = await updateAdminKnowledgeConfig(userId, item.id, {
         name,
         ...(canConfigure ? { acl_group_ids: patch.groupIds } : {}),
+        ...settingsPatch(patch, canConfigure),
       });
       replaceBase(item.id, mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext));
       setNotice({ tone: "success", message: `${name} settings saved.` });
@@ -525,18 +563,14 @@ export function KnowledgeLibrary({
     }
   }
 
-  async function addWebPage(item: KnowledgeBase, draft: { url: string; name: string; text: string }) {
+  async function addWebPage(item: KnowledgeBase, draft: WebPageDraft) {
     if (!draft.url.trim()) {
       setNotice({ tone: "warning", message: "Enter the page address." });
       return false;
     }
     setPending(`web:${item.id}`);
     try {
-      const result = await addKnowledgeWebSource(userId, item.id, {
-        name: draft.name.trim() || draft.url.trim(),
-        url: draft.url.trim(),
-        text: draft.text.trim() || null,
-      });
+      const result = await addKnowledgeWebSource(userId, item.id, webSourcePayload(draft));
       applySyncResult(item.id, result);
       setNotice({ tone: "success", message: result.provider_message ?? "The page was added." });
       void refreshIndexStatus(item.id);
@@ -686,6 +720,7 @@ export function KnowledgeLibrary({
           onRetryUpload={retryUpload}
           onClearUploads={() => clearFinishedUploads(openBase.id)}
           onRemoveDocument={(document) => void removeDocument(openBase, document)}
+          onSetDocumentAccess={(document, mode, groupIds) => setDocumentAccess(openBase, document, mode, groupIds)}
           onAddWebPage={(draft) => addWebPage(openBase, draft)}
           onAddApi={(payload) => addApi(openBase, payload)}
           onAuthorize={() => void authorizeApi(openBase)}
@@ -1007,6 +1042,7 @@ function KnowledgeDetail({
   onRetryUpload,
   onClearUploads,
   onRemoveDocument,
+  onSetDocumentAccess,
   onAddWebPage,
   onAddApi,
   onAuthorize,
@@ -1037,12 +1073,25 @@ function KnowledgeDetail({
   onRetryUpload: (id: string) => void;
   onClearUploads: () => void;
   onRemoveDocument: (document: KnowledgeDocument) => void;
-  onAddWebPage: (draft: { url: string; name: string; text: string }) => Promise<boolean>;
+  onSetDocumentAccess: (
+    document: KnowledgeDocument,
+    mode: KnowledgeDocumentAccessMode,
+    groupIds: string[],
+  ) => Promise<boolean>;
+  onAddWebPage: (draft: WebPageDraft) => Promise<boolean>;
   onAddApi: (payload: KnowledgeApiSourcePayload) => Promise<boolean>;
   onAuthorize: () => void;
-  onSaveSettings: (patch: { name: string; groupIds: string[] }) => void;
+  onSaveSettings: (patch: SettingsPatch) => void;
 }) {
   const health = baseHealth(item);
+  const access: DocumentAccess = {
+    groups: data.groups,
+    overrides: item.document_walls ?? {},
+    canSet: canManage,
+    canOpen: canShare,
+    pending,
+    onSet: onSetDocumentAccess,
+  };
   const viewerId = data.me.id;
   const connector = isConnectorBase(item);
   const syncing = pending === `sync:${item.id}`;
@@ -1214,6 +1263,7 @@ function KnowledgeDetail({
               }
               onRetry={onRetryDocuments}
               onRemove={onRemoveDocument}
+              access={access}
             />
           </Tabs.Content>
 
@@ -1227,13 +1277,13 @@ function KnowledgeDetail({
                 indexStatus={indexStatus}
                 canManage={canManage}
                 pending={pending}
-                describe={(document) => {
-                  const source = item.linked_sources?.find((candidate) => candidate.document_id === document.id);
-                  return source && !source.refresh ? "Pasted text · not re-fetched" : "Refreshed by Sync now";
-                }}
+                describe={(document) =>
+                  webSourceDescription(item.linked_sources?.find((candidate) => candidate.document_id === document.id))
+                }
                 emptyText="No web pages yet. Add a page address above."
                 onRetry={onRetryDocuments}
                 onRemove={onRemoveDocument}
+                access={access}
               />
             </Tabs.Content>
           )}
@@ -1293,6 +1343,7 @@ function KnowledgeDetail({
                 emptyText="No API data yet. Connect an endpoint above; its response is fetched and indexed."
                 onRetry={onRetryDocuments}
                 onRemove={onRemoveDocument}
+                access={access}
               />
             </Tabs.Content>
           )}
@@ -1302,6 +1353,7 @@ function KnowledgeDetail({
               <SettingsForm
                 item={item}
                 data={data}
+                limits={limits}
                 canShare={canShare}
                 saving={pending === `settings:${item.id}`}
                 onSave={onSaveSettings}
@@ -1389,6 +1441,10 @@ function DropZone({ limits, onFiles }: { limits: KnowledgeLimits | null; onFiles
           {limits ? ` · up to ${limits.upload_max_mb.toLocaleString()} MB each` : ""}. Files are searchable as soon as
           they finish.
           {limits?.ocr_enabled ? ` Scanned pages are read with OCR (first ${limits.ocr_max_pages.toLocaleString()} pages).` : ""}
+          {limits?.vision_ocr?.available
+            ? ` Handwriting, stamps, and pictures are read by ${limits.vision_ocr.model_name}.`
+            : ""}
+          {" "}File properties such as author, dates, labels, and custom fields are kept and searchable.
         </small>
       </div>
     </div>
@@ -1487,6 +1543,7 @@ function DocumentList({
   describe,
   onRetry,
   onRemove,
+  access,
 }: {
   label: string;
   documents: KnowledgeDocument[] | undefined;
@@ -1498,8 +1555,10 @@ function DocumentList({
   describe?: (document: KnowledgeDocument) => string;
   onRetry: () => void;
   onRemove: (document: KnowledgeDocument) => void;
+  access: DocumentAccess;
 }) {
   const [query, setQuery] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   if (error) {
     return (
       <div className="ws-notice is-danger">
@@ -1544,72 +1603,258 @@ function DocumentList({
         <p className="ws-no-results">No {label} match your search.</p>
       ) : (
         <ul className="knowledge-document-rows">
-          {shown.map((document) => {
-            const unreadable = document.status === "metadata-only";
-            const waiting = indexStatus?.pending_by_document?.[document.id] ?? 0;
-            return (
-              <li key={document.id} className="knowledge-document-row-item">
-                <span className="knowledge-row-icon" aria-hidden="true">
-                  {document.source_type === "web" ? <Globe size={16} /> : document.source_type === "api" ? <KeyRound size={16} /> : <FileText size={16} />}
-                </span>
-                <span className="knowledge-row-main">
-                  <strong title={document.name}>{document.name}</strong>
-                  <small title={document.source_uri}>
-                    {unreadable
-                      ? "No readable text — only the name is searchable"
-                      : `${document.chunk_count.toLocaleString()} ${plural(document.chunk_count, "passage")}`}
-                    {" · "}
-                    {describe ? describe(document) : `${label === "files" && document.source_type !== "upload" ? "Updated" : "Added"} ${document.updated_at}`}
-                    {waiting > 0 ? " · improving search" : ""}
-                  </small>
-                </span>
-                <span className="knowledge-row-actions">
-                  {unreadable && <span className="ws-badge is-warn">Not readable</span>}
-                  {canManage && (
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label={`Remove ${document.name}`}
-                      data-tooltip="Remove this item and its passages from search"
-                      disabled={pending === `document:${document.id}`}
-                      onClick={() => onRemove(document)}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </span>
-              </li>
-            );
-          })}
+          {shown.map((document) => (
+            <DocumentRow
+              key={document.id}
+              document={document}
+              label={label}
+              waiting={indexStatus?.pending_by_document?.[document.id] ?? 0}
+              canManage={canManage}
+              removing={pending === `document:${document.id}`}
+              expanded={expandedId === document.id}
+              describe={describe}
+              access={access}
+              onToggle={() => setExpandedId(expandedId === document.id ? null : document.id)}
+              onRemove={() => onRemove(document)}
+            />
+          ))}
         </ul>
       )}
     </section>
   );
 }
 
+function DocumentRow({
+  document,
+  label,
+  waiting,
+  canManage,
+  removing,
+  expanded,
+  describe,
+  access,
+  onToggle,
+  onRemove,
+}: {
+  document: KnowledgeDocument;
+  label: string;
+  waiting: number;
+  canManage: boolean;
+  removing: boolean;
+  expanded: boolean;
+  describe?: (document: KnowledgeDocument) => string;
+  access: DocumentAccess;
+  onToggle: () => void;
+  onRemove: () => void;
+}) {
+  const unreadable = document.status === "metadata-only";
+  const detailsId = `knowledge-document-details-${document.id}`;
+  return (
+    <li className={`knowledge-document-row-item ${expanded ? "is-expanded" : ""}`}>
+      <span className="knowledge-row-icon" aria-hidden="true">
+        <DocumentKindIcon sourceType={document.source_type} />
+      </span>
+      <span className="knowledge-row-main">
+        <strong title={document.name}>{document.name}</strong>
+        <small title={document.source_uri}>{documentSummary(document, label, waiting, describe)}</small>
+      </span>
+      <span className="knowledge-row-actions">
+        {unreadable && <span className="ws-badge is-warn">Not readable</span>}
+        <WallBadge document={document} groups={access.groups} />
+        <button
+          className="icon-button knowledge-details-toggle"
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          aria-label={`${expanded ? "Hide" : "Show"} details for ${document.name}`}
+          data-tooltip={expanded ? "Hide properties and access" : "Properties and who can find it"}
+          onClick={onToggle}
+        >
+          <ChevronDown size={15} />
+        </button>
+        {canManage && (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Remove ${document.name}`}
+            data-tooltip="Remove this item and its passages from search"
+            disabled={removing}
+            onClick={onRemove}
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </span>
+      {expanded && (
+        <div id={detailsId} className="knowledge-document-details-slot">
+          <KnowledgeDocumentDetails
+            document={document}
+            groups={access.groups}
+            override={access.overrides[document.id]}
+            canSetWalls={access.canSet}
+            canOpenWalls={access.canOpen}
+            saving={access.pending === `access:${document.id}`}
+            onSetAccess={(mode, groupIds) => access.onSet(document, mode, groupIds)}
+          />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function documentSummary(
+  document: KnowledgeDocument,
+  label: string,
+  waiting: number,
+  describe?: (document: KnowledgeDocument) => string,
+): string {
+  const size =
+    document.status === "metadata-only"
+      ? "No readable text — only the name is searchable"
+      : `${document.chunk_count.toLocaleString()} ${plural(document.chunk_count, "passage")}`;
+  const when = describe
+    ? describe(document)
+    : `${label === "files" && document.source_type !== "upload" ? "Updated" : "Added"} ${document.updated_at}`;
+  return `${size} · ${when}${waiting > 0 ? " · improving search" : ""}`;
+}
+
+function DocumentKindIcon({ sourceType }: { sourceType: string }) {
+  if (sourceType === "web") return <Globe size={16} />;
+  if (sourceType === "api") return <KeyRound size={16} />;
+  return <FileText size={16} />;
+}
+
 // ====================================================================== forms
+
+type WebPageDraft = {
+  url: string;
+  name: string;
+  text: string;
+  /** 0 reads only this page; 1 or 2 also read same-site pages it links to. */
+  crawlDepth: number;
+  maxPages: number;
+  liveLookup: boolean;
+};
+
+const EMPTY_WEB_PAGE_DRAFT: WebPageDraft = { url: "", name: "", text: "", crawlDepth: 0, maxPages: 25, liveLookup: true };
+
+const CRAWL_DEPTH_OPTIONS: RailSwitchOption<string>[] = [
+  { value: "0", label: "This page", tooltip: "Read only the page at this address" },
+  { value: "1", label: "Linked pages", tooltip: "Also read the same-site pages this page links to" },
+  { value: "2", label: "Two levels", tooltip: "Also read the pages those pages link to" },
+];
+
+const LIVE_LOOKUP_OPTIONS: RailSwitchOption<string>[] = [
+  { value: "on", label: "On", tooltip: "Look up pages that were not read up front when a question needs them" },
+  { value: "off", label: "Off", tooltip: "Answer only from the pages read now and on Sync" },
+];
+
+/** The request body: pasted text skips fetching, so crawl options are left out. */
+function webSourcePayload(draft: WebPageDraft): KnowledgeWebSourcePayload {
+  const base = { name: draft.name.trim(), url: draft.url.trim() };
+  const text = draft.text.trim();
+  if (text) return { ...base, text };
+  return {
+    ...base,
+    text: null,
+    crawl_depth: draft.crawlDepth,
+    max_pages: Math.min(100, Math.max(1, Math.round(draft.maxPages) || 25)),
+    live_lookup: draft.liveLookup,
+  };
+}
+
+function webSourceDescription(source: KnowledgeLinkedSource | undefined): string {
+  if (source && !source.refresh) return "Pasted text · not re-fetched";
+  const parts = ["Refreshed by Sync now"];
+  if (source && (source.crawl_depth ?? 0) > 0 && source.page_count !== undefined) {
+    parts.unshift(`${source.page_count.toLocaleString()} ${plural(source.page_count, "page")}`);
+  }
+  if (source?.live_lookup) parts.push("Looks for fresh pages when answering");
+  return parts.join(" · ");
+}
+
+function webPageButtonLabel({ saving, pasteText, crawling }: { saving: boolean; pasteText: boolean; crawling: boolean }) {
+  if (saving) return crawling ? "Reading pages..." : "Adding...";
+  if (pasteText) return "Add text";
+  return crawling ? "Fetch and add pages" : "Fetch and add page";
+}
+
+/** How much of the site to read now, and whether answers may look further on it later. */
+function WebReadOptions({
+  draft,
+  onUpdate,
+}: {
+  draft: WebPageDraft;
+  onUpdate: (patch: Partial<WebPageDraft>) => void;
+}) {
+  const crawling = draft.crawlDepth > 0;
+  return (
+    <>
+      <fieldset className="knowledge-form-wide">
+        <legend>Pages to read</legend>
+        <RailSwitch
+          ariaLabel="Pages to read"
+          value={String(draft.crawlDepth)}
+          onChange={(value) => onUpdate({ crawlDepth: Number(value) })}
+          options={CRAWL_DEPTH_OPTIONS}
+        />
+        {crawling && (
+          <span className="knowledge-field-hint">Reads pages on the same site only, up to the limit below.</span>
+        )}
+      </fieldset>
+      {crawling && (
+        <label>
+          Most pages to read
+          <input
+            type="number"
+            min={1}
+            max={100}
+            required
+            value={draft.maxPages}
+            onChange={(event) => onUpdate({ maxPages: Number(event.target.value) })}
+          />
+        </label>
+      )}
+      <fieldset className="knowledge-form-wide">
+        <legend>Look for fresh pages on this site when answering</legend>
+        <RailSwitch
+          ariaLabel="Look for fresh pages on this site when answering"
+          value={draft.liveLookup ? "on" : "off"}
+          onChange={(value) => onUpdate({ liveLookup: value === "on" })}
+          options={LIVE_LOOKUP_OPTIONS}
+        />
+        <span className="knowledge-field-hint">
+          When a question needs a page that was not read up front, it is looked up on this site and cited.
+        </span>
+      </fieldset>
+    </>
+  );
+}
 
 function WebPageForm({
   saving,
   onSubmit,
 }: {
   saving: boolean;
-  onSubmit: (draft: { url: string; name: string; text: string }) => Promise<boolean>;
+  onSubmit: (draft: WebPageDraft) => Promise<boolean>;
 }) {
-  const [draft, setDraft] = useState({ url: "", name: "", text: "" });
+  const [draft, setDraft] = useState<WebPageDraft>(EMPTY_WEB_PAGE_DRAFT);
   const [pasteText, setPasteText] = useState(false);
+  const update = (patch: Partial<WebPageDraft>) => setDraft((current) => ({ ...current, ...patch }));
   async function submit(event: FormEvent) {
     event.preventDefault();
     const saved = await onSubmit({ ...draft, text: pasteText ? draft.text : "" });
     if (saved) {
-      setDraft({ url: "", name: "", text: "" });
+      setDraft(EMPTY_WEB_PAGE_DRAFT);
       setPasteText(false);
     }
   }
+  const crawling = !pasteText && draft.crawlDepth > 0;
   return (
     <form className="knowledge-source-form" onSubmit={(event) => void submit(event)} aria-label="Add a web page">
       <p className="agent-tab-intro">
-        The page is fetched now and again whenever you choose Sync now. Only public pages can be fetched.
+        Pages are fetched now and again whenever you choose Sync now. Only public pages can be read; sign-in pages and
+        anything the site's robots.txt excludes are skipped.
       </p>
       <div className="knowledge-form-grid">
         <label>
@@ -1619,17 +1864,18 @@ function WebPageForm({
             required
             value={draft.url}
             placeholder="https://example.com/policies/retention"
-            onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))}
+            onChange={(event) => update({ url: event.target.value })}
           />
         </label>
         <label>
           <span className="knowledge-label-text">Name <span className="knowledge-optional">Optional</span></span>
           <input
             value={draft.name}
-            placeholder="Retention policy"
-            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Uses the page title"
+            onChange={(event) => update({ name: event.target.value })}
           />
         </label>
+        {!pasteText && <WebReadOptions draft={draft} onUpdate={update} />}
         <label className="knowledge-inline-check knowledge-form-wide">
           <input type="checkbox" checked={pasteText} onChange={(event) => setPasteText(event.target.checked)} />
           <span>Paste the text instead of fetching the page (for pages behind a sign-in)</span>
@@ -1641,14 +1887,17 @@ function WebPageForm({
               value={draft.text}
               required
               placeholder="Paste the page's text here"
-              onChange={(event) => setDraft((current) => ({ ...current, text: event.target.value }))}
+              onChange={(event) => update({ text: event.target.value })}
             />
           </label>
         )}
       </div>
       <div className="knowledge-form-actions">
         <button className="primary-button compact-button" type="submit" disabled={saving}>
-          <StableLabel label={saving ? "Adding..." : pasteText ? "Add text" : "Fetch and add page"} reserve={["Adding...", "Fetch and add page"]} />
+          <StableLabel
+            label={webPageButtonLabel({ saving, pasteText, crawling })}
+            reserve={["Reading pages...", "Fetch and add pages"]}
+          />
         </button>
       </div>
     </form>
@@ -1915,6 +2164,7 @@ function ApiSourceForm({
 function SettingsForm({
   item,
   data,
+  limits,
   canShare,
   saving,
   onSave,
@@ -1922,26 +2172,35 @@ function SettingsForm({
 }: {
   item: KnowledgeBase;
   data: BootstrapData;
+  limits: KnowledgeLimits | null;
   canShare: boolean;
   saving: boolean;
-  onSave: (patch: { name: string; groupIds: string[] }) => void;
+  onSave: (patch: SettingsPatch) => void;
   onDelete: () => void;
 }) {
   const initialGroups = useMemo(() => groupIdsFromBase(item, data), [item, data]);
+  const initialWallFields = (item.wall_fields ?? []).join(", ");
+  const initialVision = item.vision_ocr !== false;
   const [name, setName] = useState(item.name);
   const [groupIds, setGroupIds] = useState<string[]>(initialGroups);
+  const [visionOcr, setVisionOcr] = useState(initialVision);
+  const [wallFields, setWallFields] = useState(initialWallFields);
   useEffect(() => {
     setName(item.name);
     setGroupIds(initialGroups);
-  }, [initialGroups, item.name]);
-  const dirty = name.trim() !== item.name || groupIds.join("|") !== initialGroups.join("|");
+    setVisionOcr(initialVision);
+    setWallFields(initialWallFields);
+  }, [initialGroups, initialVision, initialWallFields, item.name]);
+  const changes = settingsChanges({ visionOcr, wallFields }, { visionOcr: initialVision, wallFields: initialWallFields });
+  const dirty =
+    name.trim() !== item.name || groupIds.join("|") !== initialGroups.join("|") || Object.keys(changes).length > 0;
   return (
     <form
       className="knowledge-settings"
       aria-label={`${item.name} settings`}
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ name, groupIds });
+        onSave({ name, groupIds, ...changes });
       }}
     >
       <div className="knowledge-form-grid">
@@ -1988,6 +2247,8 @@ function SettingsForm({
           </p>
         )}
       </fieldset>
+      <PageReadingFieldset limits={limits} value={visionOcr} onChange={setVisionOcr} />
+      {canShare && <WallFieldsFieldset value={wallFields} onChange={setWallFields} />}
       <div className="knowledge-form-actions">
         <button className="primary-button compact-button" type="submit" disabled={saving || !dirty}>
           <StableLabel label={saving ? "Saving..." : "Save changes"} reserve={["Saving...", "Save changes"]} />
@@ -2003,6 +2264,57 @@ function SettingsForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function PageReadingFieldset({
+  limits,
+  value,
+  onChange,
+}: {
+  limits: KnowledgeLimits | null;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const reading = limits?.vision_ocr;
+  return (
+    <fieldset className="knowledge-access">
+      <legend>Handwriting and images</legend>
+      <p className="agent-tab-intro">
+        {reading?.available
+          ? `${reading.model_name} reads handwriting, stamps, signatures, and pictures in scanned pages, images, Word, and PowerPoint files (up to ${reading.max_pages.toLocaleString()} pages per file). Turn it off to keep pages on this server; standard OCR still reads printed scans.`
+          : "No image-capable model is set up for this workspace, so scanned pages use standard OCR, which cannot read handwriting."}
+      </p>
+      <RailSwitch
+        ariaLabel="Read handwriting and images with AI"
+        options={[
+          { value: "on", label: "AI reading on" },
+          { value: "off", label: "Standard OCR only" },
+        ]}
+        value={value ? "on" : "off"}
+        onChange={(next) => onChange(next === "on")}
+      />
+    </fieldset>
+  );
+}
+
+function WallFieldsFieldset({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <fieldset className="knowledge-access">
+      <legend>Ethical walls</legend>
+      <p className="agent-tab-intro">
+        A file whose metadata names a group in an ethical wall field can only be found by that group&apos;s members,
+        administrators included. &quot;Ethical wall&quot; and &quot;Information barrier&quot; are always read, from Box
+        metadata, SharePoint columns, Office and PDF properties, and Google Drive properties. A name that matches no
+        group hides the file until the group exists.
+      </p>
+      <div className="knowledge-form-grid">
+        <label>
+          More wall fields
+          <input value={value} placeholder="e.g. Matter team, Deal group" onChange={(event) => onChange(event.target.value)} />
+        </label>
+      </div>
+    </fieldset>
   );
 }
 
@@ -2319,6 +2631,28 @@ function formatFileSize(bytes: number): string {
   const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
   const value = bytes / 1024 ** index;
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+}
+
+function settingsChanges(
+  next: { visionOcr: boolean; wallFields: string },
+  initial: { visionOcr: boolean; wallFields: string },
+): Pick<SettingsPatch, "visionOcr" | "wallFields"> {
+  return {
+    ...(next.visionOcr !== initial.visionOcr ? { visionOcr: next.visionOcr } : {}),
+    ...(next.wallFields.trim() !== initial.wallFields ? { wallFields: splitFieldNames(next.wallFields) } : {}),
+  };
+}
+
+function settingsPatch(patch: SettingsPatch, canConfigure: boolean): { settings?: Record<string, unknown> } {
+  const settings: Record<string, unknown> = {};
+  if (patch.visionOcr !== undefined) settings.vision_ocr = patch.visionOcr;
+  // Only administrators choose which metadata fields act as walls.
+  if (patch.wallFields !== undefined && canConfigure) settings.wall_fields = patch.wallFields;
+  return Object.keys(settings).length ? { settings } : {};
+}
+
+function splitFieldNames(value: string): string[] {
+  return Array.from(new Set(value.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean)));
 }
 
 function plural(count: number, noun: string): string {

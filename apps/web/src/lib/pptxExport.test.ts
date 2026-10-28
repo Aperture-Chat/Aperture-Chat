@@ -474,3 +474,45 @@ test("a user-resized block box lands at its adjusted PPTX position", async () =>
   expect(slide).not.toContain('<a:off x="2032000" y="3886200"/>');
   expectWellFormedXml(slide);
 });
+
+test("a deck's design exports its own shapes, inverse text, and picture placement", async () => {
+  const deck = blankSlideDeck("Designed Deck");
+  deck.theme = { ...deck.theme, design: "band" };
+  deck.slides = [
+    { id: "s1", notes: "", layout: "title", title: deckRichText("Designed Deck"), subtitle: [] },
+    {
+      id: "s2",
+      notes: "",
+      layout: "image-bullets",
+      title: deckRichText("The new office"),
+      image: { src: `data:image/jpeg;base64,${SMALL_JPEG}`, alt: "office" },
+      bullets: [{ runs: [{ text: "Opens in May" }], level: 0 }],
+    },
+    { id: "s3", notes: "", layout: "big-number", title: deckRichText("42%"), subtitle: deckRichText("renewals") },
+    { id: "s4", notes: "", layout: "statement", title: deckRichText("Ship weekly"), body: [] },
+  ];
+  const { bytes, warnings } = await buildPptxExportDocument(deck);
+  expect(warnings).toEqual([]);
+
+  // Color block: the title slide is a full-bleed accent shape with the title
+  // set in the slide background color (white on teal).
+  const titleSlide = storedZipEntry(bytes, "ppt/slides/slide1.xml");
+  expectWellFormedXml(titleSlide);
+  expect(titleSlide).toContain('<a:off x="0" y="0"/><a:ext cx="12192000" cy="6858000"/></a:xfrm><a:prstGeom prst="rect">');
+  expect(titleSlide).toMatch(/<a:srgbClr val="FFFFFF"\/><\/a:solidFill><a:latin typeface="[^"]+"\/><\/a:rPr><a:t>Designed Deck</);
+
+  // The picture sits in the design's left panel, drawn above the shapes.
+  const pictureSlide = storedZipEntry(bytes, "ppt/slides/slide2.xml");
+  expect(pictureSlide).toContain('<p:pic>');
+  expect(pictureSlide).toContain("Opens in May");
+  expect(pictureSlide.indexOf('name="Accent')).toBeLessThan(pictureSlide.indexOf("<p:pic>"));
+  expect(pictureSlide).toMatch(/<p:pic>.*?<a:off x="0" y="0"\/><a:ext cx="5588000" cy="6858000"\/>/);
+
+  // Orbit circles export as ellipses, softened by their tint.
+  deck.theme = { ...deck.theme, design: "orbit" };
+  const orbit = await buildPptxExportDocument(deck);
+  expect(storedZipEntry(orbit.bytes, "ppt/slides/slide1.xml")).toContain('<a:prstGeom prst="ellipse">');
+  const orbitStatement = storedZipEntry(orbit.bytes, "ppt/slides/slide4.xml");
+  // accent1 #087d8b mixed 85% toward white, behind the statement.
+  expect(orbitStatement).toMatch(/<a:prstGeom prst="ellipse"><a:avLst\/><\/a:prstGeom><a:solidFill><a:srgbClr val="DAECEE"\/>/);
+});

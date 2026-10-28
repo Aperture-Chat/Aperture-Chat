@@ -6,8 +6,8 @@
  * the exported file mirrors the on-screen stage by construction — no
  * placeholder inheritance, which is where hand-built PPTX usually breaks.
  *
- * Scope: the text layouts (title, title-bullets, two-column, section, quote,
- * closing, image-caption, chart titles) plus real media parts (slide images,
+ * Scope: every slide layout the editor offers, drawn in the deck's design
+ * (its shapes and text placement), plus real media parts (slide images,
  * brand logo, backgrounds). Slides with speaker notes export genuine
  * notesSlide parts — backed by a notesMaster and its own theme part — so the
  * PowerPoint notes pane shows them. Hyperlink relationships remain out of
@@ -23,6 +23,7 @@ import {
 } from "./docxExport";
 import {
   boxToEmu,
+  deckRoleColor,
   slideDecorations,
   resolvedMediaBox,
   resolvedTextRegions,
@@ -30,13 +31,16 @@ import {
   DECK_SLIDE_HEIGHT_EMU,
   DECK_SLIDE_WIDTH_EMU,
   type DeckBox,
-  type DeckColorRole,
+  type DeckDecorationSpec,
   type DeckTextRegionSpec,
 } from "./deck/deckGeometry";
 import {
   deckRichTextParagraphs,
   deckRunsText,
   deckSlideBackgroundSource,
+  deckSlidePicture,
+  deckSlideRegionContent,
+  deckThemeDesign,
   isDeckBulletList,
   type DeckBullet,
   type DeckRichText,
@@ -67,23 +71,6 @@ function escapeXml(value: string) {
 
 function hex(color: string) {
   return color.replace(/^#/, "").toUpperCase();
-}
-
-function themeColor(theme: DeckTheme, role: DeckColorRole): string {
-  switch (role) {
-    case "heading":
-      return theme.colors.heading;
-    case "body":
-      return theme.colors.body;
-    case "accent1":
-      return theme.colors.accent1;
-    case "accent2":
-      return theme.colors.accent2;
-    case "surface":
-      return theme.colors.surface;
-    case "background":
-      return theme.colors.background;
-  }
 }
 
 /* ------------------------------ media loading ------------------------------ */
@@ -172,7 +159,7 @@ function runXml(
   const italic = run.italic ?? spec.italic ? " i=\"1\"" : "";
   const underline = run.underline ? ' u="sng"' : "";
   const strike = run.strike ? ' strike="sngStrike"' : "";
-  const color = hex(run.color ?? defaultColor ?? themeColor(theme, spec.colorRole));
+  const color = hex(run.color ?? defaultColor ?? deckRoleColor(theme, spec.colorRole));
   // A per-run font override wins; otherwise the region's theme font applies.
   const typeface = escapeXml(run.font ?? theme.fonts[spec.font]);
   return (
@@ -239,48 +226,23 @@ function textShapeXml(
   );
 }
 
-function decorationShapeXml(shapeId: number, box: ReturnType<typeof boxToEmu>, color: string): string {
+function decorationShapeXml(shapeId: number, decoration: DeckDecorationSpec, theme: DeckTheme): string {
+  const box = boxToEmu(decoration.box);
+  const color = hex(deckRoleColor(theme, decoration.colorRole, decoration.tint));
   return (
     `<p:sp>` +
     `<p:nvSpPr><p:cNvPr id="${shapeId}" name="Accent ${shapeId}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>` +
     `<p:spPr><a:xfrm><a:off x="${box.xEmu}" y="${box.yEmu}"/><a:ext cx="${box.wEmu}" cy="${box.hEmu}"/></a:xfrm>` +
-    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+    `<a:prstGeom prst="${decoration.shape ?? "rect"}"><a:avLst/></a:prstGeom>` +
     `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>` +
     `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp>`
   );
 }
 
-/** Region key → the slide field carrying its content. */
-function regionContent(slide: DeckSlide, region: string): DeckRichText | DeckBullet[] | null {
-  switch (slide.layout) {
-    case "title":
-    case "section":
-      return region === "title" ? slide.title : region === "subtitle" ? slide.subtitle : null;
-    case "title-bullets":
-      return region === "title" ? slide.title : region === "bullets" ? slide.bullets : null;
-    case "two-column":
-      return region === "title"
-        ? slide.title
-        : region === "left"
-          ? slide.left
-          : region === "right"
-            ? slide.right
-            : null;
-    case "image-caption":
-      return region === "title" ? slide.title : region === "caption" ? slide.caption : null;
-    case "quote":
-      return region === "quote" ? slide.quote : region === "attribution" ? slide.attribution : null;
-    case "chart":
-      return region === "title" ? slide.title : null;
-    case "closing":
-      return region === "title" ? slide.title : region === "body" ? slide.body : null;
-  }
-}
-
 type SlideMedia = {
   /** rel id → media part name, for this slide's .rels file. */
   rels: Array<{ relId: string; target: string }>;
-  /** Slide-content picture (image-caption layout). */
+  /** Slide-content picture (the picture layouts). */
   contentPic: { relId: string; box: DeckBox } | null;
   logoPic: { relId: string; box: DeckBox } | null;
   backgroundRelId: string | null;
@@ -289,20 +251,21 @@ type SlideMedia = {
 function slideXml(slide: DeckSlide, theme: DeckTheme, media: SlideMedia): string {
   const shapes: string[] = [];
   let shapeId = 2;
+  const design = deckThemeDesign(theme);
+  // The design's shapes are the backdrop: a picture panel or a color block
+  // sits behind the slide picture and the words, as on the stage.
+  slideDecorations(slide.layout, design).forEach((decoration) => {
+    shapes.push(decorationShapeXml(shapeId, decoration, theme));
+    shapeId += 1;
+  });
   if (media.contentPic) {
     shapes.push(picXml(shapeId, "Slide image", media.contentPic.relId, media.contentPic.box));
     shapeId += 1;
   }
-  slideDecorations(slide.layout).forEach((decoration) => {
-    shapes.push(
-      decorationShapeXml(shapeId, boxToEmu(decoration.box), hex(themeColor(theme, decoration.colorRole))),
-    );
-    shapeId += 1;
-  });
   // User-resized boxes flow into the export through the shared resolver.
-  const regions = resolvedTextRegions(slide);
+  const regions = resolvedTextRegions(slide, design);
   for (const [region, spec] of Object.entries(regions)) {
-    const content = regionContent(slide, region);
+    const content = deckSlideRegionContent(slide, region);
     if (content === null) continue;
     const shape = textShapeXml(
       shapeId,
@@ -730,10 +693,11 @@ export async function buildPptxExportDocument(
       relCounter += 1;
       return `rIdMedia${relCounter}`;
     };
-    if (slide.layout === "image-caption" && slide.image.src) {
-      const box = resolvedMediaBox(slide);
+    const picture = deckSlidePicture(slide);
+    if (picture?.src) {
+      const box = resolvedMediaBox(slide, deckThemeDesign(deck.theme));
       const resource = box
-        ? await loadMedia(slide.image.src, box, `Slide ${slideIndex + 1}'s image`)
+        ? await loadMedia(picture.src, box, `Slide ${slideIndex + 1}'s image`)
         : null;
       if (resource && box) {
         const relId = nextRelId();

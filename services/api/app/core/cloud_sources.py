@@ -7,13 +7,47 @@ from urllib.parse import quote
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.document_metadata import metadata_value
 from app.core.net_guard import REDIRECT_GUARD_HOOKS, EgressBlocked, validate_public_url
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_SYNC_ITEMS = 500
 MAX_FILE_DOWNLOAD_BYTES = 15 * 1024 * 1024
-GRAPH_DEFAULT_FIELDS = "id,name,file,folder,size,lastModifiedDateTime,webUrl,@microsoft.graph.downloadUrl"
-GOOGLE_FIELDS = "nextPageToken,files(id,name,mimeType,modifiedTime,size,webViewLink)"
+GRAPH_DEFAULT_FIELDS = (
+    "id,name,file,folder,size,lastModifiedDateTime,webUrl,@microsoft.graph.downloadUrl,"
+    "description,createdDateTime,createdBy,lastModifiedBy"
+)
+# SharePoint library columns (matter numbers, walls, retention labels).
+GRAPH_LIST_ITEM_EXPAND = "listItem($expand=fields)"
+GOOGLE_FIELDS = (
+    "nextPageToken,files(id,name,mimeType,modifiedTime,size,webViewLink,description,"
+    "createdTime,owners(displayName),lastModifyingUser(displayName),properties,appProperties)"
+)
+# SharePoint bookkeeping columns that say nothing about the document itself.
+_SHAREPOINT_SYSTEM_COLUMNS = frozenset(
+    {
+        "id",
+        "ContentType",
+        "Created",
+        "Modified",
+        "FileLeafRef",
+        "FileSizeDisplay",
+        "LinkFilename",
+        "LinkFilenameNoMenu",
+        "DocIcon",
+        "Edit",
+        "ItemChildCount",
+        "FolderChildCount",
+    }
+)
+_IMANAGE_LABELS = {
+    "author": "Author",
+    "operator": "Operator",
+    "class": "Class",
+    "subclass": "Subclass",
+    "comment": "Comment",
+    "create_date": "Created",
+}
 
 
 class CloudSourceError(RuntimeError):
@@ -32,6 +66,8 @@ class CloudSourceItem:
     item_status: str | None = None
     mime_type: str | None = None
     download_url: str | None = None
+    # Display-ready (label, value) pairs the source system holds about the file.
+    properties: tuple[tuple[str, str], ...] = ()
 
 
 class MicrosoftGraphClient:
@@ -62,11 +98,16 @@ class MicrosoftGraphClient:
         if not item_id:
             raise CloudSourceError("Microsoft Graph drive item id is required.")
         path = _graph_children_path(item_id=item_id, drive_id=drive_id, site_id=site_id)
-        return self._list_collection(
-            path,
-            params={"$top": max(1, min(limit, 999)), "$select": GRAPH_DEFAULT_FIELDS},
-            max_items=max_items,
-        )
+        params: dict[str, object] = {"$top": max(1, min(limit, 999)), "$select": GRAPH_DEFAULT_FIELDS}
+        try:
+            return self._list_collection(
+                path, params={**params, "$expand": GRAPH_LIST_ITEM_EXPAND}, max_items=max_items
+            )
+        except CloudSourceError as exc:
+            # OneDrive (non-SharePoint) drives have no list items to expand.
+            if "HTTP 400" not in str(exc):
+                raise
+        return self._list_collection(path, params=params, max_items=max_items)
 
     def download_file(
         self,
@@ -415,6 +456,47 @@ def _graph_item(entry: dict[str, Any]) -> CloudSourceItem | None:
         download_url=entry.get("@microsoft.graph.downloadUrl")
         if isinstance(entry.get("@microsoft.graph.downloadUrl"), str)
         else None,
+        properties=_graph_properties(entry),
+    )
+
+
+def _graph_properties(entry: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    pairs: list[tuple[str, object]] = [
+        ("Description", entry.get("description")),
+        ("Created", entry.get("createdDateTime")),
+        ("Created by", _graph_person(entry.get("createdBy"))),
+        ("Last modified by", _graph_person(entry.get("lastModifiedBy"))),
+    ]
+    list_item = entry.get("listItem")
+    fields = list_item.get("fields") if isinstance(list_item, dict) else None
+    for name, value in (fields or {}).items() if isinstance(fields, dict) else []:
+        label = _sharepoint_column_label(str(name))
+        if label is not None and not isinstance(value, dict):
+            pairs.append((label, value))
+    return _property_pairs(pairs)
+
+
+def _sharepoint_column_label(name: str) -> str | None:
+    if name == "_ComplianceTag":
+        return "Retention label"
+    if (
+        name.startswith(("@", "_"))
+        or name.endswith("LookupId")
+        or name in _SHAREPOINT_SYSTEM_COLUMNS
+    ):
+        return None
+    return name
+
+
+def _graph_person(value: object) -> str | None:
+    user = value.get("user") if isinstance(value, dict) else None
+    name = user.get("displayName") if isinstance(user, dict) else None
+    return name if isinstance(name, str) else None
+
+
+def _property_pairs(pairs: list[tuple[str, object]]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (label, text) for label, value in pairs if (text := metadata_value(value).strip())
     )
 
 
@@ -448,7 +530,33 @@ def _google_item(entry: dict[str, Any]) -> CloudSourceItem | None:
         size=size,
         item_status="active",
         mime_type=mime_type if isinstance(mime_type, str) else None,
+        properties=_google_properties(entry),
     )
+
+
+def _google_properties(entry: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    owners = entry.get("owners")
+    modifier = entry.get("lastModifyingUser")
+    pairs: list[tuple[str, object]] = [
+        ("Description", entry.get("description")),
+        ("Created", entry.get("createdTime")),
+        (
+            "Owner",
+            [
+                owner.get("displayName")
+                for owner in owners
+                if isinstance(owner, dict) and owner.get("displayName")
+            ]
+            if isinstance(owners, list)
+            else None,
+        ),
+        ("Last modified by", modifier.get("displayName") if isinstance(modifier, dict) else None),
+    ]
+    for key in ("properties", "appProperties"):
+        custom = entry.get(key)
+        if isinstance(custom, dict):
+            pairs += [(str(name), value) for name, value in custom.items()]
+    return _property_pairs(pairs)
 
 
 def _imanage_documents_path(
@@ -480,24 +588,45 @@ def _imanage_entries(payload: object) -> list[dict[str, Any]]:
 
 
 def _imanage_item(entry: dict[str, Any], *, workspace_id: str) -> CloudSourceItem | None:
-    raw_id = entry.get("id") or entry.get("document_id") or entry.get("docnum")
-    raw_name = entry.get("name") or entry.get("document_name") or entry.get("description") or entry.get("filename")
+    raw_id = _first_present(entry, "id", "document_id", "docnum")
+    raw_name = _first_present(entry, "name", "document_name", "description", "filename")
     if raw_id is None or not isinstance(raw_name, str):
         return None
     item_id = str(raw_id)
-    modified = entry.get("modified_at") or entry.get("edit_date") or entry.get("last_modified")
+    modified = _first_present(entry, "modified_at", "edit_date", "last_modified")
     size = entry.get("size")
     return CloudSourceItem(
         id=item_id,
         type="file",
         name=raw_name,
         source_type="imanage",
-        source_uri=str(entry.get("web_url") or entry.get("url") or f"imanage://{workspace_id}/documents/{item_id}"),
+        source_uri=str(
+            _first_present(entry, "web_url", "url") or f"imanage://{workspace_id}/documents/{item_id}"
+        ),
         modified_at=modified if isinstance(modified, str) else None,
         size=size if isinstance(size, int) else None,
         item_status=str(entry.get("status") or "indexed"),
         mime_type=entry.get("mime_type") if isinstance(entry.get("mime_type"), str) else None,
+        properties=_imanage_properties(entry),
     )
+
+
+def _first_present(entry: dict[str, Any], *keys: str) -> Any:
+    """``entry[k1] or entry[k2] or ...``: iManage names fields differently per version."""
+    return next((entry[key] for key in keys if entry.get(key)), entry.get(keys[-1]))
+
+
+def _imanage_properties(entry: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Profile fields: author, class, and the firm's custom1..customN fields."""
+    pairs: list[tuple[str, object]] = [
+        (label, entry.get(key)) for key, label in _IMANAGE_LABELS.items()
+    ]
+    pairs += [
+        (key, value)
+        for key, value in entry.items()
+        if key.startswith("custom") and key[6:].isdigit() and not isinstance(value, dict)
+    ]
+    return _property_pairs(pairs)
 
 
 def _absolute_or_joined_url(base_url: str, endpoint: str) -> str:

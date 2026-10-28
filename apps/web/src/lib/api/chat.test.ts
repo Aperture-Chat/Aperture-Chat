@@ -127,6 +127,60 @@ describe("sendChatStream", () => {
   });
 });
 
+describe("sendChatStream activity", () => {
+  test("passes each well-formed activity event to onActivity, in order", async () => {
+    const onActivity = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          [
+            'data: {"activity":{"kind":"knowledge","passages":4,"sources":2}}\n\n',
+            'data: {"activity":{"kind":"mystery"}}\n\n',
+            'data: {"delta":"Hi"}\n\n',
+            'data: {"activity":{"kind":"continue","round":1}}\n\n',
+            'data: {"delta":" there"}\n\n',
+            'data: {"done":true,"citations":[],"usage":null}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+
+    const reply = await sendChatStream("user-1", { ...request, onActivity });
+
+    expect(reply.content).toBe("Hi there");
+    expect(onActivity.mock.calls.map(([activity]) => activity)).toEqual([
+      { kind: "knowledge", passages: 4, sources: 2 },
+      { kind: "continue", round: 1 },
+    ]);
+  });
+
+  test("reports a client-side reconnect before the resumed attempt's events", async () => {
+    const sse = (body: string) => new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(sse('data: {"delta":"First half."}\n\n'))
+        .mockResolvedValueOnce(
+          sse(
+            'data: {"activity":{"kind":"screen","phase":"done"}}\n\ndata: {"delta":"Second half."}\n\ndata: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n',
+          ),
+        ),
+    );
+    const onActivity = vi.fn();
+
+    await sendChatStream("user-1", { ...request, onActivity, resumeDelaysMs: [0] });
+
+    expect(onActivity.mock.calls.map(([activity]) => activity)).toEqual([
+      { kind: "resume", attempt: 1 },
+      { kind: "screen-done" },
+    ]);
+  });
+});
+
 describe("sendChatStream resume hardening", () => {
   const sse = (body: string) => new Response(body, { headers: { "Content-Type": "text/event-stream" } });
 

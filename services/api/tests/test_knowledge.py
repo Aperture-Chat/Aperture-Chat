@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.core.box import BoxError, BoxItem
 from app.core.cloud_sources import CloudSourceItem
-from app.core.knowledge_ingestion import ExtractedSegment
+from app.core.knowledge_ingestion import ExtractedDocument, ExtractedSegment
 from app.main import app
 from app.models.schemas import KnowledgeConfig
 from app.repositories.deps import get_store
@@ -306,11 +306,14 @@ def test_box_chunk_builder_preserves_pdf_page_provenance(
 
     monkeypatch.setattr(
         knowledge_route,
-        "extract_segments",
-        lambda *_args, **_kwargs: [
-            ExtractedSegment("First page text", page_start=1, page_end=1, locator="Page 1"),
-            ExtractedSegment("Second page text", page_start=2, page_end=2, locator="Page 2"),
-        ],
+        "extract_document",
+        lambda *_args, **_kwargs: ExtractedDocument(
+            segments=[
+                ExtractedSegment("First page text", page_start=1, page_end=1, locator="Page 1"),
+                ExtractedSegment("Second page text", page_start=2, page_end=2, locator="Page 2"),
+            ],
+            metadata={},
+        ),
     )
 
     document, chunks, used_file_text = knowledge_route._box_document_and_chunks(
@@ -534,11 +537,14 @@ def test_cloud_chunk_builder_preserves_slide_locator(
 
     monkeypatch.setattr(
         knowledge_route,
-        "extract_segments",
-        lambda *_args, **_kwargs: [
-            ExtractedSegment("Overview", locator="Slide 1"),
-            ExtractedSegment("Risk analysis", locator="Slide 2"),
-        ],
+        "extract_document",
+        lambda *_args, **_kwargs: ExtractedDocument(
+            segments=[
+                ExtractedSegment("Overview", locator="Slide 1"),
+                ExtractedSegment("Risk analysis", locator="Slide 2"),
+            ],
+            metadata={},
+        ),
     )
 
     document, chunks, used_file_text = knowledge_route._cloud_document_and_chunks(

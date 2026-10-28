@@ -15,6 +15,9 @@ function Probe({ intercept }: { intercept?: PopInterceptor }) {
       <button type="button" onClick={() => router.navigate({ kind: "library", section: "tools" }, { replace: true })}>
         replace-library
       </button>
+      <button type="button" onClick={() => router.navigate({ kind: "chat", threadId: "t-2" })}>
+        go-chat-thread
+      </button>
     </div>
   );
 }
@@ -89,4 +92,22 @@ test("retired Setup URL is replaced without adding a history entry", () => {
   expect(window.location.search).toBe("?source=guide");
   expect(window.history.length).toBe(before);
   expect(screen.getByTestId("unknown")).toHaveTextContent("false");
+});
+
+test("a different screen opens at its top while moves within a screen keep the scroll", () => {
+  // Narrow layouts scroll the document itself, and chat pins it to the newest
+  // reply; that offset must not carry into the next screen.
+  window.history.pushState({}, "", "/chat/t-1");
+  const scroller = document.documentElement;
+  Object.defineProperty(scroller, "scrollTop", { value: 480, writable: true, configurable: true });
+  render(<Probe />);
+
+  act(() => screen.getByText("go-chat-thread").click());
+  expect(window.location.pathname).toBe("/chat/t-2");
+  expect(scroller.scrollTop).toBe(480);
+
+  act(() => screen.getByText("go-admin").click());
+  expect(window.location.pathname).toBe("/admin/groups");
+  expect(scroller.scrollTop).toBe(0);
+  delete (scroller as { scrollTop?: number }).scrollTop;
 });

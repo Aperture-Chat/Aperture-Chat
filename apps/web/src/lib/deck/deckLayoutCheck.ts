@@ -14,14 +14,17 @@ import {
   DECK_LINE_HEIGHT,
   DECK_REGION_LABELS,
   resolvedTextRegions,
+  slideRegionNames,
   slideTextRegions,
   type DeckTextRegionSpec,
 } from "./deckGeometry";
 import {
   deckRegionPlainText,
   deckSlideRegionContent,
+  deckThemeDesign,
   defaultDeckTheme,
   isDeckBulletList,
+  type DeckDesign,
   type DeckSlide,
   type DeckSlideLayout,
   type DeckTheme,
@@ -105,10 +108,10 @@ export function deckRegionCapacityHint(spec: DeckTextRegionSpec, region: string)
     : `≤${lines} lines of ~${charsPerLine} chars`;
 }
 
-/** The fit line for one layout in the AI's layout list:
- * "title ≤45 chars; bullets ≤9 one-line bullets of ~79 chars". */
-export function deckLayoutCapacityLine(layout: DeckSlideLayout): string {
-  return Object.entries(slideTextRegions(layout))
+/** The fit line for one layout, as the deck's design sizes it, in the AI's
+ * layout list: "title ≤45 chars; bullets ≤9 one-line bullets of ~79 chars". */
+export function deckLayoutCapacityLine(layout: DeckSlideLayout, design: DeckDesign): string {
+  return Object.entries(slideTextRegions(layout, design))
     .map(([region, spec]) => `${region} ${deckRegionCapacityHint(spec, region)}`)
     .join("; ");
 }
@@ -167,7 +170,7 @@ export function auditDeckLayout(
   const issues: DeckFitIssue[] = [];
   deck.slides.forEach((slide, index) => {
     if (only && !only.has(slide.id)) return;
-    for (const [region, spec] of Object.entries(resolvedTextRegions(slide))) {
+    for (const [region, spec] of Object.entries(resolvedTextRegions(slide, deckThemeDesign(deck.theme)))) {
       if (regions && !regions.has(region)) continue;
       const content = deckSlideRegionContent(slide, region);
       if (!content?.length) continue;
@@ -223,7 +226,7 @@ export function deckFitIssueSlides(issues: DeckFitIssue[]): number[] {
 
 /** What lays out on a slide: its layout, its words, and its boxes. */
 function fitFingerprint(slide: DeckSlide): string {
-  const regions = Object.keys(slideTextRegions(slide.layout)).map((region) => deckSlideRegionContent(slide, region));
+  const regions = slideRegionNames(slide.layout).map((region) => deckSlideRegionContent(slide, region));
   return JSON.stringify([slide.layout, regions, slide.boxes ?? null]);
 }
 
