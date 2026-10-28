@@ -7,6 +7,8 @@ import {
   resumablePendingAssistant,
   targetModelForRequest,
   useChatStore,
+  withPendingActivity,
+  withStreamedPendingContent,
   type ChatResponseVersion,
 } from "./chatStore";
 import type { BootstrapData, ChatMessage, ChatThread, ModelConfig } from "./types";
@@ -200,6 +202,48 @@ test("keeps pending response versions resumable without touching completed ones"
   expect(pendingVersions[0]).toEqual(versions[0]);
   expect(pendingVersions[1].status).toBe("pending");
   expect(pendingVersions[1].content).toBe("New partial");
+});
+
+test("a streamed reply grows its own work trace", () => {
+  const pending: ChatMessage = {
+    id: "msg-assistant",
+    role: "assistant",
+    content: "",
+    createdAt: "2:25 PM",
+    status: "pending",
+    startedAtMs: 10_000,
+    activityTrace: [{ id: "route:model", label: "Routed to M" }],
+  };
+  const gathered = withPendingActivity(pending, { kind: "web", results: 2, engine: "searxng" });
+  const streamed = withStreamedPendingContent(gathered, "## Plan\n\nOak", 13_000);
+  expect(streamed.content).toBe("## Plan\n\nOak");
+  expect(streamed.activityTrace?.map((step) => step.label)).toEqual([
+    "Routed to M",
+    "Searched the web · 2 results",
+    "Thought for 3s",
+    "Drafting “Plan”",
+  ]);
+});
+
+test("a regenerated reply grows the trace of its newest version only", () => {
+  const versions: ChatResponseVersion[] = [
+    { id: "v1", label: "Version 1", content: "Finished", status: "ok", activityTrace: [{ id: "done:reply", label: "Delivered" }] },
+    { id: "v2", label: "Version 2", content: "", status: "pending", startedAtMs: 0, activityTrace: [] },
+  ];
+  const message: ChatMessage = {
+    id: "msg-assistant",
+    role: "assistant",
+    content: "",
+    createdAt: "2:25 PM",
+    status: "pending",
+    metadata: { responseVersions: versions, activeResponseVersionIndex: 1 },
+  };
+  const next = withStreamedPendingContent(withPendingActivity(message, { kind: "continue", round: 1 }), "Hi", 2_000);
+  const nextVersions = next.metadata?.responseVersions as ChatResponseVersion[];
+  expect(nextVersions[0]).toEqual(versions[0]);
+  expect(nextVersions[1].content).toBe("Hi");
+  expect(nextVersions[1].activityTrace?.map((step) => step.id)).toEqual(["continue:r1", "think:first-token", "write:intro"]);
+  expect(next.activityTrace).toEqual(nextVersions[1].activityTrace);
 });
 
 test("leaves threads without pending messages untouched", () => {

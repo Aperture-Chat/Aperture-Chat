@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 
 from app.models.schemas import (
     Group,
+    KnowledgeChunk,
     KnowledgeConfig,
     ModelConfig,
     PlatformSettings,
@@ -376,6 +377,35 @@ def knowledge_access_allowed(user: User, config: KnowledgeConfig) -> bool:
     if not config.enabled:
         return False
     if not knowledge_config_visible_to_user(user, config):
+        return False
+    return True
+
+
+def knowledge_wall_allows(user: User, wall_group_ids: list[str] | None) -> bool:
+    """Whether an ethical wall lets ``user`` through.
+
+    ``None`` is no wall. Otherwise only members of a listed group pass; an
+    empty list is a closed wall. No role is exempt: a wall screens tenant
+    admins and the platform owner too, who get in only by joining a group.
+    """
+    if wall_group_ids is None:
+        return True
+    return bool(set(user.group_ids).intersection(wall_group_ids))
+
+
+def knowledge_chunk_visible_to_user(user: User, chunk: KnowledgeChunk) -> bool:
+    """Per-passage retrieval check: the document's wall, then its sharing."""
+    if not knowledge_wall_allows(user, chunk.wall_group_ids):
+        return False
+    if is_platform_owner(user):
+        return True
+    if user.tenant_id != chunk.tenant_id:
+        return False
+    # Tenant admins may read every knowledge base in their tenant (see
+    # knowledge_config_visible_to_user); chunk sharing must agree.
+    if is_tenant_admin(user):
+        return True
+    if chunk.acl_group_ids and not set(user.group_ids).intersection(chunk.acl_group_ids):
         return False
     return True
 

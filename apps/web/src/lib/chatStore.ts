@@ -22,7 +22,9 @@ import type {
   ModelConfig,
 } from "./types";
 import { laterReadMarker, readableMessageId } from "./chatReadState";
-import { replaceDiagramFence } from "./markdown";
+import type { ChatStreamActivity } from "./streamActivity";
+import { advanceTrace, finishTrace, recordActivity, startTrace, type TraceStart } from "./workTrace";
+import { replaceCodeFence, replaceDiagramFence } from "./markdown";
 import { preferredModel, usableModels } from "./modelAccess";
 import { formatTimeLabel, platformTimestamp, type PlatformTimestamp } from "./serverClock";
 
@@ -316,19 +318,64 @@ function createThrottledPersist(save: () => void) {
   };
 }
 
-function withStreamedPendingContent(message: ChatMessage, fullText: string): ChatMessage {
+/** What a reply in flight and a response version have in common. */
+type PendingReply = Omit<ChatResponseVersion, "id" | "label">;
+
+/** Applies a patch to the reply still being written: the newest response
+ * version of a regenerated message, or the message itself. */
+function patchPendingReply(
+  message: ChatMessage,
+  patch: (reply: PendingReply) => Partial<PendingReply>,
+): ChatMessage {
   const rawVersions = message.metadata?.responseVersions;
   if (Array.isArray(rawVersions) && rawVersions.length > 0) {
     const versions = responseVersionsForMessage(message);
     return withResponseVersions(
       message,
       versions.map((version, index, currentVersions) =>
-        index === currentVersions.length - 1 ? { ...version, content: fullText } : version,
+        index === currentVersions.length - 1 ? { ...version, ...patch(version) } : version,
       ),
       versions.length - 1,
     );
   }
-  return { ...message, content: fullText };
+  return { ...message, ...patch(message) };
+}
+
+/** The streamed text so far, folded into the reply's work trace. */
+export function withStreamedPendingContent(message: ChatMessage, fullText: string, nowMs: number): ChatMessage {
+  return patchPendingReply(message, (reply) => ({
+    content: fullText,
+    activityTrace: advanceTrace(reply.activityTrace ?? [], {
+      content: fullText,
+      startedAtMs: reply.startedAtMs ?? nowMs,
+      nowMs,
+      final: false,
+    }),
+  }));
+}
+
+/** Something the API reported doing for the reply in flight. */
+export function withPendingActivity(message: ChatMessage, activity: ChatStreamActivity): ChatMessage {
+  return patchPendingReply(message, (reply) => ({ activityTrace: recordActivity(reply.activityTrace ?? [], activity) }));
+}
+
+function mapThreadMessage(
+  threads: ChatThread[],
+  threadId: string,
+  messageId: string,
+  update: (message: ChatMessage) => ChatMessage,
+): ChatThread[] {
+  return threads.map((thread) =>
+    thread.id !== threadId
+      ? thread
+      : { ...thread, messages: thread.messages.map((message) => (message.id === messageId ? update(message) : message)) },
+  );
+}
+
+/** The freshest copy of a message: async completions start from the thread
+ * they captured, but the live trace kept growing in state since then. */
+function latestMessageIn(threads: ChatThread[], threadId: string, message: ChatMessage): ChatMessage {
+  return threads.find((thread) => thread.id === threadId)?.messages.find((item) => item.id === message.id) ?? message;
 }
 
 function streamedFailureContent(
@@ -451,141 +498,20 @@ function createBlankThread(data: BootstrapData, modelId: string): ChatThread {
   };
 }
 
-function buildActivityTrace(
+function traceStart(
   data: BootstrapData,
   modelId: string,
-  content: string,
   attachments: ChatAttachment[],
   runtime?: ChatRuntimeOptions,
-): ChatActivityTraceStep[] {
-  const selectedModel = data.models.find((model) => model.id === modelId);
-  const modelLabel = selectedModel?.name ?? modelId;
-  const knowledgeCount = runtime?.knowledgeConfigIds?.length ?? 0;
-  const toolCount = runtime?.toolConfigIds?.length ?? 0;
-  const isLongForm = longFormRequested(content);
-  const wantsImages = imageRequested(content);
-  const trace: ChatActivityTraceStep[] = [
-    {
-      id: "route",
-      label: "Routing request",
-      detail: `Using ${modelLabel}.`,
-    },
-    {
-      id: "context",
-      label: "Preparing context",
-      detail: contextDetail(knowledgeCount, toolCount, attachments.length),
-    },
-  ];
-
-  if (runtime?.webEnabled) {
-    trace.push({
-      id: "web",
-      label: "Web search requested",
-      detail: "Provider-hosted public web search is enabled for this turn.",
-    });
-  }
-
-  if (knowledgeCount > 0) {
-    trace.push({
-      id: "knowledge",
-      label: "Retrieving workspace knowledge",
-      detail: `${knowledgeCount} selected ${knowledgeCount === 1 ? "source" : "sources"} will be checked.`,
-    });
-  }
-
-  if (toolCount > 0 || runtime?.agentEnabled) {
-    trace.push({
-      id: "tools",
-      label: runtime?.agentEnabled ? "Preparing agent tools" : "Preparing tools",
-      detail: toolCount > 0 ? `${toolCount} enabled ${toolCount === 1 ? "tool" : "tools"} in scope.` : "Agent workflow is enabled.",
-    });
-  }
-
-  if (attachments.length > 0) {
-    trace.push({
-      id: "attachments",
-      label: "Reading attachments",
-      detail: `${attachments.length} uploaded ${attachments.length === 1 ? "file" : "files"} attached to the request.`,
-    });
-  }
-
-  if (isLongForm) {
-    trace.push({
-      id: "scope",
-      label: "Sizing long-form deliverable",
-      detail: pageCountRequested(content)
-        ? `Detected a ${pageCountRequested(content)}-page request; the response must be drafted as the deliverable, not an outline.`
-        : "Detected a complete paper, report, memo, or draft request.",
-    });
-  }
-
-  if (wantsImages) {
-    trace.push({
-      id: "visuals",
-      label: "Preparing visual evidence",
-      detail: "Images requested; the final answer can include transferable image blocks.",
-    });
-  }
-
-  trace.push({
-    id: "generate",
-    label: isLongForm ? "Generating long-form answer" : "Generating answer",
-    detail: isLongForm
-      ? "The backend may continue internally until the full response is assembled."
-      : "Waiting for the model response.",
-  });
-  if (isLongForm || wantsImages || runtime?.agentEnabled) {
-    trace.push({
-      id: "validator",
-      label: "Content validator loop",
-      detail: "A Hermes-light quality gate checks length, requested sections, and visuals before finalizing.",
-    });
-  }
-  trace.push({
-    id: "finalize",
-    label: "Finalizing response",
-    detail: "Formatting the answer, citations, and document-transfer actions.",
-  });
-
-  return trace;
-}
-
-function contextDetail(knowledgeCount: number, toolCount: number, attachmentCount: number) {
-  const parts: string[] = [];
-  if (knowledgeCount > 0) parts.push(`${knowledgeCount} knowledge ${knowledgeCount === 1 ? "source" : "sources"}`);
-  if (toolCount > 0) parts.push(`${toolCount} ${toolCount === 1 ? "tool" : "tools"}`);
-  if (attachmentCount > 0) parts.push(`${attachmentCount} ${attachmentCount === 1 ? "attachment" : "attachments"}`);
-  return parts.length > 0 ? parts.join(" · ") : "No extra sources selected.";
-}
-
-function longFormRequested(content: string) {
-  return /\b(long[-\s]?form|paper|report|memo|brief|draft|pages?|comprehensive|complete)\b/i.test(content);
-}
-
-function imageRequested(content: string) {
-  return /\b(images?|pictures?|photos?|graphics?|visuals?|charts?|diagrams?)\b/i.test(content);
-}
-
-function pageCountRequested(content: string) {
-  const numeric = /\b(\d{1,3})\s*[- ]?\s*pages?\b/i.exec(content);
-  if (numeric) return Number(numeric[1]);
-  const words: Record<string, number> = {
-    one: 1,
-    two: 2,
-    three: 3,
-    four: 4,
-    five: 5,
-    ten: 10,
-    twenty: 20,
-    "twenty-five": 25,
-    twentyfive: 25,
+): TraceStart {
+  const selected = runtime ?? {};
+  return {
+    modelLabel: data.models.find((model) => model.id === modelId)?.name ?? modelId,
+    knowledge: (selected.knowledgeConfigIds ?? []).length,
+    tools: (selected.toolConfigIds ?? []).length,
+    web: selected.webEnabled === true,
+    attachments: attachments.length,
   };
-  const normalized = content.toLowerCase().replace(/\s+/g, " ");
-  if (/\btwenty[- ]five\s+pages?\b/.test(normalized)) return 25;
-  for (const [word, value] of Object.entries(words)) {
-    if (new RegExp(`\\b${word}\\s+pages?\\b`, "i").test(normalized)) return value;
-  }
-  return null;
 }
 
 /**
@@ -690,62 +616,55 @@ function wireHistoryForPendingResume(thread: ChatThread, pendingMessage: ChatMes
   return wireMessagesFrom(thread.messages);
 }
 
-function finalizeAssistantMessage(
-  message: ChatMessage,
-  patch: {
-    content: string;
-    status: "ok" | "error";
-    citations?: ChatMessage["citations"];
-    usage?: ChatMessage["usage"];
-    memoryUsed?: number;
-    memorySaved?: ChatMessage["memorySaved"];
-    completed: PlatformTimestamp;
-    executedAt?: string | null;
-    durationMs: number | null;
-    failureNotice?: string | null;
-  },
-): ChatMessage {
-  const notice = patch.failureNotice;
-  const applied = {
-    content: patch.content,
-    status: patch.status,
-    citations: patch.citations ?? message.citations,
-    usage: patch.usage ?? null,
-    memoryUsed: patch.memoryUsed,
-    memorySaved: patch.memorySaved,
-    createdAt: patch.completed.label,
-    createdAtIso: patch.completed.iso,
-    executedAt: patch.executedAt ?? message.executedAt,
-    completedAt: patch.completed.iso,
-    durationMs: patch.durationMs,
-    metadata: {
-      ...(message.metadata ?? {}),
-      clockSource: patch.completed.source,
-      ...(notice ? { failureNotice: notice } : { failureNotice: undefined }),
-    },
-  };
-  const rawVersions = message.metadata?.responseVersions;
-  if (Array.isArray(rawVersions) && rawVersions.length > 0) {
-    const versions = responseVersionsForMessage(message);
-    return withResponseVersions(
-      message,
-      versions.map((version, index, currentVersions) =>
-        index === currentVersions.length - 1
-          ? {
-              ...version,
-              ...applied,
-              metadata: {
-                ...(version.metadata ?? {}),
-                clockSource: patch.completed.source,
-                ...(notice ? { failureNotice: notice } : { failureNotice: undefined }),
-              },
-            }
-          : version,
-      ),
-      versions.length - 1,
-    );
+type ReplyOutcome = {
+  content: string;
+  status: "ok" | "error";
+  citations?: ChatMessage["citations"];
+  usage?: ChatMessage["usage"];
+  memoryUsed?: number;
+  memorySaved?: ChatMessage["memorySaved"];
+  completed: PlatformTimestamp;
+  executedAt?: string | null;
+  durationMs: number | null;
+  failureNotice?: string | null;
+};
+
+/** Settles the reply in flight (the newest version of a regenerated message,
+ * or the message itself) with how it ended. */
+function finalizeAssistantMessage(message: ChatMessage, patch: ReplyOutcome): ChatMessage {
+  const nowMs = Date.now();
+  const status = { clockSource: patch.completed.source, failureNotice: patch.failureNotice || undefined };
+  return patchPendingReply(message, (reply) => {
+    const citations = patch.citations ?? reply.citations;
+    return {
+      content: patch.content,
+      status: patch.status,
+      citations,
+      usage: patch.usage ?? null,
+      memoryUsed: patch.memoryUsed,
+      memorySaved: patch.memorySaved,
+      createdAt: patch.completed.label,
+      createdAtIso: patch.completed.iso,
+      executedAt: patch.executedAt ?? reply.executedAt,
+      completedAt: patch.completed.iso,
+      durationMs: patch.durationMs,
+      activityTrace: settledTrace(reply, { ...patch, citations, failureNotice: status.failureNotice }, nowMs),
+      metadata: { ...(reply.metadata ?? {}), ...status },
+    };
+  });
+}
+
+/** A finished reply's trace settles with checks on the reply; a failure keeps
+ * its steps, settling them only over real streamed text (which is what a
+ * failure notice marks). */
+function settledTrace(reply: PendingReply, outcome: ReplyOutcome, nowMs: number): ChatActivityTraceStep[] {
+  const trace = reply.activityTrace ?? [];
+  const startedAtMs = reply.startedAtMs ?? nowMs;
+  if (outcome.status === "ok") {
+    return finishTrace(trace, { content: outcome.content, citations: outcome.citations ?? [], startedAtMs, nowMs });
   }
-  return { ...message, ...applied };
+  if (!outcome.failureNotice) return trace;
+  return advanceTrace(trace, { content: outcome.content, startedAtMs, nowMs, final: true });
 }
 
 function wireMessagesFrom(messages: ChatMessage[]): ChatWireMessage[] {
@@ -862,6 +781,9 @@ export type ChatStore = {
    * only message.content would silently revert on reload or version toggle.
    */
   updateAssistantDiagram: (messageId: string, previousSource: string, nextSource: string) => boolean;
+  /** Saves an edited code block into a finished reply. `occurrence` picks
+   * among identical blocks in the same reply. */
+  updateAssistantCode: (messageId: string, previousSource: string, nextSource: string, occurrence: number) => boolean;
   sendMessage: (content: string, attachments?: ChatAttachment[], runtime?: ChatRuntimeOptions) => void;
   sendMessageInNewThread: (content: string, attachments?: ChatAttachment[], runtime?: ChatRuntimeOptions) => ChatThread | null;
   /** Runs an automation immediately and records the run as an exchange in the
@@ -1080,20 +1002,22 @@ export function useChatStore(
         const sendControl = { controller: new AbortController(), stopped: false };
         activeSendControllers.current.set(targetId, sendControl);
         let streamedText = initialText;
+        // Trace updates land in the ref at once as well as in state, so the
+        // completion (which reads the ref) settles the newest trace even when
+        // an event arrives in the same tick as the end of the stream.
+        const updatePending = (update: (message: ChatMessage) => ChatMessage) => {
+          const apply = (threads: ChatThread[]) => mapThreadMessage(threads, targetId, pendingMessage.id, update);
+          threadsRef.current = apply(threadsRef.current);
+          setThreads(apply);
+        };
         const streamRenderer = createThrottledStreamUpdate((fullText) => {
-          setThreads((current) =>
-            current.map((currentThread) =>
-              currentThread.id !== targetId
-                ? currentThread
-                : {
-                    ...currentThread,
-                    messages: currentThread.messages.map((message) =>
-                      message.id === pendingMessage.id ? withStreamedPendingContent(message, fullText) : message,
-                    ),
-                  },
-            ),
-          );
+          const nowMs = Date.now();
+          updatePending((message) => withStreamedPendingContent(message, fullText, nowMs));
         });
+        const recordStreamActivity = (activity: ChatStreamActivity) => {
+          updatePending((message) => withPendingActivity(message, activity));
+          streamPersist.touch();
+        };
         const streamPersist = createThrottledPersist(() => {
           const current = threadsRef.current.find((item) => item.id === targetId);
           if (current) void persistThread(current);
@@ -1109,6 +1033,7 @@ export function useChatStore(
               streamRenderer.push(fullText);
               streamPersist.touch();
             },
+            onActivity: recordStreamActivity,
             runtime: {
               ...runtime,
               surface: "chat",
@@ -1131,7 +1056,7 @@ export function useChatStore(
             updated_at: completed.label,
             messages: thread.messages.map((message) =>
               message.id === pendingMessage.id
-                ? finalizeAssistantMessage(message, {
+                ? finalizeAssistantMessage(latestMessageIn(threadsRef.current, targetId, message), {
                     content: reply.content,
                     status: "ok",
                     citations: reply.citations,
@@ -1183,7 +1108,7 @@ export function useChatStore(
             updated_at: completed.label,
             messages: thread.messages.map((message) =>
               message.id === pendingMessage.id
-                ? finalizeAssistantMessage(message, {
+                ? finalizeAssistantMessage(latestMessageIn(threadsRef.current, targetId, message), {
                     content: failure.content,
                     status: "error",
                     completed,
@@ -1539,7 +1464,7 @@ export function useChatStore(
           executedAt: started.iso,
           status: "pending",
           citations: [],
-          activityTrace: buildActivityTrace(data, targetModel, text, files, runtime),
+          activityTrace: startTrace(traceStart(data, targetModel, files, runtime)),
           startedAtMs: Date.now(),
           metadata: {
             clockSource: started.source,
@@ -1571,20 +1496,22 @@ export function useChatStore(
         persistThread(updated);
 
         let streamedText = "";
+        // Trace updates land in the ref at once as well as in state, so the
+        // completion (which reads the ref) settles the newest trace even when
+        // an event arrives in the same tick as the end of the stream.
+        const updatePending = (update: (message: ChatMessage) => ChatMessage) => {
+          const apply = (threads: ChatThread[]) => mapThreadMessage(threads, targetId, sourceMessage.id, update);
+          threadsRef.current = apply(threadsRef.current);
+          setThreads(apply);
+        };
         const streamRenderer = createThrottledStreamUpdate((fullText) => {
-          setThreads((current) =>
-            current.map((thread) =>
-              thread.id !== targetId
-                ? thread
-                : {
-                    ...thread,
-                    messages: thread.messages.map((message) =>
-                      message.id === sourceMessage.id ? withStreamedPendingContent(message, fullText) : message,
-                    ),
-                  },
-            ),
-          );
+          const nowMs = Date.now();
+          updatePending((message) => withStreamedPendingContent(message, fullText, nowMs));
         });
+        const recordStreamActivity = (activity: ChatStreamActivity) => {
+          updatePending((message) => withPendingActivity(message, activity));
+          streamPersist.touch();
+        };
         const streamPersist = createThrottledPersist(() => {
           const current = threadsRef.current.find((item) => item.id === targetId);
           if (current) void persistThread(current);
@@ -1600,6 +1527,7 @@ export function useChatStore(
               streamRenderer.push(fullText);
               streamPersist.touch();
             },
+            onActivity: recordStreamActivity,
             runtime: {
               ...runtime,
               surface: "chat",
@@ -1619,33 +1547,17 @@ export function useChatStore(
             updated_at: completed.label,
             messages: updated.messages.map((message) =>
               message.id === sourceMessage.id
-                ? withResponseVersions(
-                    message,
-                    responseVersionsForMessage(message).map((version, index, currentVersions) =>
-                      index === currentVersions.length - 1
-                        ? {
-                            ...version,
-                            content: reply.content,
-                            citations: reply.citations,
-                            usage: reply.usage ?? null,
-                            memoryUsed: reply.memoryUsed,
-                            memorySaved: reply.memorySaved,
-                            status: "ok",
-                            createdAt: completed.label,
-                            createdAtIso: completed.iso,
-                            executedAt: started.iso,
-                            completedAt: completed.iso,
-                            durationMs,
-                            metadata: {
-                              ...(version.metadata ?? {}),
-                              clockSource: completed.source,
-                              failureNotice: undefined,
-                            },
-                          }
-                        : version,
-                    ),
-                    responseVersionsForMessage(message).length - 1,
-                  )
+                ? finalizeAssistantMessage(latestMessageIn(threadsRef.current, targetId, message), {
+                    content: reply.content,
+                    status: "ok",
+                    citations: reply.citations,
+                    usage: reply.usage ?? null,
+                    memoryUsed: reply.memoryUsed,
+                    memorySaved: reply.memorySaved,
+                    completed,
+                    executedAt: started.iso,
+                    durationMs,
+                  })
                 : message,
             ),
           };
@@ -1657,33 +1569,17 @@ export function useChatStore(
                 updated_at: completed.label,
                 messages: thread.messages.map((message) =>
                   message.id === sourceMessage.id
-                    ? withResponseVersions(
-                        message,
-                        responseVersionsForMessage(message).map((version, index, currentVersions) =>
-                          index === currentVersions.length - 1
-                            ? {
-                                ...version,
-                                content: reply.content,
-                                citations: reply.citations,
-                                usage: reply.usage ?? null,
-                                memoryUsed: reply.memoryUsed,
-                                memorySaved: reply.memorySaved,
-                                status: "ok",
-                                createdAt: completed.label,
-                                createdAtIso: completed.iso,
-                                executedAt: started.iso,
-                                completedAt: completed.iso,
-                                durationMs,
-                                metadata: {
-                                  ...(version.metadata ?? {}),
-                                  clockSource: completed.source,
-                                  failureNotice: undefined,
-                                },
-                              }
-                            : version,
-                        ),
-                        responseVersionsForMessage(message).length - 1,
-                      )
+                    ? finalizeAssistantMessage(message, {
+                        content: reply.content,
+                        status: "ok",
+                        citations: reply.citations,
+                        usage: reply.usage ?? null,
+                        memoryUsed: reply.memoryUsed,
+                        memorySaved: reply.memorySaved,
+                        completed,
+                        executedAt: started.iso,
+                        durationMs,
+                      })
                     : message,
                 ),
               };
@@ -1702,29 +1598,14 @@ export function useChatStore(
             updated_at: completed.label,
             messages: updated.messages.map((message) =>
               message.id === sourceMessage.id
-                ? withResponseVersions(
-                    message,
-                    responseVersionsForMessage(message).map((version, index, currentVersions) =>
-                      index === currentVersions.length - 1
-                        ? {
-                            ...version,
-                            content: failure.content,
-                            status: "error",
-                            createdAt: completed.label,
-                            createdAtIso: completed.iso,
-                            executedAt: started.iso,
-                            completedAt: completed.iso,
-                            durationMs,
-                            metadata: {
-                              ...(version.metadata ?? {}),
-                              clockSource: completed.source,
-                              ...(failure.notice ? { failureNotice: failure.notice } : {}),
-                            },
-                          }
-                        : version,
-                    ),
-                    responseVersionsForMessage(message).length - 1,
-                  )
+                ? finalizeAssistantMessage(latestMessageIn(threadsRef.current, targetId, message), {
+                    content: failure.content,
+                    status: "error",
+                    completed,
+                    executedAt: started.iso,
+                    durationMs,
+                    failureNotice: failure.notice,
+                  })
                 : message,
             ),
           };
@@ -1736,29 +1617,14 @@ export function useChatStore(
                 updated_at: completed.label,
                 messages: thread.messages.map((message) =>
                   message.id === sourceMessage.id
-                    ? withResponseVersions(
-                        message,
-                        responseVersionsForMessage(message).map((version, index, currentVersions) =>
-                          index === currentVersions.length - 1
-                            ? {
-                                ...version,
-                                content: failure.content,
-                                status: "error",
-                                createdAt: completed.label,
-                                createdAtIso: completed.iso,
-                                executedAt: started.iso,
-                                completedAt: completed.iso,
-                                durationMs,
-                                metadata: {
-                                  ...(version.metadata ?? {}),
-                                  clockSource: completed.source,
-                                  ...(failure.notice ? { failureNotice: failure.notice } : {}),
-                                },
-                              }
-                            : version,
-                        ),
-                        responseVersionsForMessage(message).length - 1,
-                      )
+                    ? finalizeAssistantMessage(message, {
+                        content: failure.content,
+                        status: "error",
+                        completed,
+                        executedAt: started.iso,
+                        durationMs,
+                        failureNotice: failure.notice,
+                      })
                     : message,
                 ),
               };
@@ -1796,8 +1662,10 @@ export function useChatStore(
     [persistThread],
   );
 
-  const updateAssistantDiagram = useCallback(
-    (messageId: string, previousSource: string, nextSource: string) => {
+  /** Rewrites a fenced block in a finished reply (its active response
+   * version, when it has several) and saves the thread. */
+  const replaceAssistantFence = useCallback(
+    (messageId: string, replace: (content: string) => string | null) => {
       const sourceThread = threadsRef.current.find((thread) => thread.id === activeIdRef.current);
       if (!sourceThread) return false;
       const sourceMessage = sourceThread.messages.find((message) => message.id === messageId);
@@ -1808,7 +1676,7 @@ export function useChatStore(
         const versions = responseVersionsForMessage(sourceMessage);
         const activeIndex = activeResponseVersionIndex(sourceMessage);
         const activeContent = versions[activeIndex]?.content ?? sourceMessage.content;
-        const replaced = replaceDiagramFence(activeContent, previousSource, nextSource);
+        const replaced = replace(activeContent);
         if (replaced === null) return false;
         const nextVersions = versions.map((version, index) =>
           index === activeIndex ? { ...version, content: replaced } : version,
@@ -1818,7 +1686,7 @@ export function useChatStore(
         // Never fabricate a responseVersions array for a message that has
         // none: version metadata should only appear once a regeneration
         // actually happened.
-        const replaced = replaceDiagramFence(sourceMessage.content, previousSource, nextSource);
+        const replaced = replace(sourceMessage.content);
         if (replaced === null) return false;
         updatedMessage = { ...sourceMessage, content: replaced };
       }
@@ -1831,6 +1699,18 @@ export function useChatStore(
       return true;
     },
     [persistThread],
+  );
+
+  const updateAssistantDiagram = useCallback(
+    (messageId: string, previousSource: string, nextSource: string) =>
+      replaceAssistantFence(messageId, (content) => replaceDiagramFence(content, previousSource, nextSource)),
+    [replaceAssistantFence],
+  );
+
+  const updateAssistantCode = useCallback(
+    (messageId: string, previousSource: string, nextSource: string, occurrence: number) =>
+      replaceAssistantFence(messageId, (content) => replaceCodeFence(content, previousSource, nextSource, occurrence)),
+    [replaceAssistantFence],
   );
 
   const startChatSend = useCallback(
@@ -1872,7 +1752,7 @@ export function useChatStore(
           executedAt: started.iso,
           status: "pending",
           citations: [],
-          activityTrace: buildActivityTrace(data, targetModel, text, files, runtime),
+          activityTrace: startTrace(traceStart(data, targetModel, files, runtime)),
           startedAtMs: Date.now(),
           metadata: { clockSource: started.source, ...(storedRuntime ? { chatRuntime: storedRuntime } : {}) },
         };
@@ -1895,20 +1775,22 @@ export function useChatStore(
         persistThread(updated);
 
         let streamedText = "";
+        // Trace updates land in the ref at once as well as in state, so the
+        // completion (which reads the ref) settles the newest trace even when
+        // an event arrives in the same tick as the end of the stream.
+        const updatePending = (update: (message: ChatMessage) => ChatMessage) => {
+          const apply = (threads: ChatThread[]) => mapThreadMessage(threads, targetId, pendingId, update);
+          threadsRef.current = apply(threadsRef.current);
+          setThreads(apply);
+        };
         const streamRenderer = createThrottledStreamUpdate((fullText) => {
-          setThreads((current) =>
-            current.map((currentThread) =>
-              currentThread.id !== targetId
-                ? currentThread
-                : {
-                    ...currentThread,
-                    messages: currentThread.messages.map((message) =>
-                      message.id === pendingId ? withStreamedPendingContent(message, fullText) : message,
-                    ),
-                  },
-            ),
-          );
+          const nowMs = Date.now();
+          updatePending((message) => withStreamedPendingContent(message, fullText, nowMs));
         });
+        const recordStreamActivity = (activity: ChatStreamActivity) => {
+          updatePending((message) => withPendingActivity(message, activity));
+          streamPersist.touch();
+        };
         const streamPersist = createThrottledPersist(() => {
           const current = threadsRef.current.find((item) => item.id === targetId);
           if (current) void persistThread(current);
@@ -1924,6 +1806,7 @@ export function useChatStore(
               streamRenderer.push(fullText);
               streamPersist.touch();
             },
+            onActivity: recordStreamActivity,
             onConcealedPrompt: (concealed) => {
               // Personal-data protection: show the prompt exactly as it is
               // stored. The save round-trip converges on the same text; this
@@ -1961,25 +1844,17 @@ export function useChatStore(
             updated_at: completed.label,
             messages: updated.messages.map((message) =>
               message.id === pendingId
-                ? {
-                    ...message,
+                ? finalizeAssistantMessage(latestMessageIn(threadsRef.current, targetId, message), {
                     content: reply.content,
+                    status: "ok",
                     citations: reply.citations,
                     usage: reply.usage ?? null,
                     memoryUsed: reply.memoryUsed,
                     memorySaved: reply.memorySaved,
-                    status: "ok",
-                    createdAt: completed.label,
-                    createdAtIso: completed.iso,
+                    completed,
                     executedAt: started.iso,
-                    completedAt: completed.iso,
                     durationMs,
-                    metadata: {
-                      ...(message.metadata ?? {}),
-                      clockSource: completed.source,
-                      failureNotice: undefined,
-                    },
-                  }
+                  })
                 : message,
             ),
           };
@@ -1991,25 +1866,17 @@ export function useChatStore(
                 updated_at: completed.label,
                 messages: thread.messages.map((message) =>
                   message.id === pendingId
-                    ? {
-                        ...message,
+                    ? finalizeAssistantMessage(message, {
                         content: reply.content,
+                        status: "ok",
                         citations: reply.citations,
                         usage: reply.usage ?? null,
                         memoryUsed: reply.memoryUsed,
                         memorySaved: reply.memorySaved,
-                        status: "ok",
-                        createdAt: completed.label,
-                        createdAtIso: completed.iso,
+                        completed,
                         executedAt: started.iso,
-                        completedAt: completed.iso,
                         durationMs,
-                        metadata: {
-                          ...(message.metadata ?? {}),
-                          clockSource: completed.source,
-                          failureNotice: undefined,
-                        },
-                      }
+                      })
                     : message,
                 ),
               };
@@ -2048,21 +1915,14 @@ export function useChatStore(
             updated_at: completed.label,
             messages: updated.messages.map((message) =>
               message.id === pendingId
-                ? {
-                    ...message,
+                ? finalizeAssistantMessage(latestMessageIn(threadsRef.current, targetId, message), {
                     content: failure.content,
                     status: "error",
-                    createdAt: completed.label,
-                    createdAtIso: completed.iso,
+                    completed,
                     executedAt: started.iso,
-                    completedAt: completed.iso,
                     durationMs,
-                    metadata: {
-                      ...(message.metadata ?? {}),
-                      clockSource: completed.source,
-                      ...(failure.notice ? { failureNotice: failure.notice } : {}),
-                    },
-                  }
+                    failureNotice: failure.notice,
+                  })
                 : message,
             ),
           };
@@ -2074,21 +1934,14 @@ export function useChatStore(
                 updated_at: completed.label,
                 messages: thread.messages.map((message) =>
                   message.id === pendingId
-                    ? {
-                        ...message,
+                    ? finalizeAssistantMessage(message, {
                         content: failure.content,
                         status: "error",
-                        createdAt: completed.label,
-                        createdAtIso: completed.iso,
+                        completed,
                         executedAt: started.iso,
-                        completedAt: completed.iso,
                         durationMs,
-                        metadata: {
-                          ...(message.metadata ?? {}),
-                          clockSource: completed.source,
-                          ...(failure.notice ? { failureNotice: failure.notice } : {}),
-                        },
-                      }
+                        failureNotice: failure.notice,
+                      })
                     : message,
                 ),
               };
@@ -2347,6 +2200,7 @@ export function useChatStore(
     stopResponse,
     selectResponseVersion,
     updateAssistantDiagram,
+    updateAssistantCode,
     sendMessage,
     sendMessageInNewThread,
     runAutomationNow,

@@ -1,6 +1,8 @@
 import { useModalFocus } from "../lib/useModalFocus";
 import { Code2, LayoutList, Pencil, Plus, Trash2, TriangleAlert, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import { STEWARD_DIAGRAM_THEMES, isStewardDiagramThemeId, type StewardDiagramThemeId } from "../lib/diagramThemes";
+import { withStewardChartStyle } from "../lib/stewardDiagramEdits";
 import {
   parseStewardDiagram,
   renderStewardDiagramSvg,
@@ -28,6 +30,32 @@ const TONE_LABELS: Record<StewardDiagramTone, string> = {
 };
 
 let addCounter = 0;
+
+function ThemeField({
+  theme,
+  onChange,
+}: {
+  theme: StewardDiagramThemeId | undefined;
+  onChange: (theme: StewardDiagramThemeId) => void;
+}) {
+  return (
+    <label>
+      Theme
+      <select
+        value={theme ?? "aperture"}
+        onChange={(event) => {
+          if (isStewardDiagramThemeId(event.target.value)) onChange(event.target.value);
+        }}
+      >
+        {STEWARD_DIAGRAM_THEMES.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 /** Structured editor for steward-diagram charts. Every card is a form —
  * title, subtitle, bullet lines, status band, warning note — plus arrow
@@ -203,6 +231,10 @@ export function StewardDiagramEditorModal({
                         onChange={(event) => update((draft) => (draft.footnote = event.target.value || undefined))}
                       />
                     </label>
+                    <ThemeField
+                      theme={working.theme}
+                      onChange={(theme) => setWorking((current) => withStewardChartStyle(current, { theme }))}
+                    />
                   </div>
                 </div>
                 {working.rows.map((row, rowIndex) => (

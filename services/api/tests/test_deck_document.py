@@ -143,9 +143,50 @@ def test_constants_are_pinned_to_the_client_fixture() -> None:
     assert limits["max_slide_background_chars"] == deck.MAX_SLIDE_BACKGROUND_CHARS
     assert limits["max_background_library_entries"] == deck.MAX_BACKGROUND_LIBRARY_ENTRIES
     assert set(limits["layouts"]) == deck.DECK_LAYOUTS
+    assert set(limits["designs"]) == deck.DECK_DESIGNS
 
 
 def test_background_key_matches_the_client_fnv_variant() -> None:
     # Reference values computed with the client's deckBackgroundKey.
     assert deck_background_key("abc") == "bg1a47e90b-3"
     assert deck_background_key(PNG) == "bgb9764a8c-y"
+
+
+def test_theme_design_is_kept_classic_is_implicit_and_unknown_drops() -> None:
+    def design_of(value: object) -> object:
+        parsed = json.loads(canonicalize_deck_json(json.dumps(_deck(theme={"design": value}))))
+        return parsed["theme"].get("design", "<absent>")
+
+    assert design_of("orbit") == "orbit"
+    # The classic look is stored as no design, so older decks keep their bytes.
+    assert design_of("rule") == "<absent>"
+    assert design_of("neon-zebra") == "<absent>"
+    assert design_of(7) == "<absent>"
+    assert "design" not in canonicalize_deck_json(json.dumps(_deck()))
+
+
+def test_statement_big_number_and_picture_bullets_layouts_canonicalize() -> None:
+    slides = [
+        {"id": "a", "layout": "statement", "title": "Ship weekly", "body": "Small batches win", "stray": 1},
+        {"id": "b", "layout": "big-number", "title": "42%", "subtitle": "of renewals came from referrals"},
+        {
+            "id": "c",
+            "layout": "image-bullets",
+            "title": "New office",
+            "image": {"src": "", "alt": "Harbor office"},
+            "bullets": [{"runs": [{"text": "Opens in May"}], "level": 0}],
+        },
+    ]
+    canonical = canonicalize_deck_json(json.dumps(_deck(slides=slides)))
+    parsed = json.loads(canonical)["slides"]
+    assert parsed[0] == {"id": "a", "layout": "statement", "notes": "", "title": [{"text": "Ship weekly"}], "body": [{"text": "Small batches win"}]}
+    assert parsed[1]["subtitle"] == [{"text": "of renewals came from referrals"}]
+    assert parsed[2]["image"] == {"src": "", "alt": "Harbor office"}
+    assert parsed[2]["bullets"] == [{"runs": [{"text": "Opens in May"}], "level": 0}]
+    text = deck_plain_text(canonical)
+    for expected in ("Small batches win", "of renewals came from referrals", "Opens in May", "Harbor office"):
+        assert expected in text
+
+    unsafe = _deck(slides=[{"layout": "image-bullets", "title": "x", "image": {"src": "javascript:alert(1)", "alt": ""}, "bullets": []}])
+    with pytest.raises(DeckValidationError):
+        canonicalize_deck_json(json.dumps(unsafe))

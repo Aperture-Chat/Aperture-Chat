@@ -43,6 +43,26 @@ export function deleteKnowledgeDocument(
   });
 }
 
+export type KnowledgeDocumentAccessMode = "metadata" | "restricted" | "open";
+
+/**
+ * Set one document's ethical wall: follow its metadata, restrict it to
+ * groups, or (administrators only) open a wall its metadata set.
+ */
+export function setKnowledgeDocumentAccess(
+  userId: string,
+  configId: string,
+  documentId: string,
+  payload: { mode: KnowledgeDocumentAccessMode; group_ids?: string[] },
+  options: ApiMutationOptions = {},
+): Promise<KnowledgeSyncResult> {
+  return apiRequest<KnowledgeSyncResult>(
+    userId,
+    `/api/knowledge/${pathId(configId)}/documents/${pathId(documentId)}/access`,
+    { method: "PUT", body: payload, signal: options.signal },
+  );
+}
+
 export async function uploadKnowledgeDocuments(
   userId: string,
   configId: string,
@@ -71,13 +91,37 @@ export async function uploadKnowledgeDocuments(
   return (await response.json()) as KnowledgeSyncResult;
 }
 
+export type KnowledgeWebSourcePayload = {
+  /** Empty lets the server name the source after the page or site title. */
+  name: string;
+  url: string;
+  /** Pasted text is indexed instead of fetching the page; crawl options are ignored. */
+  text?: string | null;
+  /** 0 reads only this page; 1-3 also read same-site pages it links to. */
+  crawl_depth?: number;
+  max_pages?: number;
+  /** Look for fresh pages on this site when a question needs them. */
+  live_lookup?: boolean;
+};
+
 export function addKnowledgeWebSource(
   userId: string,
   configId: string,
-  payload: { name: string; url: string; text?: string | null },
+  payload: KnowledgeWebSourcePayload,
   options: ApiMutationOptions = {},
 ): Promise<KnowledgeSyncResult> {
-  return apiRequest<KnowledgeSyncResult>(userId, `/api/knowledge/${pathId(configId)}/web-sources`, {
+  return addKnowledgeSource(userId, configId, "web-sources", payload, options);
+}
+
+/** Both linked-source kinds are fetched and indexed by one POST that returns the sync result. */
+function addKnowledgeSource(
+  userId: string,
+  configId: string,
+  kind: "web-sources" | "api-sources",
+  payload: KnowledgeWebSourcePayload | KnowledgeApiSourcePayload,
+  options: ApiMutationOptions,
+): Promise<KnowledgeSyncResult> {
+  return apiRequest<KnowledgeSyncResult>(userId, `/api/knowledge/${pathId(configId)}/${kind}`, {
     method: "POST",
     body: payload,
     signal: options.signal,
@@ -110,11 +154,7 @@ export function addKnowledgeApiSource(
   payload: KnowledgeApiSourcePayload,
   options: ApiMutationOptions = {},
 ): Promise<KnowledgeSyncResult> {
-  return apiRequest<KnowledgeSyncResult>(userId, `/api/knowledge/${pathId(configId)}/api-sources`, {
-    method: "POST",
-    body: payload,
-    signal: options.signal,
-  });
+  return addKnowledgeSource(userId, configId, "api-sources", payload, options);
 }
 
 export type KnowledgeLimits = {
@@ -123,6 +163,8 @@ export type KnowledgeLimits = {
   ocr_enabled: boolean;
   ocr_max_pages: number;
   semantic_search: "on" | "off" | string;
+  /** The model that reads handwriting and images in this workspace, if any. */
+  vision_ocr?: { available: boolean; model_name: string | null; max_pages: number };
   /** Server-side prefix of the OAuth callback; append /{id}/oauth/callback. */
   oauth_callback_base?: string;
 };

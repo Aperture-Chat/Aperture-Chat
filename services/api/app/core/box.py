@@ -6,9 +6,16 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.document_metadata import metadata_value
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
-DEFAULT_FIELDS = "id,type,name,modified_at,size,item_status,path_collection"
+DEFAULT_FIELDS = (
+    "id,type,name,modified_at,size,item_status,path_collection,"
+    "description,tags,created_at,created_by,owned_by,classification"
+)
+# Box Shield classification labels are stored as this enterprise template.
+_CLASSIFICATION_TEMPLATE = "securityClassification-6VMVochwUWo"
+_CLASSIFICATION_FIELD = "Box__Security__Classification__Key"
 MAX_SYNC_ITEMS = 500
 MAX_FILE_DOWNLOAD_BYTES = 15 * 1024 * 1024
 
@@ -26,6 +33,8 @@ class BoxItem:
     size: int | None = None
     item_status: str | None = None
     path: str | None = None
+    # Display-ready (label, value) pairs Box holds about the file.
+    properties: tuple[tuple[str, str], ...] = ()
 
 
 class BoxClient:
@@ -91,6 +100,31 @@ class BoxClient:
             raise BoxError(f"Box request failed: {type(exc).__name__}.") from exc
         return items
 
+    def file_metadata(self, *, file_id: str) -> list[tuple[str, str]]:
+        """Every metadata template instance on a file, flattened to labeled values.
+
+        Box keeps template metadata (matter numbers, ethical walls, Shield
+        classifications) beside the file, not inside it. A file whose metadata
+        cannot be read simply has none; sync carries on.
+        """
+        if not self._access_token or not file_id:
+            return []
+        try:
+            with httpx.Client(timeout=self._timeout, transport=self._transport) as client:
+                response = client.get(
+                    f"{self._base_url}/files/{file_id}/metadata",
+                    headers={"Authorization": f"Bearer {self._access_token}"},
+                )
+                response.raise_for_status()
+                entries = response.json().get("entries")
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return []
+        pairs: list[tuple[str, str]] = []
+        for entry in entries if isinstance(entries, list) else []:
+            if isinstance(entry, dict):
+                pairs += _template_pairs(entry)
+        return pairs
+
     def download_file(self, *, file_id: str, max_bytes: int = MAX_FILE_DOWNLOAD_BYTES) -> bytes:
         if not self._access_token:
             raise BoxError("Box access token is not configured.")
@@ -135,7 +169,46 @@ def _box_item(entry: dict[str, Any]) -> BoxItem | None:
         size=size if isinstance(size, int) else None,
         item_status=entry.get("item_status") if isinstance(entry.get("item_status"), str) else None,
         path=_box_path(path_collection),
+        properties=_box_properties(entry),
     )
+
+
+def _box_properties(entry: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    pairs = [
+        ("Description", entry.get("description")),
+        ("Tags", entry.get("tags")),
+        ("Created", entry.get("created_at")),
+        ("Created by", _named(entry.get("created_by"))),
+        ("Owner", _named(entry.get("owned_by"))),
+        ("Box classification", _named(entry.get("classification"))),
+    ]
+    return tuple(
+        (label, text) for label, value in pairs if (text := metadata_value(value).strip())
+    )
+
+
+def _template_pairs(entry: dict[str, Any]) -> list[tuple[str, str]]:
+    template = str(entry.get("$template") or "")
+    pairs: list[tuple[str, str]] = []
+    for field, value in entry.items():
+        text = metadata_value(value).strip()
+        if field.startswith("$") or not text or isinstance(value, dict):
+            continue
+        if template == _CLASSIFICATION_TEMPLATE:
+            if field == _CLASSIFICATION_FIELD:
+                pairs.append(("Box classification", text))
+            continue
+        # Free-form global properties keep their own names; template fields are
+        # prefixed with the template so two templates cannot collide.
+        label = field if template == "properties" else f"{template} · {field}"
+        pairs.append((label, text))
+    return pairs
+
+
+def _named(value: object) -> str | None:
+    if isinstance(value, dict) and isinstance(value.get("name"), str):
+        return value["name"]
+    return None
 
 
 def _box_path(path_collection: object) -> str | None:

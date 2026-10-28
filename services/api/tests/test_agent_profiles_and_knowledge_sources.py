@@ -5,7 +5,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.knowledge_ingestion import ExtractedSegment
+from app.core.knowledge_ingestion import ExtractedDocument, ExtractedSegment
 from app.core.security import SecretVault
 from app.core.vector_store import LocalVectorStore
 from app.main import app
@@ -339,7 +339,13 @@ def test_uploaded_xlsx_chunks_persist_sheet_locators() -> None:
         for chunk in get_store().knowledge_chunks_for("knowledge-box-matters")
         if chunk.document_id == document["id"]
     ]
-    assert [chunk.locator for chunk in chunks] == ["Sheet: Summary", "Sheet: Risks"]
+    # openpyxl stamps workbook properties, so the file also gets a searchable
+    # "Document properties" passage after its sheets.
+    assert [chunk.locator for chunk in chunks] == [
+        "Sheet: Summary",
+        "Sheet: Risks",
+        "Document properties",
+    ]
     assert all(chunk.page_start is None and chunk.page_end is None for chunk in chunks)
     assert "Revenue | 5000000" in chunks[0].text
 
@@ -382,10 +388,13 @@ def test_knowledge_upload_accepts_file_larger_than_legacy_25_mb_limit(
 ) -> None:
     monkeypatch.setattr(
         knowledge_route,
-        "extract_segments_from_file",
-        lambda *_args, **_kwargs: [
-            ExtractedSegment(text="Large filing content extracted from the spooled upload.")
-        ],
+        "extract_document",
+        lambda *_args, **_kwargs: ExtractedDocument(
+            segments=[
+                ExtractedSegment(text="Large filing content extracted from the spooled upload.")
+            ],
+            metadata={},
+        ),
     )
 
     upload = client.post(

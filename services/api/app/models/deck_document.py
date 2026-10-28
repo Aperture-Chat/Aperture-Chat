@@ -41,8 +41,23 @@ BOX_MIN_W = 40
 BOX_MIN_H = 24
 
 DECK_LAYOUTS = frozenset(
-    {"title", "title-bullets", "two-column", "image-caption", "quote", "section", "chart", "closing"}
+    {
+        "title",
+        "title-bullets",
+        "two-column",
+        "image-caption",
+        "quote",
+        "section",
+        "chart",
+        "closing",
+        "statement",
+        "big-number",
+        "image-bullets",
+    }
 )
+# A theme's look beyond its colors. "rule" is the classic look and is stored
+# as no design at all, so decks saved before designs existed keep their bytes.
+DECK_DESIGNS = frozenset({"rule", "band", "split", "editorial", "orbit", "frame", "swiss"})
 BOX_REGIONS = frozenset(
     {"title", "subtitle", "bullets", "left", "right", "quote", "attribution", "caption", "body", "image"}
 )
@@ -333,7 +348,7 @@ def _parse_theme(value: object) -> dict[str, Any]:
         if isinstance(source_label_raw, str) and source_label_raw.strip()
         else None
     )
-    return {
+    theme: dict[str, Any] = {
         "colors": colors,
         "fonts": fonts,
         "logo": logo,
@@ -341,6 +356,12 @@ def _parse_theme(value: object) -> dict[str, Any]:
         "backgroundLibrary": library,
         "sourceLabel": source_label,
     }
+    design = value.get("design")
+    # An unknown design (a deck from a newer build) falls back to the classic
+    # look instead of refusing the save, matching the editor.
+    if isinstance(design, str) and design in DECK_DESIGNS and design != "rule":
+        theme["design"] = design
+    return theme
 
 
 def _is_number(value: object) -> bool:
@@ -370,11 +391,15 @@ def _parse_slide(value: object, index: int, used_ids: set[str]) -> dict[str, Any
     def title() -> list[dict[str, Any]]:
         return _parse_rich_text(value.get("title"), MAX_TITLE_CHARS, f"{label}.title")
 
-    if layout in {"title", "section"}:
+    if layout in {"title", "section", "big-number"}:
         slide["title"] = title()
         slide["subtitle"] = _parse_rich_text(value.get("subtitle"), MAX_TITLE_CHARS, f"{label}.subtitle")
     elif layout == "title-bullets":
         slide["title"] = title()
+        slide["bullets"] = _parse_bullets(value.get("bullets"), f"{label}.bullets")
+    elif layout == "image-bullets":
+        slide["title"] = title()
+        slide["image"] = _parse_image_ref(value.get("image"), f"{label}.image")
         slide["bullets"] = _parse_bullets(value.get("bullets"), f"{label}.bullets")
     elif layout == "two-column":
         slide["title"] = title()
@@ -394,7 +419,7 @@ def _parse_slide(value: object, index: int, used_ids: set[str]) -> dict[str, Any
         slide["mermaidSource"] = _clean_text(
             value.get("mermaidSource", ""), MAX_MERMAID_CHARS, f"{label}.mermaidSource"
         )
-    elif layout == "closing":
+    elif layout in {"closing", "statement"}:
         slide["title"] = title()
         slide["body"] = _parse_rich_text(value.get("body"), MAX_RUN_TEXT_CHARS, f"{label}.body")
 

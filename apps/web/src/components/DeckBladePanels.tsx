@@ -13,14 +13,19 @@ import {
 } from "react";
 import { Globe2, Image as ImageIcon, Sparkles, Trash2, Upload } from "lucide-react";
 import { DECK_PREVIEW_WIDTH_PX } from "../lib/deck/deckGeometry";
-import { DECK_LAYOUT_LABELS, SUPPORTED_DECK_LAYOUTS, type DeckSlideLayout } from "../lib/deck/deckModel";
+import {
+  DECK_LAYOUT_LABELS,
+  DECK_PICTURE_LAYOUTS,
+  SUPPORTED_DECK_LAYOUTS,
+  type DeckSlideLayout,
+} from "../lib/deck/deckModel";
 
 /** Layout groups, in the order the gallery lists them. */
 export const DECK_LAYOUT_GROUPS: Array<{ name: string; layouts: DeckSlideLayout[] }> = [
   { name: "Openers", layouts: ["title", "section"] },
   { name: "Content", layouts: ["title-bullets", "two-column"] },
-  { name: "Pictures", layouts: ["image-caption"] },
-  { name: "Highlights", layouts: ["quote", "closing"] },
+  { name: "Pictures", layouts: ["image-bullets", "image-caption"] },
+  { name: "Highlights", layouts: ["statement", "big-number", "quote", "closing"] },
 ];
 
 /** What each layout is for, shown as the gallery's tooltips. */
@@ -33,10 +38,10 @@ export const DECK_LAYOUT_DESCRIPTIONS: Record<DeckSlideLayout, string> = {
   quote: "One quotation with its attribution.",
   chart: "A title over a chart.",
   closing: "A closing message: next steps, thanks, or questions.",
+  statement: "One big idea in large type, with a supporting line.",
+  "big-number": "A single figure, large, with what it measures.",
+  "image-bullets": "A picture beside a title and bullets.",
 };
-
-/** Layouts that hold a picture, for slides without one. */
-export const DECK_PICTURE_LAYOUTS: DeckSlideLayout[] = ["image-caption"];
 
 /** Scales every live slide miniature in `root` to its card's width. */
 function useMiniatureScale() {

@@ -288,12 +288,106 @@ test("web pages are fetched on add and pasted text is labeled as not re-fetched"
 
   expect(await screen.findByText(/Fetched https:\/\/example.com\/retention/)).toBeInTheDocument();
   expect(requests.find((request) => request.url.includes("/web-sources"))?.body).toEqual({
-    name: "https://example.com/retention",
+    name: "",
     url: "https://example.com/retention",
     text: null,
+    crawl_depth: 0,
+    max_pages: 25,
+    live_lookup: true,
   });
   expect(screen.getByText(/Refreshed by Sync now/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sync now" })).toBeInTheDocument();
+});
+
+test("a web page can also read the pages it links to and turn off fresh lookups", async () => {
+  const base = knowledgeBase({ source_type: "web", document_count: 0 });
+  stubFetch((url, init) => {
+    if (url.includes("/web-sources") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      return json({
+        config: configRecord(base, {
+          document_count: 1,
+          linked_sources: [
+            {
+              document_id: "doc-site",
+              kind: "web",
+              name: "Synthetic Registry",
+              url: body.url,
+              refresh: true,
+              crawl_depth: body.crawl_depth,
+              page_count: 12,
+              live_lookup: body.live_lookup,
+            },
+          ],
+        }),
+        documents: [document({ id: "doc-site", name: "Synthetic Registry", source_type: "web", source_uri: body.url, chunk_count: 30 })],
+        status: "synced",
+        synced_at: "now",
+        provider_status: "live",
+        provider_message: `Fetched ${body.url}: Read 12 pages; 2 skipped by robots.txt. Indexed 30 passages.`,
+      });
+    }
+    if (url.includes("/documents")) return json([]);
+    return undefined;
+  });
+  renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.change(await screen.findByLabelText("Page address"), { target: { value: "https://registry.example.com/" } });
+  expect(screen.queryByLabelText("Most pages to read")).not.toBeInTheDocument();
+
+  const pagesRail = screen.getByRole("radiogroup", { name: "Pages to read" });
+  expect(within(pagesRail).getByRole("radio", { name: "This page" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(within(pagesRail).getByRole("radio", { name: "Linked pages" }));
+  fireEvent.change(screen.getByLabelText("Most pages to read"), { target: { value: "40" } });
+  const freshRail = screen.getByRole("radiogroup", { name: "Look for fresh pages on this site when answering" });
+  expect(within(freshRail).getByRole("radio", { name: "On" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(within(freshRail).getByRole("radio", { name: "Off" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fetch and add pages" }));
+
+  expect(await screen.findByText(/Read 12 pages; 2 skipped by robots.txt/)).toBeInTheDocument();
+  expect(requests.find((request) => request.url.includes("/web-sources"))?.body).toEqual({
+    name: "",
+    url: "https://registry.example.com/",
+    text: null,
+    crawl_depth: 1,
+    max_pages: 40,
+    live_lookup: false,
+  });
+  expect(screen.getByText(/30 passages · 12 pages · Refreshed by Sync now$/)).toBeInTheDocument();
+});
+
+test("pasted page text hides the crawl and fresh-lookup options", async () => {
+  const base = knowledgeBase({ source_type: "web", document_count: 0 });
+  stubFetch((url) => (url.includes("/documents") ? json([]) : undefined));
+  renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  await screen.findByLabelText("Page address");
+
+  fireEvent.click(screen.getByLabelText(/Paste the text instead of fetching the page/));
+
+  expect(screen.queryByRole("radiogroup", { name: "Pages to read" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("radiogroup", { name: "Look for fresh pages on this site when answering" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add text" })).toBeInTheDocument();
+});
+
+test("site documents with fresh lookups say so in the web page list", async () => {
+  const base = knowledgeBase({
+    source_type: "web",
+    linked_sources: [
+      { document_id: "doc-site", kind: "web", name: "Registry", url: "https://registry.example.com/", refresh: true, crawl_depth: 2, page_count: 1, live_lookup: true },
+    ],
+  });
+  stubFetch((url, init) =>
+    url.includes("/documents") && (init?.method ?? "GET") === "GET"
+      ? json([document({ id: "doc-site", name: "Registry", source_type: "web", source_uri: "https://registry.example.com/" })])
+      : undefined,
+  );
+  renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+  expect(await screen.findByText(/· 1 page · Refreshed by Sync now · Looks for fresh pages when answering$/)).toBeInTheDocument();
 });
 
 test("an API source sends the real request settings and keeps the secret out of the list", async () => {
@@ -471,4 +565,146 @@ test("knowledge authors without the API grant see API sources locked, not missin
   fireEvent.mouseDown(await screen.findByRole("tab", { name: /API/ }));
   expect(await screen.findByText(/turn on Can add API sources/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Fetch and add/ })).not.toBeInTheDocument();
+});
+
+test("a document's details show its preserved properties and its ethical wall", async () => {
+  const group = sampleData.groups[0];
+  const walled = document({
+    metadata: { Title: "Falcon memo", Author: "Avery Example", "Ethical wall": group.name },
+    wall: { source: "metadata", group_ids: [group.id], field: "Ethical wall", values: [group.name], unresolved: [] },
+  });
+  stubFetch((url, init) => (url.includes("/documents") && (init?.method ?? "GET") === "GET" ? json([walled]) : undefined));
+  renderLibrary([knowledgeBase()]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+  expect(await screen.findByText("Walled")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show details for brief.pdf" }));
+  const properties = screen.getByRole("region", { name: "brief.pdf properties" });
+  expect(within(properties).getByText("Avery Example")).toBeInTheDocument();
+  expect(within(properties).getByText("Falcon memo")).toBeInTheDocument();
+  const access = screen.getByRole("region", { name: "Who can find brief.pdf" });
+  expect(
+    within(access).getByText(
+      `Ethical wall from the file's "Ethical wall" property: only ${group.name} can find it, administrators included.`,
+    ),
+  ).toBeInTheDocument();
+});
+
+test("a wall that names no known group is shown as hidden", async () => {
+  const closed = document({
+    wall: { source: "metadata", group_ids: [], field: "Ethical wall", values: ["Project Kestrel"], unresolved: ["Project Kestrel"] },
+  });
+  stubFetch((url, init) => (url.includes("/documents") && (init?.method ?? "GET") === "GET" ? json([closed]) : undefined));
+  renderLibrary([knowledgeBase()]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  expect(await screen.findByText("Hidden")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show details for brief.pdf" }));
+  expect(screen.getByText(/It names no group in this workspace, so nobody can find it until the group exists\./)).toBeInTheDocument();
+  expect(screen.getByText(/"Project Kestrel" matches no group, so it admits nobody\./)).toBeInTheDocument();
+});
+
+test("administrators limit a document to groups through the access endpoint", async () => {
+  const base = knowledgeBase();
+  const group = sampleData.groups[0];
+  stubFetch((url, init) => {
+    if (url.includes("/documents/doc-brief/access") && init?.method === "PUT") {
+      const limited = document({ wall: { source: "manual", group_ids: [group.id] } });
+      return json({
+        config: configRecord(base, { document_walls: { "doc-brief": { mode: "restricted", group_ids: [group.id] } } }),
+        documents: [limited],
+        status: "synced",
+        synced_at: "now",
+        provider_status: "unchanged",
+        provider_message: `Only members of ${group.name} can now find brief.pdf.`,
+      });
+    }
+    return undefined;
+  });
+  const view = renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Show details for brief.pdf" }));
+  const editor = screen.getByRole("radiogroup", { name: "Access for brief.pdf" });
+  expect(within(editor).getByRole("radio", { name: "Open" })).toBeInTheDocument();
+  fireEvent.click(within(editor).getByRole("radio", { name: "Limit" }));
+  const save = screen.getByRole("button", { name: "Save access" });
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: group.name }));
+  fireEvent.click(save);
+
+  expect(await screen.findByText(`Only members of ${group.name} can now find brief.pdf.`)).toBeInTheDocument();
+  expect(requests.find((request) => request.method === "PUT")?.body).toEqual({
+    mode: "restricted",
+    group_ids: [group.id],
+  });
+  expect(view.data().knowledgeBases[0].document_walls).toEqual({
+    "doc-brief": { mode: "restricted", group_ids: [group.id] },
+  });
+  expect(screen.getByText("Walled")).toBeInTheDocument();
+});
+
+test("knowledge base owners who are not administrators cannot lift a wall", async () => {
+  stubFetch();
+  renderLibrary([knowledgeBase({ owner_group_id: "" })], "USER", {
+    authoringState: { ...(sampleData.authoringState ?? {}), knowledge_enabled: true } as BootstrapData["authoringState"],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Show details for brief.pdf" }));
+  const editor = screen.getByRole("radiogroup", { name: "Access for brief.pdf" });
+  expect(within(editor).queryByRole("radio", { name: "Open" })).not.toBeInTheDocument();
+});
+
+test("settings save AI page reading and wall fields only when they change", async () => {
+  const base = knowledgeBase();
+  stubFetch((url, init) => {
+    if (url.endsWith("/api/knowledge/limits")) {
+      return json({
+        upload_max_mb: 250,
+        max_extracted_chars: 10_000_000,
+        ocr_enabled: true,
+        ocr_max_pages: 250,
+        semantic_search: "on",
+        vision_ocr: { available: true, model_name: "Gemini Flash", max_pages: 60 },
+      });
+    }
+    if (url.includes("/api/admin/knowledge-configs/kb-synthetic") && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body));
+      return json(configRecord(base, body.settings));
+    }
+    return undefined;
+  });
+  const view = renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.mouseDown(await screen.findByRole("tab", { name: /Settings/ }));
+  const settings = screen.getByRole("form", { name: "Synthetic Matter Files settings" });
+  expect(await within(settings).findByText(/Gemini Flash reads handwriting, stamps, signatures, and pictures/)).toBeInTheDocument();
+  fireEvent.click(within(settings).getByRole("radio", { name: "Standard OCR only" }));
+  fireEvent.change(within(settings).getByLabelText("More wall fields"), { target: { value: "Matter team; Deal group" } });
+  fireEvent.click(within(settings).getByRole("button", { name: "Save changes" }));
+
+  expect(await screen.findByText("Synthetic Matter Files settings saved.")).toBeInTheDocument();
+  expect(requests.find((request) => request.method === "PATCH")?.body).toEqual({
+    name: "Synthetic Matter Files",
+    acl_group_ids: ["group-litigation"],
+    settings: { vision_ocr: false, wall_fields: ["Matter team", "Deal group"] },
+  });
+  expect(view.data().knowledgeBases[0].vision_ocr).toBe(false);
+  expect(view.data().knowledgeBases[0].wall_fields).toEqual(["Matter team", "Deal group"]);
+});
+
+test("the upload area names the model that reads handwriting", async () => {
+  stubFetch((url) =>
+    url.endsWith("/api/knowledge/limits")
+      ? json({
+          upload_max_mb: 250,
+          max_extracted_chars: 10_000_000,
+          ocr_enabled: true,
+          ocr_max_pages: 250,
+          semantic_search: "on",
+          vision_ocr: { available: true, model_name: "Gemini Flash", max_pages: 60 },
+        })
+      : undefined,
+  );
+  renderLibrary([knowledgeBase()]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  expect(await screen.findByText(/Handwriting, stamps, and pictures are read by Gemini Flash\./)).toBeInTheDocument();
 });

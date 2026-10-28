@@ -577,7 +577,10 @@ def test_client_abandon_after_provider_settlement_preserves_usage_event(
         usage_context=usage_context,
     )
 
-    assert '"delta": "settled before delivery"' in next(events)
+    # Work-trace activity events (the screening hold) precede the delta; the
+    # disconnect still lands on the first reply text after settlement.
+    first_delta = next(event for event in events if '"delta"' in event)
+    assert '"delta": "settled before delivery"' in first_delta
     events.close()
 
     assert _permit_statuses() == ["abandoned"]

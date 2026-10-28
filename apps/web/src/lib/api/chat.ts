@@ -19,6 +19,7 @@ import type {
   CloudAttachmentItem,
   MemorySavedNotice,
 } from "../types";
+import { parseStreamActivity, type ChatStreamActivity } from "../streamActivity";
 
 export type ChatWireMessage = { role: ChatRole; content: string };
 
@@ -351,6 +352,17 @@ function segmentJoiner(baseText: string): string {
 
 const CANCELLED_RESPONSE_MESSAGE = "The response was cancelled before it finished.";
 
+/** Hands a well-formed activity event to the caller; anything else is dropped. */
+function reportActivity(raw: unknown, onActivity?: (activity: ChatStreamActivity) => void) {
+  const activity = parseStreamActivity(raw);
+  if (activity && onActivity) onActivity(activity);
+}
+
+/** A user stop ends the generation at once, keeping what already streamed. */
+function throwIfStopped(signal: AbortSignal | undefined, partialText: string) {
+  if (signal?.aborted) throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, partialText);
+}
+
 export async function sendChatStream(
   userId: string,
   options: {
@@ -362,6 +374,9 @@ export async function sendChatStream(
     /** Called when the API reports the prompt as stored with personal data
      * concealed, so the bubble can show the same text immediately. */
     onConcealedPrompt?: (concealed: string) => void;
+    /** What the API reports doing for this reply (context gathered,
+     * continuation rounds, screening, checks), plus reconnects made here. */
+    onActivity?: (activity: ChatStreamActivity) => void;
     /**
      * Already-streamed assistant text, used after a page reload or a dropped
      * connection so the next attempt continues instead of starting over.
@@ -380,12 +395,14 @@ export async function sendChatStream(
     signal,
     onDelta,
     onConcealedPrompt,
+    onActivity,
     initialText = "",
     resumeDelaysMs = STREAM_RESUME_BACKOFF_MS,
     stallTimeoutMs = STREAM_STALL_MS,
   } = options;
   let fullText = initialText;
   let stalledAttempts = 0;
+  let reconnects = 0;
 
   // A generation ends when the completion marker arrives, the provider
   // reports a non-retryable failure, or the user hits stop. Thinking time
@@ -412,18 +429,17 @@ export async function sendChatStream(
         },
         onDelta,
         onConcealedPrompt,
+        onActivity,
       });
     } catch (error) {
-      if (signal?.aborted) {
-        throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, fullText);
-      }
+      throwIfStopped(signal, fullText);
       if (!(error instanceof ChatRequestError) || !error.resumable) throw error;
       stalledAttempts = fullText.length > progressBefore ? 1 : stalledAttempts + 1;
       if (stalledAttempts > MAX_STREAM_RESUME_ATTEMPTS) throw error;
       await abortableDelay(resumeBackoff(stalledAttempts, resumeDelaysMs), signal);
-      if (signal?.aborted) {
-        throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, fullText);
-      }
+      throwIfStopped(signal, fullText);
+      reconnects += 1;
+      onActivity?.({ kind: "resume", attempt: reconnects });
     }
   }
 }
@@ -443,9 +459,11 @@ async function streamChatOnce(
     onText: (fullText: string) => void;
     onDelta?: (fullText: string) => void;
     onConcealedPrompt?: (concealed: string) => void;
+    onActivity?: (activity: ChatStreamActivity) => void;
   },
 ): Promise<ChatAssistantReply> {
-  const { model, messages, runtime, signal, baseText, stallTimeoutMs, onText, onDelta, onConcealedPrompt } = options;
+  const { model, messages, runtime, signal, baseText, stallTimeoutMs, onText, onDelta, onConcealedPrompt, onActivity } =
+    options;
   const controller = new AbortController();
   if (signal) {
     if (signal.aborted) controller.abort();
@@ -540,6 +558,7 @@ async function streamChatOnce(
           onConcealedPrompt?.(concealed);
         }
       }
+      reportActivity(record.activity, onActivity);
       if (typeof record.delta === "string" && record.delta) {
         fullText += joiner + record.delta;
         joiner = "";

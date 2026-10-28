@@ -1096,6 +1096,12 @@ export type KnowledgeLinkedSource = {
   auth_type?: string;
   refresh: boolean;
   awaiting_authorization?: boolean;
+  /** Web sources: 0 reads one page; 1-3 also read same-site pages it links to. */
+  crawl_depth?: number;
+  /** Web sources: pages read on the last fetch or Sync. */
+  page_count?: number;
+  /** Web sources: look for fresh pages on the site when a question needs them. */
+  live_lookup?: boolean;
 };
 
 export type KnowledgeIndexStatus = {
@@ -1125,6 +1131,27 @@ export type KnowledgeBase = {
   owner_group_id: string;
   owner_user_id?: string | null;
   enabled: boolean;
+  /** Read handwriting, stamps, and pictures with the workspace's vision model. */
+  vision_ocr?: boolean;
+  /** Extra metadata field names read as ethical walls (admins choose these). */
+  wall_fields?: string[];
+  /** Administrator wall overrides keyed by document id. */
+  document_walls?: Record<string, KnowledgeDocumentWallOverride>;
+};
+
+export type KnowledgeDocumentWallOverride = { mode: "restricted" | "open" | string; group_ids?: string[] };
+
+/**
+ * An ethical wall on one document: only members of `group_ids` can retrieve
+ * it, administrators included. An empty list is a closed wall (its metadata
+ * named no known group), which hides the document from everyone.
+ */
+export type KnowledgeDocumentWall = {
+  source: "metadata" | "manual";
+  group_ids: string[];
+  field?: string | null;
+  values?: string[];
+  unresolved?: string[];
 };
 
 export type KnowledgeDocument = {
@@ -1139,6 +1166,9 @@ export type KnowledgeDocument = {
   acl_group_ids: string[];
   updated_at: string;
   citation_required: boolean;
+  /** Properties the file or its source system carries (author, dates, labels, custom fields). */
+  metadata?: Record<string, string>;
+  wall?: KnowledgeDocumentWall | null;
 };
 
 export type KnowledgeSyncResult = {
