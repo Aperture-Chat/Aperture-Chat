@@ -19,7 +19,7 @@ Chat, documents, slide decks, agents, automations, and knowledge, on infrastruct
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-tour-light.png">
-  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, Agents, Automations, the knowledge Library, the document editor, the slide editor, and the Admin Console" width="100%">
+  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, a structure diagram, a colored code block, Agents, Automations, a knowledge base showing a file's properties and ethical wall, the document editor, the slide editor, and the Admin Console" width="100%">
 </picture>
 
 <sub>The current interface in a synthetic organization, answered by an open model (Qwen 3.5 9B) running locally.
@@ -79,11 +79,13 @@ policies appropriate for your organization's data.
 
 | Light | Dark |
 | --- | --- |
-| ![Chat with the Policy Assistant agent: a cited answer drawn from the uploaded travel policy](docs/images/chat-light.png) | ![Dark mode: a standup template an automation delivered to a new chat](docs/images/chat-dark.png) |
+| ![Chat with the Policy Assistant agent: a cited answer drawn from the uploaded travel policy](docs/images/chat-light.png) | ![Dark mode: a colored Python code block with Copy, Download, Preview, and Edit](docs/images/chat-dark.png) |
+| ![A structure diagram of the vendor approval workflow with its Copy, PNG, SVG, Code, Style, and Edit toolbar](docs/images/chat-diagram-light.png) | ![The same structure diagram in dark mode](docs/images/chat-diagram-dark.png) |
 
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer.
-- **Work traces.** Review the steps, sources, and provider-reported usage behind each reply. Availability depends on the provider.
+- **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
+- **Work traces.** Review the steps, sources, and provider-reported usage behind each reply, live while it streams. Availability depends on the provider.
 - **Response actions.** Copy, share, regenerate, rate, and transfer an answer to Drafts.
 - **Organized history.** Search conversations and keep them tidy with folders, pins, and archives. Read state follows your account across browsers.
 
@@ -97,13 +99,13 @@ policies appropriate for your organization's data.
 
 | Document editor | Slide editor |
 | --- | --- |
-| ![Document editor with a project brief, compact formatting toolbar, status bar, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor with the project brief converted into a deck, layout and theme choices, and slide thumbnails](docs/images/deck-dark.png) |
+| ![Document editor with a project brief, compact formatting toolbar, save status, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor in dark mode: the project brief rebuilt as a deck in the Editorial design, with a big-number slide, theme choices, and the slide panel](docs/images/deck-dark.png) |
 
 - **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
 - **Start from chat.** Ask for a document or a deck in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
-- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts, and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and themes, a slide sorter, snapping guides, and presenter view round it out.
+- **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts (including statement, big-number, and picture-with-bullets), and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and seven theme designs, a slide sorter, snapping guides, and presenter view round it out.
 - **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
 - **Export.** Download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`), or print a paginated PDF.
@@ -114,7 +116,7 @@ policies appropriate for your organization's data.
 
 | Document, dark | Deck, light |
 | --- | --- |
-| ![Document editor in dark mode](docs/images/drafts-dark.png) | ![Slide editor in light mode](docs/images/deck-light.png) |
+| ![Document editor in dark mode](docs/images/drafts-dark.png) | ![Slide editor in light mode with the deck in the Midnight design](docs/images/deck-light.png) |
 
 </details>
 
@@ -132,7 +134,7 @@ policies appropriate for your organization's data.
 
 | Knowledge | Tools |
 | --- | --- |
-| ![Company Policies knowledge base with its uploaded documents](docs/images/knowledge-dark.png) | ![Tools library showing reusable prompt templates](docs/images/tools-dark.png) |
+| ![Company Policies knowledge base: a Word file's own properties, its sensitivity label, and the ethical wall that limits it to Finance](docs/images/knowledge-dark.png) | ![Tools library showing reusable prompt templates](docs/images/tools-dark.png) |
 
 - **Knowledge bases** combine uploaded files, web pages, and API sources. Uploads are keyword-searchable as soon as their text is extracted, and semantic vectors are added in the background. Extraction keeps what plain text extraction drops: Word headers, footers, footnotes and comments, slide speaker notes, PDF reviewer comments and filled form fields, and email attachments. Each file's own properties (title, author, dates, custom fields, Microsoft Purview sensitivity labels, Box metadata, SharePoint columns, Google Drive properties) are kept, searchable, and shown beside every cited passage. Handwriting, stamps, and pictures are read by the workspace's image-capable model (for example Gemini Flash on OpenRouter or GPT-4.1 on Azure AI Foundry), with local OCR as the fallback; each knowledge base can keep pages on the server instead. Web pages can bring in the linked pages of the same site (robots.txt and sign-in pages respected, up to 100 pages), cite each exact page, and, when a question needs a page that was not read up front, look it up on that site live (its links, its own search box) and cite it. An **ethical wall** in a file's metadata (an "Ethical wall" or "Information barrier" field naming a group) limits that file to the group's members, administrators included. Embeddings run locally; media transcription uses a configured provider.
 - **Sync** re-fetches web pages and API sources and never touches uploaded files. API requests pass the outbound guards and refuse redirects.
