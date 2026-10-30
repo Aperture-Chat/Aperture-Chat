@@ -10,6 +10,7 @@ import {
   isDedicatedStewardDiagramLanguage,
   parseMarkdownBlocks,
   resolveDiagramBlock,
+  type MarkdownTable,
 } from "../lib/markdown";
 import { diagramTypeLabel, renderMermaidSvgResult, svgToPngBlob } from "../lib/mermaidRender";
 import { renderMermaidFallbackSvg } from "../lib/mermaidFallback";
@@ -19,6 +20,7 @@ import { StableLabel } from "./Primitives";
 import { renderConcealed } from "./ConcealedText";
 import { ArtifactCanvasBlade, downloadCode, useArtifactCanvas } from "./ArtifactCanvas";
 import { CodeLines } from "./CodeLines";
+import { MarkdownTableBlock } from "./MarkdownTable";
 import { CodeBlockEditor, CodeEditButtons, CodeSaveNotice } from "./CodeBlockEditor";
 import { useCodeAiEdit, useCodeEditAssist } from "./CodeAiEdit";
 import { useCodeBlockEditing, type CodeSave } from "./useCodeBlockEditing";
@@ -151,6 +153,7 @@ export function Markdown({
   deferDiagrams = false,
   onUpdateCode,
   onUpdateDiagram,
+  onUpdateTable,
   preview = false,
   previewPageLimit = true,
   streaming = false,
@@ -161,6 +164,9 @@ export function Markdown({
    * it. Without it, code edits stay on screen only. */
   onUpdateCode?: (previousSource: string, nextSource: string, occurrence: number) => boolean;
   onUpdateDiagram?: (previousSource: string, nextSource: string) => Promise<boolean> | boolean;
+  /** Saves an edited table; `occurrence` counts identical tables above it.
+   * Without it, tables are read-only. */
+  onUpdateTable?: (previous: MarkdownTable, next: MarkdownTable, occurrence: number) => boolean;
   preview?: boolean;
   previewPageLimit?: boolean;
   /** The reply is still being written, so its code blocks stay read-only. */
@@ -170,6 +176,8 @@ export function Markdown({
   const renderedBlocks = preview && previewPageLimit ? previewPageBlocks(blocks) : blocks;
   const headingHints = precedingHeadings(renderedBlocks);
   const occurrences = codeOccurrences(renderedBlocks);
+  const saveTable = tableSaver(renderedBlocks, { onUpdateTable, streaming, preview });
+  const renderCell = (text: string) => renderInline(text, preview);
   return (
     <div className="markdown">
       {renderedBlocks.map((block, index) => {
@@ -204,38 +212,7 @@ export function Markdown({
           return <MarkdownImage alt={block.alt} caption={block.title || block.alt} key={`${index}-${block.url}`} preview={preview} url={block.url} />;
         }
         if (block.kind === "table") {
-          return (
-            <div className="md-table-scroller" key={index}>
-              <table className="md-table">
-                <thead>
-                  <tr>
-                    {block.headers.map((header, cellIndex) => (
-                      <th
-                        key={cellIndex}
-                        style={block.aligns[cellIndex] ? { textAlign: block.aligns[cellIndex]! } : undefined}
-                      >
-                        {renderInline(header, preview)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {block.rows.map((row, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {block.headers.map((_, cellIndex) => (
-                        <td
-                          key={cellIndex}
-                          style={block.aligns[cellIndex] ? { textAlign: block.aligns[cellIndex]! } : undefined}
-                        >
-                          {renderInline(row[cellIndex] ?? "", preview)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
+          return <MarkdownTableBlock key={index} table={block} renderCell={renderCell} onSave={saveTable(index)} />;
         }
         if (block.kind === "rule") {
           return <hr key={index} className="md-rule" />;
@@ -345,14 +322,33 @@ function HermesArtifactCard({ kind, text }: { kind: string; text: string }) {
 
 /** For each code block, how many identical code blocks come before it, so a
  * save finds the right one when a reply repeats a snippet. */
-function codeOccurrences(blocks: MarkdownBlock[]): number[] {
+/** For each block, how many identical blocks came before it (keyed by `key`). */
+function occurrencesBy(blocks: MarkdownBlock[], key: (block: MarkdownBlock) => string | null): number[] {
   const seen = new Map<string, number>();
   return blocks.map((block) => {
-    if (block.kind !== "code") return 0;
-    const count = seen.get(block.text) ?? 0;
-    seen.set(block.text, count + 1);
+    const id = key(block);
+    if (id === null) return 0;
+    const count = seen.get(id) ?? 0;
+    seen.set(id, count + 1);
     return count;
   });
+}
+
+function codeOccurrences(blocks: MarkdownBlock[]): number[] {
+  return occurrencesBy(blocks, (block) => (block.kind === "code" ? block.text : null));
+}
+
+type TableSave = (previous: MarkdownTable, next: MarkdownTable) => boolean;
+
+/** Per block, how the table at that index saves an edit, or undefined while
+ * tables are read-only: no save handler, a streaming reply, or a preview. */
+function tableSaver(
+  blocks: MarkdownBlock[],
+  { onUpdateTable, streaming, preview }: { onUpdateTable?: (previous: MarkdownTable, next: MarkdownTable, occurrence: number) => boolean; streaming: boolean; preview: boolean },
+): (index: number) => TableSave | undefined {
+  if (!onUpdateTable || streaming || preview) return () => undefined;
+  const occurrences = occurrencesBy(blocks, (block) => (block.kind === "table" ? JSON.stringify([block.headers, block.rows]) : null));
+  return (index) => (previous, next) => onUpdateTable(previous, next, occurrences[index] ?? 0);
 }
 
 function MarkdownCodeBlock({

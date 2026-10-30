@@ -30,6 +30,13 @@ import { createPortal } from "react-dom";
 
 type Item = { value: string; label: string; disabled: boolean };
 
+/** Whether the select still sits (within 2px) where it was when its menu opened. */
+function stayedPut(select: HTMLElement | null, at: { top: number; left: number } | null): boolean {
+  if (!select || !at) return false;
+  const rect = select.getBoundingClientRect();
+  return Math.abs(rect.top - at.top) + Math.abs(rect.left - at.left) <= 2;
+}
+
 function textContent(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -74,6 +81,9 @@ export function SelectControl(props: SelectHTMLAttributes<HTMLSelectElement>) {
   const selectRef = useRef<HTMLSelectElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const typeahead = useRef<{ buffer: string; at: number }>({ buffer: "", at: 0 });
+  /* Where the select sat when the menu opened, so a scroll that leaves it in place
+   * (a container nudging the focused select into view) keeps the menu open. */
+  const anchorAt = useRef<{ top: number; left: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<MenuPlacement | null>(null);
   const [activeValue, setActiveValue] = useState<string>("");
@@ -86,6 +96,7 @@ export function SelectControl(props: SelectHTMLAttributes<HTMLSelectElement>) {
     const select = selectRef.current;
     if (!select) return;
     const rect = select.getBoundingClientRect();
+    anchorAt.current = { top: rect.top, left: rect.left };
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < MENU_MAX_HEIGHT + 16 && rect.top > spaceBelow;
     setPlacement({
@@ -104,17 +115,18 @@ export function SelectControl(props: SelectHTMLAttributes<HTMLSelectElement>) {
 
   useEffect(() => {
     if (!open) return;
-    const dismiss = (event: Event) => {
-      /* The menu scrolls internally (arrow keys, wheel) — only close when the
-       * page or a surrounding container scrolls away from the anchor. */
+    /* The menu scrolls internally (arrow keys, wheel) — only close when the
+     * page or a surrounding container scrolls the select away from the menu. */
+    const dismissOnScroll = (event: Event) => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      if (stayedPut(selectRef.current, anchorAt.current)) return;
       closeMenu();
     };
-    window.addEventListener("resize", dismiss);
-    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", dismissOnScroll, true);
     return () => {
-      window.removeEventListener("resize", dismiss);
-      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", dismissOnScroll, true);
     };
   }, [open, closeMenu]);
 

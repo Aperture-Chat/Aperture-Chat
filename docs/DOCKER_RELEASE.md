@@ -231,6 +231,55 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.16
+
+- **Spreadsheets in Drafts.** Drafts gains a third format beside Document and
+  Deck: an Excel-style workbook with multiple sheets, a formula engine with
+  hundreds of Excel functions, dynamic arrays, and structured table
+  references, tables with a style gallery, pivot tables, charts, conditional
+  formatting, data validation, filters, sorting, named ranges, notes, freeze
+  panes, find, and column and row autofit. Workbooks open from and export to
+  `.xlsx` and `.csv`, start from templates (budget, sales tracker, project
+  plan, invoice, expenses, loan, inventory), keep saved versions with a
+  side-by-side compare, and have a **Spreadsheet Assistant** that edits a
+  selection or builds whole tables and shows its work trace. Chat requests for
+  budgets, trackers, or tables offer **Build this as a spreadsheet?**.
+- **Real PDF export.** The Export panel's new **PDF document** builds the file
+  on the server: headless Chromium lays out the saved version offline with
+  JavaScript off, and the API finishes it as **PDF/A-2b** with embedded fonts,
+  searchable text, bookmarks from the headings, tagged structure, and a
+  linearized file. Exports run as jobs with progress and **Cancel**, sized for
+  documents of thousands of pages, and each one is audited as
+  `draft.pdf_exported`. **Print / Save as PDF** is now **Print**.
+- **Editable chat tables and Transfer.** Tables in chat replies can be edited
+  in place (Tab and Enter move between cells; add or delete rows and columns;
+  undo), and edits save into the reply. **Transfer to Drafts** asks for a Word
+  document, slide deck, or spreadsheet and suggests one; a spreadsheet
+  transfer puts each table on its own sheet with a frozen header.
+- **Live work trace.** A reply's work trace reveals its steps one at a time
+  while it runs, and the thinking row becomes **Thought for Ns** in place.
+- **Phones.** Every screen fits an iPhone: no sideways scrolling or page
+  zoom-out from wide tables or long links, larger touch targets, a fixed app
+  bar on console pages, no iOS zoom when a field takes focus, and the
+  selection toolbar below the highlight on touch screens.
+- **Clean titles and menus.** AI-written chat and draft titles no longer show
+  markdown, search snippets drop stray headings, and the remaining native
+  dropdowns use the platform's themed select.
+- One database migration, `20261029_0028`, adds the `spreadsheet` draft kind.
+  On SQLite it rebuilds the draft tables with foreign keys off so every
+  revision is kept; back up the data volume before upgrading as usual.
+- The API image now includes Chromium's headless shell and metric-compatible
+  fonts (Liberation, Carlito, Caladea, Noto Color Emoji) for the PDF export,
+  so it is larger. Very long PDF exports need roughly 2–4 GB of memory.
+  Optional settings: `APERTURE_DRAFT_PDF_EXPORT_SOURCE_MAX_MB`,
+  `APERTURE_DRAFT_PDF_EXPORT_CONCURRENCY`, `APERTURE_DRAFT_PDF_EXPORT_QUEUE_MAX`,
+  `APERTURE_DRAFT_PDF_EXPORT_TIMEOUT_SECONDS`, and
+  `APERTURE_DRAFT_PDF_EXPORT_RETENTION_MINUTES`. Upgrading from v0.5.16
+  changes both the API and web images.
+- API and web images publish as `v0.5.17-dev`, `v0.5.17-test`, and
+  `v0.5.17-main`. Stable `v0.5.17` and `latest` promote inspected test images
+  without rebuilding.
+
 ## New Since v0.5.15
 
 - **Knowledge that keeps what files carry.** Uploads keep their own

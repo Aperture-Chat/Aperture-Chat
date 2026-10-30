@@ -374,6 +374,7 @@ test("transferring a chat response after opening a saved draft does not reopen t
   await waitFor(() => expect(screen.getByLabelText("Document title")).toHaveValue("Policy memo"));
   fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
   fireEvent.click(await screen.findByRole("button", { name: "Transfer response to Drafts" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Word document/ }));
 
   const editor = await screen.findByRole("textbox", { name: "Document body" });
   expect(screen.getByLabelText("Document title")).toHaveValue("Research response");

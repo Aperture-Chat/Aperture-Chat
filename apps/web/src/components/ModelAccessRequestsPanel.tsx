@@ -8,6 +8,7 @@ import {
 } from "../lib/api";
 import type { AdminModelAccessRequestView, Group } from "../lib/types";
 import { Panel } from "./Primitives";
+import { SelectControl } from "./SelectControl";
 
 /**
  * Pending per-model access requests for the administrator's tenant. Approving
@@ -130,7 +131,7 @@ export function ModelAccessRequestsPanel({
                 <div className="model-access-request-actions">
                   <label className="compact-select-field">
                     <span>Grant through group</span>
-                    <select
+                    <SelectControl
                       aria-label={`Group for ${view.requester_display_name}`}
                       value={chosen}
                       onChange={(event) =>
@@ -145,7 +146,7 @@ export function ModelAccessRequestsPanel({
                           {view.eligible_group_ids.includes(group.id) ? "" : " (also grant model to group)"}
                         </option>
                       ))}
-                    </select>
+                    </SelectControl>
                   </label>
                   {widens && (
                     <small className="muted-copy">

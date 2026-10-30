@@ -797,3 +797,43 @@ def test_chat_folder_crud_is_owner_scoped_and_delete_unfiles_threads() -> None:
     session = client.get("/api/chat/sessions", headers=headers("user-jane")).json()[0]
     assert session["folder_id"] is None
     assert client.get("/api/chat/folders", headers=headers("user-jane")).json() == []
+
+
+def test_ai_title_generation_drops_markdown_the_model_was_told_not_to_send(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_response = client.put(
+        "/api/chat/threads/thread-jane-ai-title-markdown",
+        json={
+            "title": "New chat",
+            "model_id": "gpt-4o-mini",
+            "group_id": "group-litigation",
+            "messages": [
+                {"id": "msg-md-1", "role": "user", "content": "Summarize the open matters.", "createdAt": "10:00 AM", "status": "ok"},
+                {"id": "msg-md-2", "role": "assistant", "content": "## Engagement summary", "createdAt": "10:01 AM", "status": "ok"},
+            ],
+        },
+        headers=headers("user-jane"),
+    )
+    assert create_response.status_code == 200
+
+    class MarkdownGateway:
+        def complete(self, **_kwargs: object) -> dict[str, object]:
+            # Some models answer the naming prompt with the reply's own heading.
+            content = "## Engagement summary\n\nHere is a synthetic reply."
+            return {
+                "id": "gen-ai-title-markdown",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 9, "total_tokens": 49},
+            }
+
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_test_route)
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: MarkdownGateway())
+
+    response = client.post(
+        "/api/chat/threads/thread-jane-ai-title-markdown/title/generate",
+        headers=headers("user-jane"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Engagement summary"

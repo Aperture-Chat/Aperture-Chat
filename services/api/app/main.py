@@ -29,6 +29,7 @@ from app.routes import (
     data_protection,
     deck_templates,
     document_import,
+    draft_pdf_export,
     health,
     issue_reports,
     knowledge,
@@ -248,6 +249,7 @@ app.include_router(automations.router)
 app.include_router(matters.router)
 app.include_router(deck_templates.router)
 app.include_router(document_import.router)
+app.include_router(draft_pdf_export.router)
 app.include_router(search.router)
 app.include_router(review.router)
 app.include_router(scim.router)

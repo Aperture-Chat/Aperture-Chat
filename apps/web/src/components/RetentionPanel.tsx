@@ -21,6 +21,7 @@ import type {
 import { RetentionGovernance, RetentionTagActions } from "./RetentionGovernance";
 import { Markdown } from "./Markdown";
 import { Panel, Toggle } from "./Primitives";
+import { SelectControl } from "./SelectControl";
 
 type BatchAction = "delete" | "archive";
 
@@ -312,7 +313,7 @@ export function RetentionTagsView({
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <select
+        <SelectControl
           className="retention-namespace-select"
           aria-label="Filter by tag type"
           value={namespaceFilter}
@@ -325,7 +326,7 @@ export function RetentionTagsView({
               {namespace} tags
             </option>
           ))}
-        </select>
+        </SelectControl>
         <span className="retention-tags-count">
           {rows.length === allRows.length
             ? `${allRows.length} chat${allRows.length === 1 ? "" : "s"}`

@@ -36,6 +36,7 @@ from app.db.orm import (
     MatterRow,
 )
 from app.models.deck_document import DeckValidationError
+from app.models.sheet_document import SheetValidationError
 from app.repositories.search_index import remove_entry, write_entry
 from app.models.matters import (
     DRAFT_KINDS,
@@ -67,6 +68,8 @@ from app.models.matters import (
 
 
 T = TypeVar("T")
+# Caller-input errors carry safe messages and map to 4xx in routes.
+_CALLER_INPUT_ERRORS = (DeckValidationError, SheetValidationError, DraftContentTooLarge)
 
 
 class MatterRepositoryError(RuntimeError):
@@ -2017,8 +2020,7 @@ class MatterDraftRepository:
             return operation(session)
         except MatterRepositoryError:
             raise
-        except (DeckValidationError, DraftContentTooLarge):
-            # Caller-input errors carry safe messages and map to 4xx in routes.
+        except _CALLER_INPUT_ERRORS:
             raise
         except (TypeError, ValueError) as exc:
             raise MatterPersistenceUnavailable(
@@ -2041,7 +2043,7 @@ class MatterDraftRepository:
                         session.close()
             except MatterRepositoryError:
                 raise
-            except (DeckValidationError, DraftContentTooLarge):
+            except _CALLER_INPUT_ERRORS:
                 raise
             except (TypeError, ValueError) as exc:
                 raise MatterPersistenceUnavailable(

@@ -8,6 +8,7 @@ import {
   updateDiagramNodeText,
 } from "../lib/diagramEdit";
 import { renderMermaidSvg } from "../lib/mermaidRender";
+import { SelectControl } from "./SelectControl";
 
 function isDarkTheme() {
   return document.documentElement.classList.contains("theme-dark");
@@ -199,7 +200,7 @@ export function DiagramEditorModal({
                   </button>
                   <label>
                     connected from
-                    <select
+                    <SelectControl
                       aria-label="Connect the new box from"
                       value={connectFromId}
                       onChange={(event) => setConnectFromId(event.target.value)}
@@ -210,7 +211,7 @@ export function DiagramEditorModal({
                           {node.title || node.id}
                         </option>
                       ))}
-                    </select>
+                    </SelectControl>
                   </label>
                 </div>
               </>

@@ -1,6 +1,7 @@
 /**
- * Chat → Drafts handoff. When a chat message asks for a whole document or a
- * slide deck, chat holds the message and offers to build it in Drafts. This
+ * Chat → Drafts handoff. When a chat message asks for a whole document, a
+ * slide deck, or a spreadsheet, chat holds the message and offers to build it
+ * in Drafts. This
  * module decides which offer (if any) applies and assembles what Drafts needs
  * to start the same request without the user retyping it.
  *
@@ -14,7 +15,7 @@ import { splitAssistantThinking } from "./assistantThinking";
 import { messageWithActiveResponseVersion } from "./chatStore";
 import type { ChatAttachment, ChatMessage } from "./types";
 
-export type DraftHandoffKind = "document" | "deck";
+export type DraftHandoffKind = "document" | "deck" | "spreadsheet";
 
 export type DraftHandoffAttachment = {
   attachmentId: string;
@@ -53,6 +54,13 @@ const DECK_PHRASES = [
   /\bpower[\s-]?points?\b/g,
   /\bpptx? (?:files?|decks?)\b/g,
 ];
+const SHEET_PHRASES = [
+  /\bgoogle sheets?\b/g,
+  /\bspread[\s-]?sheets?\b/g,
+  /\bpivot[\s-]?tables?\b/g,
+  /\bexcel (?:work[\s-]?books?|files?|sheets?|documents?|docs?)\b/g,
+  /\bxlsx(?: files?)?\b/g,
+];
 const DOC_PHRASES = [
   /\bstatements? of (?:work|purpose)\b/g,
   /\bscopes? of work\b/g,
@@ -80,6 +88,35 @@ const DOC_PHRASES = [
 ];
 const DECK_TOKEN = "__deck__";
 const DOC_TOKEN = "__doc__";
+const SHEET_TOKEN = "__sheet__";
+
+/** Words that name a spreadsheet as the deliverable. */
+const SHEET_HEADS = new Set([SHEET_TOKEN, "excel", "xlsx"]);
+/** "an Excel tracker", "a Google Sheets budget": these nouns become a
+ * spreadsheet when a spreadsheet word qualifies them. "An Excel formula" or
+ * "an Excel chart" stays in chat. */
+const SHEET_QUALIFIED_HEADS = new Set([
+  "tracker", "trackers", "template", "templates", "model", "models", "budget", "budgets", "dashboard",
+  "dashboards", "calculator", "calculators", "planner", "planners", "table", "tables", "log", "logs",
+  "schedule", "schedules", "sheet", "sheets", "database", "list", "lists", "ledger", "roster", "inventory",
+]);
+
+/** Tabular deliverables: "a state-by-state matrix", "a table comparing the
+ * vendors", "a habit tracker". They are offered as a spreadsheet only when
+ * nothing in the request names a document or a deck, so "a report with the
+ * results in a table" stays a document. */
+const TABLE_HEADS = new Set(["table", "tables", "matrix", "matrices", "tracker", "trackers", "crosswalk", "crosswalks"]);
+/** "A markdown table" asks for chat formatting, not a workbook. */
+const TABLE_CHAT_FORMATS = new Set(["markdown", "ascii", "text", "plaintext", "plain-text", "inline"]);
+/** "A coffee table" is furniture. */
+const TABLE_FURNITURE = new Set([
+  "coffee", "dining", "kitchen", "picnic", "side", "end", "bedside", "nightstand", "folding", "pool", "ping-pong",
+  "poker", "card", "patio", "farmhouse", "drafting", "console", "banquet", "changing", "water", "wooden", "wood",
+]);
+/** Imperatives that ask for a format rather than name an object: "List the
+ * states in a table", "Compare the plans in a matrix". Only at a clause's start. */
+const FORMAT_OPENER_VERBS = new Set(["list", "compare", "tabulate", "rank", "break", "lay", "map", "sort", "group"]);
+const FORMAT_CONNECTORS = new Set(["in", "into", "as"]);
 
 const DECK_HEADS = new Set([
   DECK_TOKEN, "presentation", "presentations", "slides", "slide", "ppt", "pptx", "slideshow", "slideshows",
@@ -121,13 +158,14 @@ const SHORT_HEADS = new Set([
   "lyrics", "joke", "jokes", "toast", "quote", "quotes", "sentence", "sentences", "paragraph", "paragraphs",
   "line", "lines", "list", "lists", "name", "names", "question", "questions", "answer", "answers", "survey",
   "quiz", "description", "descriptions", "summary", "summaries", "recap", "overview", "tldr", "outline", "outlines", "skeleton", "ad", "ads", "team", "player", "players", "lineup", "roster", "pick",
-  "picks", "round", "qb", "quarterback",
+  "picks", "round", "qb", "quarterback", "toc",
 ]);
-/** Code and spreadsheets are not Drafts documents, whatever they are called. */
+/** Code is not a Drafts deliverable, whatever it is called. Spreadsheets are
+ * (the spreadsheet editor), but VBA macros and scripts that touch them are code. */
 const CODE_WORDS = new Set([
   "python", "javascript", "js", "typescript", "java", "kotlin", "swift", "golang", "rust", "ruby", "php",
   "perl", "bash", "shell", "powershell", "sql", "html", "css", "json", "yaml", "xml", "csv", "latex", "regex",
-  "api", "react", "vue", "angular", "node", "nodejs", "excel", "spreadsheet", "spreadsheets", "sheets", "vba",
+  "api", "react", "vue", "angular", "node", "nodejs", "vba",
   "macro", "jupyter", "code", "script", "scripts", "function", "functions", "program", "app", "website",
   "webpage", "component", "cli", "sdk", "generator", "parser", "bot", "chatbot",
 ]);
@@ -155,6 +193,7 @@ const SOFT_VERBS = new Set(["make", "build", "design", "develop", "assemble"]);
 const TRANSFORM_VERBS = new Set([
   "turn", "convert", "transform", "rewrite", "reformat", "restructure", "repurpose", "recast", "adapt",
   "change", "organize", "summarize", "summarise", "condense", "distill", "compile", "present", "put", "redo",
+  "export", "move", "copy",
   "format", "expand", "write", "draft", "make", "create", "build", "develop",
 ]);
 const TRANSFORM_CONNECTORS = new Set(["into", "to", "as", "in"]);
@@ -208,7 +247,7 @@ const SCAN_TAIL_CHARS = 500;
 const BARE_REQUEST_MAX_CHARS = 240;
 
 type Verb = { word: string; start: number; soft: boolean; transformOnly: boolean };
-type HeadClass = DraftHandoffKind | "short" | "inherit" | "code" | "unknown" | null;
+type HeadClass = DraftHandoffKind | "table" | "short" | "inherit" | "code" | "unknown" | null;
 
 /** Which Drafts editor fits this chat message, or null to answer it in chat. */
 export function detectDraftHandoff(input: string): DraftHandoffKind | null {
@@ -245,8 +284,10 @@ function collapsePhrases(value: string) {
   let next = value;
   // Spaced so "10-slide deck" still yields a separate head token.
   for (const pattern of DECK_PHRASES) next = next.replace(pattern, ` ${DECK_TOKEN} `);
+  for (const pattern of SHEET_PHRASES) next = next.replace(pattern, ` ${SHEET_TOKEN} `);
   for (const pattern of DOC_PHRASES) next = next.replace(pattern, ` ${DOC_TOKEN} `);
-  return next;
+  // A table of contents is part of a document, not a table to build.
+  return next.replace(/\btables? of contents\b/g, " toc ");
 }
 
 function tokenize(clause: string) {
@@ -261,22 +302,17 @@ function clauseKind(tokens: string[], isQuestion: boolean, allowBare: boolean): 
     return null;
   }
 
+  let table = false;
   for (let index = first; index < tokens.length; index += 1) {
-    const verb = verbAt(tokens, index);
+    const verb = verbAt(tokens, index) ?? formatOpenerVerb(tokens, index, first);
     if (!verb || blockedBefore(tokens, index, first)) continue;
-    const transformed = TRANSFORM_VERBS.has(verb.word) ? transformKind(tokens, verb.start) : null;
-    if (transformed) return transformed;
-    if (verb.transformOnly) continue;
-    const { phrase, stop, stopIndex } = phraseAfter(tokens, verb.start);
-    let object = phrase;
-    if (verb.soft && object.length && EXISTING_OBJECTS.has(object[0])) {
-      // "make this a slide deck" names a new artifact; "make the essay longer" edits one.
-      if (!(["it", "this", "that"].includes(object[0]) && ["a", "an"].includes(object[1] ?? ""))) continue;
-      object = object.slice(1);
-    }
-    const kind = objectKind(object, stop, tokens, stopIndex, verb.word === "draft");
+    table ||= tableRequested(tokens, verb);
+    const kind = requestedKind(tokens, verb);
     if (kind) return kind;
   }
+  // Checked after every verb had its say: a document or deck named anywhere
+  // in the clause wins over a table it mentions.
+  if (table) return "spreadsheet";
 
   if (allowBare) {
     // "Essay on the French Revolution", "PowerPoint about solar energy".
@@ -285,8 +321,73 @@ function clauseKind(tokens: string[], isQuestion: boolean, allowBare: boolean): 
       const kind = objectKind(phrase, stop, tokens, stopIndex, false);
       if (kind) return kind;
     }
+    // "Spreadsheet of the top 50 US cities", "Matrix of state taxes": a table of something.
+    if (
+      stop === "of" &&
+      phrase.length <= 4 &&
+      (objectKind(phrase, stop, tokens, stopIndex, false) === "spreadsheet" || isTablePhrase(phrase))
+    ) {
+      return "spreadsheet";
+    }
   }
   return null;
+}
+
+/** The document, deck, or spreadsheet a request verb asks for, if any. */
+function requestedKind(tokens: string[], verb: Verb): DraftHandoffKind | null {
+  const transformed = TRANSFORM_VERBS.has(verb.word) ? transformKind(tokens, verb.start) : null;
+  if (transformed) return transformed;
+  if (verb.transformOnly) return null;
+  const { phrase, stop, stopIndex } = phraseAfter(tokens, verb.start);
+  const object = newObject(verb, phrase);
+  return object ? objectKind(object, stop, tokens, stopIndex, verb.word === "draft") : null;
+}
+
+/** The verb's object when it names something new. "make this a slide deck"
+ * names a new artifact; "make the essay longer" edits one (null). */
+function newObject(verb: Verb, phrase: string[]): string[] | null {
+  if (!(verb.soft && phrase.length && EXISTING_OBJECTS.has(phrase[0]))) return phrase;
+  if (!(["it", "this", "that"].includes(phrase[0]) && ["a", "an"].includes(phrase[1] ?? ""))) return null;
+  return phrase.slice(1);
+}
+
+/** "List the states in a table": a format imperative at the start of a clause. */
+function formatOpenerVerb(tokens: string[], index: number, first: number): Verb | null {
+  if (index !== first || !FORMAT_OPENER_VERBS.has(tokens[index])) return null;
+  return { word: tokens[index], start: index + 1, soft: false, transformOnly: true };
+}
+
+/** The verb asks for a table: as its object ("create a matrix of …") or as
+ * the shape of the answer ("show me the cities in a table"). */
+function tableRequested(tokens: string[], verb: Verb): boolean {
+  if (!verb.transformOnly) {
+    const object = newObject(verb, phraseAfter(tokens, verb.start).phrase);
+    if (object && isTablePhrase(object)) return true;
+  }
+  for (let index = verb.start; index < tokens.length; index += 1) {
+    if (tokens[index] === ",") return false;
+    if (FORMAT_CONNECTORS.has(tokens[index]) && isTablePhrase(phraseAfter(tokens, index + 1).phrase)) return true;
+  }
+  return false;
+}
+
+function isTablePhrase(phrase: string[]): boolean {
+  const conjuncts: string[][] = [[]];
+  for (const token of phrase) {
+    if (CONJUNCTIONS.has(token)) conjuncts.push([]);
+    else conjuncts[conjuncts.length - 1].push(token);
+  }
+  return conjuncts.some((words) => headClass(words, null, [], 0) === "table");
+}
+
+/** A spreadsheet word ("Excel", "an Excel tracker") or a table head ("a
+ * matrix") with the words before it; null for any other head. */
+function tabularClass(head: string, modifiers: string[]): HeadClass {
+  if (SHEET_HEADS.has(head)) return "spreadsheet";
+  if (SHEET_QUALIFIED_HEADS.has(head) && modifiers.some((word) => SHEET_HEADS.has(word))) return "spreadsheet";
+  if (!TABLE_HEADS.has(head)) return null;
+  if (modifiers.some((word) => TABLE_CHAT_FORMATS.has(word))) return "short";
+  return TABLE_FURNITURE.has(modifiers.at(-1) ?? "") ? "unknown" : "table";
 }
 
 /** "Is it possible to…", "Are you able to…", "Do you mind…" ask for the work, not about it. */
@@ -413,10 +514,14 @@ function objectKind(
     headClass(words, position === conjuncts.length - 1 ? stop : null, tokens, stopIndex),
   );
   if (classes.includes("code")) return null;
-  const found = classes.find((value): value is DraftHandoffKind => value === "document" || value === "deck");
+  const found = classes.find((value): value is DraftHandoffKind => value === "document" || value === "deck" || value === "spreadsheet");
+  const after = tokens.slice(stopIndex + 1, stopIndex + 4);
+  // "a budget in Excel", "a workbook in Google Sheets": the tool names the deliverable.
+  if (stop && ["in", "using", "as", "via"].includes(stop) && after.some((word) => SHEET_HEADS.has(word))) {
+    return "spreadsheet";
+  }
   if (found) {
     // "a report in Python", "slides as HTML": the deliverable is code.
-    const after = tokens.slice(stopIndex + 1, stopIndex + 4);
     if (stop && ["in", "using", "with", "as", "via"].includes(stop) && after.some((word) => CODE_WORDS.has(word))) {
       return null;
     }
@@ -427,7 +532,7 @@ function objectKind(
     // "a first draft of my essay", "a template for a board presentation".
     const { phrase: owner, stop: ownerStop, stopIndex: ownerStopIndex } = phraseAfter(tokens, stopIndex + 1);
     const ownerClass = headClass(owner, ownerStop, tokens, ownerStopIndex);
-    if (ownerClass === "document" || ownerClass === "deck") return ownerClass;
+    if (ownerClass === "document" || ownerClass === "deck" || ownerClass === "spreadsheet") return ownerClass;
   }
   if (draftVerb && classes.every((value) => value === "unknown" || value === "inherit")) return "document";
   return null;
@@ -449,6 +554,8 @@ function headClass(words: string[], stop: string | null, tokens: string[], stopI
   }
   const head = trimmed[headIndex];
   const modifier = trimmed[headIndex - 1] ?? "";
+  const tabular = tabularClass(head, trimmed.slice(0, headIndex));
+  if (tabular) return tabular;
   if (DECK_HEADS.has(head) || /^\d+-slides?$/.test(head)) return "deck";
   if (head === "deck" || head === "decks") {
     if (DECK_QUALIFIERS.has(modifier) || /^\d+-slides?$/.test(modifier)) return "deck";

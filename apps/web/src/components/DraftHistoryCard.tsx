@@ -1,12 +1,12 @@
 import { createPortal } from "react-dom";
 import { useRef, useState } from "react";
-import { Archive, ArchiveRestore, FileText, LoaderCircle, Presentation, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, FileText, LoaderCircle, Presentation, Sheet, Trash2 } from "lucide-react";
 
 type Props = {
   title: string; summary: string; source: string; time: string; status: string;
   archived: boolean; disabled: boolean; opening?: boolean; archiveDisabled?: boolean;
   /** Decks and documents can share a title; the icon tells them apart. */
-  kind?: "document" | "deck";
+  kind?: "document" | "deck" | "spreadsheet";
   onRestore: () => void; onArchive: () => void; onDelete: () => void;
   loadPreview: () => Promise<string>;
 };
@@ -39,6 +39,8 @@ export function DraftHistoryCard(props: Props) {
             <LoaderCircle className="is-spinning" size={15} />
           ) : props.kind === "deck" ? (
             <Presentation size={15} />
+          ) : props.kind === "spreadsheet" ? (
+            <Sheet size={15} />
           ) : (
             <FileText size={15} />
           )}
