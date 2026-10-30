@@ -891,13 +891,37 @@ def _ai_title_payload_text(payload: object) -> str:
     return ""
 
 
+# A model can ignore "no markdown" and answer "## Engagement summary" or
+# "**Title:** NDA checklist"; the name is shown as plain text everywhere, so
+# the syntax is removed rather than displayed.
+_TITLE_BLOCK_MARKER = re.compile(r"^(?:#{1,6}(?:\s+|$)|>\s*|[-*+](?:\s+|$)|\d+[.)](?:\s+|$))")
+_TITLE_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+_TITLE_PAIRED_MARK = re.compile(r"(\*\*|__|~~|`)(\S(?:.*?\S)?)\1")
+_TITLE_SINGLE_MARK = re.compile(r"(?<![\w*])([*_])(\S(?:.*?\S)?)\1(?![\w*])")
+_TITLE_LABEL = re.compile(r"^(?:chat\s+)?(?:title|name)\s*:\s*", re.IGNORECASE)
+
+
+def _strip_title_markdown(title: str) -> str:
+    previous = None
+    while previous != title:
+        previous = title
+        title = _TITLE_BLOCK_MARKER.sub("", title).strip()
+    title = _TITLE_LINK.sub(r"\1", title)
+    title = _TITLE_PAIRED_MARK.sub(r"\2", title)
+    title = _TITLE_SINGLE_MARK.sub(r"\2", title)
+    return _TITLE_LABEL.sub("", title)
+
+
+def _clean_title_line(line: str) -> str:
+    title = _strip_title_markdown(line.strip().strip("\"'“”‘’")).strip("\"'“”‘’`")
+    return re.sub(r"\s+", " ", title).strip().rstrip(".。;:,!")
+
+
 def _clean_ai_title(raw: str) -> str:
-    lines = [line.strip() for line in raw.strip().splitlines() if line.strip()]
-    title = lines[0] if lines else ""
-    title = title.strip("\"'“”‘’`")
-    title = re.sub(r"\s+", " ", title).strip()
-    title = title.rstrip(".。;:,!")
-    return title[:160].strip()
+    # The first line that still has words once its markdown is gone; a bare
+    # "##" line (the heading on its own line) is skipped.
+    titles = [title for title in map(_clean_title_line, raw.splitlines()) if title]
+    return titles[0][:160].strip() if titles else ""
 
 
 @router.post("/api/chat/threads/{thread_id}/title/generate")

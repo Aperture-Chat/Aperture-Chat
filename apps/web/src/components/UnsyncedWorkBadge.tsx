@@ -247,7 +247,7 @@ export function UnsyncedWorkBadge({
                     {summary.drafts.map((draft) => (
                       <li key={draft.id}>
                         {draft.title || "Untitled draft"}
-                        {draft.kind === "deck" ? " (deck)" : ""}
+                        {draft.kind === "deck" ? " (deck)" : draft.kind === "spreadsheet" ? " (spreadsheet)" : ""}
                         {draft.serverId ? " — local changes pending" : " — never uploaded"}
                       </li>
                     ))}

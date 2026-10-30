@@ -1088,6 +1088,26 @@ def test_draft_rules_never_become_user_requirements():
     assert extract_draft_directives("You are a presentation writer producing a slide deck as structured JSON. Include image slides.") == []
 
 
+def test_spreadsheet_assistant_prompts_skip_requirement_mining():
+    """The Drafts spreadsheet assistant replies with workbook operations as
+    JSON. Its operation reference names tables, charts, and images; mining it
+    asked for a markdown table and sent every reply through prose revision."""
+    from app.core.directives import extract_draft_directives
+
+    prompt = (
+        "You are the spreadsheet assistant inside Aperture Drafts, an Excel-compatible workbook editor. "
+        "You change the workbook by returning operations; the editor applies them, recalculates, and shows the user a preview to accept.\n"
+        'Reply with only a JSON object: {"message": "...", "ops": [...]}.\n'
+        '- {"op":"table","range":"A1:D20","name":"Sales"}  format a range as a table with banded rows\n'
+        '- {"op":"chart","type":"line","range":"A1:C13"}  add a chart; cite sources in cell notes\n'
+        "Do not insert images.\n\n"
+        "User request: Build a regional sales tracker with a summary table and a chart"
+    )
+    assert extract_draft_directives(prompt) == []
+    # A document draft that merely mentions spreadsheets is still mined.
+    assert "table" in [d.id for d in extract_draft_directives("User request: Compare spreadsheet tools in a table\n\nDraft type: Memo")]
+
+
 def test_every_deck_editor_prompt_skips_requirement_mining():
     """The deck editor's prompts quote its JSON contract ("image", "bullets",
     "a 10 page slide deck"); mining them would inject long-document and

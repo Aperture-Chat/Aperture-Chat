@@ -155,7 +155,7 @@ function loadImageElement(src: string, useCors: boolean): Promise<LoadedExportIm
 /** Last-resort image fetch: some hosts reject CORS image loads but allow a
  * fetch; converting to a data URL keeps the canvas readable so the picture
  * still embeds in the export instead of silently dropping. */
-async function fetchImageAsDataUrl(src: string): Promise<string | null> {
+export async function fetchImageAsDataUrl(src: string): Promise<string | null> {
   if (src.startsWith("data:") || typeof fetch !== "function") return null;
   try {
     const controller = new AbortController();

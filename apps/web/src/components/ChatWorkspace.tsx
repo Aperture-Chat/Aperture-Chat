@@ -32,6 +32,7 @@ import {
   Play,
   Plug,
   Presentation,
+  Sheet as SheetIcon,
   Quote,
   RefreshCw,
   ScrollText,
@@ -135,6 +136,9 @@ import { DictationControl } from "./DictationControl";
 import { isMediaUploadFile } from "../lib/mediaUploads";
 import { Markdown } from "./Markdown";
 import { WorkTrace, WorkTraceStreamStatus } from "./WorkTrace";
+import { TransferDraftMenu } from "./TransferDraftMenu";
+import type { DraftTransferFormat } from "../lib/draftTransfer";
+import type { MarkdownTable } from "../lib/markdown";
 import { ArtifactCanvasProvider } from "./ArtifactCanvas";
 import { CodeEditAssistProvider, type CodeEditAssist } from "./CodeAiEdit";
 import { renderConcealed } from "./ConcealedText";
@@ -1045,7 +1049,7 @@ export function ChatWorkspace({
   brand?: BrandAssets | null;
   requestedAgentId?: string | null;
   onRequestedAgentConsumed?: () => void;
-  onTransferToDraft?: (message: ChatMessage) => void;
+  onTransferToDraft?: (message: ChatMessage, format: DraftTransferFormat) => void;
   /** Starts a held document or deck request in Drafts instead of chat. */
   onSendToDrafts?: (request: DraftHandoffRequest) => void;
   /** Opens "Models in your organization" (why a model is not listed). */
@@ -3368,10 +3372,11 @@ export function ChatWorkspace({
 
           {showConversation && (
             <div className="message-list">
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <MessageBubble
                   key={message.id}
                   message={message}
+                  transferRequest={message.role === "assistant" ? requestBefore(messages, index) : null}
                   userId={data.me.id}
                   userName={data.me.display_name}
                   userAvatarUrl={data.me.avatar_url}
@@ -3389,6 +3394,9 @@ export function ChatWorkspace({
                   }
                   onUpdateCode={(targetMessage, previousSource, nextSource, occurrence) =>
                     chat.updateAssistantCode(targetMessage.id, previousSource, nextSource, occurrence)
+                  }
+                  onUpdateTable={(targetMessage, previous, next, occurrence) =>
+                    chat.updateAssistantTable(targetMessage.id, previous, next, occurrence)
                   }
                   onStagePromptInNewSession={stagePromptInNewChat}
                   isEditingPrompt={editingPromptId === message.id}
@@ -3564,6 +3572,49 @@ export function ChatWorkspace({
 
 /** The inline "Drafts or chat?" offer that answers a held document or deck
  * request. It reads as the assistant's reply, not a dialog. */
+/** What the handoff card says for each Drafts editor. */
+const HANDOFF_COPY: Record<DraftHandoffKind, {
+  announce: string;
+  heading: string;
+  detail: string;
+  open: string;
+  opening: string;
+  openTooltip: string;
+  chat: string;
+  chatTooltip: string;
+}> = {
+  document: {
+    announce: "This looks like a document. Choose Drafts or chat.",
+    heading: "Write this in Drafts?",
+    detail: "Drafts writes it as a full document you can edit, format, and export to Word or PDF. Or keep it here in chat.",
+    open: "Write in Drafts",
+    opening: "Opening Drafts…",
+    openTooltip: "Open Drafts and start writing this document",
+    chat: "Continue in chat",
+    chatTooltip: "Send this to the assistant here in chat",
+  },
+  deck: {
+    announce: "This looks like a slide deck. Choose the deck editor in Drafts or chat.",
+    heading: "Build this as a slide deck?",
+    detail: "The deck editor in Drafts builds real slides with layouts, themes, and speaker notes that export to PowerPoint. Or draft the slide content here in chat.",
+    open: "Build in deck editor",
+    opening: "Opening the deck editor…",
+    openTooltip: "Open the deck editor in Drafts and start building these slides",
+    chat: "Draft slides in chat",
+    chatTooltip: "Have the assistant write out the slides here in chat",
+  },
+  spreadsheet: {
+    announce: "This looks like a spreadsheet. Choose the spreadsheet editor in Drafts or chat.",
+    heading: "Build this as a spreadsheet?",
+    detail: "The spreadsheet editor in Drafts builds a real workbook with formulas, tables, charts, and pivot tables that exports to Excel. Or keep it here in chat.",
+    open: "Build in spreadsheet editor",
+    opening: "Opening the spreadsheet editor…",
+    openTooltip: "Open the spreadsheet editor in Drafts and start building this workbook",
+    chat: "Continue in chat",
+    chatTooltip: "Have the assistant answer here in chat instead",
+  },
+};
+
 function DraftHandoffCard({
   handoff,
   brandName,
@@ -3588,8 +3639,10 @@ function DraftHandoffCard({
   const headingId = useId();
   const detailId = useId();
   const deck = handoff.kind === "deck";
+  const sheet = handoff.kind === "spreadsheet";
+  const copy = HANDOFF_COPY[handoff.kind];
   const busy = handoff.phase !== "choosing";
-  const KindIcon = deck ? Presentation : FileText;
+  const KindIcon = deck ? Presentation : sheet ? SheetIcon : FileText;
   const fileCount = handoff.attachments.length;
   const carried = [
     fileCount ? `${fileCount === 1 ? "Your file" : `Your ${fileCount} files`}` : "",
@@ -3608,21 +3661,15 @@ function DraftHandoffCard({
         )}
         <section className="draft-handoff-card" aria-labelledby={headingId} aria-describedby={detailId}>
           <span className="sr-only" role="status">
-            {deck
-              ? "This looks like a slide deck. Choose the deck editor in Drafts or chat."
-              : "This looks like a document. Choose Drafts or chat."}
+            {copy.announce}
           </span>
           <div className="draft-handoff-head">
             <span className="draft-handoff-icon" aria-hidden="true">
               <KindIcon size={20} />
             </span>
             <div className="draft-handoff-copy">
-              <h3 id={headingId}>{deck ? "Build this as a slide deck?" : "Write this in Drafts?"}</h3>
-              <p id={detailId}>
-                {deck
-                  ? "The deck editor in Drafts builds real slides with layouts, themes, and speaker notes that export to PowerPoint. Or draft the slide content here in chat."
-                  : "Drafts writes it as a full document you can edit, format, and export to Word or PDF. Or keep it here in chat."}
-              </p>
+              <h3 id={headingId}>{copy.heading}</h3>
+              <p id={detailId}>{copy.detail}</p>
             </div>
           </div>
           <div className="draft-handoff-actions">
@@ -3631,14 +3678,12 @@ function DraftHandoffCard({
               className="draft-handoff-choice is-primary"
               disabled={busy}
               aria-busy={handoff.phase === "drafts"}
-              data-tooltip={deck ? "Open the deck editor in Drafts and start building these slides" : "Open Drafts and start writing this document"}
+              data-tooltip={copy.openTooltip}
               onClick={onOpenDrafts}
             >
               {handoff.phase === "drafts" ? <Loader2 size={17} className="is-spinning" aria-hidden="true" /> : <KindIcon size={17} aria-hidden="true" />}
               <span>
-                {handoff.phase === "drafts"
-                  ? deck ? "Opening the deck editor…" : "Opening Drafts…"
-                  : deck ? "Build in deck editor" : "Write in Drafts"}
+                {handoff.phase === "drafts" ? copy.opening : copy.open}
               </span>
             </button>
             <button
@@ -3646,11 +3691,11 @@ function DraftHandoffCard({
               className="draft-handoff-choice"
               disabled={busy || chatDisabled}
               aria-busy={handoff.phase === "chat"}
-              data-tooltip={deck ? "Have the assistant write out the slides here in chat" : "Send this to the assistant here in chat"}
+              data-tooltip={copy.chatTooltip}
               onClick={onContinueInChat}
             >
               {handoff.phase === "chat" ? <Loader2 size={17} className="is-spinning" aria-hidden="true" /> : <MessageSquare size={17} aria-hidden="true" />}
-              <span>{deck ? "Draft slides in chat" : "Continue in chat"}</span>
+              <span>{copy.chat}</span>
             </button>
             <button
               type="button"
@@ -4193,6 +4238,8 @@ function MessageBubble({
   onSelectResponseVersion,
   onUpdateDiagram,
   onUpdateCode,
+  onUpdateTable,
+  transferRequest,
   onStagePromptInNewSession,
   isEditingPrompt,
   promptEditDisabled,
@@ -4213,13 +4260,16 @@ function MessageBubble({
   userAvatarUrl?: string | null;
   brandName: string;
   brandIconSources: readonly string[];
-  onTransferToDraft?: (message: ChatMessage) => void;
+  onTransferToDraft?: (message: ChatMessage, format: DraftTransferFormat) => void;
   onBranchFromMessage?: (message: ChatMessage) => ChatThread | null;
   onRegenerateResponse?: (message: ChatMessage) => boolean;
   onStopResponse?: () => void;
   onSelectResponseVersion?: (message: ChatMessage, versionIndex: number) => boolean;
   onUpdateDiagram?: (message: ChatMessage, previousSource: string, nextSource: string) => boolean;
   onUpdateCode?: (message: ChatMessage, previousSource: string, nextSource: string, occurrence: number) => boolean;
+  onUpdateTable?: (message: ChatMessage, previous: MarkdownTable, next: MarkdownTable, occurrence: number) => boolean;
+  /** The user message this reply answered; it can name the Drafts format. */
+  transferRequest?: string | null;
   onStagePromptInNewSession?: (message: ChatMessage) => boolean;
   isEditingPrompt?: boolean;
   promptEditDisabled?: boolean;
@@ -4251,6 +4301,7 @@ function MessageBubble({
     !isUser && displayMessage.status === "pending" && !/^\s*<(think|thinking)>/i.test(assistantContent.visibleContent)
       ? assistantContent.visibleContent
       : "";
+  const traceState = replyTraceState(displayMessage, assistantContent.thinkingTraces);
   // A failed reply that streamed real text keeps that text as the reply and
   // shows the failure as a compact note instead of one giant error block.
   const failureNotice =
@@ -4370,6 +4421,18 @@ function MessageBubble({
           </time>
         </div>
 
+        {/* One trace element for the whole reply: it sits outside the
+            pending/finished branches so the steps already on screen (and the
+            reader's fold choice) carry over when the reply finishes. */}
+        {traceState && (
+          <WorkTrace
+            message={displayMessage}
+            brandName={brandName}
+            state={traceState}
+            onStop={traceState === "pending" ? onStopResponse : undefined}
+            thinkingTraces={traceState === "complete" ? assistantContent.thinkingTraces : undefined}
+          />
+        )}
         {isUser && isEditingPrompt ? (
           <form
             className="prompt-edit-form"
@@ -4441,10 +4504,9 @@ function MessageBubble({
           </form>
         ) : displayMessage.status === "pending" ? (
           <>
-            {/* The trace keeps working through its steps for the whole run;
-                once real tokens arrive they stream in below it, so thinking
-                and writing read as consecutive phases of one reply. */}
-            <WorkTrace message={displayMessage} brandName={brandName} state="pending" onStop={onStopResponse} />
+            {/* The trace (above) keeps working through its steps for the
+                whole run; once real tokens arrive they stream in below it, so
+                thinking and writing read as consecutive phases of one reply. */}
             {streamPreviewEnabled && streamedPendingContent && (
               <>
                 <div className="message-rendered-response message-stream-live" ref={responseContentRef}>
@@ -4467,15 +4529,6 @@ function MessageBubble({
           )
         ) : displayMessage.content ? (
           <>
-            {!isUser &&
-              ((displayMessage.activityTrace?.length ?? 0) > 0 || assistantContent.thinkingTraces.length > 0) && (
-              <WorkTrace
-                message={displayMessage}
-                brandName={brandName}
-                state="complete"
-                thinkingTraces={assistantContent.thinkingTraces}
-              />
-            )}
             {isUser ? (
               <PlainText content={displayMessage.content} />
             ) : assistantContent.visibleContent ? (
@@ -4492,6 +4545,9 @@ function MessageBubble({
                     onUpdateDiagram
                       ? (previousSource, nextSource) => onUpdateDiagram(message, previousSource, nextSource)
                       : undefined
+                  }
+                  onUpdateTable={
+                    onUpdateTable ? (previous, next, occurrence) => onUpdateTable(message, previous, next, occurrence) : undefined
                   }
                 />
               </div>
@@ -4718,22 +4774,30 @@ function MessageBubble({
               </div>
             )}
             {onTransferToDraft && (
-              <button
-                className="transfer-draft-button"
-                type="button"
-                aria-label="Transfer response to Drafts"
-                data-tooltip="Turn this response into an editable document in Drafts"
-                onClick={() => onTransferToDraft(visibleMessage)}
-              >
-                <FileText size={14} />
-                <span>Transfer to Drafts</span>
-              </button>
+              <TransferDraftMenu message={visibleMessage} request={transferRequest} onTransfer={onTransferToDraft} />
             )}
           </div>
         )}
       </div>
     </article>
   );
+}
+
+/** The user message a reply at `index` answered (the nearest one above it). */
+function requestBefore(messages: ChatMessage[], index: number): string | null {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (messages[cursor]!.role === "user") return messages[cursor]!.content;
+  }
+  return null;
+}
+
+/** Whether a reply shows its work trace, and in which phase: always while it
+ * runs, and once finished when there is a trace or exposed thinking to show. */
+function replyTraceState(message: ChatMessage, thinkingTraces: string[]): "pending" | "complete" | null {
+  if (message.role === "user") return null;
+  if (message.status === "pending") return "pending";
+  if (message.status === "error" || !message.content) return null;
+  return (message.activityTrace?.length ?? 0) > 0 || thinkingTraces.length > 0 ? "complete" : null;
 }
 
 function agentProfileOptions(data: BootstrapData): ModelConfig[] {

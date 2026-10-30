@@ -3348,7 +3348,11 @@ a.nav-item {
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 16px;
   margin-bottom: 28px;
-  animation: apx-rise 420ms var(--ease) both;
+  /* Backwards fill only: a transform left behind after the entrance makes the
+     message the containing block for position: fixed descendants, so dialogs
+     opened from a reply (the diagram editor) were pinned to the message and
+     landed off-screen once the chat scrolled. */
+  animation: apx-rise 420ms var(--ease) backwards;
 }
 
 .message-meta {
@@ -4160,6 +4164,23 @@ a.nav-item {
   padding: 0 4px 2px 0;
 }
 
+/* The chat work trace in the narrow Drafts rail: its title ("Worked for
+   19s") keeps its width and the step summary beside it gives way first. */
+.draft-event-list .work-trace {
+  margin: 0;
+}
+
+.draft-event-list .work-trace-title {
+  flex: none;
+}
+
+.draft-event-list .work-trace-summary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .draft-work-trace {
   max-width: none;
   flex: 0 0 auto;
@@ -4871,6 +4892,28 @@ a.nav-item {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+/* A PDF export runs on the server and can take a while, so its progress row
+   carries a cancel control at the far end. */
+.document-export-progress.is-pdf span {
+  flex: 1 1 auto;
+}
+
+.document-export-cancel {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.document-export-cancel:hover {
+  color: var(--text-strong);
 }
 
 .document-export-spinner {
@@ -7800,7 +7843,12 @@ a.nav-item {
 
 .markdown {
   display: grid;
+  /* One shrinkable column and breakable long tokens: a wide table or a long
+     URL scrolls or wraps inside its own block instead of widening the message
+     (on phones that widened the whole page and zoomed it out). */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  overflow-wrap: anywhere;
 }
 
 .markdown > :first-child {
@@ -8744,6 +8792,148 @@ a.nav-item {
   font-weight: 800;
 }
 
+/* Tables in a finished reply edit in place: a cell takes a text caret on
+   hover, the one in use is outlined, and the open one is a recessed well. */
+.md-table-block {
+  display: grid;
+  gap: 6px;
+}
+
+.md-table.is-editable th,
+.md-table.is-editable td {
+  cursor: text;
+  transition: background var(--speed) var(--ease);
+}
+
+.md-table.is-editable td:hover {
+  background: color-mix(in srgb, var(--teal-soft) 22%, var(--surface));
+}
+
+.md-table.is-editable th:hover {
+  background: color-mix(in srgb, var(--teal-soft) 75%, var(--surface));
+}
+
+.md-table.is-editable a {
+  cursor: pointer;
+}
+
+.md-table .is-selected {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--teal) 70%, transparent);
+}
+
+.md-table .is-active {
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow), inset 0 0 0 1.5px var(--teal);
+}
+
+.md-table .is-active:hover {
+  background: var(--tactile-track);
+}
+
+.md-table-cell-editor {
+  display: block;
+  min-height: 1.45em;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-table-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 28px;
+}
+
+/* The way in stays quiet until the table is pointed at or focused; on touch
+   screens (no hover) it always shows. */
+.md-table-tool.is-quiet {
+  opacity: 0;
+  transition: opacity var(--speed) var(--ease);
+}
+
+.md-table-block:hover .md-table-tool.is-quiet,
+.md-table-block:focus-within .md-table-tool.is-quiet {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .md-table-tool.is-quiet {
+    opacity: 1;
+  }
+}
+
+.md-table-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--tactile-raised);
+  transition:
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    color var(--speed) var(--ease),
+    opacity var(--speed) var(--ease);
+}
+
+.md-table-tool > svg {
+  color: color-mix(in srgb, var(--muted) 80%, var(--teal));
+}
+
+.md-table-tool:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--border-strong));
+  color: var(--teal-strong);
+  box-shadow: var(--tactile-raised-hover);
+}
+
+.md-table-tool:active:not(:disabled) {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+.md-table-tool:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, var(--teal-2, var(--teal)));
+  outline-offset: -2px;
+}
+
+.md-table-tool:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.md-table-tool.is-done {
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--border-strong));
+  color: var(--teal-strong);
+}
+
+.md-table-notice {
+  flex-basis: 100%;
+  color: var(--orange);
+  font-size: 12px;
+  text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-table-tool,
+  .md-table.is-editable th,
+  .md-table.is-editable td,
+  .transfer-draft-caret {
+    transition: none;
+  }
+}
+
 .message-actions {
   display: flex;
   justify-content: space-between;
@@ -8893,6 +9083,119 @@ a.nav-item {
   color: #ffffff;
 }
 
+/* Transfer to Drafts opens a chooser: document, deck, or spreadsheet. */
+.transfer-draft {
+  position: relative;
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.transfer-draft-caret {
+  margin-left: -1px;
+  opacity: 0.72;
+  transition: transform var(--speed) var(--ease);
+}
+
+.transfer-draft-button[aria-expanded="true"] .transfer-draft-caret {
+  transform: rotate(180deg);
+}
+
+.transfer-draft-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  display: grid;
+  gap: 2px;
+  width: min(312px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.transfer-draft-menu-title {
+  margin: 2px 8px 4px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.transfer-draft-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.transfer-draft-option > svg {
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--muted) 80%, var(--teal));
+}
+
+.transfer-draft-option:hover,
+.transfer-draft-option:focus-visible {
+  border-color: var(--tactile-track-border);
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+  outline: none;
+}
+
+.transfer-draft-option:focus-visible {
+  box-shadow: var(--tactile-track-shadow), inset 0 0 0 1px var(--teal);
+}
+
+.transfer-draft-option-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.transfer-draft-option-text strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.transfer-draft-option-text small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.transfer-draft-option.is-suggested > svg {
+  color: var(--teal-strong);
+}
+
+.transfer-draft-suggested {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--teal-soft) 70%, transparent);
+  color: var(--teal-strong);
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.theme-dark .transfer-draft-suggested {
+  color: #ffffff;
+}
+
 .message-feedback-actions {
   display: inline-flex;
   gap: 2px;
@@ -8949,6 +9252,13 @@ a.nav-item {
   display: grid;
   gap: 2px;
   animation: apx-rise 160ms var(--ease) both;
+}
+
+/* Header actions sit at the right edge, so the menu opens toward the page,
+   not past the viewport (on phones that overflow zoomed the whole page out). */
+.header-actions .model-menu {
+  right: 0;
+  left: auto;
 }
 
 .model-option-row {
@@ -23554,7 +23864,8 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 /* =========================================================================
-   Drafts: Print / Save as PDF surface and Visual redline version compare.
+   Drafts: Print surface (shared with the PDF export) and Visual redline
+   version compare.
    Self-contained block owned by DocumentAssistantWorkspace.tsx,
    lib/draftPrint.ts, and lib/draftRedline.ts. Keep appended at the end.
    ========================================================================= */
@@ -23614,7 +23925,7 @@ button.retention-tagged-title:focus-visible strong {
   color: var(--red);
 }
 
-/* --- Print / Save as PDF ------------------------------------------------ */
+/* --- Print and PDF export surface --------------------------------------- */
 
 /* On screen the print surface never renders; it exists for the print
    stylesheet only, and lib/draftPrint removes it after afterprint or the

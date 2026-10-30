@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   DRAFT_PRINT_BODY_CLASS,
   DRAFT_PRINT_ROOT_ID,
+  buildDraftPrintSurface,
   printSavedDraftVersion,
   removeDraftPrintSurface,
 } from "./draftPrint";
@@ -209,4 +210,36 @@ test("a document opened from Word or PDF prints on its own paper with running he
 
   removeDraftPrintSurface();
   expect(document.getElementById("aperture-draft-print-page")).toBeNull();
+});
+
+test("builds a detached print surface a PDF renderer can read", () => {
+  const surface = buildDraftPrintSurface({ title: "Client Update Draft", contentHtml: SAVED_VERSION_HTML });
+
+  expect(surface).not.toBeNull();
+  // Nothing is attached to the live page, and the content stays readable:
+  // tagged PDF structure and bookmarks come from the accessibility tree.
+  expect(surface?.root.isConnected).toBe(false);
+  expect(document.body.classList.contains(DRAFT_PRINT_BODY_CLASS)).toBe(false);
+  expect(surface?.root.getAttribute("aria-hidden")).toBeNull();
+  expect(surface?.root.querySelectorAll(".document-page")).toHaveLength(2);
+  expect(surface?.root.querySelector(".document-page-label")).toBeNull();
+  expect(surface?.pageCss).toBe("");
+});
+
+test("a source-layout surface carries its own paper size", () => {
+  const marker =
+    '<div class="document-page-setup" style="width: 612pt; height: 1008pt; padding-top: 72pt; padding-right: 90pt; padding-bottom: 72pt; padding-left: 90pt; margin-top: 36pt; margin-bottom: 30pt; font-family: Calibri; font-size: 16.21px; line-height: 1.22; color: #000000"></div>';
+
+  const surface = buildDraftPrintSurface({
+    title: "Agreement",
+    contentHtml: `${marker}<section class="document-page"><p>Only page.</p></section>`,
+  });
+
+  expect(surface?.root.classList.contains("is-source-layout")).toBe(true);
+  expect(surface?.pageCss).toContain("size: 612pt 1008pt");
+  expect(document.getElementById("aperture-draft-print-page")).toBeNull();
+});
+
+test("an empty saved version has no print surface", () => {
+  expect(buildDraftPrintSurface({ title: "Empty", contentHtml: "<p> </p>" })).toBeNull();
 });

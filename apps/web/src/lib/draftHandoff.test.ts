@@ -66,6 +66,86 @@ describe("detectDraftHandoff", () => {
   });
 
   it.each([
+    "Write a report with the results in a table",
+    "Write a report with a table of quarterly results",
+    "Draft a memo that compares the vendors in a matrix",
+  ])("offers a document for %j even though it mentions a table", (text) => {
+    expect(detectDraftHandoff(text)).toBe("document");
+  });
+
+  it.each([
+    "Create a spreadsheet of my monthly expenses",
+    "Make me an Excel spreadsheet to track our hiring pipeline",
+    "Can you build a budget in Excel?",
+    "I need an excel file with every state's population and capital",
+    "Put together a sales tracker spreadsheet with a monthly pivot",
+    "Build a pivot table of revenue by region and quarter",
+    "Generate a workbook in Excel for our inventory",
+    "Turn this into a spreadsheet",
+    "Convert these numbers to Excel",
+    "Export this table to Excel",
+    "make an excel for my wedding budget",
+    "Create a Google Sheets tracker for the volunteer schedule",
+    "Spreadsheet of the top 50 US cities by population",
+    "Draft a project plan spreadsheet with owners and due dates",
+    "Can you put this in a spreadsheet?",
+    "I'd like an xlsx file comparing the three vendor quotes",
+    // Tables and matrices are tabular deliverables: offer the spreadsheet editor.
+    "Create a state-by-state matrix for P&L management",
+    "I need a matrix of state taxes by business type",
+    "Build me a P&L matrix by state",
+    "Can you create a decision matrix for choosing a vendor?",
+    "Create a table comparing the three vendors",
+    "Make a comparison table of the top CRM tools",
+    "Give me a table of the 10 largest US cities",
+    "Show me the top 10 cities by population in a table",
+    "Summarize the findings in a table",
+    "Put this in a table",
+    "Turn this into a matrix",
+    "List the 50 states and their capitals in a table",
+    "Compare the iPhone 17 and the Pixel 11 in a matrix",
+    "Break down our Q3 costs into a table by department",
+    "Build a habit tracker",
+    "Matrix of state taxes by entity type",
+    "Quarterly state tax matrix of revenue by entity",
+  ])("offers a spreadsheet for %j", (text) => {
+    expect(detectDraftHandoff(text)).toBe("spreadsheet");
+  });
+
+  it.each([
+    "How do I make a pivot table in Excel?",
+    "What's the Excel formula for compound interest?",
+    "Write an Excel formula that sums column B when column A says Paid",
+    "Write a VBA macro for my spreadsheet",
+    "Explain how VLOOKUP works in a spreadsheet",
+    "Why does my spreadsheet show #REF!?",
+    "I made a spreadsheet yesterday",
+    "Make this spreadsheet prettier",
+    "Write a Python script that exports a spreadsheet",
+    "Create a spreadsheet right here in chat",
+    "Is Excel or Google Sheets better for budgeting?",
+    "Create a cheat sheet for Git commands",
+    "How do I make a table in Word?",
+    "What should a P&L matrix include?",
+    "Create a table of contents for my thesis",
+    "Help me build a coffee table",
+    "Build a picnic table for my backyard",
+    "Create a markdown table of the planets",
+    "Explain the periodic table",
+    "Write a Python function that builds a matrix",
+    "Make the table shorter",
+    "Add a column to the table",
+    "Don't put it in a table",
+    "List three reasons to learn Spanish",
+    "List the tables in the database",
+    "Write a haiku about Mondays, please",
+    "Build a sturdy coffee table",
+    "Make markdown tables of the planets",
+  ])("keeps the spreadsheet question %j in chat (or as a document)", (text) => {
+    expect(detectDraftHandoff(text)).not.toBe("spreadsheet");
+  });
+
+  it.each([
     "How do I write a good essay?",
     "What makes a strong cover letter?",
     "Should I write a cover letter for this job?",
@@ -111,7 +191,6 @@ describe("detectDraftHandoff", () => {
     "Write the conclusion",
     "What's the difference between a memo and a report?",
     "I wrote an essay last night",
-    "Create a table comparing the three vendors",
     "Rewrite this in a more formal tone",
     "Turn this into an email",
     "",

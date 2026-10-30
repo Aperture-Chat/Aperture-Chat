@@ -10,8 +10,9 @@ uploaded by an explicit, authenticated user action in a later integration step.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 from html import escape
 from html.parser import HTMLParser
 from typing import Annotated, Literal
@@ -34,6 +35,13 @@ from app.models.deck_document import (
     canonicalize_deck_json,
     deck_content_sha256,
 )
+from app.models.draft_digest import draft_content_digest
+from app.models.sheet_document import (
+    MAX_SHEET_CONTENT_BYTES,
+    SHEET_SANITIZER_VERSION,
+    canonicalize_sheet_json,
+    sheet_content_sha256,
+)
 
 __all__ = [
     "DECK_SANITIZER_VERSION",
@@ -52,16 +60,52 @@ MAX_DRAFT_LIST_LIMIT = 200
 MAX_DRAFT_REVISION_LIST_LIMIT = 200
 DRAFT_SANITIZER_VERSION = "sanitized-html-v1"
 
-DraftKind = Literal["document", "deck"]
-DRAFT_KINDS: tuple[DraftKind, ...] = ("document", "deck")
+DraftKind = Literal["document", "deck", "spreadsheet"]
+DRAFT_KINDS: tuple[DraftKind, ...] = ("document", "deck", "spreadsheet")
+
+
+@dataclass(frozen=True)
+class _JsonDraftFormat:
+    """A draft kind stored as canonical JSON under its own sanitizer id and bound."""
+
+    kind: DraftKind
+    label: str
+    sanitizer_version: str
+    max_content_bytes: int
+    canonicalize: Callable[[str], str]
+    content_sha256: Callable[[str], str]
+
+
+_JSON_DRAFT_FORMATS = (
+    _JsonDraftFormat(
+        kind="deck",
+        label="Deck",
+        sanitizer_version=DECK_SANITIZER_VERSION,
+        max_content_bytes=MAX_DECK_CONTENT_BYTES,
+        canonicalize=canonicalize_deck_json,
+        content_sha256=deck_content_sha256,
+    ),
+    _JsonDraftFormat(
+        kind="spreadsheet",
+        label="Spreadsheet",
+        sanitizer_version=SHEET_SANITIZER_VERSION,
+        max_content_bytes=MAX_SHEET_CONTENT_BYTES,
+        canonicalize=canonicalize_sheet_json,
+        content_sha256=sheet_content_sha256,
+    ),
+)
+_JSON_FORMAT_BY_KIND = {item.kind: item for item in _JSON_DRAFT_FORMATS}
+_JSON_FORMAT_BY_SANITIZER = {item.sanitizer_version: item for item in _JSON_DRAFT_FORMATS}
 
 
 def sanitizer_version_for_kind(kind: str) -> str:
-    return DECK_SANITIZER_VERSION if kind == "deck" else DRAFT_SANITIZER_VERSION
+    json_format = _JSON_FORMAT_BY_KIND.get(kind)
+    return DRAFT_SANITIZER_VERSION if json_format is None else json_format.sanitizer_version
 
 
 def max_content_bytes_for_kind(kind: str) -> int:
-    return MAX_DECK_CONTENT_BYTES if kind == "deck" else MAX_DRAFT_CONTENT_BYTES
+    json_format = _JSON_FORMAT_BY_KIND.get(kind)
+    return MAX_DRAFT_CONTENT_BYTES if json_format is None else json_format.max_content_bytes
 
 
 class DraftContentTooLarge(ValueError):
@@ -69,20 +113,24 @@ class DraftContentTooLarge(ValueError):
 
 
 def canonicalize_draft_content(content: str, kind: str) -> str:
-    """Canonical storable form for either kind; raises ``ValueError`` when unsafe."""
+    """Canonical storable form for any kind; raises ``ValueError`` when unsafe."""
 
     if not isinstance(content, str):
         raise TypeError("Draft content must be a string.")
     bound = max_content_bytes_for_kind(kind)
     if len(content.encode("utf-8")) > bound:
         raise DraftContentTooLarge(f"Draft content is limited to {bound} UTF-8 bytes.")
-    if kind == "deck":
-        return canonicalize_deck_json(content)
+    json_format = _JSON_FORMAT_BY_KIND.get(kind)
+    if json_format is not None:
+        return json_format.canonicalize(content)
     return sanitize_draft_html(content)
 
 
 def content_sha256_for_kind(content: str, kind: str) -> str:
-    return deck_content_sha256(content) if kind == "deck" else draft_content_sha256(content)
+    json_format = _JSON_FORMAT_BY_KIND.get(kind)
+    if json_format is None:
+        return draft_content_sha256(content)
+    return json_format.content_sha256(content)
 
 
 MatterDeletionStatus = Literal["pending", "running", "failed", "ready", "complete"]
@@ -129,10 +177,7 @@ def sanitize_draft_html(value: str) -> str:
 
 
 def draft_content_sha256(content: str) -> str:
-    return sha256(
-        f"aperture-draft-content:{DRAFT_SANITIZER_VERSION}:".encode("utf-8")
-        + content.encode("utf-8")
-    ).hexdigest()
+    return draft_content_digest(DRAFT_SANITIZER_VERSION, content)
 
 
 class Matter(BaseModel):
@@ -222,7 +267,7 @@ class DraftRevision(BaseModel):
     title: str = Field(min_length=1, max_length=MAX_DRAFT_TITLE_CHARS)
     content: str
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    sanitizer_version: str = Field(pattern=r"^(sanitized-html|deck-json)-v[1-9][0-9]*$")
+    sanitizer_version: str = Field(pattern=r"^(sanitized-html|deck-json|sheet-json)-v[1-9][0-9]*$")
     created_at: datetime
 
     @field_validator("title")
@@ -233,7 +278,7 @@ class DraftRevision(BaseModel):
     @field_validator("content")
     @classmethod
     def validate_content_bound(cls, value: str) -> str:
-        # Outer ceiling shared by both kinds; the per-kind bound is applied in
+        # Outer ceiling shared by every kind; the per-kind bound is applied in
         # validate_canonical_content once the sanitizer id is known.
         if len(value.encode("utf-8")) > MAX_DECK_CONTENT_BYTES:
             raise ValueError(f"Draft content is limited to {MAX_DECK_CONTENT_BYTES} UTF-8 bytes.")
@@ -246,7 +291,8 @@ class DraftRevision(BaseModel):
 
     @property
     def kind(self) -> DraftKind:
-        return "deck" if self.sanitizer_version == DECK_SANITIZER_VERSION else "document"
+        json_format = _JSON_FORMAT_BY_SANITIZER.get(self.sanitizer_version)
+        return "document" if json_format is None else json_format.kind
 
     @model_validator(mode="after")
     def validate_canonical_content(self) -> DraftRevision:
@@ -260,13 +306,15 @@ class DraftRevision(BaseModel):
             if draft_content_sha256(self.content) != self.content_sha256:
                 raise ValueError("Draft content digest does not match the stored snapshot.")
             return self
-        if self.sanitizer_version == DECK_SANITIZER_VERSION:
-            if canonicalize_deck_json(self.content) != self.content:
-                raise ValueError("Deck content is not canonical deck JSON.")
-            if deck_content_sha256(self.content) != self.content_sha256:
-                raise ValueError("Deck content digest does not match the stored snapshot.")
-            return self
-        raise ValueError("Unsupported draft sanitizer version.")
+        json_format = _JSON_FORMAT_BY_SANITIZER.get(self.sanitizer_version)
+        if json_format is None:
+            raise ValueError("Unsupported draft sanitizer version.")
+        label = json_format.label
+        if json_format.canonicalize(self.content) != self.content:
+            raise ValueError(f"{label} content is not canonical {label.lower()} JSON.")
+        if json_format.content_sha256(self.content) != self.content_sha256:
+            raise ValueError(f"{label} content digest does not match the stored snapshot.")
+        return self
 
 
 class DraftSnapshot(BaseModel):

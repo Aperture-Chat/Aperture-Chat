@@ -106,7 +106,7 @@ export function UserModelAccessTrace({
               style={{ padding: "8px 12px" }}
               open={!entry.decision.usable}
             >
-              <summary style={{ display: "flex", gap: "10px", alignItems: "center", cursor: "pointer" }}>
+              <summary style={{ display: "flex", flexWrap: "wrap", gap: "6px 10px", alignItems: "center", cursor: "pointer" }}>
                 <span className={`pill ${entry.decision.usable ? "pill-success" : entry.decision.allowed ? "pill-warning" : "pill-danger"}`}>
                   {entry.decision.usable ? <Check size={12} aria-hidden="true" /> : <X size={12} aria-hidden="true" />}
                   {entry.decision.usable ? "Usable" : entry.decision.allowed ? "Allowed, provider offline" : "Blocked"}
@@ -115,10 +115,11 @@ export function UserModelAccessTrace({
                 <small style={{ color: "var(--muted)" }}>{entry.model.provider_name}</small>
               </summary>
               <p style={{ margin: "8px 0 6px", fontSize: "12.5px" }}>{entry.decision.reason}</p>
-              <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "grid", gap: "4px" }}>
+              {/* Gate rows wrap their detail under the pill on narrow screens. */}
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "4px" }}>
                 {entry.decision.gates.map((gate) => (
-                  <li key={gate.key} style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "12px" }}>
-                    <span className={`pill ${gate.passed ? "pill-success" : "pill-danger"}`} style={{ minWidth: "160px", justifyContent: "flex-start" }}>
+                  <li key={gate.key} style={{ display: "flex", flexWrap: "wrap", gap: "2px 8px", alignItems: "center", fontSize: "12px" }}>
+                    <span className={`pill ${gate.passed ? "pill-success" : "pill-danger"}`} style={{ minWidth: "min(160px, 100%)", justifyContent: "flex-start" }}>
                       {gate.passed ? <Check size={11} aria-hidden="true" /> : <X size={11} aria-hidden="true" />} {gate.key}
                     </span>
                     <span style={{ color: "var(--muted)" }}>{gate.detail}</span>

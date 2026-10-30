@@ -1,10 +1,11 @@
 /**
- * Print / Save as PDF support for the Drafts workspace.
+ * Print support for the Drafts workspace.
  *
- * The approved PDF path is browser printing: Aperture never fabricates a
- * server-generated PDF or claims a PDF file was created. This module builds a
- * detached, print-only render of the exact saved draft version, invokes
- * `window.print()`, and cleans up afterwards. The editor DOM is never touched:
+ * This module builds a detached, print-only render of the exact saved draft
+ * version. Print attaches it, invokes `window.print()`, and cleans up
+ * afterwards; the PDF export (lib/draftPdfExport.ts) sends the same surface to
+ * the server's renderer, so a PDF matches what Print shows. The editor DOM is
+ * never touched:
  * the print surface is a sibling of the app root, hidden on screen, and the
  * print stylesheet (see the draft print block at the end of styles.css) hides
  * every app surface except this root while printing.
@@ -95,11 +96,7 @@ function buildSourceLayoutPrintPages(doc: Document, root: HTMLElement, setup: Do
     `${cssVariablesText(sourceLayoutCssVariables(setup))}; --source-print-zoom: ${(96 / 72 / PREVIEW_PX_PER_PT).toFixed(5)}`,
   );
   root.appendChild(pages);
-  const pageStyle = doc.createElement("style");
-  pageStyle.id = DRAFT_PRINT_PAGE_STYLE_ID;
-  pageStyle.textContent = `@media print { @page { size: ${setup.widthPt}pt ${setup.heightPt}pt; margin: 0; } }`;
-  doc.head.appendChild(pageStyle);
-  return pages;
+  return `@media print { @page { size: ${setup.widthPt}pt ${setup.heightPt}pt; margin: 0; } }`;
 }
 
 function firstHeadingText(container: Element): string {
@@ -150,10 +147,54 @@ function waitForPrintImages(root: HTMLElement, waitMs: number): Promise<string[]
   });
 }
 
+/** A detached print render of a saved version: the print root, plus the
+ * @page rule a source-layout document needs ("" for the draft design). */
+export type DraftPrintSurface = { root: HTMLElement; pageCss: string };
+
+/**
+ * Builds the print root for the exact saved draft version without attaching
+ * it anywhere. Returns null when the version has nothing to print. Print and
+ * the PDF export share this builder, so both lay out the same pages.
+ */
+export function buildDraftPrintSurface(
+  { title, contentHtml }: { title: string; contentHtml: string },
+  doc: Document = document,
+): DraftPrintSurface | null {
+  const { setup: sourceSetup, bodyHtml } = splitPageSetup(contentHtml);
+  const probe = doc.createElement("div");
+  probe.innerHTML = sanitizeDocumentHtml(bodyHtml);
+  // The on-screen "Page N" pills are app chrome, not document content.
+  probe.querySelectorAll(".document-page-label").forEach((node) => node.remove());
+  if (!probe.textContent?.trim() && !probe.querySelector("img")) return null;
+
+  const root = doc.createElement("div");
+  root.id = DRAFT_PRINT_ROOT_ID;
+  root.className = "draft-print-root";
+  if (sourceSetup) {
+    return { root, pageCss: buildSourceLayoutPrintPages(doc, root, sourceSetup, bodyHtml) };
+  }
+  const pages = doc.createElement("div");
+  pages.className = "draft-print-pages";
+  pages.append(...Array.from(probe.childNodes));
+  const normalizedTitle = title.replace(/\s+/g, " ").trim();
+  // Avoid printing the title twice when the document already opens with it.
+  if (
+    !pages.querySelector(".document-mla-text") &&
+    normalizedTitle &&
+    firstHeadingText(pages).toLowerCase() !== normalizedTitle.toLowerCase()
+  ) {
+    const titleElement = doc.createElement("h1");
+    titleElement.className = "draft-print-doc-title";
+    titleElement.textContent = normalizedTitle;
+    root.appendChild(titleElement);
+  }
+  root.appendChild(pages);
+  return { root, pageCss: "" };
+}
+
 /**
  * Builds the print-only surface for the exact saved draft version and opens
- * the browser print dialog. The user chooses "Save as PDF" in that dialog;
- * this function never claims a PDF file was produced.
+ * the browser print dialog. This function never claims a file was produced.
  *
  * On any preparation or embedded-asset failure the surface is removed, the
  * editor is left untouched, and an explicit error is returned.
@@ -184,45 +225,19 @@ export async function printSavedDraftVersion(options: {
     // Repeated print actions must not stack print roots.
     removeDraftPrintSurface(doc);
 
-    const { setup: sourceSetup, bodyHtml } = splitPageSetup(contentHtml);
-    const sanitized = sanitizeDocumentHtml(bodyHtml);
-    const probe = doc.createElement("div");
-    probe.innerHTML = sanitized;
-    // The on-screen "Page N" pills are app chrome, not document content.
-    probe.querySelectorAll(".document-page-label").forEach((node) => node.remove());
-
-    const hasText = Boolean(probe.textContent?.trim());
-    const hasVisual = Boolean(probe.querySelector("img"));
-    if (!hasText && !hasVisual) {
+    const surface = buildDraftPrintSurface({ title, contentHtml }, doc);
+    if (!surface) {
       return { ok: false, error: "This saved version has no printable content yet." };
     }
-
-    const root = doc.createElement("div");
-    root.id = DRAFT_PRINT_ROOT_ID;
-    root.className = "draft-print-root";
-    // Hidden from assistive tech and from screen rendering; it exists only
-    // for the print stylesheet.
+    const { root, pageCss } = surface;
+    // Hidden from assistive tech and from screen rendering; on screen it
+    // exists only for the print stylesheet.
     root.setAttribute("aria-hidden", "true");
-
-    if (sourceSetup) {
-      buildSourceLayoutPrintPages(doc, root, sourceSetup, bodyHtml);
-    } else {
-      const pages = doc.createElement("div");
-      pages.className = "draft-print-pages";
-      pages.append(...Array.from(probe.childNodes));
-      const normalizedTitle = title.replace(/\s+/g, " ").trim();
-      // Avoid printing the title twice when the document already opens with it.
-      if (
-        !pages.querySelector(".document-mla-text") &&
-        normalizedTitle &&
-        firstHeadingText(pages).toLowerCase() !== normalizedTitle.toLowerCase()
-      ) {
-        const titleElement = doc.createElement("h1");
-        titleElement.className = "draft-print-doc-title";
-        titleElement.textContent = normalizedTitle;
-        root.appendChild(titleElement);
-      }
-      root.appendChild(pages);
+    if (pageCss) {
+      const pageStyle = doc.createElement("style");
+      pageStyle.id = DRAFT_PRINT_PAGE_STYLE_ID;
+      pageStyle.textContent = pageCss;
+      doc.head.appendChild(pageStyle);
     }
 
     const previousFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;

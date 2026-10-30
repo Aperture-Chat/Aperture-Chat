@@ -86,8 +86,54 @@ const DECK_SHORTCUTS: ShortcutGroup[] = [
   },
 ];
 
+const SPREADSHEET_SHORTCUTS: ShortcutGroup[] = [
+  {
+    title: "AI",
+    items: [[`${MOD}J`, "Ask AI about the selected cells"]],
+  },
+  {
+    title: "Moving around",
+    items: [
+      ["Arrow keys", "Move one cell"],
+      [`${MOD}Arrow`, "Jump to the edge of the data"],
+      [`${SHIFT}Arrow`, "Extend the selection"],
+      ["Tab / Enter", "Next cell right / below (Shift: back)"],
+      [`${MOD}Home / ${MOD}End`, "First cell / last used cell"],
+      ["Page Up / Page Down", "One screen up or down"],
+    ],
+  },
+  {
+    title: "Editing",
+    items: [
+      ["F2", "Edit the cell"],
+      ["Esc", "Cancel the edit"],
+      ["F4", "Cycle $ anchors on a reference (while editing)"],
+      ["Delete", "Clear the contents"],
+      [`${MOD}Z / ${MOD}${SHIFT}Z`, "Undo / redo"],
+      [`${MOD}C / X / V`, "Copy, cut, paste"],
+      [`${MOD}${SHIFT}V`, "Paste values only"],
+      [`${MOD}D`, "Fill down"],
+      [`${MOD}R`, "Fill right"],
+      [`${MOD};`, "Insert today's date"],
+      [`${ALT}=`, "AutoSum"],
+    ],
+  },
+  {
+    title: "Selecting and formatting",
+    items: [
+      [`${MOD}A`, "Select the data, then the whole sheet"],
+      [`${MOD}Space / ${SHIFT}Space`, "Select the column / row"],
+      [`${MOD}B / I / U`, "Bold, italic, underline"],
+      [`${MOD}5`, "Strikethrough"],
+      [`${MOD}${SHIFT}$ / %`, "Currency / percent format"],
+      [`${MOD}${SHIFT}L`, "Turn filters on or off"],
+      [`${MOD}F / ${MOD}H`, "Find / find and replace"],
+    ],
+  },
+];
+
 /** Every keyboard shortcut the editor supports, grouped (⌘/). */
-export function EditorShortcutsDialog({ kind, onClose }: { kind: "document" | "deck"; onClose: () => void }) {
+export function EditorShortcutsDialog({ kind, onClose }: { kind: "document" | "deck" | "spreadsheet"; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
@@ -100,7 +146,7 @@ export function EditorShortcutsDialog({ kind, onClose }: { kind: "document" | "d
     window.addEventListener("keydown", handle, true);
     return () => window.removeEventListener("keydown", handle, true);
   }, [onClose]);
-  const groups = kind === "deck" ? DECK_SHORTCUTS : DOCUMENT_SHORTCUTS;
+  const groups = kind === "deck" ? DECK_SHORTCUTS : kind === "spreadsheet" ? SPREADSHEET_SHORTCUTS : DOCUMENT_SHORTCUTS;
   const dialog = (
     <div className="editor-shortcuts-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="editor-shortcuts" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
