@@ -77,3 +77,29 @@ test("Escape closes the menu without changing the value", () => {
   expect(seen).toEqual([]);
   expect((select as HTMLSelectElement).value).toBe("weekly");
 });
+
+test("stays open through a scroll that leaves the select in place, and closes once a scroll carries it away", () => {
+  render(<Harness />);
+  const select = screen.getByRole("combobox", { name: "Trigger" });
+  let top = 100;
+  let left = 10;
+  select.getBoundingClientRect = () => ({ top, bottom: top + 30, left, right: left + 200, width: 200, height: 30, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  fireEvent.mouseDown(select);
+  // Focusing a select can nudge its scroll container without moving the select.
+  fireEvent.scroll(document.body);
+  expect(document.querySelector(".apx-select-menu")).not.toBeNull();
+  // Up to 2px in all counts as staying put.
+  top = 101;
+  left = 11;
+  fireEvent.scroll(document.body);
+  expect(document.querySelector(".apx-select-menu")).not.toBeNull();
+  top = 102;
+  fireEvent.scroll(document.body);
+  expect(document.querySelector(".apx-select-menu")).toBeNull();
+  top = 100;
+  left = 10;
+  fireEvent.mouseDown(select);
+  top = 140;
+  fireEvent.scroll(document.body);
+  expect(document.querySelector(".apx-select-menu")).toBeNull();
+});

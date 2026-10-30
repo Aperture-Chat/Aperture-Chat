@@ -216,6 +216,7 @@ import {
 import { appendChatCitationsForDraft } from "./lib/draftCitations";
 import type { DraftNavigationGuard } from "./lib/draftNavigation";
 import type { DraftHandoffRequest } from "./lib/draftHandoff";
+import type { DraftTransferFormat } from "./lib/draftTransfer";
 import { sampleData } from "./data/sampleData";
 
 const SESSION_STORAGE_KEY = "aperture-session-user-id";
@@ -871,7 +872,7 @@ export function App() {
   }, [navigate, requestWorkspaceNavigation]);
 
   const handleTransferToDraft = useCallback(
-    (message: ChatMessage) => {
+    (message: ChatMessage, format: DraftTransferFormat = "document") => {
       const threadTitle = chat.activeThread?.title ?? "Chat response";
       const title = transferredDraftTitle(threadTitle, message.content);
       setDraftImport({
@@ -881,6 +882,7 @@ export function App() {
         sourceLabel: threadTitle === "New chat" ? "Chat response" : threadTitle,
         createdAt: message.createdAt,
         createdAtIso: message.completedAt || message.createdAtIso || message.executedAt,
+        format,
       });
       setDraftHandoff(null);
       setDraftSessionKey((current) => current + 1);

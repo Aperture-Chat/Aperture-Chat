@@ -7,7 +7,7 @@
  * writer picks, so a preset never behaves differently from typing it.
  */
 
-export type AiEditActionGroup = "improve" | "transform" | "write" | "slide";
+export type AiEditActionGroup = "improve" | "transform" | "write" | "slide" | "formulas" | "data" | "analyze";
 
 export type AiEditAction = {
   id: string;
@@ -27,6 +27,9 @@ export const AI_EDIT_GROUP_LABELS: Record<AiEditActionGroup, string> = {
   transform: "Transform",
   write: "Write at cursor",
   slide: "This slide",
+  formulas: "Formulas",
+  data: "Clean up data",
+  analyze: "Analyze & present",
 };
 
 /** Actions for highlighted document text. */
@@ -259,6 +262,108 @@ export const SLIDE_CHIP_GROUPS: AiEditChipGroup[] = [
       ...chip,
       instruction: `${chip.instruction.replace("it into", "the slide text and the speaker notes into")}`,
     })),
+  },
+];
+
+/** Spreadsheet actions for the selected cells. The reply is the sheet ops
+ * language, so these can write formulas, restructure data, or add a table,
+ * chart, or pivot table beside the selection. */
+export const SHEET_ACTIONS: AiEditAction[] = [
+  {
+    id: "sheet-formula",
+    label: "Write a formula for this cell",
+    group: "formulas",
+    keywords: "calculate compute function",
+    instruction:
+      "Write the formula the selected cell needs, judging from its column and row headers and the data around it. Use cell references, never typed-in results.",
+  },
+  {
+    id: "sheet-explain",
+    label: "Explain these formulas",
+    group: "formulas",
+    keywords: "what how understand",
+    instruction:
+      "Explain in plain words what the formulas in the selection calculate and how they depend on each other. Do not change any cells.",
+  },
+  {
+    id: "sheet-fix-errors",
+    label: "Fix formula errors",
+    group: "formulas",
+    keywords: "#REF #VALUE #NAME #DIV/0 broken error",
+    instruction:
+      "Find formulas in the selection that return an error or look wrong, fix them, and keep their intent. Say what was wrong with each.",
+  },
+  {
+    id: "sheet-totals",
+    label: "Add a totals row",
+    group: "formulas",
+    keywords: "sum subtotal total",
+    instruction:
+      "Add a bold totals row under the data with SUM formulas for the number columns, formatted like the column above.",
+  },
+  {
+    id: "sheet-clean",
+    label: "Clean up and standardize",
+    group: "data",
+    keywords: "tidy trim case consistent normalize",
+    instruction:
+      "Clean up the selected data: trim stray spaces, make capitalization, dates, and number formats consistent, and fix obvious typos. Keep every row.",
+  },
+  {
+    id: "sheet-fill",
+    label: "Fill the blanks from the pattern",
+    group: "data",
+    keywords: "missing empty complete series",
+    instruction:
+      "Fill the empty cells in the selection by following the pattern of the filled ones. Use formulas where the pattern is a calculation.",
+  },
+  {
+    id: "sheet-split",
+    label: "Split text into columns",
+    group: "data",
+    keywords: "separate parse first last name",
+    instruction:
+      "Split combined text in the selection (for example full names or city, state) into separate, well-labeled columns to the right.",
+  },
+  {
+    id: "sheet-polish",
+    label: "Format as a polished table",
+    group: "analyze",
+    keywords: "style design header banded pretty",
+    instruction:
+      "Turn the data around the selection into a polished table: a styled header row, banded rows, sensible number formats, and column widths that fit.",
+  },
+  {
+    id: "sheet-chart",
+    label: "Chart this data",
+    group: "analyze",
+    keywords: "graph visualize plot",
+    instruction:
+      "Add the chart that shows this data best, with a clear title and labeled axes, placed beside the data.",
+  },
+  {
+    id: "sheet-pivot",
+    label: "Summarize in a pivot table",
+    group: "analyze",
+    keywords: "group aggregate breakdown summary",
+    instruction:
+      "Summarize the data with a pivot table on a new sheet, grouped by its most useful category, with totals.",
+  },
+  {
+    id: "sheet-outliers",
+    label: "Highlight the outliers",
+    group: "analyze",
+    keywords: "conditional anomaly unusual",
+    instruction:
+      "Highlight the unusually high and low values in the selection with conditional formatting, and say which values stand out.",
+  },
+  {
+    id: "sheet-insights",
+    label: "Summarize the key insights",
+    group: "analyze",
+    keywords: "trends findings takeaways",
+    instruction:
+      "Read the data and summarize the three to five most important trends or takeaways, with the numbers behind them. Do not change any cells.",
   },
 ];
 

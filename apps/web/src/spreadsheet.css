@@ -1,0 +1,1232 @@
+/* Drafts spreadsheet editor (Spreadsheet format).
+ *
+ * Built on the workspace tokens so the grid follows the porcelain light theme,
+ * dark mode, and the tactile control language: the formula bar and name box
+ * are carved fields, menus reuse the Drafts insert menu, and side panels are
+ * crisp slabs like the tool drawers. Grid colours derive from --border and
+ * --surface so gridlines stay quiet in both themes. */
+
+.sheet-editor {
+  --sheet-bg: var(--surface);
+  --sheet-ink: var(--text);
+  --sheet-grid: color-mix(in srgb, var(--border-strong) 62%, var(--surface));
+  --sheet-header-bg: color-mix(in srgb, var(--surface-soft) 86%, var(--border));
+  --sheet-header-text: var(--muted);
+  --sheet-header-active: color-mix(in srgb, var(--teal) 16%, var(--sheet-header-bg));
+  --sheet-select: var(--teal);
+  --sheet-select-fill: color-mix(in srgb, var(--teal) 11%, transparent);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  grid-row-end: -1;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* The platform styles buttons by class, not globally. A sheet control with
+   no platform key class starts from a clean, borderless button here (zero
+   specificity, so each component rule below still decides its look) instead
+   of the browser's grey bevel. */
+:where(.sheet-editor, .sheet-compare) button:where(:not(.primary-button, .secondary-button, .icon-button, .chip-button, .outline-button, .danger-button)) {
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+:where(.sheet-editor, .sheet-compare) button:where(:disabled) { cursor: default; }
+
+.theme-dark .sheet-editor {
+  --sheet-grid: color-mix(in srgb, var(--border-strong) 70%, var(--surface));
+  --sheet-header-bg: color-mix(in srgb, var(--surface-soft) 80%, #000);
+}
+
+.sheet-toolbar .sheet-format-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 58px;
+  max-width: 96px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sheet-toolbar .sheet-format-chip.is-number { min-width: 18px; justify-content: center; }
+
+.sheet-toolbar-menu > button { gap: 3px; }
+.sheet-toolbar-menu .sheet-menu-chevron { opacity: 0.6; }
+
+.sheet-decimal-button {
+  gap: 0;
+  font-size: 12px;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+.sheet-decimal-button small { font-size: 9px; margin-left: 1px; opacity: 0.75; }
+
+.sheet-color-icon {
+  position: relative;
+  display: inline-flex;
+  padding-bottom: 3px;
+}
+.sheet-color-icon::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--swatch-color, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.sheet-menu {
+  top: calc(100% + 6px);
+  left: 0;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sheet-menu.is-wide { min-width: 236px; }
+.sheet-menu button[role="menuitemradio"] {
+  justify-content: space-between;
+}
+.sheet-menu button[role="menuitemradio"] small { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sheet-menu button[aria-checked="true"],
+.sheet-menu button[aria-pressed="true"] {
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 9%, transparent);
+}
+.sheet-menu button:disabled { opacity: 0.45; }
+.sheet-menu button kbd {
+  margin-left: auto;
+  color: var(--muted);
+  font: 600 11px/1 inherit;
+  font-family: inherit;
+}
+.sheet-menu button.is-danger { color: var(--danger, #b42318); }
+.sheet-menu-separator {
+  display: block;
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--border);
+}
+.sheet-menu-empty { margin: 6px 10px; color: var(--muted); font-size: 12px; }
+
+.sheet-color-menu { display: grid; gap: 10px; padding: 2px; }
+.sheet-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 24px);
+  gap: 8px;
+  padding: 4px;
+}
+/* Square chips: the menu's own button padding and height stretched them into
+   tall ovals and pushed the grid past the menu's edge. */
+.sheet-menu .sheet-color-menu .sheet-swatches > button {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 7px;
+}
+.sheet-color-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sheet-color-actions > button { min-height: 30px !important; font-size: 12px !important; }
+.sheet-color-custom {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sheet-color-custom input { width: 26px; height: 26px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+
+.sheet-border-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+.sheet-border-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 2px;
+}
+.sheet-border-icon.is-all { border: 2px solid currentColor; background: linear-gradient(currentColor, currentColor) center / 2px 100% no-repeat, linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat; }
+.sheet-border-icon.is-outer { border: 2px solid currentColor; }
+.sheet-border-icon.is-thickOuter { border: 3px solid currentColor; }
+.sheet-border-icon.is-inner { background: linear-gradient(currentColor, currentColor) center / 2px 100% no-repeat, linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat; }
+.sheet-border-icon.is-top { border-top: 2px solid currentColor; }
+.sheet-border-icon.is-bottom { border-bottom: 2px solid currentColor; }
+.sheet-border-icon.is-left { border-left: 2px solid currentColor; }
+.sheet-border-icon.is-right { border-right: 2px solid currentColor; }
+.sheet-border-icon.is-bottomDouble { border-bottom: 4px double currentColor; }
+
+/* ---------------------------------------------------------------- formula bar */
+
+.sheet-formula-bar {
+  position: relative;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: 104px auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sheet-name-box {
+  height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--tactile-track-border, var(--border-strong));
+  border-radius: 10px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0002);
+  color: var(--text);
+  font: 700 13px/1 inherit;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.sheet-name-box:focus { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+.sheet-fx {
+  align-self: center;
+  color: var(--muted);
+  font: italic 700 14px/1 Georgia, "Times New Roman", serif;
+  padding: 0 2px;
+}
+
+.sheet-formula-input {
+  position: relative;
+  min-width: 0;
+}
+.sheet-formula-input textarea,
+.sheet-formula-mirror {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  font: 500 13px/20px ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  tab-size: 2;
+}
+.sheet-formula-input textarea {
+  position: relative;
+  z-index: 1;
+  display: block;
+  resize: none;
+  overflow: hidden;
+  color: transparent;
+  caret-color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+.sheet-formula-input textarea::placeholder { color: var(--muted); opacity: 0.85; }
+.sheet-formula-input textarea::selection { background: color-mix(in srgb, var(--teal) 28%, transparent); color: transparent; }
+.sheet-formula-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--text);
+  pointer-events: none;
+}
+.sheet-formula-mirror span { font-weight: inherit; }
+
+.sheet-formula-input.is-bar {
+  min-height: 34px;
+  max-height: 128px;
+  padding: 6px 12px;
+  border: 1px solid var(--tactile-track-border, var(--border-strong));
+  border-radius: 10px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0002);
+  overflow-y: auto;
+}
+.sheet-formula-input.is-bar:focus-within { box-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0002), var(--tactile-field-focus, inset 0 0 0 1px var(--teal)); }
+/* The colored text layer sizes to the text (not 100% plus the padding, which
+   pushed it 12px past the edge and forced a sideways scrollbar), and grows with
+   a long formula so it scrolls along with the text. */
+.sheet-formula-input.is-bar { overflow-x: hidden; scrollbar-width: thin; }
+.sheet-formula-input.is-bar .sheet-formula-mirror { inset: 6px 12px auto; width: auto; }
+.sheet-formula-input.is-bar textarea:disabled { cursor: not-allowed; }
+
+/* Ask AI is a raised key, the same as the deck's "Deck starters" key; it stays
+   pressed in while the composer is open. */
+.sheet-ai-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-strong);
+  box-shadow: var(--tactile-raised);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: box-shadow var(--speed) var(--ease), color var(--speed) var(--ease);
+}
+.sheet-ai-trigger svg { color: var(--teal); flex: none; }
+.sheet-ai-trigger:hover:not(:disabled) { color: var(--teal-strong); box-shadow: var(--tactile-raised-hover); }
+.sheet-ai-trigger:active:not(:disabled) { box-shadow: var(--tactile-pressed); transform: translateY(1px); }
+.sheet-ai-trigger[aria-expanded="true"] {
+  border-color: var(--tactile-track-border);
+  background: var(--tactile-track);
+  color: var(--teal-strong);
+  box-shadow: var(--tactile-pressed);
+}
+.sheet-ai-trigger:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+.sheet-ai-trigger:focus-visible { outline: none; box-shadow: var(--tactile-raised), var(--tactile-field-focus); border-color: var(--teal); }
+
+.sheet-function-suggestions {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(420px, 86vw);
+  max-height: 280px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.sheet-function-suggestions li {
+  display: grid;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sheet-function-suggestions li strong { color: var(--text); font: 700 12.5px/1.3 ui-monospace, "SF Mono", Menlo, monospace; }
+.sheet-function-suggestions li span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.sheet-function-suggestions li.is-active,
+.sheet-function-suggestions li:hover { background: color-mix(in srgb, var(--teal) 10%, transparent); }
+.sheet-function-suggestions li.is-active strong { color: var(--teal); }
+
+.sheet-function-hint {
+  position: absolute;
+  z-index: 29;
+  top: calc(100% + 6px);
+  left: 0;
+  max-width: min(560px, 90vw);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted);
+  font: 500 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.sheet-function-hint strong { color: var(--text); }
+.sheet-function-hint .is-current { color: var(--teal); font-weight: 800; }
+
+/* ---------------------------------------------------------------- AI review */
+
+/* The composer itself is the shared AiEditComposer; these style the
+   spreadsheet's review body inside it. */
+.sheet-ai-review { display: grid; gap: 8px; }
+.sheet-ai-message { margin: 0; color: var(--text); font-size: 13px; line-height: 1.5; }
+.sheet-ai-message.is-answer { white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+.sheet-ai-summary { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.sheet-ai-summary span {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--teal) 14%, transparent);
+  color: var(--teal);
+  font-weight: 800;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sheet-ai-warning { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--warning-text, #8a5a00); font-size: 12.5px; line-height: 1.45; }
+.theme-dark .sheet-ai-warning { color: #f3c969; }
+.sheet-ai-details { color: var(--muted); font-size: 12px; }
+.sheet-ai-details ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* ---------------------------------------------------------------- body + grid */
+
+.sheet-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.sheet-grid-wrap { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; }
+
+.sheet-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--sheet-bg);
+  outline: none;
+  touch-action: pan-x pan-y;
+  scrollbar-gutter: stable;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* The active-cell outline shows where keyboard focus is; no extra ring. */
+.sheet-scroll:focus-visible { box-shadow: none; }
+.sheet-spacer { position: absolute; top: 0; left: 0; pointer-events: none; }
+.sheet-viewport {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sheet-pane { position: absolute; overflow: hidden; }
+.sheet-pane-content { position: absolute; top: 0; left: 0; will-change: transform; }
+
+.sheet-gridline { position: absolute; height: 1px; background: var(--sheet-grid); pointer-events: none; }
+.sheet-gridline.is-vertical { width: 1px; height: auto; }
+.is-gridless .sheet-gridline { display: none; }
+
+.sheet-cell {
+  position: absolute;
+  display: flex;
+  box-sizing: border-box;
+  padding: 0 4px 2px;
+  overflow: hidden;
+  color: var(--sheet-ink);
+  line-height: 1.25;
+}
+.sheet-cell[style*="z-index"] { overflow: visible; }
+.sheet-cell-text {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.sheet-cell[style*="z-index"] .sheet-cell-text { max-width: none; }
+.sheet-cell-bar {
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 2px;
+  opacity: 0.38;
+  background: var(--teal);
+}
+.sheet-cell-note {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 7px solid #c2475a;
+  border-left: 7px solid transparent;
+}
+.sheet-cell-error-mark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-top: 6px solid #2f8f5b;
+  border-right: 6px solid transparent;
+}
+.sheet-cell.is-error .sheet-cell-text { color: #b42318; }
+.theme-dark .sheet-cell.is-error .sheet-cell-text { color: #ff8a80; }
+.sheet-cell.is-spilled .sheet-cell-text { opacity: 0.92; }
+.sheet-cell.is-found { box-shadow: inset 0 0 0 2px #e3b341; background-color: color-mix(in srgb, #e3b341 18%, transparent); }
+.sheet-cell.is-ai-changed {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--teal) 75%, transparent);
+  background-image: linear-gradient(color-mix(in srgb, var(--teal) 13%, transparent), color-mix(in srgb, var(--teal) 13%, transparent));
+}
+.sheet-cell-borders { position: absolute; box-sizing: border-box; pointer-events: none; z-index: 3; }
+
+.sheet-filter-button,
+.sheet-validation-button {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+}
+.sheet-filter-button.is-active { color: var(--teal); border-color: var(--teal); }
+.sheet-validation-button { right: -22px; width: 20px; height: 20px; background: var(--surface); box-shadow: var(--shadow-sm); }
+
+.sheet-selection,
+.sheet-active-cell,
+.sheet-selection-fill,
+.sheet-ref-highlight,
+.sheet-marching,
+.sheet-fill-preview,
+.sheet-spill-outline {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 5;
+}
+.sheet-selection { border: 1px solid var(--sheet-select); }
+.sheet-selection-fill { background: var(--sheet-select-fill); }
+.sheet-active-cell { border: 2px solid var(--sheet-select); z-index: 6; }
+.sheet-ref-highlight { border: 2px solid; border-radius: 1px; z-index: 6; }
+.sheet-spill-outline { border: 1px dashed #2f6eba; z-index: 4; }
+.sheet-fill-preview { border: 1px dashed var(--sheet-select); z-index: 6; }
+.sheet-marching {
+  z-index: 7;
+  border: 2px dashed var(--sheet-select);
+  animation: sheet-march 0.9s linear infinite;
+}
+@keyframes sheet-march { to { border-color: color-mix(in srgb, var(--sheet-select) 35%, transparent); } }
+.sheet-fill-handle {
+  position: absolute;
+  z-index: 8;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--sheet-bg);
+  border-radius: 2px;
+  background: var(--sheet-select);
+  cursor: crosshair;
+  touch-action: none;
+}
+.sheet-editor-slot { position: absolute; z-index: 9; display: flex; }
+.sheet-resize-guide { position: absolute; z-index: 9; width: 2px; background: var(--sheet-select); pointer-events: none; }
+.sheet-resize-guide.is-row { width: auto; height: 2px; }
+
+.sheet-cell-editor {
+  min-width: 100%;
+  min-height: 100%;
+  padding: 1px 4px;
+  border: 2px solid var(--sheet-select);
+  border-radius: 1px;
+  background: var(--sheet-bg);
+  box-shadow: 0 6px 18px #0002;
+}
+.sheet-cell-editor textarea,
+.sheet-cell-editor .sheet-formula-mirror {
+  font: 500 13px/19px "Plus Jakarta Sans", "SF Pro Text", system-ui, sans-serif;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.sheet-cell-editor .sheet-formula-mirror { inset: 1px 4px; }
+
+/* Headers */
+.sheet-col-headers,
+.sheet-row-headers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  overflow: hidden;
+  background: var(--sheet-header-bg);
+}
+.sheet-col-headers { top: 0; border-bottom: 1px solid var(--sheet-grid); }
+.sheet-row-headers { left: 0; border-right: 1px solid var(--sheet-grid); }
+.sheet-header {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-right: 1px solid var(--sheet-grid);
+  color: var(--sheet-header-text);
+  font-size: 11.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  cursor: s-resize;
+}
+.sheet-header.is-row { left: 0; border-right: 0; border-bottom: 1px solid var(--sheet-grid); cursor: e-resize; }
+
+/* Each header's trailing edge is a grab strip that straddles the gridline:
+   a faint grip shows on header hover, teal on the strip itself. */
+.sheet-resize-handle { position: absolute; z-index: 3; touch-action: none; }
+.sheet-resize-handle.is-col { top: 0; right: -5px; bottom: 0; width: 10px; cursor: col-resize; }
+.sheet-resize-handle.is-row { right: 0; bottom: -4px; left: 0; height: 8px; cursor: row-resize; }
+.sheet-resize-handle::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: var(--sheet-header-text);
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+.sheet-resize-handle.is-col::after { top: 5px; bottom: 5px; left: 3.5px; width: 3px; }
+.sheet-resize-handle.is-row::after { top: 2.5px; left: 12px; right: 12px; height: 3px; }
+.sheet-header:hover > .sheet-resize-handle::after { opacity: 0.32; }
+.sheet-header > .sheet-resize-handle:hover::after,
+.sheet-scroll[data-resize] .sheet-resize-handle:active::after { opacity: 1; background: var(--teal); }
+.sheet-scroll[data-resize="cols"],
+.sheet-scroll[data-resize="cols"] * { cursor: col-resize !important; }
+.sheet-scroll[data-resize="rows"],
+.sheet-scroll[data-resize="rows"] * { cursor: row-resize !important; }
+@media (pointer: coarse) {
+  .sheet-resize-handle.is-col { right: -9px; width: 18px; }
+  .sheet-resize-handle.is-row { bottom: -7px; height: 14px; }
+  .sheet-resize-handle.is-col::after { left: 7.5px; }
+  .sheet-resize-handle.is-row::after { top: 5.5px; }
+}
+.sheet-header.is-selected { background: var(--sheet-header-active); color: var(--teal); box-shadow: inset 0 -2px 0 var(--teal); }
+.sheet-header.is-row.is-selected { box-shadow: inset -2px 0 0 var(--teal); }
+.sheet-header.is-full { background: color-mix(in srgb, var(--teal) 26%, var(--sheet-header-bg)); }
+.sheet-hidden-marker { position: absolute; top: 4px; width: 4px; height: 16px; border-left: 2px solid var(--teal); border-right: 2px solid var(--teal); opacity: 0.7; }
+.sheet-corner {
+  position: absolute;
+  z-index: 11;
+  top: 0;
+  left: 0;
+  border-right: 1px solid var(--sheet-grid);
+  border-bottom: 1px solid var(--sheet-grid);
+  background: var(--sheet-header-bg);
+  cursor: pointer;
+}
+/* Select all: a small triangle in the corner, as in Excel, lit under the
+   pointer and while the whole sheet is selected. */
+.sheet-corner::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  transition: background-color 120ms ease;
+}
+.sheet-corner:hover::after,
+.sheet-corner.is-selected::after { background: var(--teal); }
+.sheet-corner.is-selected { background: var(--sheet-header-active); }
+.sheet-freeze-line { position: absolute; z-index: 12; height: 2px; background: color-mix(in srgb, var(--muted) 55%, transparent); pointer-events: none; }
+.sheet-freeze-line.is-vertical { width: 2px; height: auto; }
+
+/* Charts */
+.sheet-chart {
+  position: absolute;
+  z-index: 8;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px #0000001a, 0 6px 18px #00000014;
+  cursor: grab;
+  touch-action: none;
+}
+.sheet-chart.is-selected { outline: 2px solid var(--teal); outline-offset: -2px; }
+.sheet-chart:active { cursor: grabbing; }
+.sheet-chart-grip { position: absolute; top: 6px; left: 6px; color: var(--muted); opacity: 0.6; pointer-events: none; }
+.sheet-chart-resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--surface);
+  border-radius: 3px;
+  background: var(--teal);
+  cursor: nwse-resize;
+}
+.sheet-chart-svg { display: block; overflow: visible; font-family: "Plus Jakarta Sans", "SF Pro Text", system-ui, sans-serif; }
+.sheet-chart-bg { fill: var(--surface); stroke: color-mix(in srgb, var(--border-strong) 70%, transparent); }
+.sheet-chart-title { fill: var(--text); font-size: 14px; font-weight: 760; }
+.sheet-chart-axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sheet-chart-axis-title { fill: var(--muted); font-size: 11px; font-weight: 700; }
+.sheet-chart-grid line { stroke: color-mix(in srgb, var(--border-strong) 55%, transparent); stroke-width: 1; }
+.sheet-chart-baseline { stroke: color-mix(in srgb, var(--muted) 60%, transparent); stroke-width: 1; }
+.sheet-chart-line { fill: none; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.sheet-chart-area { opacity: 0.28; }
+.sheet-chart-dot { stroke: var(--surface); stroke-width: 1.5; }
+.sheet-chart-value { fill: var(--text); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sheet-chart-slice { stroke: var(--surface); stroke-width: 1.5; }
+.sheet-chart-slice-label { fill: #fff; font-size: 11px; font-weight: 800; paint-order: stroke; stroke: #0005; stroke-width: 2px; }
+.sheet-chart-legend text { fill: var(--muted); font-size: 11px; font-weight: 600; }
+.sheet-chart-empty { fill: var(--muted); font-size: 12px; }
+
+.sheet-notice {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: 14px;
+  max-width: min(560px, calc(100% - 32px));
+  padding: 9px 14px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  animation: sheet-rise 160ms ease-out;
+}
+@keyframes sheet-rise { from { opacity: 0; transform: translate(-50%, 6px); } }
+
+/* ---------------------------------------------------------------- tabs + status */
+
+/* Sheet tabs follow the platform's choice rail: a recessed track holds the
+   tabs and the sheet on screen is the lit thumb. Add and list are raised keys. */
+.sheet-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 5px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+.sheet-tab-add,
+.sheet-tab-all {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--tactile-raised);
+  cursor: pointer;
+}
+:is(.sheet-tab-add, .sheet-tab-all):hover:not(:disabled) { color: var(--text-strong); box-shadow: var(--tactile-raised-hover); }
+:is(.sheet-tab-add, .sheet-tab-all):active:not(:disabled) { box-shadow: var(--tactile-pressed); transform: translateY(1px); }
+.sheet-tab-all[aria-expanded="true"] { border-color: var(--tactile-track-border); background: var(--tactile-track); color: var(--teal-strong); box-shadow: var(--tactile-pressed); }
+.sheet-tab-add:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.sheet-tab-list-control { position: relative; }
+.sheet-tab-menu.is-up { top: auto; bottom: calc(100% + 6px); min-width: 220px; }
+.sheet-tab-menu small { margin-left: auto; color: var(--muted); font-weight: 600; font-size: 11px; }
+.sheet-tab-dot { flex: none; width: 9px; height: 9px; border-radius: 3px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 40%, transparent); }
+.sheet-tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 3px;
+  overflow-x: auto;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 12px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+  scrollbar-width: none;
+}
+.sheet-tab-strip::-webkit-scrollbar { display: none; }
+.sheet-tab { position: relative; flex: 0 0 auto; }
+.sheet-tab > [role="tab"],
+.sheet-tab-rename {
+  height: 28px;
+  max-width: 220px;
+  padding: 0 14px;
+  overflow: hidden;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sheet-tab > [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  cursor: pointer;
+}
+.sheet-tab > [role="tab"] > span { overflow: hidden; text-overflow: ellipsis; }
+.sheet-tab:not(.is-active) > [role="tab"]:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text-strong); }
+.sheet-tab.is-active > [role="tab"] {
+  border-color: var(--tactile-lit-border);
+  background: var(--tactile-lit);
+  color: #fff;
+  box-shadow: var(--tactile-lit-shadow);
+}
+.sheet-tab.is-active .sheet-tab-dot { box-shadow: 0 0 0 1.5px #ffffffb3; }
+.sheet-tab > [role="tab"]:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--teal); }
+/* A sheet's delete key sits inside its tab, after the name: quiet on other
+   tabs, white on the lit one, and stronger under the pointer. */
+.sheet-tab.is-closable > [role="tab"] { padding-right: 30px; padding-left: 12px; }
+.sheet-tab-close {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  opacity: 0.6;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+.sheet-tab:hover .sheet-tab-close { opacity: 1; }
+.sheet-tab-close:hover { opacity: 1; color: var(--text-strong); background: color-mix(in srgb, var(--muted) 18%, transparent); }
+.sheet-tab.is-active .sheet-tab-close { color: #ffffffd9; opacity: 0.85; }
+.sheet-tab.is-active .sheet-tab-close:hover { color: #fff; background: #ffffff2e; opacity: 1; }
+.sheet-tab-close:focus-visible { outline: none; opacity: 1; box-shadow: inset 0 0 0 2px var(--teal); }
+.sheet-tab.is-active .sheet-tab-close:focus-visible { box-shadow: inset 0 0 0 2px #ffffffd9; }
+@media (pointer: coarse) {
+  .sheet-tab.is-closable > [role="tab"] { padding-right: 36px; }
+  .sheet-tab-close { width: 26px; height: 26px; right: 4px; opacity: 0.85; }
+}
+.sheet-tab.is-active > [role="tab"]:focus-visible { box-shadow: var(--tactile-lit-shadow), inset 0 0 0 2px #ffffffd9; }
+.sheet-tab.is-drop-target::before { content: ""; position: absolute; left: -3px; top: 4px; bottom: 4px; width: 2px; border-radius: 2px; background: var(--teal); }
+.sheet-tab-rename {
+  width: 160px;
+  border: 1px solid var(--teal);
+  background: var(--tactile-field, var(--surface));
+  box-shadow: var(--tactile-field-shadow), var(--tactile-field-focus);
+  color: var(--text);
+  outline: 0;
+}
+.sheet-tab-context { position: fixed; z-index: 60; width: 248px; max-width: calc(100vw - 16px); }
+.sheet-tab-colors { display: flex; align-items: center; gap: 6px; padding: 6px 10px; color: var(--muted); }
+.sheet-tab-colors button {
+  width: 18px !important;
+  min-height: 18px !important;
+  height: 18px;
+  padding: 0 !important;
+  border-radius: 5px !important;
+  background: var(--swatch-color) !important;
+  box-shadow: inset 0 0 0 1px #0002 !important;
+}
+.sheet-tab-colors button[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 1px; }
+.sheet-tab-colors .sheet-tab-color-none { background: transparent !important; color: var(--muted) !important; justify-content: center; }
+
+/* The footer is the shared .document-status-bar; only the numbers differ. */
+.sheet-statusbar { flex: none; }
+.sheet-stats strong { margin-left: 4px; color: var(--text-strong, var(--text)); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- menus */
+
+.sheet-context-menu { position: fixed; z-index: 60; width: 264px; max-width: calc(100vw - 16px); max-height: min(84vh, 720px); gap: 1px; }
+.sheet-context-menu button { min-height: 30px; }
+.sheet-validation-list { position: fixed; z-index: 60; width: 220px; max-width: calc(100vw - 16px); max-height: 320px; }
+
+.sheet-filter-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 10px;
+  width: min(300px, calc(100vw - 24px));
+  max-height: min(78vh, 560px);
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.sheet-filter-sorts { display: grid; gap: 4px; }
+.sheet-filter-sorts button { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+.sheet-filter-search { height: 32px; }
+.sheet-filter-values { display: grid; gap: 2px; max-height: 220px; overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft); }
+
+/* ---------------------------------------------------------------- side panels */
+
+.sheet-side-panel {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  flex: 0 0 auto;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: -8px 0 22px #00000010;
+}
+.sheet-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-panel-head strong { color: var(--text); font-size: 14px; }
+/* Close is the quiet icon key the AI composer and shortcuts dialog use. */
+.sheet-panel-head button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.sheet-panel-head button:hover,
+.sheet-panel-head button:focus-visible { outline: none; background: var(--surface-sunken); color: var(--text-strong); }
+.sheet-panel-body { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 14px; overscroll-behavior: contain; }
+.sheet-panel-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.sheet-panel-subhead { margin: 6px 0 0; color: var(--text); font-size: 12.5px; font-weight: 800; }
+.sheet-panel-note,
+.sheet-panel-empty { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.sheet-panel-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.sheet-panel-actions.is-wrap { flex-wrap: wrap; justify-content: flex-start; }
+.sheet-panel-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.secondary-button.is-danger { color: var(--danger, #b42318); }
+
+.sheet-field { display: grid; gap: 5px; min-width: 0; }
+.sheet-field > span,
+.sheet-field-label { color: var(--muted); font-size: 11.5px; font-weight: 750; letter-spacing: 0.01em; }
+.sheet-field > small { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.sheet-field input,
+.sheet-field select,
+.sheet-field-row input,
+.sheet-field-row select,
+.sheet-panel-stack > input,
+.sheet-find-row input,
+.sheet-filter-search,
+.sheet-note-input,
+.sheet-sort-level select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--tactile-track-border, var(--border-strong));
+  border-radius: 9px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0002);
+  color: var(--text);
+  font: 600 13px/1 inherit;
+  font-family: inherit;
+}
+.sheet-field input[type="color"] { padding: 3px; height: 34px; }
+.sheet-note-input { height: auto; min-height: 120px; padding: 10px; line-height: 1.45; resize: vertical; }
+.sheet-field input:focus,
+.sheet-field select:focus,
+.sheet-panel-stack > input:focus,
+.sheet-find-row input:focus,
+.sheet-filter-search:focus,
+.sheet-note-input:focus,
+.sheet-field-row input:focus,
+.sheet-sort-level select:focus { outline: 0; box-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0002), var(--tactile-field-focus, inset 0 0 0 1px var(--teal)); }
+.sheet-field input[aria-invalid="true"] { border-color: #c2475a; }
+.sheet-field-row { display: flex; gap: 6px; }
+.sheet-field-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.sheet-check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.sheet-check input { width: 16px; height: 16px; accent-color: var(--teal); }
+.sheet-check small { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sheet-check.is-all { font-weight: 750; }
+.sheet-check-list { display: grid; gap: 6px; }
+.sheet-find-row { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.sheet-find-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sheet-find-results { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.sheet-find-results button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: 7px; color: var(--text); text-align: left; font-size: 12.5px; }
+.sheet-find-results button:hover { background: var(--surface-sunken); }
+.sheet-find-results button[aria-current="true"] { background: color-mix(in srgb, var(--teal) 12%, transparent); color: var(--teal); }
+.sheet-find-results code { color: var(--muted); font-weight: 700; }
+.sheet-find-results span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* Chart types are a choice rail: a recessed track, the chosen type lit. */
+.sheet-chart-types {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 12px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+}
+.sheet-chart-types button {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.sheet-chart-types button:hover:not(.is-active) { background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text-strong); }
+.sheet-chart-types button.is-active {
+  border-color: var(--tactile-lit-border);
+  background: var(--tactile-lit);
+  color: #fff;
+  box-shadow: var(--tactile-lit-shadow);
+}
+.sheet-chart-preview {
+  display: flex;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-track-shadow, inset 0 2px 5px #0002);
+}
+
+.sheet-pivot-fields { display: grid; gap: 4px; }
+.sheet-pivot-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: center; gap: 8px; }
+.sheet-pivot-row.is-head span { color: var(--muted); font-size: 11.5px; font-weight: 750; }
+.sheet-pivot-name { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
+.sheet-pivot-controls { display: flex; gap: 4px; }
+.sheet-pivot-controls select { flex: 1; min-width: 0; height: 30px; padding: 0 6px; border-radius: 8px; font-size: 12px; }
+
+.sheet-table-styles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.sheet-table-styles button { display: grid; justify-items: center; gap: 4px; padding: 6px 2px; border-radius: 10px; }
+.sheet-table-styles button.is-active { outline: 2px solid var(--teal); outline-offset: -2px; }
+.sheet-table-styles small { font-size: 10px; font-weight: 700; color: var(--muted); }
+.sheet-table-swatch { display: grid; width: 34px; border-radius: 4px; overflow: hidden; box-shadow: 0 0 0 1px #0001; }
+.sheet-table-swatch i { display: block; height: 6px; background: var(--surface); }
+.sheet-table-swatch i:first-child { height: 8px; background: var(--table-header); }
+.sheet-table-swatch i:nth-child(2n) { background: var(--table-band); }
+
+/* Table design gallery: three tones of six colors as mini tables, the chosen
+   one lit with a teal ring, then the style options as checkable rows. */
+.sheet-table-design .sheet-menu { min-width: 296px; overflow-x: hidden; }
+.sheet-table-design-menu { display: grid; gap: 2px; }
+.sheet-table-gallery { display: grid; gap: 4px; padding: 0 6px; }
+.sheet-table-gallery .sheet-menu-heading { margin: 6px 0 0; padding: 0 2px; }
+.sheet-table-gallery-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.sheet-menu .sheet-table-gallery-row > .sheet-table-choice {
+  display: grid;
+  place-items: center;
+  /* Menu radio items spread label and hint apart (space-between), which packs
+     this one-swatch grid to the left; a swatch sits in the middle. */
+  justify-content: center;
+  width: 100%;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 8px;
+}
+.sheet-menu .sheet-table-gallery-row > .sheet-table-choice:hover { background: var(--surface-sunken); }
+.sheet-menu .sheet-table-gallery-row > .sheet-table-choice.is-active {
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  box-shadow: inset 0 0 0 2px var(--teal);
+}
+.sheet-table-choice .sheet-table-swatch { width: 30px; }
+.sheet-table-option-box {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--tactile-track-border, var(--border-strong));
+  border-radius: 5px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-track-shadow, inset 0 1px 2px #0002);
+}
+.sheet-table-option[aria-checked="true"] .sheet-table-option-box {
+  border-color: var(--tactile-lit-border, var(--teal));
+  background: var(--tactile-lit, var(--teal));
+  color: #fff;
+  box-shadow: none;
+}
+
+.sheet-rule-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.sheet-rule-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; }
+.sheet-rule-swatch { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 22px; flex: 0 0 auto; border-radius: 5px; box-shadow: inset 0 0 0 1px #0001; font-size: 11px; font-weight: 800; }
+.sheet-rule-text { display: grid; min-width: 0; flex: 1; }
+.sheet-rule-text strong { overflow: hidden; color: var(--text); font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
+.sheet-rule-text small { color: var(--muted); font-size: 11.5px; }
+.sheet-rule-actions { display: flex; gap: 2px; }
+.sheet-rule-actions button,
+.sheet-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border-radius: 7px; }
+.sheet-sort-level { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; }
+.sheet-sort-level .sheet-field-label { grid-column: 1 / -1; }
+.sheet-function-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.sheet-function-list button { display: grid; gap: 2px; width: 100%; padding: 8px; border-radius: 8px; text-align: left; }
+.sheet-function-list code { color: var(--text); font: 700 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace; overflow-wrap: anywhere; }
+.sheet-function-list span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+
+/* ---------------------------------------------------------------- format toggle */
+
+/* The Drafts format rail gains a third stop; the lit thumb keeps its width
+   in thirds and slides one column per format. */
+/* Three equal stops sized by the longest label, so every label sits centered
+   in its stop and the lit thumb lines up; the title beside it gives way first. */
+.document-assistant-page .deck-mode-switch { grid-template-columns: repeat(3, 1fr); min-width: max-content; flex-shrink: 0; }
+/* The thumb's 1px border counts inside its width, so translateX(100%) moves
+   exactly one stop (with the border outside, each stop drifted 2px right). */
+.document-assistant-page .deck-mode-switch::before { box-sizing: border-box; width: calc((100% - 8px) / 3); }
+.document-assistant-page .deck-mode-switch[data-mode="deck"]::before { transform: translateX(100%); }
+.document-assistant-page .deck-mode-switch[data-mode="spreadsheet"]::before { transform: translateX(200%); }
+.document-assistant-page .deck-mode-switch button { min-width: max-content; }
+
+/* With three stops the rail is wider than the old two; on laptop widths the
+   labels carry the meaning and the icons give their room back to the title. */
+@media (max-width: 1360px) {
+  .document-assistant-page .deck-mode-switch button { padding-inline: 10px; }
+  .document-assistant-page .deck-mode-switch button svg { display: none; }
+}
+
+@media (max-width: 520px) {
+  .document-assistant-page .deck-mode-switch button { gap: 4px; padding-inline: 6px; font-size: 12px; }
+  .document-assistant-page .deck-mode-switch button svg { display: none; }
+}
+
+@media (max-width: 380px) {
+  .document-assistant-page .deck-mode-switch .draft-format-label { font-size: 0; }
+  .document-assistant-page .deck-mode-switch .draft-format-label::after { content: attr(data-short); font-size: 12px; }
+}
+
+/* ---------------------------------------------------------------- page layout */
+
+.document-assistant-page.is-sheet-mode .document-editor-workspace { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
+
+@media (max-width: 1180px) {
+  .document-assistant-page.is-sheet-mode { overflow: hidden; }
+  .is-sheet-mode .document-assistant-shell { height: 100vh; min-height: 0; }
+  .is-sheet-mode .document-editor-workspace { height: 100vh; min-height: 0; }
+  .sheet-side-panel { position: absolute; z-index: 25; top: 0; right: 0; bottom: 0; width: min(340px, 100%); }
+}
+
+@media (max-width: 720px) {
+  .sheet-formula-bar { grid-template-columns: 76px auto minmax(0, 1fr) auto; gap: 6px; padding: 6px 10px; }
+  .sheet-ai-trigger span:last-child { display: none; }
+  .sheet-ai-trigger { padding: 0 10px; }
+  .sheet-side-panel {
+    top: auto;
+    left: 0;
+    width: 100%;
+    max-height: 72%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 30px #0000002a;
+  }
+}
+
+@media (max-width: 560px) {
+  .sheet-formula-bar { grid-template-columns: 64px minmax(0, 1fr) auto; }
+  .sheet-fx { display: none; }
+  .sheet-name-box { padding: 0 6px; font-size: 12px; }
+  .sheet-tabs { padding: 4px 6px; }
+  .sheet-find-options { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-marching,
+  .sheet-notice { animation: none; }
+}
+
+@media print {
+  .sheet-editor { display: none; }
+}
+
+.draft-template-intro { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+/* The spreadsheet toolbar has more keys than the writing bar. Like the
+   document toolbar it stays one row: SheetToolbar measures the main group and
+   sets data-fold, and keys leave in tiers (a: strikethrough, decimals,
+   vertical align; b: currency, percent, font size, borders, wrap, merge;
+   c: horizontal align; d: text and fill color) to reappear under "More". On a
+   phone the expanded group still wraps, so the save status never spills
+   past the edge. */
+.sheet-toolbar .document-toolbar-main { flex: 1 1 0; min-width: 0; }
+.sheet-toolbar > .document-save-state { flex: 0 0 auto; }
+.sheet-toolbar .sheet-tier-more,
+.sheet-more-menu > [class^="sheet-tier-"] { display: none; }
+.sheet-toolbar .sheet-tier-more .sheet-menu { right: 0; left: auto; min-width: 248px; }
+.sheet-toolbar-label { font-size: 13px; font-weight: 500; }
+.sheet-more-menu > [class^="sheet-tier-"] { flex-direction: column; gap: 1px; }
+.sheet-menu-heading { margin: 6px 0 2px; padding: 0 10px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.sheet-menu-glyph { display: inline-flex; justify-content: center; width: 16px; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sheet-more-menu .sheet-color-menu { padding: 0 6px; }
+
+.document-toolbar-main:is([data-fold="1"], [data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) > .sheet-tier-more { display: block; }
+.document-toolbar-main:is([data-fold="1"], [data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) > .sheet-tier-a { display: none; }
+.document-toolbar-main:is([data-fold="1"], [data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) .sheet-more-menu > .sheet-tier-a { display: flex; }
+.document-toolbar-main:is([data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) > .sheet-tier-b { display: none; }
+.document-toolbar-main:is([data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) .sheet-more-menu > .sheet-tier-b { display: flex; }
+.document-toolbar-main:is([data-fold="3"], [data-fold="4"], [data-fold="5"]) > .sheet-tier-c { display: none; }
+.document-toolbar-main:is([data-fold="3"], [data-fold="4"], [data-fold="5"]) .sheet-more-menu > .sheet-tier-c { display: flex; }
+.document-toolbar-main:is([data-fold="4"], [data-fold="5"]) > .sheet-tier-d { display: none; }
+.document-toolbar-main:is([data-fold="4"], [data-fold="5"]) .sheet-more-menu > .sheet-tier-d { display: flex; }
+.document-toolbar-main[data-fold="5"] > .sheet-tier-e { display: none; }
+.document-toolbar-main[data-fold="5"] .sheet-more-menu > .sheet-tier-e { display: flex; }
+
+/* ---------------------------------------------------------------- version compare */
+
+.sheet-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(86vh, 900px);
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.sheet-compare .modal-head { align-items: flex-start; }
+.sheet-compare .modal-head > div { flex: 1; min-width: 0; }
+.sheet-compare-pickers { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 10px; }
+.sheet-compare-arrow { padding-bottom: 8px; color: var(--muted); font-weight: 800; }
+.sheet-compare-body { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 14px; }
+.sheet-compare-totals { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.sheet-compare-totals span { padding: 3px 9px; border-radius: 7px; background: var(--surface-soft); color: var(--text); font-size: 12px; font-weight: 700; }
+.sheet-compare-totals .is-added { color: #166534; background: color-mix(in srgb, #3d8b5a 14%, transparent); }
+.sheet-compare-totals .is-removed { color: #9b1c1c; background: color-mix(in srgb, #c2475a 14%, transparent); }
+.sheet-compare-totals .is-changed { color: var(--teal); background: color-mix(in srgb, var(--teal) 12%, transparent); }
+.theme-dark .sheet-compare-totals .is-added { color: #86efac; }
+.theme-dark .sheet-compare-totals .is-removed { color: #fda4af; }
+.sheet-compare-sheet h3 { margin: 0 0 6px; color: var(--text); font-size: 13px; }
+.sheet-compare-sheet table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.sheet-compare-sheet th, .sheet-compare-sheet td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; color: var(--text); }
+.sheet-compare-sheet thead th { color: var(--muted); font-size: 11.5px; font-weight: 750; }
+.sheet-compare-sheet th[scope="row"] { width: 72px; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+.sheet-compare-sheet td:last-child { width: 92px; }
+.sheet-compare-sheet td em { color: var(--muted); }
+.sheet-compare-sheet tr.is-added td:nth-child(3) { background: color-mix(in srgb, #3d8b5a 10%, transparent); }
+.sheet-compare-sheet tr.is-removed td:nth-child(2) { background: color-mix(in srgb, #c2475a 10%, transparent); text-decoration: line-through; }
+.sheet-compare-sheet tr.is-changed td:nth-child(2) { color: var(--muted); }
+.sheet-compare-sheet tr.is-changed td:nth-child(3) { background: color-mix(in srgb, var(--teal) 9%, transparent); }
+@media (max-width: 560px) {
+  .sheet-compare { padding: 14px; }
+  .sheet-compare-pickers { grid-template-columns: minmax(0, 1fr); }
+  .sheet-compare-arrow { display: none; }
+}
+
+/* Table styles: a line saying what a pick restyles (or what to do first). */
+.sheet-menu-note { margin: 2px 4px 4px; padding: 0 6px; color: var(--muted); font-size: 12px; line-height: 1.4; max-width: 280px; }
+/* Menus never grow wider than a phone's window. */
+.sheet-toolbar .sheet-menu { max-width: calc(100vw - 16px); }

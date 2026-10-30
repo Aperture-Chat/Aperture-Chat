@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from app.models.deck_document import DeckValidationError
+from app.models.sheet_document import SheetValidationError
 from app.models.matters import (
     MAX_DRAFT_LIST_LIMIT,
     DraftContentTooLarge,
@@ -868,6 +869,12 @@ def _require_active_tenant_member_target(
         )
 
 
+_CONTENT_LABELS: dict[type[ValueError], str] = {
+    DeckValidationError: "Deck",
+    SheetValidationError: "Spreadsheet",
+}
+
+
 @contextmanager
 def _repository_errors() -> Iterator[None]:
     try:
@@ -902,11 +909,11 @@ def _repository_errors() -> Iterator[None]:
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(exc),
         ) from exc
-    except DeckValidationError as exc:
-        # Deck validation messages name the offending field and are safe to show.
+    except (DeckValidationError, SheetValidationError) as exc:
+        # Validation messages name the offending field and are safe to show.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Deck content is invalid: {exc}",
+            detail=f"{_CONTENT_LABELS[type(exc)]} content is invalid: {exc}",
         ) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(

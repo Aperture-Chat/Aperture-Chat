@@ -190,11 +190,16 @@ _DECK_PROMPT = re.compile(
     r"editing slide \d+ of \d+ in the presentation\b|fixing slide layout\b)"
 )
 
+# Every prompt the Drafts spreadsheet assistant sends (whole-workbook requests,
+# Ask AI on a selection, and the formula fix round; apps/web/src/lib/sheet/sheetAi.ts)
+# opens with this. Its operation reference names tables, charts, and images.
+_SHEET_PROMPT = re.compile(r"\AYou are the spreadsheet assistant inside Aperture Drafts\b")
+
 
 def extract_draft_directives(prompt: str, standing_instructions: list[str] | None = None) -> list[Directive]:
-    # Deck output is validated against its JSON contract in the deck pipeline.
-    # The editor adds artwork afterward; prose/image verifiers are inapplicable.
-    if _DECK_PROMPT.match(prompt):
+    # Deck and workbook output is validated against its JSON contract in the
+    # editor (decks get artwork afterward); prose/image verifiers are inapplicable.
+    if _DECK_PROMPT.match(prompt) or _SHEET_PROMPT.match(prompt):
         return []
     match = re.search(r"\AUser request: (.*?)\n\nDraft type:", prompt, re.DOTALL)
     return extract_directives(match.group(1) if match else prompt, standing_instructions)

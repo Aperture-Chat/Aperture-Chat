@@ -1,0 +1,471 @@
+/* Phone layer: iPhone-width layout and touch adjustments.
+
+   Loaded after tactile-controls.css so it can adapt shared classes for
+   narrow, touch-first screens without editing each feature stylesheet.
+   Rules here only change layout, sizing, and spacing below the phone
+   breakpoint; colors and the tactile language stay with their owners.
+
+   Principles:
+   - Nothing may widen the page: wide content scrolls inside its own block.
+   - Nothing floats over content the reader is scrolling through.
+   - Touch targets are at least 36px on their short side, 40px+ where a row
+     has room (Apple recommends 44pt).
+   - Popovers stay inside the viewport and above the sticky chrome. */
+
+/* Phones in portrait, and phones on their side (short and touch-driven,
+   where the desktop composer and gutters left almost no reading room). */
+@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+  /* ---------- Chat: messages use the full width ----------
+     The 42px avatar column plus its gap took 58px from every reply. On a
+     phone the avatar sits on the name line and the body spans the column. */
+  .message {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    margin-bottom: 22px;
+  }
+
+  .message > .avatar,
+  .message > span.avatar {
+    position: absolute;
+    top: -3px;
+    left: 0;
+    margin: 0;
+    width: 30px;
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .message > .avatar svg,
+  .message > .avatar img {
+    width: 100%;
+    height: 100%;
+  }
+
+  .message .message-meta {
+    min-height: 24px;
+    padding-left: 40px;
+  }
+
+  /* ---------- Chat: compact composer once a conversation is open ----------
+     The empty composer was 104px tall, so with its toolbar the dock took a
+     quarter of the screen. It starts at two lines and grows as you type. */
+  .chat-main:has(.message-list) .composer textarea {
+    min-height: 52px;
+  }
+
+  .chat-main:has(.message-list) .composer {
+    padding: 10px 12px;
+  }
+
+  /* ---------- Chat: header ----------
+     "Model:" is implied by the chip's icon; dropping it leaves room for the
+     model name and the chat title instead of "Mo…". */
+  .workspace-header .model-select .model-select-label {
+    font-size: 0;
+    /* Its own text is hidden; an ellipsis here would hide the whole name
+       box below and draw a 0px "…" in its place (a blank chip). */
+    text-overflow: clip;
+  }
+
+  .workspace-header .header-actions,
+  .workspace-header .model-select {
+    flex: none;
+  }
+
+  .workspace-header .model-select .model-select-label strong {
+    display: inline-block;
+    /* Never wider than the label, so a long name ends in its own "…". */
+    max-width: min(84px, 100%);
+    overflow: hidden;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  /* Renaming needs the whole row for the name field. */
+  .workspace-header:has(.chat-title-editor) .header-actions .model-select {
+    display: none;
+  }
+
+  /* ---------- Chat: menus that open above the composer ----------
+     In an empty chat the composer sits mid-screen, so the "/" and "@" lists
+     reached under the sticky header and their first rows were hidden. Lift
+     the composer over the header while a list is open (as the attach menu
+     already does) and cap the list to the screen. */
+  .composer:has(.composer-command-menu) {
+    position: relative;
+    z-index: 7;
+  }
+
+  body:has(.composer-command-menu) .mobile-hamburger {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .composer-command-menu {
+    max-height: min(340px, 46dvh);
+  }
+
+  /* ---------- Tables scroll sideways instead of splitting words ----------
+     A five-column table squeezed into 300px broke words mid-letter
+     ("Nort/hwin/d"). Columns keep a readable minimum and the table scrolls
+     inside its own frame. */
+  .md-table {
+    min-width: 100%;
+    table-layout: auto;
+  }
+
+  .md-table th,
+  .md-table td {
+    min-width: 7rem;
+    overflow-wrap: break-word;
+  }
+
+  .document-canvas table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    table-layout: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .document-canvas th,
+  .document-canvas td {
+    min-width: 7rem;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  /* ---------- Artifact canvas pull tab ----------
+     The tab rides the right edge mid-screen; on a phone it sat on top of the
+     reply text. Narrow it and keep the conversation out of its lane. */
+  .artifact-canvas-tab {
+    width: 24px;
+    height: 64px;
+  }
+
+  body:has(.artifact-canvas-edge) .message-list {
+    padding-right: 16px;
+  }
+
+  /* ---------- Console pages: an app bar instead of a floating button ----------
+     Agents, Library, Admin, and Platform scroll the page under the fixed menu
+     button, which then sat on top of cards and text. A bar in the page color
+     gives the button a home and content scrolls cleanly beneath it. The old
+     58px left gutter that dodged the button is no longer needed. */
+  .main-surface:has(> .console-page)::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 49;
+    height: 58px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+  }
+
+  .main-surface > .console-page {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  /* ---------- Drafts: the menu button scrolls with the page ----------
+     The editor pins its page navigator to the top while the document
+     scrolls; the fixed menu button sat over it and over the page. In Drafts
+     it stays with the toolbar it lines up with. */
+  .view-drafts .mobile-hamburger {
+    position: absolute;
+  }
+
+  /* The assistant pull tab on the left edge covered the save status and
+     field edges beside it; at 24px it stays in the editor's margin. */
+  .draft-rail-tab {
+    width: 24px;
+    height: 64px;
+    padding-left: 3px;
+  }
+
+  /* Deck: "Deck starters" wraps under the Layouts/Themes switch instead of
+     running off the right edge. */
+  .document-assistant-page .deck-design-heading {
+    flex-wrap: wrap;
+  }
+
+  /* Deck: the slide stage fits the height left under the toolbars, so with
+     Deck formatting open on a phone the slide shrank to a 46px sliver. The
+     stage keeps room for a full-width slide and the deck body scrolls. */
+  .deck-editor-body {
+    overflow-y: auto;
+  }
+
+  .deck-stage-column {
+    flex: 1 0 auto;
+    min-height: 31rem;
+  }
+
+  /* Drafts history: the archive and delete keys sit over the card's right
+     end; keep the title and date clear of them. */
+  .draft-history-actions button,
+  .document-assistant-page .document-assistant-rail.is-drawer .draft-history-actions button {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .draft-history-entry:has(.draft-history-actions) .draft-history-document-card {
+    padding-right: 98px;
+  }
+
+  /* Find bar: the field shrinks so the match count and the previous, next,
+     and close keys stay on screen. */
+  .document-find-rows {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .document-find-count {
+    min-width: 0;
+  }
+
+  /* The sticky ruler cost a row of an already short screen: it scrolls with
+     the page here, and its 14x11px indent handles get a finger-sized hit
+     area without changing how they look. */
+  .document-ruler {
+    position: static;
+  }
+
+  .document-ruler-handle::before {
+    content: "";
+    position: absolute;
+    inset: -10px -11px;
+  }
+
+  /* Session details: statuses are one word, so they stay in a trailing
+     column instead of stacking above each row like audit timestamps. */
+  .session-panel .audit-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .session-panel .audit-row time {
+    order: 0;
+    white-space: nowrap;
+  }
+
+  /* ---------- First-run welcome ----------
+     The welcome card sits above the chat in the page flow, so it scrolls
+     past the fixed menu button. It passes over the button rather than under
+     it, which keeps its text readable. */
+  .first-run-welcome {
+    position: relative;
+    z-index: 51;
+  }
+
+  /* ---------- Drafts: find bar and outline open where you are ----------
+     Both were placed at the top of the editor body. On a phone the page
+     itself scrolls, so opening them from the status bar while reading page
+     two put them above the screen. They float in view instead. */
+  .document-find-bar {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    z-index: 60;
+    width: auto;
+  }
+
+  .document-outline {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(300px, 86vw);
+  }
+
+  /* ---------- Admin and platform consoles ---------- */
+  /* User actions span the record card and wrap as keys, not a column of
+     full-width buttons. */
+  .user-management-table td:has(> .user-row-actions) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .user-row-actions .secondary-button.compact {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  /* IdP mapping: the claim value takes its own line; the group and the
+     remove key share the next one (three columns cut both fields off). */
+  .sso-mapping-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .sso-mapping-row > input {
+    grid-column: 1 / -1;
+  }
+
+  /* Provider cards: actions use the card's full width under the logo. */
+  .provider-card {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .provider-actions {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  /* The toolbar overflow menu sits at the left on a phone; anchoring it to
+     the button's right edge pushed it past the screen. */
+  .ws-toolbar-actions .ws-overflow-menu {
+    right: auto;
+    left: 0;
+  }
+}
+
+/* ---------- Touch targets on phones ----------
+   Desktop density uses 20–30px keys. Under a finger these grow to at least
+   36px (40px where a row has room) without changing their look. */
+@media (max-width: 640px) and (pointer: coarse), (max-height: 500px) and (pointer: coarse) {
+  .message-icon-action,
+  .chat-title-rename-button,
+  .section-icon-button,
+  .deck-design-fold {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .md-code-action,
+  .md-table-tool,
+  .work-trace-toggle,
+  .chat-library-toggle,
+  .ws-chip,
+  .status-filter-option,
+  .audit-summary-expand,
+  .deck-layout-control,
+  .back-link-button,
+  .issue-report-details-toggle {
+    min-height: 36px;
+  }
+
+  .attach-menu .attach-option {
+    min-height: 42px;
+  }
+
+  /* Document and deck formatting keys, the selection mini toolbar, the find
+     bar, and small close/expand keys: 26–30px under a mouse, 34–36px here.
+     The spreadsheet toolbar measures its own fold and is sized there. */
+  .document-toolbar-main > button:not(.sheet-toolbar *),
+  .document-toolbar-main > select:not(.sheet-toolbar *),
+  .document-tool-panel-trigger:not(.sheet-toolbar *),
+  .document-selection-toolbar button,
+  .document-export-panel-header > button,
+  .document-outline-head > button,
+  .document-find-bar > button,
+  .document-find-row > button,
+  .composer-expand-button,
+  .prompt-editor-action,
+  .chat-title-action,
+  .deck-sorter-toggle {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .document-find-field {
+    height: 38px;
+  }
+
+  .document-find-option {
+    min-width: 30px;
+    min-height: 30px;
+  }
+
+  .deck-design-tabs button,
+  .audit-chart-toggle button,
+  .training-guide-tabs button,
+  .document-insert-control > button,
+  .sidebar-view-all,
+  .folder-create-form input,
+  .folder-create-form button {
+    min-height: 36px;
+  }
+
+  /* Search fields: the box is 44px but its input was an 18px strip, and a
+     <div> box does not pass a tap on its padding to the input. */
+  .search-box input,
+  .support-search input {
+    align-self: stretch;
+  }
+
+  .support-search {
+    min-height: 40px;
+  }
+
+  /* No keyboard to press them on; dropping the Drafts shortcuts key also
+     gives the status bar room for "Page 1 of 3 · 138 words". */
+  .command-palette-heading kbd,
+  .document-status-tools > button[aria-label="Keyboard shortcuts"] {
+    display: none;
+  }
+
+  .document-status-tools > button,
+  .document-zoom button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .deck-thumb-actions button {
+    width: 26px;
+    height: 26px;
+  }
+
+  /* Hover-revealed row actions (pin, archive, folder) were invisible on a
+     touch screen yet still took taps, so a tap near a row's right edge could
+     archive it. Show them, at a usable size, beside a faded title. */
+  .chat-row .pin-toggle,
+  .chat-row .chat-row-actions::before,
+  .sidebar .chat-row:is(.is-selected, .is-pinned) .pin-toggle,
+  .sidebar .chat-row:is(.is-selected, .is-pinned) .chat-row-actions::before {
+    opacity: 1;
+  }
+
+  .chat-row .pin-toggle {
+    width: 34px;
+    height: 36px;
+  }
+
+  /* Search results carry the same hidden row actions. */
+  .palette-result-actions .pin-toggle {
+    width: 34px;
+    height: 36px;
+    opacity: 1;
+  }
+
+  .palette-result .palette-option {
+    padding-right: 112px;
+  }
+
+  /* Fields whose visible box is taller than the control inside it. */
+  .compact-select-field select,
+  .document-find-field input {
+    align-self: stretch;
+  }
+
+  .managed-group-card > input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+  }
+
+  .document-page-navigator button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .command-palette-panel .drawer-card > summary {
+    min-height: 36px;
+  }
+}

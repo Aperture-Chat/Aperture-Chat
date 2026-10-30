@@ -24,7 +24,7 @@ import type {
 import { laterReadMarker, readableMessageId } from "./chatReadState";
 import type { ChatStreamActivity } from "./streamActivity";
 import { advanceTrace, finishTrace, recordActivity, startTrace, type TraceStart } from "./workTrace";
-import { replaceCodeFence, replaceDiagramFence } from "./markdown";
+import { replaceCodeFence, replaceDiagramFence, replaceMarkdownTable, type MarkdownTable } from "./markdown";
 import { preferredModel, usableModels } from "./modelAccess";
 import { formatTimeLabel, platformTimestamp, type PlatformTimestamp } from "./serverClock";
 
@@ -784,6 +784,7 @@ export type ChatStore = {
   /** Saves an edited code block into a finished reply. `occurrence` picks
    * among identical blocks in the same reply. */
   updateAssistantCode: (messageId: string, previousSource: string, nextSource: string, occurrence: number) => boolean;
+  updateAssistantTable: (messageId: string, previous: MarkdownTable, next: MarkdownTable, occurrence: number) => boolean;
   sendMessage: (content: string, attachments?: ChatAttachment[], runtime?: ChatRuntimeOptions) => void;
   sendMessageInNewThread: (content: string, attachments?: ChatAttachment[], runtime?: ChatRuntimeOptions) => ChatThread | null;
   /** Runs an automation immediately and records the run as an exchange in the
@@ -1662,8 +1663,8 @@ export function useChatStore(
     [persistThread],
   );
 
-  /** Rewrites a fenced block in a finished reply (its active response
-   * version, when it has several) and saves the thread. */
+  /** Rewrites a block (a fence or a table) in a finished reply (its active
+   * response version, when it has several) and saves the thread. */
   const replaceAssistantFence = useCallback(
     (messageId: string, replace: (content: string) => string | null) => {
       const sourceThread = threadsRef.current.find((thread) => thread.id === activeIdRef.current);
@@ -1710,6 +1711,12 @@ export function useChatStore(
   const updateAssistantCode = useCallback(
     (messageId: string, previousSource: string, nextSource: string, occurrence: number) =>
       replaceAssistantFence(messageId, (content) => replaceCodeFence(content, previousSource, nextSource, occurrence)),
+    [replaceAssistantFence],
+  );
+
+  const updateAssistantTable = useCallback(
+    (messageId: string, previous: MarkdownTable, next: MarkdownTable, occurrence: number) =>
+      replaceAssistantFence(messageId, (content) => replaceMarkdownTable(content, previous, next, occurrence)),
     [replaceAssistantFence],
   );
 
@@ -2201,6 +2208,7 @@ export function useChatStore(
     selectResponseVersion,
     updateAssistantDiagram,
     updateAssistantCode,
+    updateAssistantTable,
     sendMessage,
     sendMessageInNewThread,
     runAutomationNow,

@@ -2,7 +2,8 @@ import { Fragment, type ReactNode } from "react";
 
 /** Compact, noninteractive Markdown: search rows must not contain links or media. */
 export function SearchSnippet({ text }: { text: string }) {
-  const source = text.replace(/^\s{0,3}(?:#{1,6}\s+|>\s?)/gm, "")
+  // Heading markers can sit mid-line: the index flattens a chat into one line.
+  const source = text.replace(/^\s{0,3}(?:#{1,6}\s+|>\s?)/gm, "").replace(/(^|\s)#{1,6}\s+/g, "$1")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\n+/g, " ");
   const nodes: ReactNode[] = [];
   const tokens = /\*\*(\S(?:.*?\S)?)\*\*|__(\S(?:.*?\S)?)__|`([^`]+)`|(?<!\*)\*(?!\*)([^*]+)\*(?!\*)|(?<!_)_(?!_)([^_]+)_(?!_)|~~(.+?)~~/g;

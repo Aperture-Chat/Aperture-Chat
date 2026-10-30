@@ -519,19 +519,23 @@ test("the work trace grows from what the API reports and the reply itself, then 
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   sendFromComposer("Stream a short answer.");
 
+  // The timeline is open while the reply runs, and each step lands in turn.
   const running = await screen.findByRole("status", { name: "Aperture Chat activity trace" });
-  expect(within(running).getByText("Thinking")).toBeInTheDocument();
+  const runningSteps = within(running).getByRole("list", { name: "Steps so far" });
+  expect(await within(runningSteps).findByText("Thinking", {}, { timeout: 3000 })).toBeInTheDocument();
   expect(within(running).getByText("Start writing the reply")).toBeInTheDocument();
 
   sse.push('data: {"activity":{"kind":"knowledge","passages":3,"sources":1}}\n\n');
   sse.push('data: {"delta":"## Plan\\n\\nOak trees"}\n\n');
-  expect(await within(running).findByText("Drafting “Plan”")).toBeInTheDocument();
+  expect(await within(runningSteps).findByText("Found 3 passages in workspace knowledge", {}, { timeout: 3000 })).toBeInTheDocument();
+  expect(within(runningSteps).queryByText("Drafting “Plan”")).not.toBeInTheDocument();
+  expect(await within(runningSteps).findByText("Drafting “Plan”", {}, { timeout: 3000 })).toBeInTheDocument();
   expect(within(running).getByText("Check the work and finish")).toBeInTheDocument();
 
   sse.push('data: {"delta":"\\n\\n```html\\n<!doctype html>\\n<html>"}\n\n');
-  expect(await within(running).findByText("Writing html · 2 lines")).toBeInTheDocument();
+  fireEvent.click(within(running).getByRole("button", { name: "Collapse work trace" }));
+  expect(await within(running).findByText("Writing html · 2 lines", {}, { timeout: 3000 })).toBeInTheDocument();
   fireEvent.click(within(running).getByRole("button", { name: "Expand work trace" }));
-  expect(within(running).getByText("Found 3 passages in workspace knowledge")).toBeInTheDocument();
 
   sse.push('data: {"delta":"\\n</html>\\n```\\n\\nDone [K1]."}\n\n');
   sse.push(
@@ -543,8 +547,12 @@ test("the work trace grows from what the API reports and the reply itself, then 
   sse.push("data: [DONE]\n\n");
   sse.close();
 
+  // The same open timeline carries over into the finished reply; opening it
+  // again by hand lays out every step at once.
   const finished = await screen.findByRole("region", { name: "Aperture Chat activity trace" });
   expect(within(finished).getByText(/^\d+ steps · 3 checks passed · 1 flag$/)).toBeInTheDocument();
+  expect(within(finished).getByRole("list", { name: "Steps" })).toBeInTheDocument();
+  fireEvent.click(within(finished).getByRole("button", { name: "Collapse work trace" }));
   fireEvent.click(within(finished).getByRole("button", { name: "Expand work trace" }));
   for (const label of [
     "Found 3 passages in workspace knowledge",
@@ -1800,11 +1808,10 @@ test("pending assistant response shows an activity trace for enabled tools", asy
   const trace = await screen.findByRole("status", {
     name: "Aperture Chat activity trace",
   });
-  // Collapsed by default: one line naming what is happening right now.
+  // Open by default: the timeline shows each step as the run reaches it.
   expect(within(trace).getByText("Aperture Chat is working")).toBeInTheDocument();
-  expect(within(trace).getByText("Thinking")).toBeInTheDocument();
-  expect(within(trace).queryByText("Routed to Client Update Agent")).not.toBeInTheDocument();
-  fireEvent.click(within(trace).getByRole("button", { name: "Expand work trace" }));
+  expect(within(trace).getByRole("button", { name: "Collapse work trace" })).toHaveAttribute("aria-expanded", "true");
+  expect(await within(trace).findByText("Thinking", {}, { timeout: 3000 })).toBeInTheDocument();
   // Only what is known for certain is shown up front: the route and what the
   // user switched on. No preset steps are promised before they happen.
   expect(within(trace).getByText("Routed to Client Update Agent")).toBeInTheDocument();
@@ -1982,6 +1989,7 @@ As of June 2024, the list of scientific discoveries from Artemis II is:
       name: "Transfer response to Drafts",
     }),
   );
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Word document/ }));
 
   expect(await screen.findByRole("heading", { name: "Document Assistant" })).toBeInTheDocument();
   expect(screen.getByLabelText("Document title")).toHaveValue("List Artemis II discoveries");
@@ -2025,6 +2033,7 @@ The crew portrait should sit near the crew section of the paper.`;
       name: "Transfer response to Drafts",
     }),
   );
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Word document/ }));
 
   expect(await screen.findByRole("heading", { name: "Document Assistant" })).toBeInTheDocument();
   const editor = screen.getByRole("textbox", { name: "Document body" });
@@ -2081,6 +2090,7 @@ rows:
       name: "Transfer response to Drafts",
     }),
   );
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Word document/ }));
 
   expect(await screen.findByRole("heading", { name: "Document Assistant" })).toBeInTheDocument();
   const editor = screen.getByRole("textbox", { name: "Document body" });
@@ -3088,6 +3098,43 @@ test("a slide deck request builds in the Drafts deck editor", async () => {
   expect(screen.getByText("Deck Assistant")).toBeInTheDocument();
 });
 
+test("a spreadsheet request offers the Drafts spreadsheet editor and builds the workbook there", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Create a spreadsheet of our Q3 marketing budget by channel");
+
+  const offer = await screen.findByRole("region", { name: "Build this as a spreadsheet?" });
+  expect(within(offer).getByText(/exports to Excel/)).toBeInTheDocument();
+  expect(within(offer).getByRole("button", { name: "Continue in chat" })).toBeEnabled();
+  expect(chatRequests).toHaveLength(0);
+  fireEvent.click(within(offer).getByRole("button", { name: "Build in spreadsheet editor" }));
+
+  await waitFor(() => expect(draftRequests().length).toBeGreaterThan(0));
+  expect(window.location.pathname).toBe("/drafts");
+  expect(requestText(draftRequests()[0])).toContain("You are the spreadsheet assistant inside Aperture Drafts");
+  expect(requestText(draftRequests()[0])).toContain("User request: Create a spreadsheet of our Q3 marketing budget by channel");
+  expect(await screen.findByText("Building the spreadsheet you asked for in chat.")).toBeInTheDocument();
+  // The spreadsheet editor is active, not the document or deck editor.
+  expect(screen.getByText("Spreadsheet Assistant")).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Draft format" })).toHaveAttribute("data-mode", "spreadsheet");
+});
+
+test("a spreadsheet request can stay in chat", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Build a pivot table of revenue by region");
+
+  const offer = await screen.findByRole("region", { name: "Build this as a spreadsheet?" });
+  fireEvent.click(within(offer).getByRole("button", { name: "Continue in chat" }));
+
+  expect(await screen.findByText(CANNED)).toBeInTheDocument();
+  expect(chatRequests).toHaveLength(1);
+  expect(window.location.pathname).not.toBe("/drafts");
+  expect(screen.queryByRole("region", { name: "Build this as a spreadsheet?" })).not.toBeInTheDocument();
+});
+
 test("continue in chat sends the held request once, as typed", async () => {
   await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
@@ -3154,4 +3201,123 @@ test("a mid-chat document request carries the earlier conversation into Drafts",
   expect(prompt).toContain("<chat_conversation>");
   expect(prompt).toContain("User: Our churn fell to 2.1% in Q3 and partner leads grew 30%.");
   expect(prompt).toContain(`Assistant: ${CANNED}`);
+});
+
+const MATRIX_REPLY = [
+  "To build the state-by-state P&L matrix, which of these should it cover?",
+  "",
+  "| Focus | What the matrix would include |",
+  "| --- | --- |",
+  "| **State taxes and compliance** | Taxes affecting profit and filing requirements |",
+  "| **Internal P&L management** | Margins by state |",
+  "",
+  "What type of business are you working with?",
+].join("\n");
+
+function sheetCellText(address: string) {
+  return document.querySelector(`.sheet-pane [data-cell='${address}'] .sheet-cell-text`)?.textContent ?? null;
+}
+
+test("a matrix request offers the spreadsheet editor before chat answers it", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Create a state-by-state matrix for P&L management");
+
+  const offer = await screen.findByRole("region", { name: "Build this as a spreadsheet?" });
+  expect(within(offer).getByRole("button", { name: "Build in spreadsheet editor" })).toBeEnabled();
+  expect(within(offer).getByRole("button", { name: "Continue in chat" })).toBeEnabled();
+  expect(chatRequests).toHaveLength(0);
+});
+
+test("a table edited in chat transfers into a spreadsheet exactly as edited", async () => {
+  assistantReply = MATRIX_REPLY;
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Create a state-by-state matrix for P&L management");
+  await keepRequestInChat();
+
+  const table = await screen.findByRole("table");
+  fireEvent.click(within(table).getByText("Margins by state").closest("td")!);
+  const editor = screen.getByRole("textbox", { name: "Edit What the matrix would include, row 2" });
+  editor.innerHTML = "Margins and cost allocation by state";
+  fireEvent.input(editor);
+  act(() => editor.blur());
+  expect(within(table).getByText("Margins and cost allocation by state")).toBeInTheDocument();
+  fireEvent.click(within(table).getByText("Focus").closest("th")!);
+  fireEvent.click(screen.getByRole("button", { name: "Add column to the right" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done editing table" }));
+  expect(within(screen.getByRole("table")).getByText("New column")).toBeInTheDocument();
+
+  const conversation = document.querySelector(".message-list") as HTMLElement;
+  fireEvent.click(within(conversation).getByRole("button", { name: "Transfer response to Drafts" }));
+  const menu = screen.getByRole("menu", { name: "Open in Drafts as" });
+  expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    expect.stringMatching(/^Word document/),
+    expect.stringMatching(/^Slide deck/),
+    expect.stringMatching(/^SpreadsheetSuggested/),
+  ]);
+  // The request asked for a matrix, so the spreadsheet is suggested and focused.
+  const spreadsheet = within(menu).getByRole("menuitem", { name: /^Spreadsheet \(suggested\)/ });
+  expect(spreadsheet).toHaveFocus();
+  fireEvent.click(spreadsheet);
+
+  await waitFor(() => expect(screen.getByRole("group", { name: "Draft format" })).toHaveAttribute("data-mode", "spreadsheet"));
+  expect(window.location.pathname).toBe("/drafts");
+  await waitFor(() => expect(sheetCellText("A1")).toBe("Focus"));
+  expect(sheetCellText("B1")).toBe("New column");
+  expect(sheetCellText("A2")).toBe("State taxes and compliance");
+  expect(sheetCellText("C3")).toBe("Margins and cost allocation by state");
+});
+
+test("Transfer to Drafts can open a reply as a slide deck", async () => {
+  assistantReply = [
+    "## Why we are here",
+    "- Q3 revenue grew 12%",
+    "- Churn fell to 3%",
+    "## Next steps",
+    "- Hire two engineers",
+  ].join("\n");
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Summarize our Q3 results");
+  expect(await screen.findByText("Q3 revenue grew 12%")).toBeInTheDocument();
+
+  const conversation = document.querySelector(".message-list") as HTMLElement;
+  fireEvent.click(within(conversation).getByRole("button", { name: "Transfer response to Drafts" }));
+  // Prose with no request for a format suggests a document.
+  expect(screen.getByRole("menuitem", { name: /^Word document \(suggested\)/ })).toHaveFocus();
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Slide deck/ }));
+
+  expect(await screen.findByText("Deck Assistant")).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Draft format" })).toHaveAttribute("data-mode", "deck");
+  expect(await screen.findByText(/slides? built from the chat response/)).toBeInTheDocument();
+});
+
+test("the Drafts format chooser works from the keyboard and closes without moving", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  sendFromComposer("Stream a short answer.");
+  expect(await screen.findByText(CANNED)).toBeInTheDocument();
+
+  const trigger = within(document.querySelector(".message-list") as HTMLElement).getByRole("button", {
+    name: "Transfer response to Drafts",
+  });
+  fireEvent.click(trigger);
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  const menu = screen.getByRole("menu", { name: "Open in Drafts as" });
+  fireEvent.keyDown(menu, { key: "ArrowDown" });
+  expect(within(menu).getByRole("menuitem", { name: /^Slide deck/ })).toHaveFocus();
+  fireEvent.keyDown(menu, { key: "End" });
+  expect(within(menu).getByRole("menuitem", { name: /^Spreadsheet/ })).toHaveFocus();
+  fireEvent.keyDown(menu, { key: "ArrowDown" });
+  expect(within(menu).getByRole("menuitem", { name: /^Word document/ })).toHaveFocus();
+  fireEvent.keyDown(menu, { key: "Escape" });
+
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  expect(window.location.pathname).not.toBe("/drafts");
 });

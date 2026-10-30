@@ -12,6 +12,7 @@ import {
   type StewardDiagramModel,
   type StewardDiagramTone,
 } from "../lib/stewardDiagram";
+import { SelectControl } from "./SelectControl";
 
 function isDarkTheme() {
   return document.documentElement.classList.contains("theme-dark");
@@ -41,7 +42,7 @@ function ThemeField({
   return (
     <label>
       Theme
-      <select
+      <SelectControl
         value={theme ?? "aperture"}
         onChange={(event) => {
           if (isStewardDiagramThemeId(event.target.value)) onChange(event.target.value);
@@ -52,7 +53,7 @@ function ThemeField({
             {item.name}
           </option>
         ))}
-      </select>
+      </SelectControl>
     </label>
   );
 }
@@ -306,7 +307,7 @@ export function StewardDiagramEditorModal({
                                   })
                                 }
                               />
-                              <select
+                              <SelectControl
                                 aria-label={`Status color for box ${card.id}`}
                                 value={card.footer?.tone ?? "neutral"}
                                 onChange={(event) =>
@@ -320,7 +321,7 @@ export function StewardDiagramEditorModal({
                                     {TONE_LABELS[tone]}
                                   </option>
                                 ))}
-                              </select>
+                              </SelectControl>
                             </div>
                             <input
                               type="text"
@@ -358,7 +359,7 @@ export function StewardDiagramEditorModal({
                   </div>
                   {working.edges.map((edge, edgeIndex) => (
                     <div className="diagram-editor-edge-row" key={edgeIndex}>
-                      <select
+                      <SelectControl
                         aria-label={`Arrow ${edgeIndex + 1} from`}
                         value={edge.from}
                         onChange={(event) => update((draft) => (draft.edges[edgeIndex].from = event.target.value))}
@@ -368,9 +369,9 @@ export function StewardDiagramEditorModal({
                             {card.title}
                           </option>
                         ))}
-                      </select>
+                      </SelectControl>
                       <span aria-hidden="true">→</span>
-                      <select
+                      <SelectControl
                         aria-label={`Arrow ${edgeIndex + 1} to`}
                         value={edge.to}
                         onChange={(event) => update((draft) => (draft.edges[edgeIndex].to = event.target.value))}
@@ -380,8 +381,8 @@ export function StewardDiagramEditorModal({
                             {card.title}
                           </option>
                         ))}
-                      </select>
-                      <select
+                      </SelectControl>
+                      <SelectControl
                         aria-label={`Arrow ${edgeIndex + 1} style`}
                         value={edge.kind ?? "primary"}
                         onChange={(event) =>
@@ -393,7 +394,7 @@ export function StewardDiagramEditorModal({
                             {EDGE_KIND_LABELS[kind]}
                           </option>
                         ))}
-                      </select>
+                      </SelectControl>
                       <input
                         type="text"
                         aria-label={`Arrow ${edgeIndex + 1} label`}

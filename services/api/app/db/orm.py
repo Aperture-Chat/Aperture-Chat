@@ -2481,7 +2481,7 @@ class DraftDocumentRow(Base):
             name="current_revision_bounded",
         ),
         CheckConstraint("updated_at >= created_at", name="updated_after_creation"),
-        CheckConstraint("kind IN ('document', 'deck')", name="kind_valid"),
+        CheckConstraint("kind IN ('document', 'deck', 'spreadsheet')", name="kind_valid"),
         UniqueConstraint(
             "id",
             "tenant_id",
@@ -2561,7 +2561,7 @@ class DraftRevisionRow(Base):
             "length(trim(title)) >= 1 AND length(title) <= 240",
             name="title_bounded",
         ),
-        # Outer ceiling shared by both kinds; the 2,000,000-byte HTML bound is
+        # Outer ceiling shared by every kind; the 2,000,000-byte HTML bound is
         # enforced in Python for documents (see app.models.matters).
         CheckConstraint(
             "octet_length(content) <= 8000000",
@@ -2572,7 +2572,7 @@ class DraftRevisionRow(Base):
             name="content_sha256_length",
         ),
         CheckConstraint(
-            "sanitizer_version IN ('sanitized-html-v1', 'deck-json-v1')",
+            "sanitizer_version IN ('sanitized-html-v1', 'deck-json-v1', 'sheet-json-v1')",
             name="sanitizer_version_known",
         ),
         ForeignKeyConstraint(
