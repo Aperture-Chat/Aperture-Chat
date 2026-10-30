@@ -314,7 +314,7 @@
    light up when on, matching the Document/Deck switch beside them. */
 .document-assistant-page .draft-context-strip {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--tactile-track-border);
@@ -326,7 +326,7 @@
 .document-assistant-page .draft-context-strip .draft-context-chip {
   flex: 1 1 auto;
   justify-content: center;
-  min-width: 0;
+  min-width: max-content;
   min-height: 34px;
   padding: 0 8px;
   border: 1px solid transparent;
@@ -378,9 +378,20 @@
   box-shadow: var(--tactile-lit-shadow), 0 0 0 2px var(--teal-ring);
 }
 
+/* Labels never clip. Three keys share one row (wrapping only where even that
+   cannot fit); a fourth (Cited) turns the strip into a 2 x 2 grid so every key
+   keeps its full name and its readout. */
 .document-assistant-page .draft-context-strip .draft-context-chip > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-assistant-page .draft-context-strip:has(> .draft-context-chip:nth-child(4)) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.document-assistant-page .draft-context-strip:has(> .draft-context-chip:nth-child(4)) .draft-context-chip {
+  min-width: 0;
 }
 
 /* Deck slide sorter toggle (its base rule uses !important). */

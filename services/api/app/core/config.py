@@ -157,6 +157,15 @@ class Settings(BaseSettings):
     deck_template_upload_max_mb: int = Field(default=30, ge=1, le=100)
     # PDF document imports parsed into editable draft HTML.
     document_import_upload_max_mb: int = Field(default=40, ge=1, le=200)
+    # Drafts PDF export: the browser uploads the saved version's print surface
+    # (gzip JSON, bounded after decompression too), headless Chromium lays it
+    # out, and the API finishes it as PDF/A-2b. A 6,700-page document peaked
+    # near 4 GB of renderer memory, so renders run one at a time by default.
+    draft_pdf_export_source_max_mb: int = Field(default=200, ge=1, le=2048)
+    draft_pdf_export_concurrency: int = Field(default=1, ge=1, le=8)
+    draft_pdf_export_queue_max: int = Field(default=8, ge=1, le=100)
+    draft_pdf_export_timeout_seconds: int = Field(default=1200, ge=30, le=7200)
+    draft_pdf_export_retention_minutes: int = Field(default=15, ge=1, le=1440)
     knowledge_max_extracted_chars: int = Field(default=10_000_000, ge=100_000, le=50_000_000)
     knowledge_ocr_enabled: bool = True
     knowledge_ocr_max_pages: int = Field(default=250, ge=1, le=2000)

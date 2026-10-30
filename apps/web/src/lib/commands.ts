@@ -104,7 +104,7 @@ export function buildCommands({
   ];
   const nav: Array<PaletteCommand | null> = [
     navigationCommand("Chat", { kind: "chat" }, role, route, actions),
-    navigationCommand("Drafts", { kind: "drafts" }, role, route, actions, ["document", "deck", "write"]),
+    navigationCommand("Drafts", { kind: "drafts" }, role, route, actions, ["document", "deck", "write", "spreadsheet", "excel"]),
     navigationCommand("Agents", { kind: "agents", section: "agents" }, role, route, actions),
     navigationCommand("Automations", { kind: "agents", section: "automations" }, role, route, actions, ["schedule"]),
     navigationCommand("Knowledge", { kind: "library", section: "knowledge" }, role, route, actions, ["library", "sources"]),

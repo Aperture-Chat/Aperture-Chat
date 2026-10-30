@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from html import unescape
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -32,7 +31,7 @@ from app.core.policy import (
     knowledge_access_allowed,
 )
 from app.core.review_store import ReviewStore
-from app.models.deck_document import deck_plain_text
+from app.core.search_index import draft_plain_text
 from app.models.matters import MAX_DRAFT_LIST_LIMIT, DraftSnapshot
 from app.models.review import ReviewMatrix
 from app.models.schemas import Automation, ChatThread, ModelConfig, User
@@ -66,7 +65,6 @@ SearchKind = Literal[
     "draft",
 ]
 _TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+")
-_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 # Knowledge hits are filtered for a literal term match after retrieval, so the
 # candidate pool is wider than the page of results the caller asked for.
 _KNOWLEDGE_CANDIDATE_FACTOR = 8
@@ -447,10 +445,7 @@ def _matter_membership_allows_draft(
 
 
 def _draft_plain_text(snapshot: DraftSnapshot) -> str:
-    if snapshot.document.kind == "deck":
-        return " ".join(deck_plain_text(snapshot.revision.content).split())
-    without_tags = _HTML_TAG_PATTERN.sub(" ", snapshot.revision.content)
-    return " ".join(unescape(without_tags).split())
+    return draft_plain_text(snapshot.document, snapshot.revision)
 
 
 def _search_review_matrices(

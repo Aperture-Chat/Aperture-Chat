@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    FASTEMBED_CACHE_PATH=/opt/aperture-models
+    FASTEMBED_CACHE_PATH=/opt/aperture-models \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 # Mirror the repository layout. app/core/config.py resolves the repo root as
 # Path(__file__).parents[4] (services/api/app/core/config.py -> repo root), so
@@ -17,12 +18,29 @@ WORKDIR /srv/aperture/services/api
 # uploaded audio/video so those files can be transcribed with Gemini Flash
 # (the same path used for composer dictation). Videos without an audio track
 # still yield visual notes from extracted stills.
+# The Drafts PDF export lays pages out in headless Chromium, so a document set
+# in Word's usual faces needs them or metric-compatible stand-ins: Liberation
+# (Times New Roman, Arial, Courier New), Carlito (Calibri), and Caladea
+# (Cambria) keep the same line breaks; Noto Color Emoji and DejaVu cover the
+# rest. The app's own faces ship with the API (app/static/pdf-fonts).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
+        fonts-liberation \
+        fonts-crosextra-carlito \
+        fonts-crosextra-caladea \
+        fonts-noto-color-emoji \
         tesseract-ocr \
         tesseract-ocr-eng \
         ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Chromium's headless shell for the PDF export, in its own layer so code
+# changes do not download it again. Keep the version at or above the
+# playwright floor in pyproject.toml; pip then leaves it in place below.
+ARG PLAYWRIGHT_VERSION=1.64.1
+RUN pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}" \
+    && python -m playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Runtime dependencies only; dev extras (pytest, ruff) stay out of the image.

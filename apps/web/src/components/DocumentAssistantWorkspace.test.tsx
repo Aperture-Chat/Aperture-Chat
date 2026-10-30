@@ -2408,12 +2408,11 @@ test("exports the available document formats with the right fallback file type",
       screen.getByText("Editable Word file with preview page breaks and embedded images."),
     ).toBeInTheDocument();
     expect(screen.getByText("Best for plain text or web publishing.")).toBeInTheDocument();
-    // PDF stays an honest browser-print capability: the app opens the saved
-    // version in the print dialog and lets the user choose "Save as PDF".
-    expect(screen.getByRole("button", { name: /Print \/ Save as PDF/ })).toBeInTheDocument();
-    expect(
-      screen.getByText(/Choose "Save as PDF" in that dialog to keep a PDF copy/),
-    ).toBeInTheDocument();
+    // A real PDF file is its own format; Print only opens the print dialog.
+    expect(screen.getByRole("button", { name: /PDF document/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Print/ })).toBeInTheDocument();
+    expect(screen.getByText("Opens the browser print dialog with the saved version.")).toBeInTheDocument();
+    expect(screen.queryByText(/Save as PDF/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Basic DOCX/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Choose save location/ })).not.toBeInTheDocument();
 
@@ -2449,6 +2448,137 @@ test("exports the available document formats with the right fallback file type",
   } finally {
     downloadSpy.restore();
   }
+});
+
+async function readPdfExportSource(blob: Blob) {
+  const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+  const bytes = new Uint8Array(buffer);
+  const text =
+    bytes[0] === 0x1f && bytes[1] === 0x8b
+      ? await new Response(new Response(bytes).body!.pipeThrough(new DecompressionStream("gzip"))).text()
+      : new TextDecoder().decode(bytes);
+  return JSON.parse(text) as { title: string; lang: string; body_html: string; css: string };
+}
+
+function pdfJobResponse(overrides: Record<string, unknown>) {
+  return new Response(
+    JSON.stringify({
+      id: "pdf-7",
+      status: "rendering",
+      queue_position: null,
+      page_count: null,
+      size_bytes: null,
+      bookmark_count: null,
+      conformance: null,
+      error: null,
+      ...overrides,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+test("builds a real PDF on the server and downloads it with its archival summary", async () => {
+  const downloadSpy = installDownloadSpy();
+  installChatCompletionFetchMock(clientUpdateProviderDraft());
+  const fetchMock = globalThis.fetch as unknown as {
+    getMockImplementation: () => typeof fetch;
+    mockImplementation: (implementation: typeof fetch) => void;
+  };
+  const chatImplementation = fetchMock.getMockImplementation();
+  const pdfRequests: Array<{ url: string; method: string; body?: unknown }> = [];
+  fetchMock.mockImplementation(async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (!url.includes("/api/drafts/pdf-exports")) return chatImplementation(input, init);
+    const method = init?.method ?? "GET";
+    pdfRequests.push({ url, method, body: init?.body });
+    if (method === "POST") return pdfJobResponse({ status: "rendering" });
+    if (method === "DELETE") return new Response(null, { status: 204 });
+    if (url.endsWith("/file")) {
+      return new Response("%PDF-1.7 synthetic", {
+        status: 200,
+        headers: { "Content-Type": "application/pdf", "Content-Length": "18" },
+      });
+    }
+    return pdfJobResponse({
+      status: "ready",
+      page_count: 3,
+      size_bytes: 18,
+      bookmark_count: 2,
+      conformance: "PDF/A-2b",
+    });
+  });
+
+  try {
+    render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+    await waitFor(() => {
+      expect(documentText()).toContain("Anderson v. Northstar Logistics");
+    });
+    openExportDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /PDF document/ }));
+
+    await waitFor(
+      () => {
+        expect(downloadSpy.downloads[0]).toMatchObject({ filename: "client-update-draft.pdf" });
+      },
+      { timeout: 4000 },
+    );
+    expect(downloadSpy.downloads[0].blob.type).toBe("application/pdf");
+    expect(screen.getByText("3 pages · PDF/A-2b archival · 2 bookmarks")).toBeInTheDocument();
+    const upload = pdfRequests.find((request) => request.method === "POST");
+    const source = await readPdfExportSource((upload?.body as FormData).get("source") as Blob);
+    expect(source.title).toBe("Client Update Draft");
+    expect(source.body_html).toContain("Anderson v. Northstar Logistics");
+    expect(source.body_html).toContain("draft-print-root");
+    // The finished file is freed on the server once it has been downloaded.
+    expect(pdfRequests.some((request) => request.method === "DELETE" && request.url.endsWith("/pdf-7"))).toBe(true);
+  } finally {
+    downloadSpy.restore();
+  }
+});
+
+test("a PDF export can be canceled while the server is laying out pages", async () => {
+  installChatCompletionFetchMock(clientUpdateProviderDraft());
+  const fetchMock = globalThis.fetch as unknown as {
+    getMockImplementation: () => typeof fetch;
+    mockImplementation: (implementation: typeof fetch) => void;
+  };
+  const chatImplementation = fetchMock.getMockImplementation();
+  const methods: string[] = [];
+  fetchMock.mockImplementation(async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (!url.includes("/api/drafts/pdf-exports")) return chatImplementation(input, init);
+    methods.push(init?.method ?? "GET");
+    if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    return pdfJobResponse({ status: "rendering" });
+  });
+
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+  fireEvent.click(screen.getByRole("button", { name: /Create Client Update draft/ }));
+  await waitFor(() => {
+    expect(documentText()).toContain("Anderson v. Northstar Logistics");
+  });
+  openExportDialog();
+  fireEvent.click(screen.getByRole("button", { name: /PDF document/ }));
+
+  await waitFor(() => {
+    expect(screen.getByText("Laying out pages")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel PDF export" }));
+
+  await waitFor(() => {
+    expect(screen.getByText("PDF export canceled.")).toBeInTheDocument();
+  });
+  expect(methods).toContain("DELETE");
+  expect(screen.getByRole("button", { name: /PDF document/ })).toBeEnabled();
 });
 
 test("uses the save picker for each document export format when available", async () => {
@@ -5254,7 +5384,8 @@ test("mode switch starts a blank deck when the document is empty", () => {
   expect(screen.getByText("PowerPoint deck")).toBeInTheDocument();
   expect(screen.getByText("Markdown outline")).toBeInTheDocument();
   expect(screen.queryByText("Word document")).not.toBeInTheDocument();
-  expect(screen.queryByText("Print / Save as PDF")).not.toBeInTheDocument();
+  expect(screen.queryByText("PDF document")).not.toBeInTheDocument();
+  expect(screen.queryByText("Print")).not.toBeInTheDocument();
 });
 
 test("the mobile assistant drawer traps keyboard focus and makes closed controls inert", () => {

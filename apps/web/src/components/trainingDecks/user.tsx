@@ -2235,7 +2235,8 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         steps: [
           "Word document: an editable .docx with page breaks and images.",
           "Markdown: a .md file for plain text or web publishing.",
-          "Print / Save as PDF: opens the browser's print dialog; choose Save as PDF there.",
+          "PDF document: an archival PDF/A file built on the server, with searchable text, embedded fonts, and bookmarks from your headings. Long documents show progress and can be canceled.",
+          "Print: opens the browser's print dialog with the saved version.",
           "Save to: Browser downloads saves straight to your downloads; Choose a location asks the browser where to save. If that location cannot be written, the file goes to your downloads and the receipt says so.",
         ],
       },

@@ -2,6 +2,8 @@ import { connectorHidden } from "../lib/connectors";
 import { draftHtmlForAccount, reflowSavedVersions, removeDraftPageLabels } from "../lib/draftPageLayout";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
 import { DeckBlade, DECK_BLADE_DEFAULT_WIDTH } from "./DeckBlade";
+import { SpreadsheetEditor, type SheetAiAsk } from "./spreadsheet/SpreadsheetEditor";
+import { SheetVersionCompare } from "./spreadsheet/SheetVersionCompare";
 import { DeckLayoutGallery, DeckPicturePanel, type DeckWebImageChoice } from "./DeckBladePanels";
 import { DeckTextToolbar, type DeckTextCommand, type DeckTextToolbarFormat } from "./DeckTextToolbar";
 import { AiEditComposer, type AiComposerAnchor, type AiComposerPhase } from "./AiEditComposer";
@@ -66,6 +68,7 @@ import { draftSaveStatus, type DraftServerSaveState } from "../lib/draftSaveStat
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
 import type { DraftHandoffRequest } from "../lib/draftHandoff";
 import { SelectControl } from "./SelectControl";
+import { WorkTrace } from "./WorkTrace";
 import {
   ALargeSmall,
   AlignCenter,
@@ -105,6 +108,7 @@ import {
   Download,
   FileDiff,
   FilePen,
+  FileCheck2,
   FileText,
   Globe2,
   GraduationCap,
@@ -138,6 +142,7 @@ import {
   Scale,
   Send,
   Settings2,
+  Sheet as SheetIcon,
   Sparkles,
   Strikethrough,
   Subscript,
@@ -222,6 +227,7 @@ import {
   type ChatWireMessage,
 } from "../lib/api";
 import { splitAssistantThinking } from "../lib/assistantThinking";
+import { cleanAiTitle } from "../lib/aiTitle";
 import {
   buildDocxExportDocument,
   DOCX_MIME_TYPE,
@@ -230,8 +236,20 @@ import {
   removeEmptyInlineWrappers,
   type ExportImageProxy,
 } from "../lib/docxExport";
-import type { BootstrapData, ChatCitation } from "../lib/types";
+import type { BootstrapData, ChatActivityTraceStep, ChatCitation } from "../lib/types";
 import { printSavedDraftVersion } from "../lib/draftPrint";
+import {
+  buildDraftPdfSource,
+  collectDocumentStyleText,
+  describePdfProgress,
+  describePdfResult,
+  draftPdfExportApi,
+  draftPdfImageDataUrl,
+  packDraftPdfSource,
+  runDraftPdfExport,
+  type DraftPdfProgress,
+  type DraftPdfResult,
+} from "../lib/draftPdfExport";
 import { splitFillInBlanks } from "../lib/fillInBlanks";
 import {
   computeDraftRedline,
@@ -308,6 +326,23 @@ import {
   type DeckTheme,
   type SlideDeck,
 } from "../lib/deck/deckModel";
+import { sheetToDelimited } from "../lib/sheet/csv";
+import { formatCellValue } from "../lib/sheet/numberFormat";
+import { isTabularFile, tabularAttachmentText, workbookFromFile } from "../lib/sheet/attachments";
+import { computeWorkbook } from "../lib/sheet/recalc";
+import { effectiveStyle } from "../lib/sheet/sheetOps";
+import { SHEET_TEMPLATES, buildSheetTemplate } from "../lib/sheet/templates";
+import { XLSX_MIME_TYPE, buildXlsxWorkbook } from "../lib/sheet/xlsxExport";
+import { describeChanges, workbookPlainText, workbookTitleFrom } from "../lib/sheet/sheetAi";
+import { type SheetRunOutcome, sheetRunFinished, sheetRunFixing, sheetRunMessage, sheetRunReplied, sheetRunStart } from "../lib/sheet/sheetTrace";
+import { runSheetAiFlow } from "../lib/sheet/sheetAiFlow";
+import {
+  type Workbook,
+  blankWorkbook,
+  contentLooksLikeWorkbook,
+  parseWorkbook,
+  serializeWorkbook,
+} from "../lib/sheet/sheetModel";
 import {
   DECK_LINE_HEIGHT,
   DECK_LIST_REGIONS,
@@ -325,6 +360,8 @@ import {
   type DeckTextRegionSpec,
 } from "../lib/deck/deckGeometry";
 import { deckFromDocumentHtml, textRunsFromElement } from "../lib/deck/deckFromDocument";
+import { workbookFromMarkdown, type DraftTransferFormat } from "../lib/draftTransfer";
+import { measureCellText } from "./spreadsheet/SheetGrid";
 import { deckFontStack, deckRegionFit, type DeckTextFit } from "../lib/deck/deckTextFit";
 import {
   applyDeckTextSize,
@@ -407,10 +444,31 @@ type DraftVersion = {
   executedAt?: string;
   content: string;
   summary: string;
-  /** Deck versions store canonical deck JSON in `content`; absent means a
-   * document (HTML) version, keeping older stored versions valid. */
-  format?: "document" | "deck";
+  /** Deck versions store canonical deck JSON in `content` and spreadsheet
+   * versions canonical workbook JSON; absent means a document (HTML)
+   * version, keeping older stored versions valid. */
+  format?: DraftFormat;
 };
+
+/** The three things a draft can be edited as, in toggle order. */
+type DraftFormat = "document" | "deck" | "spreadsheet";
+const DRAFT_FORMATS: DraftFormat[] = ["document", "deck", "spreadsheet"];
+
+/** The format one stop left (-1) or right (+1) on the format toggle. */
+function neighborDraftFormat(current: DraftFormat, step: 1 | -1): DraftFormat {
+  const index = DRAFT_FORMATS.indexOf(current) + step;
+  return DRAFT_FORMATS[Math.max(0, Math.min(DRAFT_FORMATS.length - 1, index))];
+}
+
+/** Deck and spreadsheet versions hold JSON, not document HTML. */
+function isStructuredVersion(version: Pick<DraftVersion, "format" | "content">): boolean {
+  return (
+    version.format === "deck" ||
+    version.format === "spreadsheet" ||
+    contentLooksLikeDeck(version.content) ||
+    contentLooksLikeWorkbook(version.content)
+  );
+}
 
 type RevisionAsset = {
   kind: "image" | "link";
@@ -473,9 +531,9 @@ type AssistantEvent = {
 
 type AssistantTool = "templates" | "sources" | "settings" | "history";
 
-type ExportFormat = "word" | "markdown" | "code" | "pptx";
+type ExportFormat = "word" | "pdf" | "markdown" | "code" | "pptx" | "xlsx" | "csv";
 /** Every action offered by the export panel. "print" opens the browser print
- * dialog (the user chooses "Save as PDF" there); it never builds a file. */
+ * dialog; it never builds a file. "pdf" builds a real PDF on the server. */
 type ExportAction = ExportFormat | "print";
 type ExportDelivery = "download" | "picker";
 
@@ -498,6 +556,8 @@ type ExportReceipt = {
   label: string;
   delivery: ExportDelivery;
   href?: string;
+  /** What the file holds, e.g. a PDF's pages and conformance. */
+  detail?: string;
   /** A second line when delivery did not go as asked. */
   note?: string;
 };
@@ -601,6 +661,8 @@ export type DraftImportPayload = {
   sourceLabel: string;
   createdAt: string;
   createdAtIso?: string | null;
+  /** The editor the reader chose for it; a document when absent. */
+  format?: DraftTransferFormat;
 };
 
 type DraftContextOptions = {
@@ -717,6 +779,16 @@ type DraftTraceState = {
   activeIndex: number;
   complete: boolean;
   startedAt: number;
+  endedAt?: number;
+  /** A spreadsheet run is told the chat trace's way: the facts it recorded
+   * and any thinking the model exposed, drawn by WorkTrace in place of the
+   * preset steps above. */
+  sheetRun?: {
+    activity: ChatActivityTraceStep[];
+    thinking: string[];
+    /** The request it works on; the trace sits under it, as in the chat. */
+    requestEventId: string;
+  };
 };
 
 const TEXT_COLOR_SWATCHES = ["#111827", "#0f766e", "#1d4ed8", "#b91c1c", "#7c3aed"];
@@ -879,20 +951,6 @@ const AI_DRAFT_TITLE_SYSTEM_PROMPT =
   "draft is about.";
 const AI_DRAFT_TITLE_EXCERPT_CHARS = 2_000;
 
-function cleanAiDraftTitle(raw: string): string {
-  const { visibleContent } = splitAssistantThinking(raw);
-  const line =
-    visibleContent
-      .split("\n")
-      .map((part) => part.trim())
-      .find(Boolean) ?? "";
-  return line
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .replace(/\s+/g, " ")
-    .replace(/[.。;:,!]+$/, "")
-    .trim()
-    .slice(0, 160);
-}
 const NO_WORKSPACE_SOURCE_LABEL = "No selected workspace source";
 /** CSS highlight name that keeps the AI edit target visibly selected while
  * focus sits in the composer. */
@@ -975,6 +1033,12 @@ const DOCUMENT_EXPORT_OPTIONS: Array<{
     icon: FileText,
   },
   {
+    format: "pdf",
+    label: "PDF document",
+    description: "Archival PDF/A with searchable text, embedded fonts, and bookmarks. Built for long documents.",
+    icon: FileCheck2,
+  },
+  {
     format: "markdown",
     label: "Markdown",
     description: "Best for plain text or web publishing.",
@@ -985,7 +1049,7 @@ const DOCUMENT_EXPORT_OPTIONS: Array<{
 /** Deck-mode export menu. Only formats that genuinely work for decks appear:
  * a real .pptx and a real markdown outline. Word/code stay document-only. */
 const DECK_EXPORT_OPTIONS: Array<{
-  format: Exclude<ExportFormat, "code" | "word">;
+  format: Exclude<ExportFormat, "code" | "word" | "pdf">;
   label: string;
   description: string;
   icon: LucideIcon;
@@ -1000,6 +1064,27 @@ const DECK_EXPORT_OPTIONS: Array<{
     format: "markdown",
     label: "Markdown outline",
     description: "Slide titles, bullets, and speaker notes as text.",
+    icon: FileText,
+  },
+];
+
+/** Spreadsheet-mode export menu: a real Excel workbook, or the active sheet as CSV. */
+const SPREADSHEET_EXPORT_OPTIONS: Array<{
+  format: "xlsx" | "csv";
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}> = [
+  {
+    format: "xlsx",
+    label: "Excel workbook",
+    description: "Editable .xlsx with every sheet, formula, format, table, and chart.",
+    icon: SheetIcon,
+  },
+  {
+    format: "csv",
+    label: "CSV (current sheet)",
+    description: "The current sheet's values as comma-separated text.",
     icon: FileText,
   },
 ];
@@ -1988,14 +2073,36 @@ function blankDraftVersion(): DraftVersion {
   };
 }
 
+function isDocumentTransfer(draft: DraftImportPayload) {
+  return !draft.format || draft.format === "document";
+}
+
+function transferredTitle(draft: DraftImportPayload) {
+  return draft.title.trim() || "Transferred Chat Draft";
+}
+
+function transferredSummary(draft: DraftImportPayload) {
+  return `Transferred from chat${draft.createdAt ? ` at ${draft.createdAt}` : ""}`;
+}
+
+function transferEvent(draft: DraftImportPayload, kind: string, executedAt: string) {
+  return {
+    id: `event-import-${draft.id}`,
+    kind: "assistant" as const,
+    text: `Transferred the chat response into an editable ${kind} from ${draft.sourceLabel}.`,
+    createdAt: executedAt,
+    executedAt,
+  };
+}
+
 function buildImportedDraftState(initialDraft: DraftImportPayload) {
   const importedAt = initialDraft.createdAtIso || new Date().toISOString();
-  const title = initialDraft.title.trim() || "Transferred Chat Draft";
+  const title = transferredTitle(initialDraft);
   const content = paginateTransferredDocumentHtml(
     documentHtmlFromMarkdown(initialDraft.content),
     `${title}\n\n${initialDraft.content}`,
   );
-  const summary = `Transferred from chat${initialDraft.createdAt ? ` at ${initialDraft.createdAt}` : ""}`;
+  const summary = transferredSummary(initialDraft);
   const version: DraftVersion = {
     id: "version-1",
     label: "Version 1",
@@ -2011,15 +2118,7 @@ function buildImportedDraftState(initialDraft: DraftImportPayload) {
     requiresCitations: /\b(citations?|references?|works cited|sources?)\b/i.test(initialDraft.content),
     requiresApproval: false,
     status: "Transferred from chat into Drafts.",
-    events: [
-      {
-        id: `event-import-${initialDraft.id}`,
-        kind: "assistant" as const,
-        text: `Transferred the chat response into an editable draft from ${initialDraft.sourceLabel}.`,
-        createdAt: importedAt,
-        executedAt: importedAt,
-      },
-    ],
+    events: [transferEvent(initialDraft, "draft", importedAt)],
   };
 }
 
@@ -2086,7 +2185,7 @@ export function DocumentAssistantWorkspace({
     return candidates.find((model) => model.is_custom)?.id ?? candidates[0]?.id ?? "";
   }, [data]);
   const importedDraftState = useMemo(
-    () => (initialDraft ? buildImportedDraftState(initialDraft) : null),
+    () => (initialDraft && isDocumentTransfer(initialDraft) ? buildImportedDraftState(initialDraft) : null),
     [initialDraft?.id],
   );
   const [selectedAgentId, setSelectedAgentId] = useState(() =>
@@ -2121,8 +2220,9 @@ export function DocumentAssistantWorkspace({
     templateCategory === "All"
       ? draftTemplates
       : draftTemplates.filter((template) => template.category === templateCategory);
-  const [documentTitle, setDocumentTitle] = useState(importedDraftState?.title ?? EMPTY_DOCUMENT_TITLE);
-  const [savedDocumentTitle, setSavedDocumentTitle] = useState(importedDraftState?.title ?? EMPTY_DOCUMENT_TITLE);
+  const importedTitle = initialDraft ? transferredTitle(initialDraft) : EMPTY_DOCUMENT_TITLE;
+  const [documentTitle, setDocumentTitle] = useState(importedTitle);
+  const [savedDocumentTitle, setSavedDocumentTitle] = useState(importedTitle);
   const [pendingDraftNavigation, setPendingDraftNavigation] = useState<{ label: string; run: () => void } | null>(null);
   const [draftNavigationError, setDraftNavigationError] = useState<string | null>(null);
   const draftNavigationDialogRef = useRef<HTMLElement | null>(null);
@@ -2151,6 +2251,7 @@ export function DocumentAssistantWorkspace({
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
   const [lastExport, setLastExport] = useState<ExportReceipt | null>(null);
   const [printPreparing, setPrintPreparing] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState<DraftPdfProgress | null>(null);
   const [printNotice, setPrintNotice] = useState<{ kind: "status" | "error"; text: string } | null>(
     null,
   );
@@ -2237,8 +2338,14 @@ export function DocumentAssistantWorkspace({
     : "default";
   // Deck (PowerPoint) mode. One draft can hold both a document and a deck;
   // the mode switch toggles which is rendered and never destroys either.
-  const [draftKind, setDraftKind] = useState<"document" | "deck">("document");
+  const [draftKind, setDraftKind] = useState<DraftFormat>("document");
   const [deckState, setDeckState] = useState<SlideDeck | null>(null);
+  // Spreadsheet mode keeps its workbook beside the document and the deck, so
+  // switching formats never discards any of the three.
+  const [workbookState, setWorkbookState] = useState<Workbook | null>(null);
+  // Changes when a version is restored or a workbook is opened, which resets
+  // the spreadsheet editor's own undo history.
+  const [spreadsheetHistoryKey, setSpreadsheetHistoryKey] = useState("initial");
   const [selectedSlideId, setSelectedSlideId] = useState<string | null>(null);
   // The deck as last rendered, for work that finishes after an await (a
   // picture landing must not roll back edits made while it was on its way).
@@ -2353,8 +2460,8 @@ export function DocumentAssistantWorkspace({
   const railIsDrawer = viewportWidth <= DRAFT_RAIL_DRAWER_WIDTH;
   const [railOpen, setRailOpen] = useState(false);
   // Read after a chat handoff finishes, when this render's values are stale.
-  const handoffLayoutRef = useRef({ railIsDrawer, deckState });
-  handoffLayoutRef.current = { railIsDrawer, deckState };
+  const handoffLayoutRef = useRef({ railIsDrawer, deckState, workbookState });
+  handoffLayoutRef.current = { railIsDrawer, deckState, workbookState };
   // Hover preview from the left seam: slides the drawer out without taking
   // focus or dimming the page. A click or focus inside pins it open.
   const [railPeek, setRailPeek] = useState(false);
@@ -2395,6 +2502,15 @@ export function DocumentAssistantWorkspace({
     revision: null,
     historyId: deckHistoryIdRef.current,
   });
+  const spreadsheetHistoryIdRef = useRef(createDraftHistoryId());
+  // The sheet the spreadsheet editor shows, for "CSV (current sheet)".
+  const spreadsheetActiveSheetRef = useRef<string | null>(null);
+  // Spreadsheets bind to their own server draft (kind "spreadsheet") as well.
+  const spreadsheetServerRef = useRef<DraftServerBinding>({
+    id: null,
+    revision: null,
+    historyId: spreadsheetHistoryIdRef.current,
+  });
   const lastDraftHistoryWriteSucceededRef = useRef(true);
   const documentHistoryRef = useRef(documentHistory);
   documentHistoryRef.current = documentHistory;
@@ -2405,9 +2521,17 @@ export function DocumentAssistantWorkspace({
   const wordTemplateInputRef = useRef<HTMLInputElement | null>(null);
   const openInEditorInputRef = useRef<HTMLInputElement | null>(null);
   const openDeckInEditorInputRef = useRef<HTMLInputElement | null>(null);
+  const openWorkbookInEditorInputRef = useRef<HTMLInputElement | null>(null);
+  // CSV and Excel attachments read on this device, keyed by attachment entry,
+  // so the spreadsheet assistant sees their rows rather than a text preview.
+  const tabularAttachmentsRef = useRef(new Map<string, string>());
+  // Asks the spreadsheet editor to show a sheet (the assistant's newest one).
+  const [spreadsheetFocus, setSpreadsheetFocus] = useState<{ id: string; nonce: number } | null>(null);
+  const [selectedSheetTemplateId, setSelectedSheetTemplateId] = useState(SHEET_TEMPLATES[0].id);
   const attachControlRef = useRef<HTMLDivElement | null>(null);
   const exportObjectUrlRef = useRef<string | null>(null);
   const exportInFlightRef = useRef(false);
+  const pdfExportAbortRef = useRef<AbortController | null>(null);
   const exportImageCacheRef = useRef(new Map<string, Promise<string | null>>());
   const normalizedLayoutHtmlRef = useRef<string | null>(null);
   const draftTimersRef = useRef<number[]>([]);
@@ -2592,6 +2716,10 @@ export function DocumentAssistantWorkspace({
     () => (deckState ? serializeSlideDeck(deckState) : null),
     [deckState],
   );
+  const serializedWorkbook = useMemo(
+    () => (workbookState ? serializeWorkbook(workbookState) : null),
+    [workbookState],
+  );
   const selectedSlide =
     deckState?.slides.find((slide) => slide.id === selectedSlideId) ??
     deckState?.slides[0] ??
@@ -2657,7 +2785,9 @@ export function DocumentAssistantWorkspace({
     selectedVersion &&
       (documentTitle.trim() !== savedDocumentTitle.trim() || (draftKind === "deck"
         ? serializedDeck !== null && selectedVersion.content !== serializedDeck
-        : selectedVersion.content !== content)),
+        : draftKind === "spreadsheet"
+          ? serializedWorkbook !== null && selectedVersion.content !== serializedWorkbook
+          : selectedVersion.content !== content)),
   );
   hasUnsavedEditsRef.current = hasUnsavedEdits || serverSaveState.kind === "not-stored";
   const exportSaveReceipt =
@@ -2679,10 +2809,17 @@ export function DocumentAssistantWorkspace({
   const saveStatus = draftSaveStatus(hasUnsavedEdits, serverSaveState);
   // Compare versions is honest only with two genuinely different saved
   // snapshots; identical restore copies do not count.
-  const canCompareVersions = useMemo(
-    () => new Set(versions.map((version) => version.content)).size >= 2,
+  // Spreadsheet mode compares workbook versions only; documents and decks
+  // keep comparing every saved version, as before.
+  const spreadsheetVersions = useMemo(
+    () => versions.filter((version) => version.format === "spreadsheet" || contentLooksLikeWorkbook(version.content)),
     [versions],
   );
+  const canCompareVersions = useMemo(
+    () => new Set((draftKind === "spreadsheet" ? spreadsheetVersions : versions).map((version) => version.content)).size >= 2,
+    [versions, spreadsheetVersions, draftKind],
+  );
+  const [sheetCompareOpen, setSheetCompareOpen] = useState(false);
   const compareBaseVersion = versions.find((version) => version.id === compareBaseId) ?? null;
   const compareComparisonVersion =
     versions.find((version) => version.id === compareComparisonId) ?? null;
@@ -2812,16 +2949,22 @@ export function DocumentAssistantWorkspace({
       draftKind === "deck"
         ? // A fresh deck has one empty slide; only typed text counts.
           /"text":"[^"]*\S[^"]*"/.test(JSON.stringify(deckState?.slides ?? []))
-        : Boolean(documentHtmlToText(content).trim()),
-    [content, deckState, draftKind],
+        : draftKind === "spreadsheet"
+          ? Boolean(workbookState?.sheets.some((sheet) => Object.keys(sheet.cells).length > 0))
+          : Boolean(documentHtmlToText(content).trim()),
+    [content, deckState, draftKind, workbookState],
   );
   const draftSuggestionHeading = hasDraftContent
     ? draftKind === "deck"
       ? "How should we improve these slides?"
-      : "How should we revise this draft?"
+      : draftKind === "spreadsheet"
+        ? "What should we change in this workbook?"
+        : "How should we revise this draft?"
     : draftKind === "deck"
       ? "What should this deck cover?"
-      : "What should we write?";
+      : draftKind === "spreadsheet"
+        ? "What should this spreadsheet do?"
+        : "What should we write?";
   const draftSuggestions = draftStarterSuggestions(
     draftKind,
     hasDraftContent,
@@ -3111,6 +3254,14 @@ export function DocumentAssistantWorkspace({
   useEffect(() => {
     if (!initialDraft) return;
     clearDraftTimers();
+    if (initialDraft.format === "deck") {
+      openTransferredDeck(initialDraft);
+      return;
+    }
+    if (initialDraft.format === "spreadsheet") {
+      openTransferredWorkbook(initialDraft);
+      return;
+    }
     // A transferred chat draft is a new document owned by the signed-in user;
     // its first save creates a fresh server draft.
     serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
@@ -3181,6 +3332,7 @@ export function DocumentAssistantWorkspace({
     // Stays in the box if drafting cannot start (for example, no model access).
     setInstruction(initialRequest.prompt);
     if (initialRequest.kind === "deck") startBlankDeck();
+    if (initialRequest.kind === "spreadsheet") startBlankWorkbook();
     setHandoffToRun(initialRequest);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialRequest?.id]);
@@ -3191,11 +3343,14 @@ export function DocumentAssistantWorkspace({
     notifyRail(
       handoffToRun.kind === "deck"
         ? "Building the slide deck you asked for in chat."
-        : "Writing the document you asked for in chat.",
+        : handoffToRun.kind === "spreadsheet"
+          ? "Building the spreadsheet you asked for in chat."
+          : "Writing the document you asked for in chat.",
     );
     void (async () => {
       try {
         if (handoffToRun.kind === "deck") await runDeckAssistantRequest(handoffToRun.prompt);
+        else if (handoffToRun.kind === "spreadsheet") await runSpreadsheetAssistantRequest(handoffToRun.prompt);
         else await runAssistantInstruction(handoffToRun.prompt, { fromChat: true });
       } finally {
         handoffChatContextRef.current = null;
@@ -3204,11 +3359,13 @@ export function DocumentAssistantWorkspace({
       // came from chat, not that drawer, so once the draft lands show it;
       // a failed run keeps the drawer open with its explanation.
       window.setTimeout(() => {
-        const { railIsDrawer: drawer, deckState: deck } = handoffLayoutRef.current;
+        const { railIsDrawer: drawer, deckState: deck, workbookState: workbook } = handoffLayoutRef.current;
         const landed =
           handoffToRun.kind === "deck"
             ? Boolean(deck?.slides.some((slide) => deckSlideOutline(slide).trim().length > 0))
-            : documentHasSubstantiveContent(contentRef.current);
+            : handoffToRun.kind === "spreadsheet"
+              ? Boolean(workbook?.sheets.some((sheet) => Object.keys(sheet.cells).length > 0))
+              : documentHasSubstantiveContent(contentRef.current);
         if (drawer && landed) setRailOpen(false);
       }, 300);
     })();
@@ -3431,6 +3588,20 @@ export function DocumentAssistantWorkspace({
 
   function selectVersion(version: DraftVersion) {
     clearDraftTimers();
+    if (version.format === "spreadsheet" || contentLooksLikeWorkbook(version.content)) {
+      const parsed = parseWorkbook(version.content);
+      if (!parsed.ok) {
+        setStatus(`This spreadsheet version could not be restored: ${parsed.error}`);
+        return;
+      }
+      setSelectedVersionId(version.id);
+      setWorkbookState(parsed.workbook);
+      setSpreadsheetHistoryKey(`${version.id}-${Date.now()}`);
+      endDeckEditSession();
+      setDraftKind("spreadsheet");
+      setStatus(`${version.label} restored in the spreadsheet editor.`);
+      return;
+    }
     if (version.format === "deck" || contentLooksLikeDeck(version.content)) {
       const parsed = parseSlideDeck(version.content);
       if (!parsed.ok) {
@@ -3478,10 +3649,12 @@ export function DocumentAssistantWorkspace({
     if (!pending) return;
     if (preserveCopy) {
       const deck = draftKind === "deck" ? flushDeckTextEdits() : null;
+      const workbook = draftKind === "spreadsheet" ? workbookState : null;
       const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
         id: createDraftHistoryId(),
         title: `${documentTitle.trim() || EMPTY_DOCUMENT_TITLE} (unsaved copy)`,
-        content: deck ? serializeSlideDeck(deck) : contentRef.current,
+        content: deck ? serializeSlideDeck(deck) : workbook ? serializeWorkbook(workbook) : contentRef.current,
+        ...(deck ? { kind: "deck" as const } : workbook ? { kind: "spreadsheet" as const } : {}),
         summary: "Unsaved edits preserved before leaving this version",
         sourceLabel: activeSourceLabel,
         serverId: null,
@@ -4496,13 +4669,17 @@ export function DocumentAssistantWorkspace({
         ? deck
           ? markdownOutlineFromDeck(deck)
           : ""
-        : documentHtmlToText(content);
+        : draftKind === "spreadsheet"
+          ? workbookState ? workbookPlainText(workbookState, computeWorkbook(workbookState), AI_DRAFT_TITLE_EXCERPT_CHARS) : ""
+          : documentHtmlToText(content);
     const excerpt = body.replace(/\s+/g, " ").trim().slice(0, AI_DRAFT_TITLE_EXCERPT_CHARS);
     if (!excerpt) {
       setStatus(
         draftKind === "deck"
           ? "AI naming needs some slide content first."
-          : "AI naming needs some document content first.",
+          : draftKind === "spreadsheet"
+            ? "AI naming needs some cells filled in first."
+            : "AI naming needs some document content first.",
       );
       return;
     }
@@ -4514,7 +4691,7 @@ export function DocumentAssistantWorkspace({
           { role: "system", content: AI_DRAFT_TITLE_SYSTEM_PROMPT },
           {
             role: "user",
-            content: `${draftKind === "deck" ? "Slide deck outline" : "Document body"} to name:\n\n${excerpt}`,
+            content: `${draftKind === "deck" ? "Slide deck outline" : draftKind === "spreadsheet" ? "Spreadsheet contents" : "Document body"} to name:\n\n${excerpt}`,
           },
         ],
         runtime: {
@@ -4527,12 +4704,12 @@ export function DocumentAssistantWorkspace({
           maxCompletionTokens: 256,
         },
       });
-      const title = cleanAiDraftTitle(reply.content ?? "");
+      const title = cleanAiTitle(reply.content ?? "");
       if (!title) {
         throw new ChatRequestError(`${selectedAgent.name} did not return a usable name.`);
       }
       setDocumentTitle(title);
-      setStatus(`AI named this ${draftKind === "deck" ? "deck" : "draft"} "${title}".`);
+      setStatus(`AI named this ${draftKind === "deck" ? "deck" : draftKind === "spreadsheet" ? "workbook" : "draft"} "${title}".`);
     } catch (error) {
       setStatus(
         error instanceof ChatRequestError && error.message
@@ -5636,6 +5813,176 @@ export function DocumentAssistantWorkspace({
   /** Composer entry point for deck mode: generate a new deck or revise the
    * current one through the provider, with strict validation, one retry, and
    * a deterministic fallback — invalid AI JSON never renders. */
+  /** Spreadsheet data from attached CSV/Excel files still on this draft. */
+  function spreadsheetSourceText(): string | undefined {
+    const attachedIds = new Set(attachedFiles.map((file) => file.id));
+    const parts = Array.from(tabularAttachmentsRef.current.entries())
+      .filter(([id]) => attachedIds.has(id))
+      .map(([, text]) => text);
+    return parts.length ? parts.join("\n\n").slice(0, 48_000) : undefined;
+  }
+
+  /** The inline spreadsheet assistant's model call: streamed, with the
+   * draft's knowledge sources and attachments, abortable from the editor. */
+  const askSpreadsheetModel: SheetAiAsk = async (prompt, { signal, onText }) => {
+    if (!selectedAgent) throw new Error(draftAiUnavailableReason);
+    const sources = spreadsheetSourceText();
+    const reply = await sendChatStream(completionUserId, {
+      model: selectedAgent.id,
+      messages: [{ role: "user", content: sources ? `${prompt}\n\nData from attached files:\n${sources}` : prompt }],
+      signal,
+      runtime: {
+        surface: "draft",
+        draftTitle: documentTitle.trim() || EMPTY_DOCUMENT_TITLE,
+        clientStartedAt: draftNowIso(),
+        webEnabled: false,
+        citationsEnabled: false,
+        knowledgeConfigIds: activeSourceIds,
+        ...draftAttachmentRuntime(),
+        maxCompletionTokens: 12000,
+        reasoningEffort: reasoningEffortForSend,
+      },
+      onDelta: (fullText) => onText?.(splitAssistantThinking(fullText).visibleContent),
+    });
+    return splitAssistantThinking(reply.content ?? "").visibleContent;
+  };
+
+  async function runSpreadsheetAssistantRequest(request: string) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
+    if (revisionInFlightRef.current) {
+      setStatus("The spreadsheet assistant is already working on the current request.");
+      return;
+    }
+    revisionInFlightRef.current = true;
+    const current = workbookState ?? blankWorkbook();
+    const revising = current.sheets.some((sheet) => Object.keys(sheet.cells).length > 0);
+    const useWebSearch = webSearchEnabled && webSearchAvailable;
+    const contextOptions = draftContextOptions(sourceSummary, { useTemplateContext: false, useWebSearch });
+    const requestStartedAt = draftNowIso();
+    const sheetId = current.sheets.find((sheet) => sheet.id === spreadsheetActiveSheetRef.current)?.id ?? current.sheets[0].id;
+    setInstruction("");
+    const requestEvent = draftEvent("user", "sheet-request", request, { createdAt: requestStartedAt });
+    setEvents((list) => [...list, requestEvent]);
+    const knowledge = activeSourceIds.length;
+    const attachments = draftAttachmentRuntime().attachmentIds.length;
+    const activity = sheetRunStart({ modelLabel: selectedAgent.name, web: useWebSearch, knowledge, attachments, workbook: current });
+    setDraftTrace({ steps: [], activeIndex: 0, complete: false, startedAt: Date.now(), sheetRun: { activity, thinking: [], requestEventId: requestEvent.id } });
+    const record = (update: (steps: ChatActivityTraceStep[]) => ChatActivityTraceStep[], thinking: string[] = []) =>
+      setDraftTrace((trace) =>
+        trace?.sheetRun
+          ? { ...trace, sheetRun: { ...trace.sheetRun, activity: update(trace.sheetRun.activity), thinking: [...trace.sheetRun.thinking, ...thinking] } }
+          : trace,
+      );
+    const finish = (outcome: SheetRunOutcome) => record((steps) => sheetRunFinished(steps, outcome));
+    setStatus(revising ? "Updating the workbook..." : "Building the workbook...");
+    const ask = async (prompt: string) => {
+      const askedAt = Date.now();
+      const reply = await sendChat(completionUserId, {
+        model: selectedAgent.id,
+        messages: [{ role: "user", content: withCitationRequirement(prompt, requireCitations) }],
+        runtime: {
+          surface: "draft",
+          draftTitle: documentTitle.trim() || EMPTY_DOCUMENT_TITLE,
+          clientStartedAt: requestStartedAt,
+          webEnabled: useWebSearch,
+          citationsEnabled: requireCitations,
+          knowledgeConfigIds: activeSourceIds,
+          ...draftAttachmentRuntime(),
+          maxCompletionTokens: 16000,
+          reasoningEffort: reasoningEffortForSend,
+        },
+      });
+      const { visibleContent, thinkingTraces } = splitAssistantThinking(reply.content ?? "");
+      record((steps) => sheetRunReplied(steps, askedAt, Date.now()), thinkingTraces);
+      return visibleContent;
+    };
+    const contextLines = [
+      useWebSearch
+        ? "Provider-hosted public web search is available: use it for current public figures, and put each source's name in a cell note on the numbers it supports."
+        : "Do not claim live web research.",
+      ...(contextOptions.chatContext ? [chatContextPromptSection(contextOptions.chatContext)] : []),
+    ].join("\n");
+    try {
+      const flow = await runSheetAiFlow({
+        ask,
+        instruction: request,
+        workbook: current,
+        sheetId,
+        scope: "workbook",
+        sources: spreadsheetSourceText(),
+        context: contextLines,
+        onPhase: (phase, problems) => { if (phase === "fixing") record((steps) => sheetRunFixing(steps, problems)); },
+      });
+      if (!flow.ok) {
+        finish({ kind: "unreadable" });
+        setStatus("The spreadsheet assistant's reply could not be read as workbook changes, so nothing was applied.");
+        setEvents((list) => [...list, draftEvent("system", "sheet-failed", "The model's reply was not valid spreadsheet changes twice, so nothing was applied. Try rephrasing the request.")]);
+        return;
+      }
+      const { result, message, problems } = flow;
+      const changed = describeChanges(current, result.workbook);
+      if (serializeWorkbook(result.workbook) === serializeWorkbook(current)) {
+        finish({ kind: "answered" });
+        setEvents((list) => [...list, draftEvent("assistant", "sheet-answer", message || "No changes were needed.")]);
+        setStatus("The spreadsheet assistant answered without changing the workbook.");
+        return;
+      }
+      const summary = `${revising ? "Workbook updated" : "Workbook built"}: ${request.slice(0, 80)}`;
+      // Like a generated deck, an untitled workbook takes the name of what the assistant built.
+      const autoTitle = documentTitle.trim() === EMPTY_DOCUMENT_TITLE ? workbookTitleFrom(flow.title, current, result.workbook) : null;
+      const title = autoTitle ?? documentTitle;
+      if (autoTitle) setDocumentTitle(autoTitle);
+      let version: string;
+      if (!workbookState) {
+        version = openWorkbookInEditor(result.workbook, summary, "Workbook built by the assistant.");
+        rememberSpreadsheetSnapshot(title, serializeWorkbook(result.workbook), summary);
+      } else {
+        setWorkbookState(result.workbook);
+        const appended = appendSpreadsheetVersion(result.workbook, summary);
+        version = appended.label;
+        rememberSpreadsheetSnapshot(title, serializeWorkbook(result.workbook), appended.summary);
+      }
+      finish({ kind: "applied", built: !revising, changed, problems, skipped: result.warnings.length, version });
+      setDraftKind("spreadsheet");
+      setSpreadsheetFocus({ id: result.activeSheetId, nonce: Date.now() });
+      setEvents((list) => [
+        ...list,
+        draftEvent("assistant", "sheet-applied", `${message ? `${message} ` : ""}(${changed})`),
+        ...(problems.length ? [draftEvent("system", "sheet-formula-errors", `${problems.length} formula${problems.length === 1 ? "" : "s"} still show an error: ${problems.slice(0, 4).map((problem) => `${problem.sheetName}!${problem.address} ${problem.error.code}`).join(", ")}. Select a cell and use Ask AI to fix it.`)] : []),
+        ...result.warnings.slice(0, 6).map((warning) => draftEvent("system", "sheet-warning", warning)),
+      ]);
+      setStatus(`${revising ? "Workbook updated" : "Workbook built"}: ${changed}.`);
+    } catch (error) {
+      finish({ kind: "failed", error: draftErrorText(error) });
+      setStatus(`The spreadsheet assistant could not finish: ${draftErrorText(error)}`);
+      setEvents((list) => [...list, draftEvent("system", "sheet-failed", `The spreadsheet request failed: ${draftErrorText(error)}`)]);
+    } finally {
+      setDraftTrace((trace) => (trace ? { ...trace, complete: true, activeIndex: trace.steps.length, endedAt: Date.now() } : trace));
+      revisionInFlightRef.current = false;
+    }
+  }
+
+  async function handleOpenWorkbookInEditor(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      setStatus(`Opening ${file.name}…`);
+      const { workbook, warnings } = await workbookFromFile(file);
+      const title = file.name.replace(/\.[^.]+$/, "") || EMPTY_DOCUMENT_TITLE;
+      setDocumentTitle(title);
+      openWorkbookInEditor(workbook, `Opened ${file.name}`, `${file.name} opened in the spreadsheet editor.`);
+      rememberSpreadsheetSnapshot(title, serializeWorkbook(workbook), `Opened ${file.name}`);
+      setEvents((list) => [
+        ...list,
+        draftEvent("system", "sheet-opened", `Opened ${file.name} (${workbook.sheets.length} sheet${workbook.sheets.length === 1 ? "" : "s"}).`),
+        ...warnings.slice(0, 8).map((warning) => draftEvent("system", "sheet-import-warning", `Import note: ${warning}`)),
+      ]);
+    } catch (error) {
+      setStatus(`${file.name} could not be opened: ${draftErrorText(error)}`);
+    }
+  }
+
   async function runDeckAssistantRequest(request: string) {
     if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (revisionInFlightRef.current) {
@@ -5928,16 +6275,172 @@ export function DocumentAssistantWorkspace({
     );
   }
 
-  function switchDraftMode(mode: "document" | "deck") {
+  function appendSpreadsheetVersion(workbook: Workbook, summary: string) {
+    const nextVersionNumber = versions.length + 1;
+    const executedAt = draftNowIso();
+    const nextVersion: DraftVersion = {
+      id: `version-${nextVersionNumber}`,
+      label: `Version ${nextVersionNumber}`,
+      time: draftTimeLabel(executedAt),
+      executedAt,
+      content: serializeWorkbook(workbook),
+      summary,
+      format: "spreadsheet",
+    };
+    setVersions((current) => [...current, nextVersion]);
+    setSelectedVersionId(nextVersion.id);
+    return nextVersion;
+  }
+
+  /** Server-first save for workbooks, the same contract decks use: cached on
+   * this device, then created or CAS-updated as a kind "spreadsheet" draft. */
+  function rememberSpreadsheetSnapshot(title: string, serialized: string, summary: string) {
+    if (spreadsheetServerRef.current.historyId !== spreadsheetHistoryIdRef.current) {
+      spreadsheetServerRef.current = { id: null, revision: null, historyId: spreadsheetHistoryIdRef.current };
+    }
+    const binding = spreadsheetServerRef.current;
+    const nextHistory = persistDraftDocumentHistorySnapshot(draftScope, {
+      id: spreadsheetHistoryIdRef.current,
+      title,
+      content: serialized,
+      summary,
+      sourceLabel: activeSourceLabel,
+      kind: "spreadsheet",
+      serverId: binding.id,
+      serverRevision: binding.revision,
+      serverSavePending: true,
+    });
+    setSavedDocumentTitle(title);
+    setDocumentHistory(nextHistory);
+    queueDraftServerSync(
+      {
+        historyId: nextHistory[0].id,
+        title,
+        content: serialized,
+        summary,
+        sourceLabel: activeSourceLabel,
+        kind: "spreadsheet",
+      },
+      binding,
+    );
+  }
+
+  /** Puts a workbook in the spreadsheet editor as a new spreadsheet draft
+   * (blank, a template, an import, or the assistant's first build). */
+  /** Opens a workbook in the editor as a version; returns that version's label. */
+  function openWorkbookInEditor(workbook: Workbook, summary: string, message: string): string {
+    spreadsheetHistoryIdRef.current = createDraftHistoryId();
+    spreadsheetServerRef.current = { id: null, revision: null, historyId: spreadsheetHistoryIdRef.current };
+    setWorkbookState(workbook);
+    setSpreadsheetHistoryKey(spreadsheetHistoryIdRef.current);
+    endDeckEditSession();
+    setDraftKind("spreadsheet");
+    setMobileFormattingExpanded(false);
+    setDocumentToolPanel(null);
+    // Opening a blank workbook is not an edit: reuse a pristine Version 1.
+    const pristine = versions.length === 1 && versions[0].id === "version-1" && !versions[0].content;
+    let label: string;
+    if (pristine) {
+      setVersions([{ ...versions[0], content: serializeWorkbook(workbook), summary, format: "spreadsheet" }]);
+      setSelectedVersionId("version-1");
+      label = versions[0].label;
+    } else {
+      label = appendSpreadsheetVersion(workbook, summary).label;
+    }
+    setStatus(message);
+    return label;
+  }
+
+  function startWorkbookFromTemplate(templateId: string) {
+    const template = SHEET_TEMPLATES.find((item) => item.id === templateId) ?? SHEET_TEMPLATES[0];
+    const { workbook } = buildSheetTemplate(template);
+    setDocumentTitle(template.name);
+    openWorkbookInEditor(workbook, `Started from the ${template.name} template`, `${template.name} template opened. Replace the sample data with yours.`);
+    setActiveAssistantTool(null);
+  }
+
+  /** A chat reply the reader sent to Drafts as a slide deck: its headings and
+   * points become slides, the way Document → Deck converts a page. */
+  function openTransferredDeck(draft: DraftImportPayload) {
+    const title = transferredTitle(draft);
+    const summary = transferredSummary(draft);
+    const executedAt = draft.createdAtIso || draftNowIso();
+    setDocumentTitle(title);
+    deckHistoryIdRef.current = createDraftHistoryId();
+    deckServerRef.current = { id: null, revision: null, historyId: deckHistoryIdRef.current };
+    const { deck, warnings } = deckFromDocumentHtml(title, documentHtmlFromMarkdown(draft.content));
+    setDeckState(deck);
+    setSelectedSlideId(deck.slides[0]?.id ?? null);
+    setDeckUndoStack([]);
+    setDeckRedoStack([]);
+    deckEditSessionUndoRef.current = null;
+    setDraftKind("deck");
+    const version: DraftVersion = {
+      id: "version-1",
+      label: "Version 1",
+      time: draft.createdAt || draftTimeLabel(executedAt),
+      executedAt,
+      content: serializeSlideDeck(deck),
+      summary,
+      format: "deck",
+    };
+    setVersions([version]);
+    setSelectedVersionId(version.id);
+    rememberDeckSnapshot(title, version.content, summary);
+    setEvents([
+      transferEvent(draft, "slide deck", executedAt),
+      ...warnings.map((warning) => draftEvent("system", "deck-conversion-warning", `Deck conversion note: ${warning}`)),
+    ]);
+    setStatus(`${deck.slides.length} slide${deck.slides.length === 1 ? "" : "s"} built from the chat response.`);
+  }
+
+  /** A chat reply the reader sent to Drafts as a spreadsheet: each table in
+   * it becomes a sheet (a reply without one lands down column A). */
+  function openTransferredWorkbook(draft: DraftImportPayload) {
+    const title = transferredTitle(draft);
+    const summary = transferredSummary(draft);
+    const executedAt = draft.createdAtIso || draftNowIso();
+    const { workbook, tables } = workbookFromMarkdown(draft.content, measureCellText);
+    setDocumentTitle(title);
+    openWorkbookInEditor(
+      workbook,
+      summary,
+      tables
+        ? `${tables} table${tables === 1 ? "" : "s"} from the chat response, one sheet each.`
+        : "The chat response had no table, so its lines are down column A.",
+    );
+    rememberSpreadsheetSnapshot(title, serializeWorkbook(workbook), summary);
+    setEvents([transferEvent(draft, "spreadsheet", executedAt)]);
+  }
+
+  function startBlankWorkbook() {
+    openWorkbookInEditor(blankWorkbook(), "Blank workbook", "Blank workbook started. Type in any cell, or ask the assistant to build one.");
+  }
+
+  function switchDraftMode(mode: DraftFormat) {
     if (mode === draftKind || assistantWorking) return;
     setMobileFormattingExpanded(false);
     setDocumentToolPanel(null);
+    if (mode === "spreadsheet") {
+      if (!workbookState) {
+        startBlankWorkbook();
+        return;
+      }
+      endDeckEditSession();
+      setDraftKind("spreadsheet");
+      const latestWorkbookVersion = [...versions]
+        .reverse()
+        .find((version) => version.format === "spreadsheet" || contentLooksLikeWorkbook(version.content));
+      if (latestWorkbookVersion && latestWorkbookVersion.id !== selectedVersionId) setSelectedVersionId(latestWorkbookVersion.id);
+      setStatus("Spreadsheet editor active.");
+      return;
+    }
     if (mode === "document") {
       endDeckEditSession();
       setDraftKind("document");
       const latestDocumentVersion = [...versions]
         .reverse()
-        .find((version) => version.format !== "deck" && !contentLooksLikeDeck(version.content));
+        .find((version) => !isStructuredVersion(version));
       if (latestDocumentVersion && latestDocumentVersion.id !== selectedVersionId) {
         setSelectedVersionId(latestDocumentVersion.id);
         // Deck mode never changes the document buffer. Preserve unsaved edits
@@ -6454,7 +6957,7 @@ export function DocumentAssistantWorkspace({
     // A save owns the document binding captured when it was queued. Switching
     // the editor must never retarget a pending PUT or adopt its response.
     const reportSaveState = (state: DraftServerSaveState) => {
-      const owned = serverDraftRef.current === binding || deckServerRef.current === binding;
+      const owned = serverDraftRef.current === binding || deckServerRef.current === binding || spreadsheetServerRef.current === binding;
       if (owned && binding.lastSnapshot === snapshot) {
         setServerSaveState(state);
       }
@@ -6474,7 +6977,9 @@ export function DocumentAssistantWorkspace({
       reportUnstored(
         kind === "deck"
           ? "This deck exceeds the 8 MB server deck limit"
-          : "This draft exceeds the 2 MB server draft limit",
+          : kind === "spreadsheet"
+            ? "This workbook exceeds the 8 MB server spreadsheet limit"
+            : "This draft exceeds the 2 MB server draft limit",
       );
       return;
     }
@@ -6553,8 +7058,15 @@ export function DocumentAssistantWorkspace({
     }
   }
 
+  /** The server binding for whichever format the editor is showing. */
+  function activeServerBinding() {
+    if (draftKind === "deck") return deckServerRef.current;
+    if (draftKind === "spreadsheet") return spreadsheetServerRef.current;
+    return serverDraftRef.current;
+  }
+
   function retryDraftServerSync() {
-    const binding = draftKind === "deck" ? deckServerRef.current : serverDraftRef.current;
+    const binding = activeServerBinding();
     const snapshot = binding.lastSnapshot;
     if (snapshot) queueDraftServerSync(snapshot, binding);
   }
@@ -6643,9 +7155,9 @@ export function DocumentAssistantWorkspace({
   async function reloadServerDraftCopy(serverId: string) {
     const requestId = ++draftOpenRequestRef.current;
     const reloadingDeck = draftKind === "deck";
-    const binding = reloadingDeck ? deckServerRef.current : serverDraftRef.current;
-    const stillBound = () =>
-      reloadingDeck ? deckServerRef.current === binding : serverDraftRef.current === binding;
+    const reloadingWorkbook = draftKind === "spreadsheet";
+    const binding = activeServerBinding();
+    const stillBound = () => activeServerBinding() === binding;
     try {
       const snapshot = await getDraft(completionUserId, serverId, { tenantSlug: draftTenantSlug });
       if (requestId !== draftOpenRequestRef.current || !stillBound()) return;
@@ -6654,7 +7166,9 @@ export function DocumentAssistantWorkspace({
         ? localDeck
           ? serializeSlideDeck(localDeck)
           : ""
-        : contentRef.current;
+        : reloadingWorkbook
+          ? serializedWorkbook ?? ""
+          : contentRef.current;
       if (localContent && localContent !== snapshot.revision.content) {
         persistDraftDocumentHistorySnapshot(draftScope, {
           id: `${slugify(documentTitle)}-local-${Date.now()}`,
@@ -6662,7 +7176,7 @@ export function DocumentAssistantWorkspace({
           content: localContent,
           summary: "Local copy preserved before reloading the server draft",
           sourceLabel: activeSourceLabel,
-          kind: reloadingDeck ? "deck" : "document",
+          kind: reloadingDeck ? "deck" : reloadingWorkbook ? "spreadsheet" : "document",
           serverId: null,
           serverRevision: null,
         });
@@ -6706,6 +7220,10 @@ export function DocumentAssistantWorkspace({
     const html = item.serverId && (!item.content || item.serverContentStale)
       ? (await getDraft(completionUserId, item.serverId, { tenantSlug: draftTenantSlug })).revision.content
       : item.content;
+    if (contentLooksLikeWorkbook(html)) {
+      const workbook = parseWorkbook(html);
+      if (workbook.ok) return workbookPlainText(workbook.workbook, computeWorkbook(workbook.workbook), 700) || "This workbook is empty.";
+    }
     const parsed = parseSlideDeck(html);
     return parsed.ok ? markdownOutlineFromDeck(parsed.deck).slice(0, 700) : documentHtmlToText(sanitizeDocumentHtml(html)).slice(0, 700) || "This draft has no content yet.";
   }
@@ -6795,6 +7313,72 @@ export function DocumentAssistantWorkspace({
     clearDraftTimers();
     const status = item.status ?? "complete";
     const executedAt = item.completedAt || item.updatedAt || draftNowIso();
+    // Workbooks restore through the workbook validator, never innerHTML.
+    if (item.kind === "spreadsheet" || contentLooksLikeWorkbook(item.content)) {
+      const parsed = parseWorkbook(item.content);
+      if (!parsed.ok) {
+        setStatus(`This saved spreadsheet could not be restored: ${parsed.error}`);
+        return;
+      }
+      serverDraftRef.current = { id: null, revision: null, historyId: createDraftHistoryId() };
+      spreadsheetHistoryIdRef.current = item.id;
+      const bindingKey = `${scopedDraftCacheKey(draftScope)}:${item.id}`;
+      const existingBinding = draftServerBindings.get(bindingKey);
+      spreadsheetServerRef.current = existingBinding ?? {
+        id: item.serverId ?? null,
+        revision: item.serverRevision ?? null,
+        historyId: item.id,
+      };
+      if (existingBinding && !item.serverSavePending) {
+        existingBinding.id = item.serverId ?? existingBinding.id;
+        existingBinding.revision = item.serverRevision ?? existingBinding.revision;
+      }
+      draftServerBindings.set(bindingKey, spreadsheetServerRef.current);
+      if (item.serverSavePending && !spreadsheetServerRef.current.lastSnapshot) {
+        spreadsheetServerRef.current.lastSnapshot = {
+          historyId: item.id,
+          title: item.title,
+          content: item.content,
+          summary: item.summary,
+          sourceLabel: item.sourceLabel,
+          kind: "spreadsheet",
+          storedLocally: true,
+        };
+      }
+      setServerSaveState(
+        item.serverSavePending
+          ? { kind: "local-only", message: "This version is kept on this device; its account save has not completed." }
+          : item.serverId ? { kind: "saved", revision: item.serverRevision ?? 0 } : { kind: "idle" },
+      );
+      const canonical = serializeWorkbook(parsed.workbook);
+      const restoredVersion: DraftVersion = {
+        id: "version-1",
+        label: "Version 1",
+        time: draftTimeLabel(executedAt),
+        executedAt,
+        content: canonical,
+        summary: `Restored from history: ${item.summary}`,
+        format: "spreadsheet",
+      };
+      setActiveHistoryItemId(null);
+      setDocumentTitle(item.title);
+      setSavedDocumentTitle(item.title);
+      setContent("");
+      clearEditHistory();
+      setDeckState(null);
+      setSelectedSlideId(null);
+      setWorkbookState(parsed.workbook);
+      setSpreadsheetHistoryKey(`${item.id}-${Date.now()}`);
+      setDraftKind("spreadsheet");
+      setVersions([restoredVersion]);
+      setSelectedVersionId(restoredVersion.id);
+      setEvents(item.events ?? []);
+      setCodeArtifact(null);
+      setShowEdits(false);
+      setActiveAssistantTool((current) => (options?.fromLiveUpdate ? current : null));
+      setStatus(`${item.title} restored from history in the spreadsheet editor.`);
+      return;
+    }
     // Deck snapshots restore through the deck validator, never innerHTML.
     if (contentLooksLikeDeck(item.content)) {
       const parsed = parseSlideDeck(item.content);
@@ -6837,6 +7421,7 @@ export function DocumentAssistantWorkspace({
       setDeckUndoStack([]);
       setDeckRedoStack([]);
       deckEditSessionUndoRef.current = null;
+      setWorkbookState(null);
       setDraftKind("deck");
       setVersions([restoredVersion]);
       setSelectedVersionId(restoredVersion.id);
@@ -6900,6 +7485,7 @@ export function DocumentAssistantWorkspace({
     setDeckUndoStack([]);
     setDeckRedoStack([]);
     deckEditSessionUndoRef.current = null;
+    setWorkbookState(null);
     setVersions([restoredVersion]);
     setSelectedVersionId(restoredVersion.id);
     setEvents(item.events ?? []);
@@ -7418,6 +8004,18 @@ export function DocumentAssistantWorkspace({
   }
 
   function saveManualVersion(): DraftVersion | null {
+    if (draftKind === "spreadsheet") {
+      if (!workbookState) return null;
+      const serialized = serializeWorkbook(workbookState);
+      if (selectedVersion && selectedVersion.content === serialized && documentTitle.trim() === savedDocumentTitle.trim()) {
+        setStatus("Current version already matches the workbook.");
+        return null;
+      }
+      const nextVersion = appendSpreadsheetVersion(workbookState, "Manual spreadsheet edit snapshot");
+      setStatus(`${nextVersion.label} saved from spreadsheet edits.`);
+      rememberSpreadsheetSnapshot(documentTitle, serialized, nextVersion.summary);
+      return nextVersion;
+    }
     if (draftKind === "deck") {
       endDeckEditSession();
       const editedDeck = flushDeckTextEdits();
@@ -7763,6 +8361,14 @@ export function DocumentAssistantWorkspace({
       await runDeckAssistantRequest(request);
       return;
     }
+    if (draftKind === "spreadsheet") {
+      if (assistantWorking || revisionInFlightRef.current) {
+        setStatus("The spreadsheet assistant is already working on the current request.");
+        return;
+      }
+      await runSpreadsheetAssistantRequest(request);
+      return;
+    }
     if (assistantWorking || revisionInFlightRef.current) {
       setStatus("The document assistant is already working on the current request.");
       return;
@@ -7867,8 +8473,7 @@ export function DocumentAssistantWorkspace({
   }
 
   /** Opens the browser print dialog on a print-only render of the saved
-   * version. The user chooses "Save as PDF" in that dialog; the app never
-   * claims to have produced a PDF file itself. */
+   * version. The app never claims to have produced a file itself. */
   async function handlePrintExport(printHtml: string) {
     if (exportInFlightRef.current) return;
     exportInFlightRef.current = true;
@@ -7881,8 +8486,7 @@ export function DocumentAssistantWorkspace({
         contentHtml: printHtml,
       });
       if (outcome.ok) {
-        const text =
-          'Print dialog opened. Choose "Save as PDF" in the browser dialog to keep a PDF copy.';
+        const text = "Print dialog opened with the saved version.";
         setPrintNotice({ kind: "status", text });
         setStatus(text);
       } else {
@@ -7903,6 +8507,10 @@ export function DocumentAssistantWorkspace({
    * saved versions; the base/comparison choice is the user's, with no legal
    * original/revised implication. */
   function openVersionCompare() {
+    if (draftKind === "spreadsheet") {
+      if (canCompareVersions) setSheetCompareOpen(true);
+      return;
+    }
     if (!canCompareVersions || versions.length < 2) return;
     compareReturnFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -7954,9 +8562,16 @@ export function DocumentAssistantWorkspace({
       setStatus("There is no deck to export yet.");
       return;
     }
+    const exportWorkbook = draftKind === "spreadsheet" ? workbookState : null;
+    if (draftKind === "spreadsheet" && !exportWorkbook) {
+      setStatus("There is no workbook to export yet.");
+      return;
+    }
     const plainText = exportDeck
       ? markdownOutlineFromDeck(exportDeck)
-      : exportDocumentBody(content.includes("document-mla-text") ? "" : documentTitle, documentHtmlToText(content));
+      : exportWorkbook
+        ? workbookPlainText(exportWorkbook, computeWorkbook(exportWorkbook), 200_000)
+        : exportDocumentBody(content.includes("document-mla-text") ? "" : documentTitle, documentHtmlToText(content));
     const normalizedTitle = documentTitle.trim() || "Draft";
     const descriptor = exportFileDescriptor(format, { codeArtifact, normalizedTitle });
     if (!descriptor) {
@@ -7967,7 +8582,7 @@ export function DocumentAssistantWorkspace({
     const buildCurrentExport = async () => {
       let exportHtml = content;
       if (
-        format === "word" &&
+        (format === "word" || format === "pdf") &&
         !isAutomatedTestMode() &&
         countDocumentPages(content) &&
         normalizedLayoutHtmlRef.current !== content
@@ -7986,7 +8601,13 @@ export function DocumentAssistantWorkspace({
         normalizedTitle,
         plainText,
         deck: exportDeck,
+        workbook: exportWorkbook,
+        activeSheetId: spreadsheetActiveSheetRef.current,
         imageProxy: cachedExportImageDataUrl,
+        exportPdf: buildPdfExport,
+        onExportDetail: (detail) => {
+          exportDetail = detail;
+        },
         onExportWarnings: (exportWarnings) =>
           setEvents((current) => [
             ...current,
@@ -7997,6 +8618,7 @@ export function DocumentAssistantWorkspace({
       });
     };
 
+    let exportDetail: string | undefined;
     exportInFlightRef.current = true;
     setExportingFormat(format);
     let refusedFilename: string | null = null;
@@ -8051,14 +8673,14 @@ export function DocumentAssistantWorkspace({
             await discardEmptyExportFile(handle);
             const exportFile: ExportFile = { ...descriptor, blob };
             const retainedHref = downloadBlob(exportFile, setStatus);
-            rememberExportReceipt(exportFile, "download", retainedHref);
+            rememberExportReceipt(exportFile, "download", retainedHref, undefined, exportDetail);
             setStatus(
               `${descriptor.filename} could not be written to the chosen location, so it was sent to your browser downloads instead.`,
             );
             return;
           }
           setStatus(`Saved ${descriptor.filename} to your selected location.`);
-          rememberExportReceipt({ ...descriptor, blob }, "picker");
+          rememberExportReceipt({ ...descriptor, blob }, "picker", undefined, undefined, exportDetail);
           return;
         }
       }
@@ -8074,17 +8696,58 @@ export function DocumentAssistantWorkspace({
       const refusedNote = refusedFilename
         ? `This browser can't save to a folder you choose. The empty ${refusedFilename} it made there can be deleted.`
         : undefined;
-      rememberExportReceipt(exportFile, "download", retainedHref, refusedNote);
+      rememberExportReceipt(exportFile, "download", retainedHref, refusedNote, exportDetail);
       if (refusedNote) setStatus(`${refusedNote} The full file was sent to your browser downloads.`);
-    } catch {
-      setStatus(`Could not export ${descriptor.filename}. Try again from the export menu.`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setStatus("PDF export canceled.");
+      } else if (format === "pdf" && error instanceof Error && error.message) {
+        setStatus(`Could not export ${descriptor.filename}: ${error.message}`);
+      } else {
+        setStatus(`Could not export ${descriptor.filename}. Try again from the export menu.`);
+      }
     } finally {
       exportInFlightRef.current = false;
       setExportingFormat(null);
+      setPdfProgress(null);
+      pdfExportAbortRef.current = null;
     }
   }
 
-  function rememberExportReceipt(exportFile: ExportFile, delivery: ExportDelivery, href?: string, note?: string) {
+  /** Builds a real PDF of the saved version on the server: the same pages
+   * Print lays out, finished as an archival PDF/A file. */
+  async function buildPdfExport(contentHtml: string): Promise<DraftPdfResult & { warnings: string[] }> {
+    const controller = new AbortController();
+    pdfExportAbortRef.current = controller;
+    setPdfProgress({ stage: "preparing" });
+    const { source, warnings } = await buildDraftPdfSource({
+      title: documentTitle.trim() || "Draft",
+      contentHtml,
+      lang: document.documentElement.lang || "en",
+      styleText: collectDocumentStyleText(document),
+      imageDataUrl: (src) => draftPdfImageDataUrl(src, cachedExportImageDataUrl),
+    });
+    if (controller.signal.aborted) throw new DOMException("The PDF export was canceled.", "AbortError");
+    const result = await runDraftPdfExport({
+      api: draftPdfExportApi(completionUserId),
+      source: await packDraftPdfSource(source),
+      signal: controller.signal,
+      onProgress: setPdfProgress,
+    });
+    return { ...result, warnings };
+  }
+
+  function cancelPdfExport() {
+    pdfExportAbortRef.current?.abort();
+  }
+
+  function rememberExportReceipt(
+    exportFile: ExportFile,
+    delivery: ExportDelivery,
+    href?: string,
+    note?: string,
+    detail?: string,
+  ) {
     if (exportObjectUrlRef.current && exportObjectUrlRef.current !== href) {
       revokeRetainedExportUrl(exportObjectUrlRef.current);
     }
@@ -8094,6 +8757,7 @@ export function DocumentAssistantWorkspace({
       label: exportFile.label,
       delivery,
       href,
+      detail,
       note,
     });
   }
@@ -8127,7 +8791,7 @@ export function DocumentAssistantWorkspace({
 
   function triggerOpenInEditor() {
     setAttachMenuOpen(false);
-    (draftKind === "deck" ? openDeckInEditorInputRef : openInEditorInputRef).current?.click();
+    (draftKind === "deck" ? openDeckInEditorInputRef : draftKind === "spreadsheet" ? openWorkbookInEditorInputRef : openInEditorInputRef).current?.click();
   }
 
   // The attach menu closes on any press outside it and on Escape. Escape is
@@ -8170,6 +8834,11 @@ export function DocumentAssistantWorkspace({
     setAttachedFiles((current) => [...current, ...pending.map((item) => item.entry)]);
     notifyRail(`Attached ${files.length} draft source${files.length === 1 ? "" : "s"}; uploading for the assistant…`);
     for (const { file, entry } of pending) {
+      if (isTabularFile(file.name)) {
+        void tabularAttachmentText(file).then((text) => {
+          if (text) tabularAttachmentsRef.current.set(entry.id, text);
+        });
+      }
       void uploadChatAttachment(completionUserId, file, { tenantId: data.currentTenant?.id })
         .then((uploaded) => {
           const attachmentId = uploaded.id;
@@ -10290,7 +10959,7 @@ export function DocumentAssistantWorkspace({
     <div
       className={`document-assistant-page ${railIsDrawer ? "rail-drawer-mode" : ""} ${
         railIsDrawer && railOpen ? "rail-drawer-open" : ""
-      } ${draftKind === "deck" ? "is-deck-mode" : ""}`}
+      } ${draftKind === "deck" ? "is-deck-mode" : ""} ${draftKind === "spreadsheet" ? "is-sheet-mode" : ""}`}
     >
       {historyDeleteTarget && (
         <div className="modal-backdrop">
@@ -10354,13 +11023,13 @@ export function DocumentAssistantWorkspace({
           <button
             type="button"
             className="draft-rail-tab"
-            aria-label={`Open the ${draftKind === "deck" ? "deck" : "document"} assistant${
+            aria-label={`Open the ${draftKind === "deck" ? "deck" : draftKind === "spreadsheet" ? "spreadsheet" : "document"} assistant${
               assistantWorking ? " (drafting…)" : ""
             }`}
             aria-expanded={railOpen}
             aria-keyshortcuts={DRAFT_RAIL_SHORTCUT.aria}
             data-tooltip={`Open the assistant panel to chat about and revise this ${
-              draftKind === "deck" ? "deck" : "draft"
+              draftKind === "deck" ? "deck" : draftKind === "spreadsheet" ? "workbook" : "draft"
             } (${DRAFT_RAIL_SHORTCUT.label})`}
             onClick={pinRailOpen}
           >
@@ -10418,17 +11087,21 @@ export function DocumentAssistantWorkspace({
             )}
             <div className="draft-assistant-title">
               <div>
-                <h1>{draftKind === "deck" ? "Deck Assistant" : "Document Assistant"}</h1>
+                <h1>{draftKind === "deck" ? "Deck Assistant" : draftKind === "spreadsheet" ? "Spreadsheet Assistant" : "Document Assistant"}</h1>
                 <small className={assistantWorking ? "is-working" : undefined}>
                   {assistantWorking && <PenLine size={12} aria-hidden="true" />}
                   {assistantWorking
                     ? draftKind === "deck"
                       ? "Building slides…"
-                      : "Writing…"
+                      : draftKind === "spreadsheet"
+                        ? "Building the workbook…"
+                        : "Writing…"
                     : draftAiAvailable
                       ? draftKind === "deck"
                         ? "Ready to build slides"
-                        : "Ready to write"
+                        : draftKind === "spreadsheet"
+                          ? "Ready to build spreadsheets"
+                          : "Ready to write"
                       : "No drafting model connected"}
                 </small>
               </div>
@@ -10472,6 +11145,14 @@ export function DocumentAssistantWorkspace({
             accept={OPEN_IN_EDITOR_ACCEPT}
             aria-label="Open a file in the editor"
             onChange={(event) => void handleOpenInEditor(event)}
+          />
+          <input
+            ref={openWorkbookInEditorInputRef}
+            type="file"
+            className="sr-only"
+            accept=".xlsx,.xlsm,.csv,.tsv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            aria-label="Open a spreadsheet in the spreadsheet editor"
+            onChange={(event) => void handleOpenWorkbookInEditor(event)}
           />
           <input
             ref={openDeckInEditorInputRef}
@@ -10552,7 +11233,9 @@ export function DocumentAssistantWorkspace({
               data-tooltip={
                 draftKind === "deck"
                   ? "Browse deck templates and your uploaded brand template"
-                  : "Browse templates that shape the structure of your next draft"
+                  : draftKind === "spreadsheet"
+                    ? "Start from a ready-made workbook: budgets, trackers, invoices, and more"
+                    : "Browse templates that shape the structure of your next draft"
               }
               onClick={() =>
                 setActiveAssistantTool((current) => (current === "templates" ? null : "templates"))
@@ -10584,11 +11267,19 @@ export function DocumentAssistantWorkspace({
               className={`draft-event-list ${events.length === 0 && !draftTrace ? "is-empty" : ""}`}
               aria-label="Assistant events"
             >
-              {draftTrace && (
-                <DraftWorkTrace trace={draftTrace} workspaceName={workspaceName} />
-              )}
+              {draftTrace && !draftTrace.sheetRun && <DraftWorkTrace trace={draftTrace} workspaceName={workspaceName} />}
               {events.map((event) => (
-                <DraftEventRow event={event} key={event.id} />
+                <Fragment key={event.id}>
+                  <DraftEventRow event={event} />
+                  {draftTrace?.sheetRun?.requestEventId === event.id && (
+                    <WorkTrace
+                      message={sheetRunMessage({ activity: draftTrace.sheetRun.activity, startedAt: draftTrace.startedAt, endedAt: draftTrace.endedAt })}
+                      brandName={workspaceName}
+                      state={draftTrace.complete ? "complete" : "pending"}
+                      thinkingTraces={draftTrace.sheetRun.thinking}
+                    />
+                  )}
+                </Fragment>
               ))}
             </div>
             {events.length === 0 && !draftTrace && !activeAssistantTool && (
@@ -10600,7 +11291,9 @@ export function DocumentAssistantWorkspace({
                 <small>
                   {draftKind === "deck"
                     ? "Describe the deck in plain words. Slides are built right in the editor."
-                    : "Describe what you need in plain words. The assistant writes right on the page."}
+                    : draftKind === "spreadsheet"
+                      ? "Describe the spreadsheet in plain words. Sheets, formulas, tables, and charts are built right in the grid."
+                      : "Describe what you need in plain words. The assistant writes right on the page."}
                 </small>
                 <div className="draft-suggestion-list" aria-label="Suggested requests">
                   {draftSuggestions.map((suggestion) => (
@@ -10656,6 +11349,44 @@ export function DocumentAssistantWorkspace({
                 </button>
               </div>
 
+              {activeAssistantTool === "templates" && draftKind === "spreadsheet" && (
+                <div className="draft-template-panel is-deck is-sheet" aria-label="Spreadsheet templates">
+                  <p className="draft-template-intro">Start from a ready-made workbook. Formulas, formats, tables, and charts are all live and editable.</p>
+                  <div className="draft-template-list" aria-label="Spreadsheet starter templates">
+                    {SHEET_TEMPLATES.map((template) => (
+                      <button
+                        key={template.id}
+                        type="button"
+                        data-tooltip={`Select the ${template.name} workbook`}
+                        className={`draft-template-card ${selectedSheetTemplateId === template.id ? "is-selected" : ""}`}
+                        aria-pressed={selectedSheetTemplateId === template.id}
+                        onClick={() => setSelectedSheetTemplateId(template.id)}
+                      >
+                        <span className="draft-template-icon" aria-hidden="true">
+                          <SheetIcon size={15} />
+                        </span>
+                        <span>
+                          <strong>{template.name}</strong>
+                          <small>{template.description}</small>
+                        </span>
+                        <CheckCircle2 size={15} className="draft-template-check" aria-hidden="true" />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="draft-template-footer">
+                    <button
+                      className="draft-template-start-button"
+                      type="button"
+                      data-tooltip="Open this workbook as a new spreadsheet draft"
+                      disabled={assistantWorking}
+                      onClick={() => startWorkbookFromTemplate(selectedSheetTemplateId)}
+                    >
+                      <SheetIcon size={16} />
+                      Start {SHEET_TEMPLATES.find((template) => template.id === selectedSheetTemplateId)?.name ?? "workbook"}
+                    </button>
+                  </div>
+                </div>
+              )}
               {activeAssistantTool === "templates" && draftKind === "deck" && (
                 <div className="draft-template-panel is-deck" aria-label="Deck templates">
                   <label className="draft-switch-row">
@@ -11043,7 +11774,7 @@ export function DocumentAssistantWorkspace({
                             time={formatHistoryTimestamp(item.updatedAt)} status={draftHistoryStatusLabel(item)}
                             archiveDisabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverId && item.serverSavePending) || assistantWorking}
                             opening={historyOpeningId === item.id}
-                            kind={item.kind === "deck" ? "deck" : "document"}
+                            kind={item.kind === "deck" ? "deck" : item.kind === "spreadsheet" || contentLooksLikeWorkbook(item.content) ? "spreadsheet" : "document"}
                             archived={Boolean(item.archived)}
                             disabled={Boolean(historyBusyId) || item.status === "running" || Boolean(item.serverSavePending) || assistantWorking}
                             onRestore={() => void restoreDocumentHistoryItem(item)}
@@ -11203,7 +11934,7 @@ export function DocumentAssistantWorkspace({
               </ul>
             )}
             <label className="sr-only" htmlFor="draft-assistant-command">
-              {draftKind === "deck" ? "Ask the deck assistant" : "Ask the document assistant"}
+              {draftKind === "deck" ? "Ask the deck assistant" : draftKind === "spreadsheet" ? "Ask the spreadsheet assistant" : "Ask the document assistant"}
             </label>
             <textarea
               id="draft-assistant-command"
@@ -11211,7 +11942,9 @@ export function DocumentAssistantWorkspace({
               data-tooltip={
                 draftKind === "deck"
                   ? "Describe the deck you want the assistant to build, or ask for changes to the current slides."
-                  : "Describe the draft you want, paste revision instructions, or ask the assistant to edit the current document using the selected templates and sources."
+                  : draftKind === "spreadsheet"
+                    ? "Describe the workbook you want built, or ask for changes to the current sheets. Attached files and sources are used as data."
+                    : "Describe the draft you want, paste revision instructions, or ask the assistant to edit the current document using the selected templates and sources."
               }
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
@@ -11225,10 +11958,14 @@ export function DocumentAssistantWorkspace({
                 assistantWorking
                   ? draftKind === "deck"
                     ? "The deck assistant is working on your slides..."
-                    : "The document assistant is revising this draft..."
+                    : draftKind === "spreadsheet"
+                      ? "The spreadsheet assistant is building your workbook..."
+                      : "The document assistant is revising this draft..."
                   : draftKind === "deck"
                     ? "Ask the deck assistant what to build"
-                    : templateContextEnabled
+                    : draftKind === "spreadsheet"
+                      ? "Describe a spreadsheet, or a change to this one"
+                      : templateContextEnabled
                       ? `Ask for a ${selectedTemplate.name.toLowerCase()} or describe edits`
                       : "Ask the document assistant"
               }
@@ -11273,7 +12010,9 @@ export function DocumentAssistantWorkspace({
                         data-tooltip={
                           draftKind === "deck"
                             ? "Open a PowerPoint file as this deck so you can edit its slides directly"
-                            : "Open a Word, PDF, Markdown, or text file as this draft, keeping its formatting, so you can edit it directly"
+                            : draftKind === "spreadsheet"
+                              ? "Open an Excel workbook or a CSV file in the spreadsheet editor"
+                              : "Open a Word, PDF, Markdown, or text file as this draft, keeping its formatting, so you can edit it directly"
                         }
                         disabled={assistantWorking}
                         onClick={triggerOpenInEditor}
@@ -11281,7 +12020,7 @@ export function DocumentAssistantWorkspace({
                         <FilePen size={16} />
                         <span>
                           <strong>Open in editor</strong>
-                          <small>{draftKind === "deck" ? "Edit slides directly" : "Edit it directly"}</small>
+                          <small>{draftKind === "deck" ? "Edit slides directly" : draftKind === "spreadsheet" ? "Edit cells directly" : "Edit it directly"}</small>
                         </span>
                       </button>
                     </div>
@@ -11399,12 +12138,12 @@ export function DocumentAssistantWorkspace({
                 onPointerUp={event => {
                   const start = modeDragStartRef.current;
                   modeDragStartRef.current = null;
-                  if (start !== null && Math.abs(event.clientX - start) > 24) switchDraftMode(event.clientX > start ? "deck" : "document");
+                  if (start !== null && Math.abs(event.clientX - start) > 24) switchDraftMode(neighborDraftFormat(draftKind, event.clientX > start ? 1 : -1));
                 }}
                 onPointerCancel={() => { modeDragStartRef.current = null; }}
                 onKeyDown={event => {
                   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                    event.preventDefault(); switchDraftMode(event.key === "ArrowRight" ? "deck" : "document");
+                    event.preventDefault(); switchDraftMode(neighborDraftFormat(draftKind, event.key === "ArrowRight" ? 1 : -1));
                   }
                 }}
                 role="group"
@@ -11432,6 +12171,18 @@ export function DocumentAssistantWorkspace({
                   <Presentation size={15} />
                   Deck
                 </button>
+                <button
+                  type="button"
+                  className={draftKind === "spreadsheet" ? "is-active" : ""}
+                  disabled={assistantWorking}
+                  aria-pressed={draftKind === "spreadsheet"}
+                  aria-label="Spreadsheet"
+                  data-tooltip="Edit this draft as an Excel workbook"
+                  onClick={() => switchDraftMode("spreadsheet")}
+                >
+                  <SheetIcon size={15} />
+                  <span className="draft-format-label" data-short="Sheet">Spreadsheet</span>
+                </button>
               </div>
               <div className="draft-title-edit">
                 <div className="draft-title-input-wrap">
@@ -11446,8 +12197,8 @@ export function DocumentAssistantWorkspace({
                 <button
                   type="button"
                   className="draft-title-ai-button"
-                  aria-label={draftKind === "deck" ? "Rename deck with AI" : "Rename document with AI"}
-                  data-tooltip={draftAiAvailable ? `Let AI name this ${draftKind === "deck" ? "deck" : "draft"} from its content` : draftAiUnavailableReason}
+                  aria-label={draftKind === "deck" ? "Rename deck with AI" : draftKind === "spreadsheet" ? "Rename workbook with AI" : "Rename document with AI"}
+                  data-tooltip={draftAiAvailable ? `Let AI name this ${draftKind === "deck" ? "deck" : draftKind === "spreadsheet" ? "workbook" : "draft"} from its content` : draftAiUnavailableReason}
                   disabled={!draftAiAvailable || draftTitleGenerating || assistantWorking}
                   onClick={() => void generateDraftTitleWithAi()}
                 >
@@ -11552,7 +12303,9 @@ export function DocumentAssistantWorkspace({
                 data-tooltip={
                   draftKind === "deck"
                     ? "Download this deck as a PowerPoint file or a Markdown outline"
-                    : "Download this document as Word or Markdown, or print / save as PDF"
+                    : draftKind === "spreadsheet"
+                      ? "Download this workbook as an Excel file, or the current sheet as CSV"
+                      : "Download this document as Word, PDF, or Markdown, or print it"
                 }
                 aria-label={exportingFormat ? "Export in progress" : "Export"}
                 aria-busy={Boolean(exportingFormat)}
@@ -11583,7 +12336,7 @@ export function DocumentAssistantWorkspace({
                 >
                   <div className="document-export-panel-header">
                     <span>
-                      <strong>{draftKind === "deck" ? "Export deck" : "Export document"}</strong>
+                      <strong>{draftKind === "deck" ? "Export deck" : draftKind === "spreadsheet" ? "Export workbook" : "Export document"}</strong>
                       <small>
                         {canChooseExportLocation
                           ? "Choose a file type and save it where you want."
@@ -11650,12 +12403,12 @@ export function DocumentAssistantWorkspace({
                   )}
                   {canChooseExportLocation && (
                     <label className="document-export-destination">Save to
-                      <select aria-label="Export destination" value={exportDelivery}
+                      <SelectControl aria-label="Export destination" value={exportDelivery}
                         disabled={Boolean(exportingFormat)}
                         onChange={event => setExportDelivery(event.target.value as ExportDelivery)}>
                         <option value="picker">Choose a location</option>
                         <option value="download">Browser downloads</option>
-                      </select>
+                      </SelectControl>
                     </label>
                   )}
                   <div
@@ -11663,7 +12416,7 @@ export function DocumentAssistantWorkspace({
                     aria-label="Export formats"
                     aria-busy={Boolean(exportingFormat)}
                   >
-                    {(draftKind === "deck" ? DECK_EXPORT_OPTIONS : DOCUMENT_EXPORT_OPTIONS).map(
+                    {(draftKind === "deck" ? DECK_EXPORT_OPTIONS : draftKind === "spreadsheet" ? SPREADSHEET_EXPORT_OPTIONS : DOCUMENT_EXPORT_OPTIONS).map(
                       (option) => {
                         const Icon = option.icon;
                         return (
@@ -11694,11 +12447,8 @@ export function DocumentAssistantWorkspace({
                       >
                         <Printer size={17} />
                         <span>
-                          <strong>Print / Save as PDF</strong>
-                          <small>
-                            Opens the browser print dialog with the saved version. Choose "Save as
-                            PDF" in that dialog to keep a PDF copy.
-                          </small>
+                          <strong>Print</strong>
+                          <small>Opens the browser print dialog with the saved version.</small>
                         </span>
                       </button>
                     )}
@@ -11721,7 +12471,24 @@ export function DocumentAssistantWorkspace({
                       <span>{printNotice.text}</span>
                     </div>
                   )}
-                  {exportingFormat && (
+                  {exportingFormat === "pdf" && pdfProgress ? (
+                    <div className="document-export-progress is-pdf" role="status">
+                      <LoaderCircle className="document-export-spinner" size={17} />
+                      <span>
+                        <strong>{describePdfProgress(pdfProgress).title}</strong>
+                        <small>{describePdfProgress(pdfProgress).detail}</small>
+                      </span>
+                      <button
+                        type="button"
+                        className="document-export-cancel"
+                        aria-label="Cancel PDF export"
+                        data-tooltip="Stop building this PDF"
+                        onClick={cancelPdfExport}
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  ) : exportingFormat && (
                     <div className="document-export-progress" role="status">
                       <LoaderCircle className="document-export-spinner" size={17} />
                       <span>
@@ -11746,6 +12513,7 @@ export function DocumentAssistantWorkspace({
                             ? "Saved to your selected location."
                             : "Sent to your browser downloads."}
                         </small>
+                        {lastExport.detail && <small>{lastExport.detail}</small>}
                         {lastExport.note && <small>{lastExport.note}</small>}
                         {lastExport.href && (
                           <a
@@ -13429,6 +14197,33 @@ export function DocumentAssistantWorkspace({
                   />
                 )}
             </div>
+          )}
+
+          {sheetCompareOpen && draftKind === "spreadsheet" && (
+            <SheetVersionCompare versions={spreadsheetVersions} onClose={() => setSheetCompareOpen(false)} />
+          )}
+
+          {draftKind === "spreadsheet" && workbookState && (
+            <SpreadsheetEditor
+              workbook={workbookState}
+              historyKey={spreadsheetHistoryKey}
+              title={documentTitle}
+              onChange={(next) => setWorkbookState(next)}
+              readOnly={assistantWorking}
+              saveStatus={(
+                <DraftSaveStatus
+                  status={saveStatus}
+                  onRetry={retryDraftServerSync}
+                  onReload={(serverId) => void reloadServerDraftCopy(serverId)}
+                />
+              )}
+              mobileExpanded={mobileFormattingExpanded}
+              onToggleMobile={() => setMobileFormattingExpanded((value) => !value)}
+              ai={{ available: draftAiAvailable, reason: draftAiUnavailableReason, ask: askSpreadsheetModel, agentName: selectedAgent?.name ?? "AI" }}
+              onStatus={setStatus}
+              onActiveSheetChange={(id) => { spreadsheetActiveSheetRef.current = id; }}
+              focusSheet={spreadsheetFocus}
+            />
           )}
 
           {draftKind === "document" && (
@@ -16162,7 +16957,22 @@ function draftUploadStateLabel(file: DraftSourceFile) {
   return file.hasText ? "ready" : "name only";
 }
 
-function draftStarterSuggestions(kind: "document" | "deck", hasContent: boolean, hasSources: boolean) {
+function draftStarterSuggestions(kind: DraftFormat, hasContent: boolean, hasSources: boolean) {
+  if (kind === "spreadsheet") {
+    return hasContent
+      ? [
+          "Add a summary sheet with totals, averages, and a chart",
+          "Build a pivot table that breaks this down by category",
+          "Highlight outliers and format everything consistently",
+        ]
+      : [
+          hasSources
+            ? "Turn my attached data into a clean table with totals and a chart"
+            : "Build a 12-month budget with income, expenses, and a savings chart",
+          "Create a sales tracker by region with a monthly pivot and chart",
+          "Make a project plan with owners, dates, status, and % complete",
+        ];
+  }
   if (kind === "deck") {
     return hasContent
       ? [
@@ -18259,6 +19069,42 @@ function exportFileDescriptor(
       ],
     };
   }
+  if (format === "pdf") {
+    return {
+      filename: `${exportFileStem(normalizedTitle)}.pdf`,
+      label: "PDF document",
+      pickerTypes: [
+        {
+          description: "PDF document",
+          accept: { "application/pdf": [".pdf"] },
+        },
+      ],
+    };
+  }
+  if (format === "xlsx") {
+    return {
+      filename: `${exportFileStem(normalizedTitle)}.xlsx`,
+      label: "Excel workbook",
+      pickerTypes: [
+        {
+          description: "Microsoft Excel workbook",
+          accept: { [XLSX_MIME_TYPE]: [".xlsx"] },
+        },
+      ],
+    };
+  }
+  if (format === "csv") {
+    return {
+      filename: `${exportFileStem(normalizedTitle)}.csv`,
+      label: "CSV file",
+      pickerTypes: [
+        {
+          description: "Comma-separated values",
+          accept: { "text/csv": [".csv"] },
+        },
+      ],
+    };
+  }
   if (format === "pptx") {
     return {
       filename: `${exportFileStem(normalizedTitle)}.pptx`,
@@ -18291,7 +19137,11 @@ async function buildExportBlob(
     normalizedTitle,
     plainText,
     deck,
+    workbook,
+    activeSheetId,
     imageProxy,
+    exportPdf,
+    onExportDetail,
     onExportWarnings,
   }: {
     codeArtifact: CodeArtifact | null;
@@ -18299,13 +19149,45 @@ async function buildExportBlob(
     normalizedTitle: string;
     plainText: string;
     deck?: SlideDeck | null;
+    workbook?: Workbook | null;
+    activeSheetId?: string | null;
     imageProxy?: ExportImageProxy;
+    exportPdf?: (contentHtml: string) => Promise<DraftPdfResult & { warnings: string[] }>;
+    onExportDetail?: (detail: string) => void;
     onExportWarnings?: (warnings: string[]) => void;
   },
 ): Promise<Blob | null> {
+  if (format === "pdf") {
+    if (!exportPdf) return null;
+    const pdf = await exportPdf(contentHtml);
+    onExportDetail?.(describePdfResult(pdf));
+    if (pdf.warnings.length) onExportWarnings?.(pdf.warnings);
+    return pdf.blob;
+  }
   if (format === "code") {
     if (!codeArtifact) return null;
     return new Blob([codeArtifact.content], { type: codeMimeType(codeArtifact.extension) });
+  }
+  if (format === "xlsx") {
+    if (!workbook) return null;
+    // A real SpreadsheetML package: formulas (recalculated by Excel on open),
+    // cached values, styles, tables, charts, and validation. Anything Excel
+    // cannot represent natively is reported, never silently dropped.
+    const xlsx = buildXlsxWorkbook(workbook, { title: normalizedTitle });
+    if (xlsx.warnings.length) onExportWarnings?.(xlsx.warnings);
+    return new Blob([xlsx.bytes.slice().buffer], { type: XLSX_MIME_TYPE });
+  }
+  if (format === "csv") {
+    if (!workbook) return null;
+    const sheet = workbook.sheets.find((item) => item.id === activeSheetId) ?? workbook.sheets.find((item) => !item.hidden) ?? workbook.sheets[0];
+    const engine = computeWorkbook(workbook);
+    const used = engine.usedRange(sheet.id);
+    const csv = sheetToDelimited(
+      sheet,
+      (row, col) => formatCellValue(engine.value(sheet.id, row, col), effectiveStyle(sheet, row, col)?.format),
+      used ? { range: used } : {},
+    );
+    return new Blob([csv], { type: "text/csv;charset=utf-8" });
   }
   if (format === "pptx") {
     if (!deck) return null;

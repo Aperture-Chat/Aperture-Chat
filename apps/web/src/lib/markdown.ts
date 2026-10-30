@@ -23,9 +23,23 @@ export type MarkdownBlock =
   | { kind: "quote"; lines: string[] }
   | { kind: "math"; source: string; math: string };
 
+/** A table's data: what a reader sees and edits. */
+export type MarkdownTable = { headers: string[]; rows: string[][]; aligns: MarkdownColumnAlign[] };
+
+/** Where a table sits in the source: lines [start, end). */
+type TableSpan = { start: number; end: number; table: MarkdownTable };
+
 export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
+  return walkMarkdownBlocks(source).blocks;
+}
+
+/** One pass over the source that yields the blocks and, for the editor, the
+ * line span of every table, so an edit lands on exactly the table the reader
+ * saw (never one inside a code fence or a math block). */
+function walkMarkdownBlocks(source: string): { blocks: MarkdownBlock[]; tableSpans: TableSpan[] } {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: MarkdownBlock[] = [];
+  const tableSpans: TableSpan[] = [];
   let paragraph: string[] = [];
   let index = 0;
 
@@ -74,6 +88,7 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
     if (table) {
       flushParagraph();
       blocks.push(table.block);
+      tableSpans.push({ start: index, end: table.nextIndex, table: table.block });
       index = table.nextIndex;
       continue;
     }
@@ -143,7 +158,44 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
   }
 
   flushParagraph();
-  return blocks;
+  return { blocks, tableSpans };
+}
+
+function sameTableData(left: MarkdownTable, right: MarkdownTable): boolean {
+  return JSON.stringify([left.headers, left.rows]) === JSON.stringify([right.headers, right.rows]);
+}
+
+/** A table cell as markdown source: pipes escaped, line breaks flattened
+ * (a markdown table row is one line). */
+function tableCellSource(text: string): string {
+  return text.replace(/\s*\r?\n\s*/g, " ").replace(/\|/g, "\\|").trim();
+}
+
+const ALIGN_SEPARATORS: Record<string, string> = { left: ":---", center: ":---:", right: "---:" };
+
+/** The table as GitHub-flavored markdown that parses back to the same data. */
+export function serializeMarkdownTable(table: MarkdownTable): string {
+  const width = table.headers.length;
+  const row = (cells: string[]) =>
+    `| ${Array.from({ length: width }, (_, index) => tableCellSource(cells[index] ?? "")).join(" | ")} |`;
+  const separator = `| ${Array.from({ length: width }, (_, index) => ALIGN_SEPARATORS[table.aligns[index] ?? ""] ?? "---").join(" | ")} |`;
+  return [row(table.headers), separator, ...table.rows.map(row)].join("\n");
+}
+
+/** Rewrites the `occurrence`-th table whose data reads exactly `previous`
+ * (as parseMarkdownBlocks reads it), leaving every other line as it was.
+ * Returns null when no such table exists. */
+export function replaceMarkdownTable(
+  content: string,
+  previous: MarkdownTable,
+  next: MarkdownTable,
+  occurrence = 0,
+): string | null {
+  const { tableSpans } = walkMarkdownBlocks(content);
+  const span = tableSpans.filter((item) => sameTableData(item.table, previous))[occurrence];
+  if (!span) return null;
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  return [...lines.slice(0, span.start), serializeMarkdownTable(next), ...lines.slice(span.end)].join("\n");
 }
 
 type FenceOpener = { marker: string; char: "`" | "~"; length: number; language: string; info: string };
@@ -830,9 +882,11 @@ function looksLikeTableRow(line: string) {
   return parseTableRow(line).length >= 2;
 }
 
+/** Cells of one row. An escaped pipe (\\|) is text inside its cell, as in
+ * GitHub-flavored markdown. */
 function parseTableRow(line: string) {
-  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-  return trimmed.split("|").map((cell) => cell.trim());
+  const trimmed = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
+  return trimmed.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
 }
 
 function normalizeCells(cells: string[], columnCount: number) {
@@ -863,7 +917,7 @@ function isRuleLine(line: string) {
   return /^([-*_])(?:\s*\1){2,}$/.test(line);
 }
 
-function inlineMarkdownToHtml(text: string) {
+export function inlineMarkdownToHtml(text: string) {
   const protectedLinks: string[] = [];
   const withProtectedLinks = escapeHtml(text)
     .replace(

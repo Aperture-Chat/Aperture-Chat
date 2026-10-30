@@ -406,3 +406,13 @@ test("password change cannot be cancelled while it is saving", async () => {
   expect(onSubmit).toHaveBeenCalledOnce();
   finish();
 });
+
+test("signing in leaves the page at its top, so a phone does not open the workspace part-way down", () => {
+  const { unmount } = render(
+    <AuthScreen authOptions={{ local_auth_enabled: true, password_auth_enabled: true, providers: [] }} onLocalLogin={vi.fn()} />,
+  );
+  // On a short phone screen the card scrolls to reach the Sign in button.
+  document.documentElement.scrollTop = 240;
+  unmount();
+  expect(document.documentElement.scrollTop).toBe(0);
+});

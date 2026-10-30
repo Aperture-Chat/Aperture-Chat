@@ -1,0 +1,82 @@
+{
+  "schema": "aperture-sheet-v1",
+  "sanitizer_version": "sheet-json-v1",
+  "max_content_bytes": 8000000,
+  "max_sheets": 40,
+  "max_workbook_cells": 200000,
+  "max_cell_text_chars": 32767,
+  "max_formula_chars": 8192,
+  "max_note_chars": 2000,
+  "max_sheet_name_chars": 31,
+  "max_merges_per_sheet": 2000,
+  "max_objects_per_sheet": 50,
+  "max_rules_per_sheet": 100,
+  "max_defined_names": 200,
+  "max_list_items": 500,
+  "max_source_chars": 300,
+  "max_sheet_rows": 20000,
+  "max_sheet_cols": 256,
+  "min_col_width": 24,
+  "max_col_width": 2000,
+  "min_row_height": 18,
+  "max_row_height": 1000,
+  "border_styles": [
+    "thin",
+    "medium",
+    "thick",
+    "dashed",
+    "dotted",
+    "double"
+  ],
+  "table_tones": [
+    "light",
+    "medium",
+    "dark"
+  ],
+  "chart_types": [
+    "column",
+    "bar",
+    "line",
+    "area",
+    "pie",
+    "doughnut",
+    "scatter"
+  ],
+  "chart_legends": [
+    "right",
+    "bottom",
+    "top",
+    "none"
+  ],
+  "pivot_aggregates": [
+    "sum",
+    "count",
+    "average",
+    "min",
+    "max",
+    "countDistinct"
+  ],
+  "cell_operators": [
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "eq",
+    "neq",
+    "between",
+    "notBetween"
+  ],
+  "text_operators": [
+    "contains",
+    "notContains",
+    "begins",
+    "ends"
+  ],
+  "validation_kinds": [
+    "list",
+    "whole",
+    "decimal",
+    "date",
+    "textLength"
+  ]
+}

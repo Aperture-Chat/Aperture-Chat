@@ -201,6 +201,13 @@ export function AuthScreen({
     [],
   );
 
+  /* The sign-in card scrolls on short phone screens. Hand the page over at
+   * its top so the workspace that replaces this screen does not open
+   * part-way down (chat would hide its greeting under the header). */
+  useEffect(() => () => {
+    document.documentElement.scrollTop = 0;
+  }, []);
+
   useEffect(() => {
     registerMfaChallengeUiHandler(beginMfaSession);
     return () => {

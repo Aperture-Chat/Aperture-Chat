@@ -25,8 +25,9 @@ export type DraftCacheScope = {
 /** Server-sync bookkeeping carried on each cached entry. */
 export type DraftSyncFields = {
   archived?: boolean;
-  /** "deck" entries hold canonical deck JSON; absent means an HTML document. */
-  kind?: "document" | "deck";
+  /** "deck" entries hold canonical deck JSON and "spreadsheet" entries canonical
+   * workbook JSON; absent means an HTML document. */
+  kind?: "document" | "deck" | "spreadsheet";
   serverListedRevision?: number;
   /** Server-assigned draft id; missing/null means the entry is local only. */
   serverId?: string | null;

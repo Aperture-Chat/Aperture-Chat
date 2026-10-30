@@ -27,6 +27,7 @@ from app.core import clock
 from app.core.policy import is_workspace_agent_profile
 from app.db.orm import DraftDocumentRow, DraftRevisionRow
 from app.models.deck_document import deck_plain_text
+from app.models.sheet_document import sheet_plain_text
 from app.models.matters import DraftDocument, DraftRevision, Matter
 from app.models.review import ReviewMatrix
 from app.models.schemas import Automation, ChatThread, ModelConfig
@@ -83,6 +84,8 @@ def entry_for_thread(thread: ChatThread, *, updated_at: datetime | None = None) 
 def draft_plain_text(document: DraftDocument, revision: DraftRevision) -> str:
     if document.kind == "deck":
         return " ".join(deck_plain_text(revision.content).split())
+    if document.kind == "spreadsheet":
+        return " ".join(sheet_plain_text(revision.content).split())
     return " ".join(unescape(_HTML_TAG_PATTERN.sub(" ", revision.content)).split())
 
 

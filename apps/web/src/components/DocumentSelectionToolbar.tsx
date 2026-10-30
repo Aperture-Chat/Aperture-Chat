@@ -11,6 +11,7 @@ import {
   Underline,
 } from "lucide-react";
 import type { AiComposerAnchor } from "./AiEditComposer";
+import { placeSelectionToolbar } from "../lib/selectionToolbarPlacement";
 
 export type SelectionToolbarFormat = {
   bold: boolean;
@@ -49,7 +50,8 @@ type Props = {
 };
 
 /**
- * Word-style mini toolbar that floats above highlighted document text: AI edit
+ * Word-style mini toolbar that floats by highlighted document text (above it
+ * with a mouse, below it on touch screens): AI edit
  * first, then the formatting people reach for most. Every control keeps the
  * page selection (mousedown is swallowed), so it formats exactly what is
  * highlighted.
@@ -76,12 +78,12 @@ export function DocumentSelectionToolbar({
       const width = ref.current?.offsetWidth || 360;
       const height = ref.current?.offsetHeight || 40;
       if (!anchor) return;
-      const viewportWidth = window.innerWidth || 1024;
-      const center = (anchor.left + anchor.right) / 2;
-      const left = Math.max(8, Math.min(center - width / 2, viewportWidth - width - 8));
-      const below = anchor.top - height - 10 < 64;
-      const top = below ? anchor.bottom + 10 : anchor.top - height - 10;
-      setPosition({ top, left, below });
+      const viewport = {
+        width: window.innerWidth || 1024,
+        height: window.visualViewport?.height || window.innerHeight || 768,
+      };
+      const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+      setPosition(placeSelectionToolbar(anchor, { width, height }, viewport, touch));
     };
     const schedule = () => {
       if (!frame) frame = window.requestAnimationFrame(place);

@@ -20,6 +20,7 @@
  */
 import { apiRequest, pathId, ChatRequestError } from "./http";
 import { DECK_SANITIZER_VERSION, MAX_DECK_CONTENT_BYTES } from "../deck/deckModel";
+import { MAX_SHEET_CONTENT_BYTES, SHEET_SANITIZER_VERSION } from "../sheet/sheetModel";
 
 /** Server-enforced limits (app/models/matters.py). */
 export const MAX_DRAFT_TITLE_CHARS = 240;
@@ -27,12 +28,14 @@ export const MAX_DRAFT_CONTENT_BYTES = 2_000_000;
 export const MAX_DRAFT_REVISIONS = 200;
 export const MAX_DRAFT_LIST_LIMIT = 200;
 export const DRAFT_SANITIZER_VERSION = "sanitized-html-v1";
-export { DECK_SANITIZER_VERSION, MAX_DECK_CONTENT_BYTES };
+export { DECK_SANITIZER_VERSION, MAX_DECK_CONTENT_BYTES, MAX_SHEET_CONTENT_BYTES, SHEET_SANITIZER_VERSION };
 
-/** A draft is either sanitized HTML or canonical deck JSON; the kind is fixed at creation. */
-export type DraftKind = "document" | "deck";
+/** A draft is sanitized HTML, canonical deck JSON, or canonical workbook
+ * JSON; the kind is fixed at creation. */
+export type DraftKind = "document" | "deck" | "spreadsheet";
 
 export function maxDraftContentBytes(kind: DraftKind): number {
+  if (kind === "spreadsheet") return MAX_SHEET_CONTENT_BYTES;
   return kind === "deck" ? MAX_DECK_CONTENT_BYTES : MAX_DRAFT_CONTENT_BYTES;
 }
 

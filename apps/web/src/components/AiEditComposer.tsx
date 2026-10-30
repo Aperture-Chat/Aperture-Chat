@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import {
   ArrowUp,
+  ChartColumn,
   Check,
   CornerDownLeft,
   Languages,
@@ -19,8 +20,10 @@ import {
   Loader2,
   MessageSquareQuote,
   RotateCcw,
+  Sigma,
   Sparkles,
   Square,
+  Table2,
   Wand2,
   X,
   type LucideIcon,
@@ -78,6 +81,8 @@ type Props = {
   error?: string | null;
   disabledReason?: string | null;
   acceptLabel: string;
+  /** Hint in the refine box; defaults to wording edits. */
+  refinePlaceholder?: string;
   onRun: (instruction: string, label: string) => void;
   onRefine: (instruction: string) => void;
   onAccept: () => void;
@@ -95,6 +100,9 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
   transform: ListPlus,
   write: MessageSquareQuote,
   slide: Sparkles,
+  formulas: Sigma,
+  data: Table2,
+  analyze: ChartColumn,
 };
 
 /** Largest word-by-word comparison worth drawing; beyond it the review shows
@@ -134,6 +142,7 @@ export function AiEditComposer({
   error,
   disabledReason,
   acceptLabel,
+  refinePlaceholder = "Tell AI what to change — shorter, warmer, add a number…",
   onRun,
   onRefine,
   onAccept,
@@ -537,7 +546,7 @@ export function AiEditComposer({
               rows={1}
               value={refine}
               aria-label="Refine the AI suggestion"
-              placeholder="Tell AI what to change — shorter, warmer, add a number…"
+              placeholder={refinePlaceholder}
               onChange={(event) => setRefine(event.target.value)}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return;
