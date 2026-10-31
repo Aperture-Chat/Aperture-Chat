@@ -112,6 +112,34 @@ export async function apiRequest<ResponseBody>(
   return (await response.json()) as ResponseBody;
 }
 
+/** GET for binary bodies, which `apiRequest` cannot read: the session lives in
+ * a header, so a file route cannot simply be a link. */
+export async function apiBlobRequest(userId: string, path: string, options: ApiMutationOptions = {}): Promise<Blob> {
+  return (await apiFileRequest(userId, path, options)).blob();
+}
+
+/** As `apiBlobRequest`, keeping the response for its headers. */
+export async function apiFileRequest(
+  userId: string,
+  path: string,
+  { signal }: ApiMutationOptions = {},
+): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${path}`, { headers: authHeaders(userId), signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ChatRequestError("The request was cancelled before the API responded.");
+    }
+    throw new ChatRequestError("Could not reach the API. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    recordApiFailure("GET", path, response.status);
+    throw new ChatRequestError(await readApiError(response), response.status);
+  }
+  return response;
+}
+
 export async function readApiError(response: Response): Promise<string> {
   const fallback = `Request failed with ${response.status}`;
   try {

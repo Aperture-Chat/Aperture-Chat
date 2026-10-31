@@ -1135,7 +1135,6 @@ test("owner persona shortcut opens the platform owner workspace", async () => {
 
 async function openAdminConnections() {
   fireEvent.click(await screen.findByRole("button", { name: /Account:/ }));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByText("Management"));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Account" })).getByRole("button", { name: /Admin console/ }));
   fireEvent.keyDown(await screen.findByRole("tab", { name: "Connections" }), { key: "Enter" });
   return (await screen.findByRole("heading", { name: "Connectors", exact: true })).closest(".panel") as HTMLElement;
@@ -1377,7 +1376,7 @@ test("account profile save updates the active shell identity", async () => {
 
   fireEvent.click(await screen.findByText("Alex Morgan"));
   fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
-  fireEvent.change(screen.getByLabelText("Username"), {
+  fireEvent.change(screen.getByLabelText("Display name"), {
     target: { value: updatedUser.display_name },
   });
   fireEvent.change(screen.getByLabelText("Phone number"), {
@@ -1460,10 +1459,10 @@ test("platform owner previewing as user keeps grant-based model access in chat",
   fireEvent.keyDown(document, { key: "Escape" });
 
   fireEvent.click(screen.getByText("Aperture Platform Owner"));
-  const previewGroup = await screen.findByRole("group", {
+  const previewGroup = await screen.findByRole("radiogroup", {
     name: "Preview role",
   });
-  fireEvent.click(within(previewGroup).getByRole("button", { name: "User" }));
+  fireEvent.click(within(previewGroup).getByRole("radio", { name: "User" }));
 
   // Previewing as a user must reflect grant-based access, not an ungranted
   // pseudo-user: the granted Client Update Agent stays selectable.

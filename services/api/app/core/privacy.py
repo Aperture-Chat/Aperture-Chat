@@ -9,9 +9,10 @@ unconcealed. Every function is a no-op when the policy is off.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, MutableMapping
+from collections.abc import Callable, Iterable, MutableMapping
 from typing import TYPE_CHECKING, Any
 
+from app.core.citation_use import screened_fields
 from app.core.personal_data import DETECTORS_BY_ID, conceal
 from app.models.schemas import (
     ChatFeedbackRecord,
@@ -79,7 +80,21 @@ def _conceal_dict_fields(
 # text previews are copied into the message by the client, and citation
 # snippets quote source documents; both are stored with the thread.
 _ATTACHMENT_FIELDS = ("name", "text_preview")
-_CITATION_FIELDS = ("snippet", "source_name")
+
+
+def _text_screen(categories: list[str], counts: Counter[str]) -> Callable[[str], str]:
+    return lambda text: _text(text, categories, counts) or ""
+
+
+def _concealed_citation_rows(items: Any, categories: list[str], counts: Counter[str]) -> Any:
+    """Saved versions hold citations as plain data, so nothing here can be assumed."""
+    if not isinstance(items, list):
+        return items
+    screen = _text_screen(categories, counts)
+    return [
+        {**item, **screened_fields(item, screen)} if isinstance(item, MutableMapping) else item
+        for item in items
+    ]
 
 
 def _conceal_metadata(metadata: dict[str, Any], categories: list[str], counts: Counter[str]) -> dict[str, Any]:
@@ -96,7 +111,7 @@ def _conceal_metadata(metadata: dict[str, Any], categories: list[str], counts: C
             if "activityTrace" in version:
                 version["activityTrace"] = _conceal_trace(version["activityTrace"], categories, counts)
             if "citations" in version:
-                version["citations"] = _conceal_dict_fields(version["citations"], _CITATION_FIELDS, categories, counts)
+                version["citations"] = _concealed_citation_rows(version["citations"], categories, counts)
             if "attachments" in version:
                 version["attachments"] = _conceal_dict_fields(
                     version["attachments"], _ATTACHMENT_FIELDS, categories, counts
@@ -138,10 +153,9 @@ def conceal_thread(thread: ChatThread, policy: TenantPrivacyPolicy) -> tuple[Cha
         if message.citations:
             update["citations"] = [
                 citation.model_copy(
-                    update={
-                        "snippet": _text(citation.snippet, categories, counts) or "",
-                        "source_name": _text(citation.source_name, categories, counts) or citation.source_name,
-                    }
+                    update=screened_fields(
+                        citation.model_dump(), _text_screen(categories, counts)
+                    )
                 )
                 for citation in message.citations
             ]

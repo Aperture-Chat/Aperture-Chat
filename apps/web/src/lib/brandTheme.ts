@@ -59,9 +59,44 @@ function alpha(color: string, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
+function contrastWithWhite(color: string): number {
+  const [r, g, b] = parseHex(color)
+    .map((channel) => channel / 255)
+    .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+  return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05);
+}
+
+/** Lit keys always carry white text, so a bright accent darkens until it reads. */
+function litBaseColor(accent: string): string {
+  let shade = 0;
+  let color = accent;
+  while (contrastWithWhite(color) < 4.5) {
+    shade += 0.02;
+    color = mix(accent, "#000000", shade);
+  }
+  return color;
+}
+
 export function normalizeHexColor(value: string | null | undefined): string | null {
   const candidate = value?.trim().toLowerCase() ?? "";
   return HEX_COLOR_RE.test(candidate) ? candidate : null;
+}
+
+function accentTokenLines(accent: string): string[] {
+  const litBase = litBaseColor(accent);
+  return [
+    `--teal: ${accent};`,
+    `--teal-strong: ${mix(accent, "#000000", 0.22)};`,
+    `--teal-2: ${mix(accent, "#ffffff", 0.16)};`,
+    `--teal-soft: ${mix(accent, "#ffffff", 0.92)};`,
+    `--teal-border: ${mix(accent, "#ffffff", 0.68)};`,
+    `--teal-ring: ${alpha(accent, 0.32)};`,
+    // The default logo mark's SVG gradient reads these stops.
+    `--brand-mark-1: ${mix(accent, "#ffffff", 0.38)};`,
+    `--brand-mark-2: ${mix(accent, "#ffffff", 0.16)};`,
+    `--brand-mark-3: ${mix(accent, "#000000", 0.35)};`,
+    ...(litBase === accent ? [] : [`--tactile-lit-base: ${litBase};`]),
+  ];
 }
 
 export function brandThemeCss(theme: BrandThemeInput | null | undefined): string {
@@ -76,18 +111,7 @@ export function brandThemeCss(theme: BrandThemeInput | null | undefined): string
   const lightLines: string[] = [];
 
   if (accent && accent !== DEFAULT_ACCENT_COLOR) {
-    rootLines.push(
-      `--teal: ${accent};`,
-      `--teal-strong: ${mix(accent, "#000000", 0.22)};`,
-      `--teal-2: ${mix(accent, "#ffffff", 0.16)};`,
-      `--teal-soft: ${mix(accent, "#ffffff", 0.92)};`,
-      `--teal-border: ${mix(accent, "#ffffff", 0.68)};`,
-      `--teal-ring: ${alpha(accent, 0.32)};`,
-      // The default logo mark's SVG gradient reads these stops.
-      `--brand-mark-1: ${mix(accent, "#ffffff", 0.38)};`,
-      `--brand-mark-2: ${mix(accent, "#ffffff", 0.16)};`,
-      `--brand-mark-3: ${mix(accent, "#000000", 0.35)};`,
-    );
+    rootLines.push(...accentTokenLines(accent));
     darkLines.push(`--teal-soft: ${alpha(accent, 0.18)};`, `--teal-ring: ${alpha(accent, 0.4)};`);
   }
 

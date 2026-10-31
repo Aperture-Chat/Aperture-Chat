@@ -29,7 +29,7 @@ const { scrollTo, openTab, expandPanel, removeUsers, continueInChat } = helpers;
 const MODEL = /Qwen3\.5 9B/;
 const ALL_CATEGORIES = ["identity", "contact", "financial", "health", "credentials", "network"];
 const NOTE_PROMPT =
-  "Draft a two-sentence note to the benefits team: update the payroll record for employee SSN 123-45-6789 and confirm by email to jordan.lee@example.com.";
+  "Write a two-sentence note to the benefits team: update the payroll record for employee SSN 123-45-6789 and confirm by email to jordan.lee@example.com.";
 const SIGNATURE_PROMPT = "Write a one-line email signature for Jordan Lee with the phone number (415) 555-0134 and the email jordan.lee@example.com.";
 
 /** Open a new chat on the local model. */
@@ -146,7 +146,7 @@ const adminPersonalData = {
     await shot("pdp-activity");
     const trail = await expandPanel(page, "Audit Trail");
     await trail.locator(".panel-header").getByRole("button", { name: "Refresh" }).click();
-    await trail.getByLabel("Search audit events").fill("privacy.");
+    await trail.getByLabel("Search audit events").fill("privacy");
     await trail.locator(".audit-row").filter({ hasText: "PROMPT_CONCEALED" }).first().waitFor();
     await trail.locator(".audit-row").filter({ hasText: "POLICY_UPDATED" }).first().waitFor();
     await scrollTo(page, trail.locator(".audit-filter-toolbar"), "start");
@@ -197,24 +197,25 @@ async function priorWork(kit) {
   await newChat(jane);
   await rate(jane, await ask(jane, "Draft a litigation hold notice asking the operations team to preserve emails and shipping records about the Harbor Logistics dispute."), "positive");
   await newChat(jane);
-  await ask(jane, "Summarize the deadlines a defendant faces after being served with a federal complaint.");
+  // A word limit keeps the small local model from repeating a list until it runs out of tokens.
+  await ask(jane, "Summarize the deadlines a defendant faces after being served with a federal complaint, in at most five short bullets.");
   await ask(jane, "Not quite: you left out the 60-day deadline when the defendant waives service. Rewrite it as a short list.");
   await newChat(jane);
-  await ask(jane, "Explain what a motion to compel discovery is.");
+  await ask(jane, "Explain what a motion to compel discovery is, in at most 120 words.");
   await ask(jane, "That's too long, and you missed when it can be filed. Please revise it in two sentences.");
 
   const priya = await createAndSignIn(kit, PRIYA);
   await newChat(priya);
-  await rate(priya, await ask(priya, "Explain the 2026 estimated tax payment deadlines for individuals."), "negative", "It should list the January 15, 2027 payment for the fourth quarter.");
+  await rate(priya, await ask(priya, "Explain the 2026 estimated tax payment deadlines for individuals, in at most 120 words."), "negative", "It should list the January 15, 2027 payment for the fourth quarter.");
   await newChat(priya);
   await rate(priya, await ask(priya, "Draft a short letter to the IRS asking for a 120-day extension to pay a tax balance for our client Northwind Industries. Ask them to call Jane Smith at (415) 555-0134 with questions."), "positive");
   await newChat(priya);
-  await ask(priya, "Which tax form does a self-employed freelancer use to send quarterly estimated tax payments?");
+  await ask(priya, "Which tax form does a self-employed freelancer use to send quarterly estimated tax payments? Answer in one short paragraph.");
   await ask(priya, "That's incorrect: quarterly estimates are paid with Form 1040-ES vouchers. Please revise your answer.");
 
   const marcus = await createAndSignIn(kit, MARCUS);
   await newChat(marcus);
-  await rate(marcus, await ask(marcus, "Review this indemnification clause and flag any risks: Supplier shall indemnify Customer against all claims arising from Supplier's negligence."), "positive");
+  await rate(marcus, await ask(marcus, "Review this indemnification clause and flag any risks in at most 120 words: Supplier shall indemnify Customer against all claims arising from Supplier's negligence."), "positive");
   await newChat(marcus);
   await rate(marcus, await ask(marcus, "Draft a mutual confidentiality clause for a vendor agreement."), "positive");
 }

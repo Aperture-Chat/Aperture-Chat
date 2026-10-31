@@ -211,4 +211,28 @@ async function setWebSearchForModel(kit, modelId, connected) {
 }
 
 const helpers = { signInWithPassword, createPerson, scrollTo, scrollBelowHeader, dismissToasts, composer, sendChat, waitForReply, totp, freshTotp, syntheticPassword, publicApi, userRealm, ensureSharedAgent, SHARED_AGENT, setWebSearchForModel };
+/** A button in a code block's, canvas's, or figure's toolbar, by its label. */
+const toolbarAction = (scope, name) => scope.locator(".md-code-action").filter({ hasText: name });
+
+/** The chat id in the address of an open chat. */
+const threadIdOf = (page) => decodeURIComponent(new URL(page.url()).pathname.split("/").pop());
+
+/** The newest reply as the server saved it, not as the page shows it. */
+async function savedReply(kit, threadId) {
+  const threads = await kit.api("user", "GET", "/api/chat/threads");
+  const thread = threads.find((item) => item.id === threadId);
+  if (!thread) throw new Error(`Thread ${threadId} is missing.`);
+  return thread.messages.filter((message) => message.role === "assistant").at(-1).content;
+}
+
+/** A trace the reader watched stays open when the reply lands. Fold it to one
+ * line, once its steps have played in, when a frame is about the reply itself. */
+async function foldTrace(page, reply) {
+  await page.waitForTimeout(3000);
+  const toggle = reply.locator(".work-trace.is-expanded .work-trace-toggle");
+  if (await toggle.count()) await toggle.click();
+  await page.waitForTimeout(400);
+}
+
+Object.assign(helpers, { toolbarAction, threadIdOf, savedReply, foldTrace });
 Object.defineProperty(module.exports, "helpers", { value: helpers, enumerable: false });

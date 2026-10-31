@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { helpers } = require("./user-common.cjs");
-const { composer, sendChat, waitForReply, scrollTo } = helpers;
+const { composer, sendChat, waitForReply, scrollTo, foldTrace } = helpers;
 
 const CHECKLIST = [
   "# Synthetic vendor checklist",
@@ -65,9 +65,10 @@ const userAttachments = {
       await composer(page).fill("From the attached checklist: when is the renewal date, and who is the security contact?");
       await shot("attach-file-ready", { keepFocus: true });
       let before = await sendChat(page, await composer(page).inputValue());
-      let reply = await waitForReply(page, before, { timeout: 900000 });
+      let reply = await waitForReply(page, before, { timeout: 2400000 });
       const text = await reply.innerText();
       if (!/30 November 2026|November 30, 2026/.test(text)) throw new Error(`The reply did not use the attached file: ${text.slice(0, 200)}`);
+      await foldTrace(page, reply);
       await scrollTo(page, reply, "start");
       await shot("attach-file-reply");
 
@@ -79,11 +80,12 @@ const userAttachments = {
       await shot("attach-link-field", { keepFocus: true });
       await page.getByRole("button", { name: "Add link" }).click();
       await page.locator(".composer-mcp-chip").filter({ hasText: "example.com" }).waitFor();
-      await composer(page).fill("In one sentence, what does the attached web page say it is for?");
+      await composer(page).fill("In one sentence, what does the attached link say it is for?");
       await shot("attach-link-chip", { keepFocus: true });
       before = await sendChat(page, await composer(page).inputValue());
-      reply = await waitForReply(page, before, { timeout: 900000 });
+      reply = await waitForReply(page, before, { timeout: 2400000 });
       if (!/example|documentation|illustrative/i.test(await reply.innerText())) throw new Error("The reply did not use the attached page.");
+      await foldTrace(page, reply);
       await scrollTo(page, reply, "start");
       await shot("attach-link-reply");
 

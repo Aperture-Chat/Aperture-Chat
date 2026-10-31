@@ -1,5 +1,6 @@
-import { expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import { appendChatCitationsForDraft } from "./draftCitations";
+import type { ChatCitation } from "./types";
 
 test("citation metadata transfers as written-out sources with names and full URLs", () => {
   const result = appendChatCitationsForDraft("Report body.", [
@@ -36,4 +37,33 @@ test("replies that cite inline get their linked sources written out and deduplic
 
 test("replies without any citations transfer unchanged", () => {
   expect(appendChatCitationsForDraft("Plain reply, no links.")).toBe("Plain reply, no links.");
+});
+
+describe("sources a reply only consulted", () => {
+  const web = (fields: Partial<ChatCitation>): ChatCitation => ({
+    id: "w",
+    source_name: "Article",
+    source_type: "web",
+    source_uri: "https://example.com/a",
+    snippet: "",
+    ...fields,
+  });
+
+  it("are not listed as sources of the draft", () => {
+    const content = appendChatCitationsForDraft("Body.", [
+      web({ id: "w1", source_name: "Cited one", cited: true }),
+      web({ id: "w2", source_name: "Only consulted", source_uri: "https://example.com/b", cited: false }),
+    ]);
+    expect(content).toContain("Cited one");
+    expect(content).not.toContain("Only consulted");
+    expect(content).toContain("1. **Cited one**");
+  });
+
+  it("leave no empty section when nothing else was cited", () => {
+    expect(appendChatCitationsForDraft("Body.", [web({ cited: false })])).toBe("Body.");
+  });
+
+  it("keep rows with no record either way", () => {
+    expect(appendChatCitationsForDraft("Body.", [web({ cited: null })])).toContain("## Sources");
+  });
 });

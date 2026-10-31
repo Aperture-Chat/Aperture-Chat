@@ -452,7 +452,7 @@ def test_agent_profile_merges_prompts_knowledge_tools_and_companion_into_chat_ru
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": "Merged runtime answer"},
+                        "message": {"role": "assistant", "content": "Merged runtime answer [K1]"},
                         "finish_reason": "stop",
                     }
                 ],

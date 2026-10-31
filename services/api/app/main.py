@@ -3,7 +3,6 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -64,13 +63,7 @@ def _restrict_data_directory_permissions() -> None:
     # being world readable again. The umask makes the restrictive mode the
     # default for anything this process creates from here on.
     os.umask(0o077)
-    settings = get_settings()
-    roots = {
-        Path(settings.application_db_path).expanduser().parent,
-        Path(settings.runtime_state_path).expanduser().parent,
-        Path(settings.vector_db_path).expanduser().parent,
-    }
-    for root in roots:
+    for root in get_settings().private_data_directories:
         if not root.is_dir():
             continue
         try:

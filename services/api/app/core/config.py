@@ -170,6 +170,11 @@ class Settings(BaseSettings):
     knowledge_ocr_enabled: bool = True
     knowledge_ocr_max_pages: int = Field(default=250, ge=1, le=2000)
     knowledge_ocr_page_timeout_seconds: float = Field(default=45.0, ge=1.0, le=300.0)
+    # Office files become a PDF through LibreOffice the first time someone opens
+    # them. Empty finds soffice on PATH; absent, they open as text.
+    knowledge_rendition_soffice_path: str = ""
+    knowledge_rendition_timeout_seconds: float = Field(default=120.0, ge=5.0, le=600.0)
+    knowledge_rendition_memory_mb: int = Field(default=4096, ge=2048, le=65536)
     # Read handwriting, stamps, and pictures with the workspace's best
     # image-capable model (Gemini Flash, GPT-4.1/5 on Azure AI Foundry, ...);
     # Tesseract remains the fallback. Each knowledge base can turn it off.
@@ -333,6 +338,13 @@ class Settings(BaseSettings):
     def egress_allow_host_set(self) -> frozenset[str]:
         """Operator-approved hostnames the egress guard permits in any environment."""
         return frozenset(host.strip().lower() for host in self.egress_allow_hosts.split(",") if host.strip())
+
+    @property
+    def private_data_directories(self) -> tuple[Path, ...]:
+        """Where the databases and stored documents live. Nothing but the API's own
+        user may enter these; conversions refuse to run if something else can."""
+        paths = (self.application_db_path, self.runtime_state_path, self.vector_db_path)
+        return tuple(dict.fromkeys(resolve_repo_path(path).parent for path in paths))
 
     @property
     def knowledge_upload_max_bytes(self) -> int:

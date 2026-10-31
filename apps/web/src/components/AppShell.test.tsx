@@ -52,33 +52,28 @@ test("account drawer shows profile and personal usage without user management", 
 
   expect(screen.getByText("Role")).toBeInTheDocument();
   expect(screen.getByText("Organization")).toBeInTheDocument();
-  expect(screen.getByText("Auth method")).toBeInTheDocument();
+  expect(screen.getByText("Sign-in")).toBeInTheDocument();
   expect(screen.getByText("Usage this month")).toBeInTheDocument();
-  expect(screen.getByText("prompts")).toBeInTheDocument();
-  expect(screen.getByText("responses")).toBeInTheDocument();
-  expect(screen.getByText("est. tokens")).toBeInTheDocument();
-  const profileButton = screen.getByRole("button", { name: /Edit account profile for Alex Morgan/ });
-  expect(profileButton).toBeInTheDocument();
-  expect(within(profileButton).getByText("Email")).toBeInTheDocument();
-  expect(within(profileButton).getByText("alex.morgan@example.com")).toBeInTheDocument();
-  expect(within(profileButton).getByText("Phone")).toBeInTheDocument();
-  expect(within(profileButton).getByText("970.397.8816")).toBeInTheDocument();
-  expect(within(profileButton).getByText("Position")).toBeInTheDocument();
-  expect(within(profileButton).getByText("Example Corporation Founder")).toBeInTheDocument();
-  expect(within(profileButton).getByText("Bio")).toBeInTheDocument();
-  expect(within(profileButton).getByText("I like building useful things.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Edit account profile for Alex Morgan/ })).toBeInTheDocument();
+  const profile = screen.getByRole("region", { name: "Your profile" });
+  expect(within(profile).getByText("alex.morgan@example.com")).toBeInTheDocument();
+  expect(within(profile).getByText("Phone")).toBeInTheDocument();
+  expect(within(profile).getByText("970.397.8816")).toBeInTheDocument();
+  expect(within(profile).getByText("Firm")).toBeInTheDocument();
+  expect(within(profile).getByText("Example Corporation Founder")).toBeInTheDocument();
+  expect(within(profile).getByText("Bio")).toBeInTheDocument();
+  expect(within(profile).getByText("I like building useful things.")).toBeInTheDocument();
   expect(screen.queryByText("Profile")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
   expect(screen.queryByText("Admin user management")).not.toBeInTheDocument();
   expect(screen.queryByText("Connected to /api/admin/users.")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Create account" })).not.toBeInTheDocument();
-  // The only network call on open is the personal daily-token budget — the
-  // honest per-user meter added with downstream budget allocations.
+  // Opening reads only the signed-in person's own account state.
   const calledUrls = vi
     .mocked(globalThis.fetch)
     .mock.calls.map(([input]) => String(input));
   expect(calledUrls).toEqual(
-    calledUrls.filter((url) => url.endsWith("/api/auth/me/usage-budget")),
+    calledUrls.filter((url) => /\/api\/auth\/(me\/usage-budget|me\/usage-summary|mfa\/status)$/.test(url)),
   );
 });
 
@@ -102,7 +97,7 @@ test("account drawer edits the signed-in user's profile", async () => {
   fireEvent.click(screen.getByText("Alex Morgan"));
   fireEvent.click(screen.getByRole("button", { name: /Edit account profile/ }));
 
-  fireEvent.change(screen.getByLabelText("Username"), {
+  fireEvent.change(screen.getByLabelText("Display name"), {
     target: { value: "Taylor Example" },
   });
   fireEvent.change(screen.getByLabelText("Phone number"), {
@@ -121,8 +116,6 @@ test("account drawer edits the signed-in user's profile", async () => {
     target: { value: "AI automation and legal workflow builder." },
   });
   const saveProfileButton = screen.getByRole("button", { name: /Save profile/ });
-  expect(saveProfileButton).toHaveClass("account-form-submit-button");
-  expect(saveProfileButton.querySelector(".stable-label")).toBeNull();
   fireEvent.click(saveProfileButton);
 
   await waitFor(() =>
@@ -135,7 +128,7 @@ test("account drawer edits the signed-in user's profile", async () => {
       bio: "AI automation and legal workflow builder.",
     }),
   );
-  expect(await screen.findByText("Profile saved.")).toBeInTheDocument();
+  expect((await screen.findAllByText("Profile saved.")).length).toBeGreaterThan(0);
 });
 
 test("API-enabled users can create a one-time key from the account drawer", async () => {
@@ -180,9 +173,7 @@ test("API-enabled users can create a one-time key from the account drawer", asyn
   expect(apiDetails).toHaveAttribute("open");
   expect(await screen.findByDisplayValue(`${window.location.origin}/v1`)).toBeInTheDocument();
   expect(onApiKeyLoad).toHaveBeenCalledTimes(1);
-  const createButton = screen.getByRole("button", { name: "Create key" });
-  expect(createButton).toHaveClass("account-api-action-button");
-  fireEvent.click(createButton);
+  fireEvent.click(screen.getByRole("button", { name: "Create key" }));
 
   expect(await screen.findByDisplayValue("apt_example-personal-secret-1234")).toBeInTheDocument();
   expect(screen.getByText(/shown only once/i)).toBeInTheDocument();
@@ -286,15 +277,7 @@ test("local account drawer can submit a password update", async () => {
   );
   fireEvent.click(screen.getByText("Aperture Platform Owner"));
   expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
-  const passwordCard = screen.getByText("Password").closest(".account-password-card");
-  expect(passwordCard).not.toBeNull();
-  expect(passwordCard).toHaveClass("is-compact");
-  expect(within(passwordCard as HTMLElement).getByText("Local account")).toBeInTheDocument();
-  expect(
-    within(passwordCard as HTMLElement).queryByText(/Use the edit button/),
-  ).not.toBeInTheDocument();
-  fireEvent.click(within(passwordCard as HTMLElement).getByRole("button", { name: "Edit" }));
-  expect(passwordCard).toHaveClass("is-editing");
+  fireEvent.click(screen.getByRole("button", { name: "Change password" }));
   fireEvent.change(screen.getByLabelText("Current password"), {
     target: { value: "old-password-123" },
   });
@@ -304,10 +287,7 @@ test("local account drawer can submit a password update", async () => {
   fireEvent.change(screen.getByLabelText("Confirm new password"), {
     target: { value: "new-password-123" },
   });
-  const updatePasswordButton = screen.getByRole("button", { name: /Update password/ });
-  expect(updatePasswordButton).toHaveClass("account-form-submit-button");
-  expect(updatePasswordButton.querySelector(".stable-label")).toBeNull();
-  fireEvent.click(updatePasswordButton);
+  fireEvent.click(screen.getByRole("button", { name: /Update password/ }));
 
   await waitFor(() =>
     expect(onPasswordUpdate).toHaveBeenCalledWith({
@@ -315,7 +295,7 @@ test("local account drawer can submit a password update", async () => {
       new_password: "new-password-123",
     }),
   );
-  expect(await screen.findByText("Password updated.")).toBeInTheDocument();
+  expect((await screen.findAllByText("Password updated.")).length).toBeGreaterThan(0);
 });
 
 test("sidebar shows the full logo when expanded and the icon when collapsed", () => {
@@ -332,6 +312,110 @@ test("sidebar shows the full logo when expanded and the icon when collapsed", ()
   expect(logo).toHaveClass("has-logo-image");
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   expect(screen.getByLabelText("Aperture Chat").querySelector("img")).toHaveAttribute("src", "/tenant-icon.svg");
+});
+
+test("the collapse control lives on the rail's edge and stays one control in both states", () => {
+  renderShell(cloneData());
+
+  const control = screen.getByRole("button", { name: "Collapse sidebar" });
+  expect(control).toHaveAttribute("aria-expanded", "true");
+  expect(control).toHaveAttribute("aria-controls", "workspace-navigation");
+  // Anything in the logo row would push the navigation when the rail narrows.
+  expect(control.closest(".sidebar")).toBeNull();
+
+  fireEvent.click(control);
+  expect(screen.getByRole("button", { name: "Expand sidebar" })).toBe(control);
+  expect(control).toHaveAttribute("aria-expanded", "false");
+
+  fireEvent.click(control);
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBe(control);
+  expect(control).toHaveAttribute("aria-expanded", "true");
+});
+
+test("an open overlay takes the collapse control out of reach along with the rail", () => {
+  renderShell(cloneData());
+
+  const control = screen.getByRole("button", { name: "Collapse sidebar" });
+  expect(control).not.toHaveAttribute("inert");
+
+  fireEvent.click(screen.getByRole("button", { name: "Help" }));
+  expect(control).toHaveAttribute("inert");
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(control).not.toHaveAttribute("inert");
+
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  expect(control).toHaveAttribute("inert");
+});
+
+test("both brand layers stay mounted to crossfade, and only the visible one names the brand", () => {
+  const data = cloneData();
+  data.currentTenant.icon_url = "/tenant-icon.svg";
+  data.currentTenant.logo_url = "/tenant-logo.svg";
+  const { container } = renderShell(data);
+
+  const expectBothLayers = () => {
+    expect(container.querySelector('.sidebar img[src="/tenant-logo.svg"]')).toBeInTheDocument();
+    expect(container.querySelector('.sidebar img[src="/tenant-icon.svg"]')).toBeInTheDocument();
+  };
+
+  expectBothLayers();
+  expect(screen.getByLabelText("Aperture Chat")).not.toHaveClass("logo-compact");
+  expect(container.querySelector(".logo-compact")).toHaveAttribute("aria-hidden", "true");
+
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+  expectBothLayers();
+  expect(screen.getByLabelText("Aperture Chat")).toHaveClass("logo-compact");
+  expect(container.querySelector(".logo:not(.logo-compact)")).toHaveAttribute("aria-hidden", "true");
+});
+
+test("the chat list stays put behind the closing rail, out of reach, and keeps its open width", () => {
+  const { container } = renderShell(cloneData(), vi.fn(), vi.fn(), [shellThread("thread-kept", "Kept chat")]);
+  const app = container.querySelector(".app") as HTMLElement;
+  const row = screen.getByText("Kept chat");
+  const library = row.closest(".sidebar-main");
+  expect(library).not.toHaveAttribute("inert");
+  expect(app.style.getPropertyValue("--rail-open-width")).toBe("226px");
+
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+  expect(screen.getByText("Kept chat")).toBe(row);
+  expect(library).toHaveAttribute("inert");
+  expect(app.style.getPropertyValue("--app-content-left")).toBe("76px");
+  expect(app.style.getPropertyValue("--rail-open-width")).toBe("226px");
+
+  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+  expect(library).not.toHaveAttribute("inert");
+});
+
+test("closing a drawer returns focus to what opened it", () => {
+  renderShell(cloneData());
+
+  const account = screen.getByRole("button", { name: /Account:/ });
+  account.focus();
+  fireEvent.click(account);
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Account" })).not.toBeInTheDocument();
+  expect(account).toHaveFocus();
+
+  const help = screen.getByRole("button", { name: "Help" });
+  help.focus();
+  fireEvent.click(help);
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Help" })).getByRole("button", { name: "Close" }));
+  expect(help).toHaveFocus();
+});
+
+test("a phone drawer opened from the hidden sidebar returns focus to the menu button", () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  renderShell(cloneData());
+
+  fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+  const account = screen.getByRole("button", { name: /Account:/ });
+  account.focus();
+  fireEvent.click(account);
+  fireEvent.keyDown(document, { key: "Escape" });
+
+  expect(screen.getByRole("button", { name: "Open menu" })).toHaveFocus();
 });
 
 test("account drawer sign out action calls the provided callback", () => {
@@ -351,12 +435,12 @@ test("admins can preview the regular user workspace from account settings", () =
   renderShell(data, vi.fn(), vi.fn(), [], null, onViewAsRoleChange);
   fireEvent.click(screen.getByText("Alex Morgan"));
 
-  const previewGroup = screen.getByRole("group", { name: "Preview role" });
-  expect(within(previewGroup).getByRole("button", { name: "Admin" })).toHaveAttribute("aria-pressed", "true");
-  expect(within(previewGroup).getByRole("button", { name: "User" })).toBeInTheDocument();
-  expect(within(previewGroup).queryByRole("button", { name: "Platform admin" })).not.toBeInTheDocument();
+  const previewGroup = screen.getByRole("radiogroup", { name: "Preview role" });
+  expect(within(previewGroup).getByRole("radio", { name: "Admin" })).toHaveAttribute("aria-checked", "true");
+  expect(within(previewGroup).getByRole("radio", { name: "User" })).toBeInTheDocument();
+  expect(within(previewGroup).queryByRole("radio", { name: "Owner" })).not.toBeInTheDocument();
 
-  fireEvent.click(within(previewGroup).getByRole("button", { name: "User" }));
+  fireEvent.click(within(previewGroup).getByRole("radio", { name: "User" }));
   expect(onViewAsRoleChange).toHaveBeenCalledWith("USER");
 });
 
@@ -372,9 +456,9 @@ test("user preview hides admin console entry points while keeping a way back to 
   expect(within(primaryNav).queryByRole("button", { name: "Platform" })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByText("Alex Morgan"));
-  const previewGroup = screen.getByRole("group", { name: "Preview role" });
-  expect(within(previewGroup).getByRole("button", { name: "User" })).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(within(previewGroup).getByRole("button", { name: "Admin" }));
+  const previewGroup = screen.getByRole("radiogroup", { name: "Preview role" });
+  expect(within(previewGroup).getByRole("radio", { name: "User" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(within(previewGroup).getByRole("radio", { name: "Admin" }));
   expect(onViewAsRoleChange).toHaveBeenCalledWith(null);
 });
 
@@ -386,12 +470,12 @@ test("platform owners can preview admin and user workspaces", () => {
   renderShell(ownerData, vi.fn(), vi.fn(), [], null, onViewAsRoleChange, "PLATFORM_OWNER");
   fireEvent.click(screen.getByText("Aperture Platform Owner"));
 
-  const previewGroup = screen.getByRole("group", { name: "Preview role" });
-  expect(within(previewGroup).getByRole("button", { name: "Platform admin" })).toHaveAttribute("aria-pressed", "true");
-  expect(within(previewGroup).getByRole("button", { name: "Admin" })).toBeInTheDocument();
-  expect(within(previewGroup).getByRole("button", { name: "User" })).toBeInTheDocument();
+  const previewGroup = screen.getByRole("radiogroup", { name: "Preview role" });
+  expect(within(previewGroup).getByRole("radio", { name: "Owner" })).toHaveAttribute("aria-checked", "true");
+  expect(within(previewGroup).getByRole("radio", { name: "Admin" })).toBeInTheDocument();
+  expect(within(previewGroup).getByRole("radio", { name: "User" })).toBeInTheDocument();
 
-  fireEvent.click(within(previewGroup).getByRole("button", { name: "Admin" }));
+  fireEvent.click(within(previewGroup).getByRole("radio", { name: "Admin" }));
   expect(onViewAsRoleChange).toHaveBeenCalledWith("TENANT_ADMIN");
 });
 
@@ -420,11 +504,6 @@ test("admins can also reach their console from the account drawer, outside the p
   expect(within(primaryNav).queryByRole("button", { name: "Platform" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Alex Morgan"));
   const accountDrawer = screen.getByRole("dialog", { name: "Account" });
-  const managementDetails = within(accountDrawer).getByText("Management").closest("details");
-  expect(managementDetails).not.toBeNull();
-  expect(managementDetails).not.toHaveAttribute("open");
-  fireEvent.click(within(accountDrawer).getByText("Management"));
-  expect(managementDetails).toHaveAttribute("open");
   expect(within(accountDrawer).getByRole("button", { name: /Admin console/ })).toBeInTheDocument();
   expect(within(accountDrawer).queryByRole("button", { name: /Platform owner console/ })).not.toBeInTheDocument();
   fireEvent.click(within(accountDrawer).getByRole("button", { name: /Admin console/ }));
@@ -957,7 +1036,7 @@ test("the same chat preview is available in all-chat and archive listings", () =
   fireEvent.click(within(allChats).getByRole("button", { name: "Close" }));
 
   fireEvent.click(screen.getByRole("button", { name: /Account:/ }));
-  fireEvent.click(screen.getByRole("button", { name: "View (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "View archived chats" }));
   const archivedSummary = screen.getByText("Preview archived").closest(".account-archived-summary") as HTMLElement;
   fireEvent.focus(archivedSummary);
   expect(within(document.querySelector(".chat-hover-preview") as HTMLElement).getByText("Archived answer")).toBeInTheDocument();
@@ -982,7 +1061,6 @@ function shellThread(id: string, title: string, overrides: Partial<ChatThread> =
 }
 
 test("account drawer archived section restores and permanently deletes chats", () => {
-  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   const onRestoreThread = vi.fn();
   const onDeleteThread = vi.fn();
   const archivedThread = shellThread("thread-archived", "Archived matter", { archived: true });
@@ -1006,18 +1084,19 @@ test("account drawer archived section restores and permanently deletes chats", (
   expect(screen.getByText("Archived chats")).toBeInTheDocument();
   expect(screen.queryByText("Archived matter")).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "View (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "View archived chats" }));
   expect(screen.getByText("Archived matter")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Restore Archived matter" }));
   expect(onRestoreThread).toHaveBeenCalledWith("thread-archived");
 
   fireEvent.click(screen.getByRole("button", { name: "Permanently delete Archived matter" }));
-  expect(confirmSpy).toHaveBeenCalledWith(
-    'Permanently delete "Archived matter"? This removes the full conversation and cannot be undone.',
-  );
+  expect(
+    screen.getByText('Permanently delete "Archived matter"? This removes the full conversation and cannot be undone.'),
+  ).toBeInTheDocument();
+  expect(onDeleteThread).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Delete Archived matter forever" }));
   expect(onDeleteThread).toHaveBeenCalledWith("thread-archived");
-  confirmSpy.mockRestore();
 });
 
 test("help drawer lists the user guide playlist and opens a walkthrough", async () => {

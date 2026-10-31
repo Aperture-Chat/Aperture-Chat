@@ -33,7 +33,6 @@ import {
   Plug,
   Presentation,
   Sheet as SheetIcon,
-  Quote,
   RefreshCw,
   ScrollText,
   Send,
@@ -73,7 +72,6 @@ import { createPortal } from "react-dom";
 import type {
   BootstrapData,
   ChatAttachment,
-  ChatCitation,
   ChatFeedbackRating,
   ChatMessage,
   ChatThread,
@@ -126,6 +124,7 @@ import {
   type DraftHandoffRequest,
 } from "../lib/draftHandoff";
 import { connectorEnabled, connectorHidden, isMcpRuntimeTool } from "../lib/connectors";
+import type { DocumentRequest } from "../lib/citationTargets";
 import { formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { feedbackRatingForMessage, recordChatFeedback } from "../lib/chatFeedback";
 import { markdownToPlainText } from "../lib/markdown";
@@ -134,7 +133,10 @@ import { loadLiveStreamPreference, storeLiveStreamPreference } from "../lib/stre
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { DictationControl } from "./DictationControl";
 import { isMediaUploadFile } from "../lib/mediaUploads";
+import { CitationMarkerContext } from "./CitationMarker";
+import { useKnowledgeDocumentViewer } from "./KnowledgeDocumentViewerHost";
 import { Markdown } from "./Markdown";
+import { SessionSources } from "./SessionSources";
 import { WorkTrace, WorkTraceStreamStatus } from "./WorkTrace";
 import { TransferDraftMenu } from "./TransferDraftMenu";
 import type { DraftTransferFormat } from "../lib/draftTransfer";
@@ -1065,6 +1067,7 @@ export function ChatWorkspace({
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [citationDetailsOpen, setCitationDetailsOpen] = useState(false);
   const [focusedCitationMessageId, setFocusedCitationMessageId] = useState<string | null>(null);
+  const { openDocument, documentViewerLayer } = useKnowledgeDocumentViewer(data.me.id);
   // Web search defaults on whenever the selected model supports it; an
   // effect below turns it back off if the user routes to an unsupported model.
   const [composerTools, setComposerTools] = useState<ComposerTools>(() => ({
@@ -1429,7 +1432,9 @@ export function ChatWorkspace({
   useEffect(() => {
     if (!focusedCitationMessageId) return;
     const hasFocusedMessage = messages.some(
-      (message) => message.id === focusedCitationMessageId && (message.citations?.length ?? 0) > 0,
+      (message) =>
+        message.id === focusedCitationMessageId &&
+        (messageWithActiveResponseVersion(message).citations?.length ?? 0) > 0,
     );
     if (hasFocusedMessage) return;
     setFocusedCitationMessageId(null);
@@ -3410,6 +3415,7 @@ export function ChatWorkspace({
                   }}
                   citationDetailsExpanded={citationDetailsOpen && focusedCitationMessageId === message.id}
                   onToggleCitations={(targetMessage) => toggleCitationDetails(targetMessage.id)}
+                  onOpenDocument={openDocument}
                   onSubmitFeedback={submitResponseFeedback}
                   customTools={customScriptTools}
                   onRunCustomTool={(tool, targetMessage) => void runCustomToolOnMessage(tool, targetMessage)}
@@ -3547,9 +3553,11 @@ export function ChatWorkspace({
             showSources={citationDetailsOpen}
             focusedCitationMessageId={focusedCitationMessageId}
             contextWindowStatus={contextWindowStatus}
+            onOpenDocument={openDocument}
           />
         </aside>
       )}
+      {documentViewerLayer}
 
       {cloudPicker && (
         <CloudAttachmentPicker
@@ -4248,6 +4256,7 @@ function MessageBubble({
   onSubmitEditPrompt,
   citationDetailsExpanded,
   onToggleCitations,
+  onOpenDocument,
   onSubmitFeedback,
   customTools,
   onRunCustomTool,
@@ -4278,6 +4287,7 @@ function MessageBubble({
   onSubmitEditPrompt?: (message: ChatMessage, text: string) => boolean;
   citationDetailsExpanded?: boolean;
   onToggleCitations?: (message: ChatMessage) => void;
+  onOpenDocument?: (request: DocumentRequest) => void;
   onSubmitFeedback?: (message: ChatMessage, rating: ChatFeedbackRating, comment?: string) => void;
   customTools?: ToolConfig[];
   onRunCustomTool?: (tool: ToolConfig, message: ChatMessage) => void;
@@ -4343,7 +4353,14 @@ function MessageBubble({
   }
   const citationCount = !isUser ? (displayMessage.citations?.length ?? 0) : 0;
   const canViewCitations = citationCount > 0 && Boolean(onToggleCitations);
-  const citationLabel = `${citationCount} citation${citationCount === 1 ? "" : "s"}`;
+  // Only a row the reply is on record as citing is a citation; a consulted web
+  // result, an attachment, or a tool result is a source.
+  const citationNoun = displayMessage.citations?.every((citation) => citation.cited === true) ? "citation" : "source";
+  const citationLabel = `${citationCount} ${citationNoun}${citationCount === 1 ? "" : "s"}`;
+  const citationScope = useMemo(
+    () => (onOpenDocument ? { citations: displayMessage.citations ?? [], onOpen: onOpenDocument } : null),
+    [displayMessage.citations, onOpenDocument],
+  );
 
   function flashActionStatus(status: string) {
     setActionStatus(status);
@@ -4520,7 +4537,9 @@ function MessageBubble({
           failureNotice && assistantContent.visibleContent ? (
             <>
               <div className="message-rendered-response" ref={responseContentRef}>
-                <Markdown content={assistantContent.visibleContent} />
+                <CitationMarkerContext.Provider value={citationScope}>
+                  <Markdown content={assistantContent.visibleContent} />
+                </CitationMarkerContext.Provider>
               </div>
               <p className="message-error">{failureNotice}</p>
             </>
@@ -4533,23 +4552,25 @@ function MessageBubble({
               <PlainText content={displayMessage.content} />
             ) : assistantContent.visibleContent ? (
               <div className="message-rendered-response" ref={responseContentRef}>
-                <Markdown
-                  content={assistantContent.visibleContent}
-                  onUpdateCode={
-                    onUpdateCode
-                      ? (previousSource, nextSource, occurrence) =>
-                          onUpdateCode(message, previousSource, nextSource, occurrence)
-                      : undefined
-                  }
-                  onUpdateDiagram={
-                    onUpdateDiagram
-                      ? (previousSource, nextSource) => onUpdateDiagram(message, previousSource, nextSource)
-                      : undefined
-                  }
-                  onUpdateTable={
-                    onUpdateTable ? (previous, next, occurrence) => onUpdateTable(message, previous, next, occurrence) : undefined
-                  }
-                />
+                <CitationMarkerContext.Provider value={citationScope}>
+                  <Markdown
+                    content={assistantContent.visibleContent}
+                    onUpdateCode={
+                      onUpdateCode
+                        ? (previousSource, nextSource, occurrence) =>
+                            onUpdateCode(message, previousSource, nextSource, occurrence)
+                        : undefined
+                    }
+                    onUpdateDiagram={
+                      onUpdateDiagram
+                        ? (previousSource, nextSource) => onUpdateDiagram(message, previousSource, nextSource)
+                        : undefined
+                    }
+                    onUpdateTable={
+                      onUpdateTable ? (previous, next, occurrence) => onUpdateTable(message, previous, next, occurrence) : undefined
+                    }
+                  />
+                </CitationMarkerContext.Provider>
               </div>
             ) : null}
           </>
@@ -4712,12 +4733,12 @@ function MessageBubble({
                   aria-label={citationDetailsExpanded ? `Hide ${citationLabel}` : `View ${citationLabel}`}
                   data-tooltip={
                     citationDetailsExpanded
-                      ? "Hide the cited-source list in the session details panel"
-                      : "Open session details and show every source cited by this response"
+                      ? "Hide the source list in the session details panel"
+                      : "Open session details and show the sources behind this response"
                   }
                   onClick={() => onToggleCitations?.(displayMessage)}
                 >
-                  {citationDetailsExpanded ? "Hide citations" : `View ${citationLabel}`} →
+                  {citationDetailsExpanded ? `Hide ${citationNoun}s` : `View ${citationLabel}`} →
                 </button>
               )}
               {actionStatus && (
@@ -4957,6 +4978,7 @@ function SessionSummary({
   showSources,
   focusedCitationMessageId,
   contextWindowStatus,
+  onOpenDocument,
 }: {
   data: BootstrapData;
   thread: ChatThread | null;
@@ -4967,6 +4989,7 @@ function SessionSummary({
   showSources: boolean;
   focusedCitationMessageId?: string | null;
   contextWindowStatus: ContextWindowStatus;
+  onOpenDocument: (request: DocumentRequest) => void;
 }) {
   const messages = thread?.messages ?? [];
   const hasMessages = messages.length > 0;
@@ -4979,27 +5002,6 @@ function SessionSummary({
   const toolsDetail = activeToolNames.length > 0 ? activeToolNames.join(", ") : "None on for this chat";
   const toolsStatus = activeToolNames.length > 0 ? `${activeToolNames.length} on` : "Off";
   const usageTotals = contextWindowStatus.usageTotals;
-
-  const allSources: ChatCitation[] = [];
-  const seenSources = new Set<string>();
-  for (const message of messages) {
-    for (const citation of message.citations ?? []) {
-      const key = citationKey(citation);
-      if (seenSources.has(key)) continue;
-      seenSources.add(key);
-      allSources.push(citation);
-    }
-  }
-  const focusedMessage = focusedCitationMessageId
-    ? messages.find((message) => message.id === focusedCitationMessageId)
-    : undefined;
-  const focusedSources = uniqueCitations(focusedMessage?.citations ?? []);
-  const focusedSourceKeys = new Set(focusedSources.map(citationKey));
-  const remainingSources = focusedSources.length
-    ? allSources.filter((citation) => !focusedSourceKeys.has(citationKey(citation)))
-    : allSources;
-  const webSources = remainingSources.filter((citation) => citation.source_type === "web");
-  const workspaceSources = remainingSources.filter((citation) => citation.source_type !== "web");
 
   const rows: Array<[string, string, string]> = hasMessages
     ? [
@@ -5051,40 +5053,8 @@ function SessionSummary({
         </div>
       ))}
       <ContextWindowDetails status={contextWindowStatus} />
-      {showSources && (focusedSources.length > 0 || webSources.length > 0 || workspaceSources.length > 0) && (
-        <div className="session-sources">
-          <div className="audit-heading">
-            <h3>Sources gathered</h3>
-          </div>
-          {focusedSources.length > 0 && (
-            <SessionSourceGroup
-              key={`selected-${focusedCitationMessageId}`}
-              icon={<Quote size={12} />}
-              label={`Selected response · ${focusedSources.length}`}
-              sources={focusedSources}
-              moreScope="response"
-            />
-          )}
-          {focusedSources.length > 0 && (webSources.length > 0 || workspaceSources.length > 0) && (
-            <span className="session-source-divider">Other citations in this chat</span>
-          )}
-          {webSources.length > 0 && (
-            <SessionSourceGroup
-              icon={<Globe2 size={12} />}
-              label={`Web · ${webSources.length}`}
-              sources={webSources}
-              moreScope="chat"
-            />
-          )}
-          {workspaceSources.length > 0 && (
-            <SessionSourceGroup
-              icon={<FileText size={12} />}
-              label={`Workspace · ${workspaceSources.length}`}
-              sources={workspaceSources}
-              moreScope="chat"
-            />
-          )}
-        </div>
+      {showSources && (
+        <SessionSources messages={messages} focusedMessageId={focusedCitationMessageId} onOpenDocument={onOpenDocument} />
       )}
       <div className="session-shortcuts" role="group" aria-label="Symbol shortcuts">
         <div className="audit-heading">
@@ -5106,141 +5076,6 @@ function SessionSummary({
     </section>
   );
 }
-
-const SESSION_SOURCE_DISPLAY_LIMIT = 6;
-
-function citationKey(citation: ChatCitation): string {
-  const base = `${citation.source_type}|${citation.source_uri || citation.source_name}`;
-  // Distinct chunks from the same source stay distinct entries; legacy
-  // citations without a chunk id keep the historical source-level key.
-  return citation.chunk_id ? `${base}|chunk:${citation.chunk_id}` : base;
-}
-
-/** Page pill text built only from reported fields — never fabricated. */
-function citationPageLabel(citation: ChatCitation): string | null {
-  const start = citation.page_start ?? citation.page_end;
-  if (start === null || start === undefined) return null;
-  const end = citation.page_end ?? start;
-  return end !== start ? `p. ${start}–${end}` : `p. ${start}`;
-}
-
-const CITATION_PILL_STYLE: CSSProperties = {
-  minHeight: 20,
-  padding: "0 7px",
-  fontSize: 10.5,
-};
-
-function uniqueCitations(citations: ChatCitation[]): ChatCitation[] {
-  const seen = new Set<string>();
-  return citations.filter((citation) => {
-    const key = citationKey(citation);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function citationHost(uri: string): string | null {
-  try {
-    const url = new URL(uri);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    return url.hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
-
-function SessionSourceGroup({
-  icon,
-  label,
-  sources,
-  moreScope,
-}: {
-  icon: ReactNode;
-  label: string;
-  sources: ChatCitation[];
-  moreScope: "chat" | "response";
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const hiddenCount = Math.max(sources.length - SESSION_SOURCE_DISPLAY_LIMIT, 0);
-  const visible = expanded ? sources : sources.slice(0, SESSION_SOURCE_DISPLAY_LIMIT);
-  return (
-    <div className="session-source-group">
-      <span className="session-source-label">
-        {icon}
-        {label}
-      </span>
-      <ul>
-        {visible.map((citation) => {
-          const host = citationHost(citation.source_uri);
-          const pageLabel = citationPageLabel(citation);
-          const hasKIndex = citation.k_index !== null && citation.k_index !== undefined;
-          return (
-            <li key={citationKey(citation)}>
-              {host ? (
-                <a
-                  href={citation.source_uri}
-                  target="_blank"
-                  rel="noreferrer"
-                  data-tooltip={`Open ${citation.source_name} in a new browser tab`}
-                >
-                  {citation.source_name}
-                </a>
-              ) : (
-                <strong>{citation.source_name}</strong>
-              )}
-              <small>{host ?? citation.source_type}</small>
-              {(hasKIndex || pageLabel || citation.locator) && (
-                <span
-                  className="session-source-location"
-                  style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}
-                >
-                  {hasKIndex && (
-                    <span
-                      className="pill"
-                      style={CITATION_PILL_STYLE}
-                      data-tooltip={`Cited inline as [K${citation.k_index}]`}
-                    >
-                      K{citation.k_index}
-                    </span>
-                  )}
-                  {pageLabel && (
-                    <span className="pill" style={CITATION_PILL_STYLE}>
-                      {pageLabel}
-                    </span>
-                  )}
-                  {citation.locator && (
-                    <span className="pill" style={CITATION_PILL_STYLE}>
-                      {citation.locator}
-                    </span>
-                  )}
-                </span>
-              )}
-              {citation.snippet && <span className="session-source-snippet">{citation.snippet}</span>}
-            </li>
-          );
-        })}
-      </ul>
-      {hiddenCount > 0 && (
-        <button
-          type="button"
-          className="session-source-more"
-          data-tooltip={
-            expanded
-              ? `Hide the extra citations from this ${moreScope}`
-              : `Show the remaining citations from this ${moreScope}`
-          }
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded
-            ? `Hide ${hiddenCount} cited source${hiddenCount === 1 ? "" : "s"}`
-            : `Show ${hiddenCount} more cited in this ${moreScope}`}
-        </button>
-      )}
-    </div>
-  );
-}
-
 
 function modelName(chat: ChatStore) {
   return chat.enabledModels.find((model) => model.id === chat.model)?.name ?? "No connected model";

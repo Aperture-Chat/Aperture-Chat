@@ -21,7 +21,9 @@
    warning, status) stay with the feature styles. */
 
 :root {
-  --tactile-lit: linear-gradient(160deg, var(--teal), color-mix(in srgb, var(--teal) 60%, #052e35));
+  /* lib/brandTheme.ts darkens this for an accent too bright to carry white text. */
+  --tactile-lit-base: var(--teal);
+  --tactile-lit: linear-gradient(160deg, var(--tactile-lit-base), color-mix(in srgb, var(--tactile-lit-base) 60%, #052e35));
   --tactile-lit-border: #ffffff35;
   --tactile-lit-shadow: 0 2px 8px #0003, inset 0 1px #ffffff40;
   --tactile-lit-hover-shadow: 0 4px 12px #0000003d, inset 0 1px #ffffff4d;
@@ -943,12 +945,10 @@ span.mini-avatar.avatar-initials,
 .document-assistant-page .draft-version-card.is-active,
 .cloud-picker-item.is-selected,
 .group-card.is-active,
-.account-console-link.is-active,
 .support-mode-option.is-selected,
 .datasets-format.is-selected,
 .support-ticket-row.is-selected,
 .privacy-category.is-on,
-.view-as-option.is-active,
 .document-assistant-page :is(.deck-layout-gallery, .deck-theme-gallery) > button[aria-pressed="true"],
 :is(.deck-layout-gallery, .deck-theme-gallery) > button[aria-pressed="true"],
 .deck-layout-option[aria-current="true"] {
@@ -1245,7 +1245,10 @@ span.mini-avatar.avatar-initials,
 }
 
 .rail-switch-label {
+  /* The ellipsis needs overflow: hidden, which clips at the line box, so the
+     box has to clear the font's descenders. */
   overflow: hidden;
+  line-height: 1.4;
   text-overflow: ellipsis;
 }
 

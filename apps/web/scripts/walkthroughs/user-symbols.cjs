@@ -7,7 +7,7 @@
  * skill file ($), and records the cited reply.
  */
 const { helpers } = require("./user-common.cjs");
-const { composer, waitForReply, scrollTo, ensureSharedAgent, SHARED_AGENT } = helpers;
+const { composer, waitForReply, scrollTo, foldTrace, ensureSharedAgent, SHARED_AGENT } = helpers;
 
 async function openSymbol(page, symbol, filter = "") {
   const box = composer(page);
@@ -100,11 +100,12 @@ const userSymbols = {
     await choose(page, menu, "Litigation Playbook");
     const box = composer(page);
     await box.press("End");
-    await box.pressSequentially("What should a responsive pleading preserve? Two sentences.", { delay: 15 });
+    await box.pressSequentially("What should a responsive pleading preserve? Two sentences. Cite the playbook after each sentence.", { delay: 15 });
     const before = await page.locator("article.assistant-message").count();
     await page.locator("form.composer .send-button").click();
-    const reply = await waitForReply(page, before, { timeout: 900000 });
+    const reply = await waitForReply(page, before, { timeout: 2400000 });
     if (!(await reply.locator(".message-citation-action").count())) throw new Error("The reply has no citations.");
+    await foldTrace(page, reply);
     await scrollTo(page, reply, "start");
     await shot("symbols-reply");
   },

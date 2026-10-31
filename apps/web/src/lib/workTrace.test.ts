@@ -517,6 +517,18 @@ describe("selfChecks", () => {
         detail: "Those markers have nothing behind them in this reply.",
       },
     ]);
+    expect(selfChecks("Grouped [K1, K2], ranged [K1-K2], full-width 【K1】.", [citation({ id: "a", k_index: 1 }), citation({ id: "b", k_index: 2 })])).toEqual([
+      { id: "check:citations", label: "Every citation links to a source", detail: "4 markers matched" },
+    ]);
+    expect(selfChecks("Grouped [K3, K4].", citations)[0]?.label).toBe("Cites [K3], [K4] with no source");
+    expect(selfChecks("A hallucinated range [K2-K999999].", citations)[0]?.id).toBe("flag:citations");
+    expect(selfChecks("A range reaching one source [K1-K9].", citations)[0]?.id).toBe("check:citations");
+    expect(selfChecks("Fetched [U4].", [citation({ id: "x", u_index: 4 })])[0]?.id).toBe("check:citations");
+    expect(selfChecks("From the web [W2].", [citation({ id: "x", w_index: 2 })])[0]?.id).toBe("check:citations");
+    expect(selfChecks("From the web [W3].", [citation({ id: "x", w_index: 2 })])[0]?.label).toBe("Cites [W3] with no source");
+    // With no web source in the reply, [W2] is a tax form, not a claim of one.
+    expect(selfChecks("See the [W2] form.", citations)).toEqual([]);
+    expect(selfChecks("[K1 statement]", [])).toEqual([]);
     // Markers inside code are code, not citations.
     expect(selfChecks(fence("txt", "array[K9]"), [])).toEqual([
       { id: "check:fences", label: "Code blocks are all closed", detail: "1 fenced block" },

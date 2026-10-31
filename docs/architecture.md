@@ -112,6 +112,59 @@ name groups, or from an administrator's per-document override; every passage
 carries `wall_group_ids`, and `policy.knowledge_chunk_visible_to_user` enforces
 them for every role. A wall naming no known group admits nobody.
 
+Uploads and connector downloads keep their original bytes beside runtime state
+in `knowledge_originals/`, keyed by the SHA-256 of tenant, knowledge base, and
+document id (`app/core/knowledge_originals.py`). A document removed by a delete,
+a sync that no longer lists it, a knowledge base purge, or a tenant purge takes
+its bytes with it; the two purges are stages of the resumable cleanup job. The
+document viewer reads from this store through four routes under
+`/api/knowledge` (`…/view`, `…/view/file`, `…/original`, and
+`chunks/{id}/location`). All four share one gate: `knowledge_access`, the
+readable-base check, the document, then the wall for every role. A base the actor
+cannot read answers like a missing base and a walled document like a missing
+document, both 404. Views and wall refusals are audited with ids only.
+
+PDFs and images are shown as stored. Office, RTF, and OpenDocument files become
+a PDF through headless LibreOffice on first view, cached beside the original
+(`app/core/document_rendition.py`); TIFF scans go through a small worker in the
+same sandbox (`app/core/scan_worker.py`). Conversion is treated as hostile input,
+and parsers are what fail, so the layer that has to hold is not a parser:
+
+- The operating system. LibreOffice runs as the image's `aperture-render` account
+  (uid 10001, no other groups) in scratch space outside the data volume. That
+  account cannot read the originals, the databases, or the API's environment. If
+  the API cannot drop to it, or the data directories can be entered by anyone
+  else, conversion is refused and documents open as text, except when
+  `APERTURE_ENV=local`. Startup only logs a failed `chmod`, so this is checked at
+  each conversion.
+- What goes in. The format is sniffed from the bytes and pins the import filter.
+  LibreOffice gets a package rebuilt from an allowlist: parts a rendition needs,
+  internal relationships of known kinds pointing at those parts, and pictures whose
+  headers really are pictures. Only an image relationship can reach a part not
+  named as XML, and a repeated part name is refused. A document that nests another
+  document, or an OpenDocument file naming an outside resource, is refused by its
+  structure. RTF loses its field instructions.
+- The profile. Each run gets a fresh one with macros, active content, and link
+  updates off, every link from the document blocked, a proxy that goes nowhere, and
+  the SVG, EPS, and HTML importers removed. Active content goes on for one case: a
+  document with charts, which are embedded objects, and no OLE or DDE. A document
+  with both opens with a blank chart.
+- The process. Its own group, a minimal environment, resource limits, one at a
+  time, a hard deadline, and a sweep of the account's processes afterwards.
+
+There is no network wall: a process that fully escapes LibreOffice keeps the
+container's network. A converter sidecar with no network would close that.
+
+Any failure falls back to the indexed text, which is also how documents indexed
+before originals were kept still open at their cited passage. A rendition's page
+comes from matching the chunk's text against each page's text
+(`app/core/document_view.py`), and `exact` is false when that is a guess.
+`scripts/prove-rendition-image.sh` runs the crafted-document proof and the OS wall
+tests inside the built image, on the LibreOffice production runs, with a real API
+startup on a mounted volume. Any skip, xfail, or xpass fails it. The two builds
+differ: 25.2.3 imports no HTML chunk and does not follow a PPTX OLE link, so the
+proof holds a fixed list of what fires on each.
+
 Web sources are parsed with a structured HTML reader (`app/core/html_extract.py`:
 main content, headings, tables, links, a GET search form). With a crawl depth,
 `app/core/site_crawl.py` reads same-site pages breadth-first through the same
