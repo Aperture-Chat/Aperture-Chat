@@ -6,7 +6,7 @@ import mimetypes
 import re
 import time
 import zipfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
@@ -66,6 +66,7 @@ from app.core.connector_auth import (
     user_oauth_provider,
 )
 from app.core.content_filters import (
+    FilterEvaluation,
     ContentRuleMatch,
     evaluate_content_filters,
     filters_have_output_rules,
@@ -132,6 +133,8 @@ from app.core.usage_budget_runtime import (
     UsageTenantScopeError,
     map_usage_budget_error,
 )
+from app.core.citation_use import citations_used, screened_fields, strip_citation_markers
+from app.core.knowledge_ingestion import DEFAULT_CHUNK_CHARS
 from app.core.live_site_lookup import live_site_hits
 from app.core.web_fetch import WebFetchError, fetch_web_source
 from app.core.web_search import (
@@ -149,6 +152,7 @@ from app.core.policy import (
     assert_knowledge_access,
     assert_model_access,
     hermes_companion_allowed,
+    knowledge_chunk_visible_to_user,
     hermes_locked_for,
     is_hermes_tool,
     model_access_allowed,
@@ -162,6 +166,7 @@ from app.models.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCitation,
+    ContentFilter,
     ChatFeedbackRecord,
     ChatFeedbackSubmitRequest,
     ChatThreadTag,
@@ -275,6 +280,13 @@ CONTINUATION_PROMPT = (
     "or apologize. Keep the same structure and continue until the requested work is complete."
 )
 CONTINUATION_FINISH_REASONS = {"length", "max_tokens", "max_completion_tokens", "model_length"}
+CITATION_WITHHELD = "[Withheld by content filter]"
+CITATION_SNIPPET_CHARS = 260
+CITATION_SCREEN_MARGIN_CHARS = 120
+MAX_CARRIED_CHUNKS = 4
+# At least a whole chunk, so a fact that won retrieval from the end of one is
+# something the model can actually read.
+KNOWLEDGE_EXCERPT_CHARS = DEFAULT_CHUNK_CHARS
 
 
 def _ends_inside_code_fence(text: str) -> bool:
@@ -1233,6 +1245,7 @@ def complete(
     # prompts must reach the provider exactly as sent.
     if request.reasoning_effort == "minimal" and request.surface == "chat":
         runtime_context["fast_mode"] = True
+    runtime_context["earlier_markers_stale"] = request.surface == "chat"
     route = _resolve_gateway_route(
         store,
         model,
@@ -2482,6 +2495,9 @@ def _generate_completion(
             full_text=_response_text(final),
         )
         filtered = _apply_output_content_filters(store, actor, request, model_config, final)
+        filtered.citations = _completion_citations(
+            filtered, runtime_context, resolve_model_content_filters(store, model_config)
+        )
         filtered.directives = _directive_results(runtime_context, filtered)
         concealed_prompt = runtime_context.get("privacy_concealed_prompt")
         if isinstance(concealed_prompt, str):
@@ -3184,7 +3200,11 @@ def _generate_image_completion(
             )
         ],
         usage=usage,
-        citations=_citations_from_runtime(runtime_context),
+        citations=_reply_citations(
+            "\n\n".join(lines),
+            runtime_context,
+            filters=resolve_model_content_filters(store, model_config),
+        ),
     )
 
 
@@ -3366,6 +3386,8 @@ def _attach_platform_web_search(
             detail=f"Web search ({client.engine}) is unavailable: {exc} Turn off Web for this reply to continue without it.",
         ) from exc
 
+    # One page, one number: a second number for a URL would have no row to cite.
+    results = list({result.url: result for result in reversed(results)}.values())[::-1]
     runtime_context["web_search_engine"] = client.engine
     runtime_context["web_results"] = [
         {"title": result.title, "url": result.url, "snippet": result.snippet} for result in results
@@ -3373,9 +3395,18 @@ def _attach_platform_web_search(
     if runtime_context.get("citations_enabled") and results:
         existing = runtime_context.get("citations")
         citations = existing if isinstance(existing, list) else []
-        seen = {citation.get("source_uri") for citation in citations if isinstance(citation, dict)}
+        # A fetched URL is the same page, so its row answers to both labels. A
+        # knowledge chunk at that URL is a different source and keeps its own.
+        fetched = {
+            citation.get("source_uri"): citation
+            for citation in citations
+            if isinstance(citation, dict) and citation.get("k_index") is None
+        }
+        whole_texts = _citation_texts(runtime_context)
+        runtime_context["citation_texts"] = whole_texts
         for index, result in enumerate(results, start=1):
-            if result.url in seen:
+            if result.url in fetched:
+                fetched[result.url]["w_index"] = index
                 continue
             citations.append(
                 ChatCitation(
@@ -3384,8 +3415,10 @@ def _attach_platform_web_search(
                     source_type="web",
                     source_uri=result.url,
                     snippet=_citation_snippet(result.snippet),
+                    w_index=index,
                 ).model_dump()
             )
+            whole_texts[f"cite-web-{index}"] = result.snippet
         runtime_context["citations"] = citations
 
 
@@ -3540,16 +3573,9 @@ def _translate_response(
         model=requested_model,
         choices=choices_out,
         usage=usage,
-        citations=_citations_actually_referenced(
-            "\n".join(
-                str(choice.message.get("content") or "")
-                for choice in choices_out
-            ),
-            _merge_citations(
-                _citations_from_runtime(runtime_context),
-                _web_citations_from_payload(payload, runtime_context),
-            ),
-        ),
+        # Only what this provider call attributed. The finished reply is judged
+        # once, as a whole, in _generate_completion.
+        citations=_web_citations_from_payload(payload, runtime_context),
         memory_used=len(_runtime_memory_ids(runtime_context)),
         memory_saved=_runtime_memory_saved(runtime_context),
     )
@@ -3867,6 +3893,10 @@ def _stream_events(
     completed = False
     accounting_failed = False
     accumulated = ""
+    # What the person received, once screening has run. Everything judged after
+    # the stream reads this, never the unscreened text.
+    delivered = ""
+    output_filters: list[ContentFilter] = []
     total_usage: dict[str, int] = {}
     stream_annotations: list[object] = []
     last_wire_activity = time.monotonic()
@@ -4008,15 +4038,13 @@ def _stream_events(
                 if tail:
                     yield _sse_data({"delta": tail})
             accumulated = conceal(accumulated, privacy_categories).text
+        delivered = accumulated
         if buffer_output:
             yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
-            yield _sse_data(
-                {
-                    "delta": _filtered_output_text(
-                        store, actor, request, model_config, output_filters, accumulated
-                    )
-                }
+            delivered = _filtered_output_text(
+                store, actor, request, model_config, output_filters, accumulated
             )
+            yield _sse_data({"delta": delivered})
         hermes_summary = hermes.capture_artifacts(
             store,
             actor,
@@ -4120,15 +4148,13 @@ def _stream_events(
                     if tail:
                         yield _sse_data({"delta": tail})
                 accumulated = conceal(accumulated, privacy_categories).text
+            delivered = accumulated
             if buffer_output:
                 yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
-                yield _sse_data(
-                    {
-                        "delta": _filtered_output_text(
-                            store, actor, request, model_config, output_filters, accumulated
-                        )
-                    }
+                delivered = _filtered_output_text(
+                    store, actor, request, model_config, output_filters, accumulated
                 )
+                yield _sse_data({"delta": delivered})
             try:
                 hermes_summary = hermes.capture_artifacts(
                     store,
@@ -4171,7 +4197,7 @@ def _stream_events(
         # The finished reply is checked against this turn's verifiable
         # requirements, and Hermes reports what it saved, before closing.
         for activity in (
-            requirement_checks(runtime_context, accumulated),
+            requirement_checks(runtime_context, delivered),
             hermes_activity(hermes_summary),
         ):
             if activity is not None:
@@ -4180,12 +4206,11 @@ def _stream_events(
             "done": True,
             "citations": [
                 citation.model_dump(mode="json")
-                for citation in _citations_actually_referenced(
-                    accumulated,
-                    _merge_citations(
-                        _citations_from_runtime(runtime_context),
-                        _web_citations_from_annotations(stream_annotations, runtime_context),
-                    ),
+                for citation in _reply_citations(
+                    f"{_resumed_partial(request.messages)}{delivered}",
+                    runtime_context,
+                    _web_citations_from_annotations(stream_annotations, runtime_context),
+                    filters=output_filters,
                 )
             ],
             # Provider-reported usage summed across continuation rounds
@@ -4517,7 +4542,9 @@ def _replace_completion_response(
         model=base.model,
         choices=replacement.choices,
         usage=_merge_usage(base.usage, replacement.usage),
-        citations=base.citations or replacement.citations,
+        # A revision restates the first draft, so with no attribution of its
+        # own the provider's earlier sources still stand.
+        citations=replacement.citations or base.citations,
         memory_used=base.memory_used,
         memory_saved=base.memory_saved,
     )
@@ -4606,7 +4633,13 @@ def _merge_completion_response(
             )
         ],
         usage=_merge_usage(base.usage, continuation.usage),
-        citations=base.citations,
+        citations=[
+            # Each segment numbers its own, so only the merged list can be unique.
+            citation.model_copy(update={"id": f"cite-web-{number}"})
+            for number, citation in enumerate(
+                _merge_citations(base.citations, continuation.citations), start=1
+            )
+        ],
         memory_used=base.memory_used,
         memory_saved=base.memory_saved,
     )
@@ -4750,7 +4783,7 @@ def _resolve_runtime_context(
     ]
     attachment_names = [attachment.name for attachment in attachments] + legacy_attachment_names
     inline_edit_query = _draft_inline_edit_retrieval_query(request)
-    retrieval_query = inline_edit_query or _latest_user_message(request.messages)
+    retrieval_query = inline_edit_query or _retrieval_question(request.messages)
     web_enabled = request.web_enabled or inline_edit_query is not None
     knowledge_hits = _dedupe_knowledge_hits(
         store.retrieve_knowledge(
@@ -4769,7 +4802,13 @@ def _resolve_runtime_context(
         known_hits=knowledge_hits,
         web_search=web_enabled,
     )
-    knowledge_hits = _dedupe_knowledge_hits([*knowledge_hits, *live_hits])
+    knowledge_hits = _dedupe_knowledge_hits(
+        [
+            *knowledge_hits,
+            *live_hits,
+            *_carried_knowledge_hits(store, actor, request, knowledge_configs),
+        ]
+    )
     fetched_urls = _fetch_chat_urls(request.fetch_urls)
     if any(tool.tool_type == "mcp" for tool in tool_configs):
         _require_workspace_connector(
@@ -4815,7 +4854,9 @@ def _resolve_runtime_context(
         directives: list[Directive] = []
     else:
         extract = extract_draft_directives if request.surface == "draft" else extract_directives
-        directives = extract(retrieval_query, memory_context["standing_instructions"])
+        directives = extract(
+            _latest_user_message(request.messages), memory_context["standing_instructions"]
+        )
     return {
         "surface": request.surface if request.surface in {"chat", "draft"} else "chat",
         "thread_id": request.thread_id,
@@ -4872,7 +4913,11 @@ def _resolve_runtime_context(
         "image_attachment_count": len(image_attachments),
         "image_input_supported": image_input_supported,
         "attachment_images": attachment_images,
-        "citations": [citation.model_dump() for citation in citations],
+        "citations": [
+            citation.model_copy(update={"snippet": _citation_snippet(citation.snippet)}).model_dump()
+            for citation in citations
+        ],
+        "citation_texts": {citation.id: citation.snippet for citation in citations},
         "directives": directives,
         **memory_context,
     }
@@ -5553,6 +5598,60 @@ def _dedupe_knowledge_hits(knowledge_hits: list[KnowledgeChunk]) -> list[Knowled
     return unique
 
 
+def _followed_reply(messages: list[dict[str, Any]]) -> object | None:
+    """The reply this turn follows. A resumed partial is this turn's own text."""
+    history = messages[:-2] if _resumes_dropped_stream(messages) else messages
+    replies = [m.get("content") for m in history if m.get("role") == "assistant"]
+    return replies[-1] if replies else None
+
+
+def _previous_reply_chunk_ids(
+    store: SeedStore, actor: User, request: ChatCompletionRequest
+) -> list[str]:
+    """The chunks cited by the reply this turn follows, as ids and nothing else.
+
+    The thread PUT stores citations as the client sent them, so a stored name or
+    snippet is never used and an id means nothing until it is re-authorized.
+    """
+    reply = _followed_reply(request.messages)
+    thread = store.chat_threads.get(request.thread_id or "")
+    if reply is None or thread is None or thread.owner_user_id != actor.id:
+        return []
+    for message in reversed(thread.messages):
+        if message.role == "assistant" and message.content == reply:
+            ids = (citation.chunk_id for citation in message.citations if citation.chunk_id)
+            return list(dict.fromkeys(ids))[:MAX_CARRIED_CHUNKS]
+    return []
+
+
+def _carried_knowledge_hits(
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    knowledge_configs: list[KnowledgeConfig],
+) -> list[KnowledgeChunk]:
+    """Re-supply what the previous reply cited, re-authorized for this turn.
+
+    Retrieval reads only the follow-up's own words, so "say that again" rarely
+    finds the passage the claim came from, and the model could only repeat the
+    claim unsourced or cite something unrelated. Numbers stay per turn.
+    """
+    if request.surface != "chat":
+        return []
+    allowed = {config.id for config in knowledge_configs}
+    stored = (
+        store.vector_store.chunk(chunk_id)
+        for chunk_id in _previous_reply_chunk_ids(store, actor, request)
+    )
+    return [
+        chunk
+        for chunk in stored
+        if chunk is not None
+        and chunk.knowledge_config_id in allowed
+        and knowledge_chunk_visible_to_user(actor, chunk)
+    ]
+
+
 def _runtime_citations(
     knowledge_hits: list[KnowledgeChunk],
     attachments: list[ChatAttachment],
@@ -5573,12 +5672,14 @@ def _runtime_citations(
                 source_name=hit.source_name,
                 source_type=hit.source_type,
                 source_uri=hit.source_uri,
-                snippet=_citation_snippet(hit.text),
+                snippet=hit.text,
                 page_start=hit.page_start,
                 page_end=hit.page_end,
                 locator=hit.locator,
                 chunk_id=hit.id,
                 k_index=k_index,
+                document_id=hit.document_id,
+                knowledge_config_id=hit.knowledge_config_id,
             )
         )
     for fetched in fetched_urls or []:
@@ -5593,7 +5694,8 @@ def _runtime_citations(
                 source_name=str(fetched.get("source_name") or source_uri),
                 source_type="web",
                 source_uri=source_uri,
-                snippet=_citation_snippet(str(fetched.get("text") or "")),
+                snippet=str(fetched.get("text") or ""),
+                u_index=u_index,
             )
         )
     for attachment in attachments:
@@ -5630,7 +5732,7 @@ def _runtime_citations(
                 source_name=label,
                 source_type="mcp",
                 source_uri=f"mcp://{result.get('tool_config_id')}/{tool_name}",
-                snippet=_citation_snippet(str(snippet_source)),
+                snippet=str(snippet_source),
             )
         )
     return citations
@@ -5698,6 +5800,36 @@ def _latest_user_message(messages: list[dict[str, Any]]) -> str:
         if message.get("role") == "user":
             return _message_content_text(message.get("content"))
     return ""
+
+
+def _resumes_dropped_stream(messages: list[dict[str, Any]]) -> bool:
+    """True when the client is re-sending a partial reply to finish it.
+
+    A dropped stream comes back as the conversation, the partial answer, and
+    CONTINUATION_PROMPT. See sendChatStream in the web client.
+    """
+    if len(messages) < 2 or messages[-2].get("role") != "assistant":
+        return False
+    prompt = messages[-1]
+    return (
+        prompt.get("role") == "user"
+        and _message_content_text(prompt.get("content")).strip() == CONTINUATION_PROMPT
+    )
+
+
+def _resumed_partial(messages: list[dict[str, Any]]) -> str:
+    """The reply text already delivered before a resume, else empty."""
+    if not _resumes_dropped_stream(messages):
+        return ""
+    return _message_content_text(messages[-2].get("content"))
+
+
+def _retrieval_question(messages: list[dict[str, Any]]) -> str:
+    """What this turn is asking. A resume asks what the dropped attempt asked,
+    so it retrieves the same indexed excerpts and the partial's [K#] numbers
+    still hold. Live pages and web results are fetched again and may differ."""
+    resumed = _resumes_dropped_stream(messages)
+    return _latest_user_message(messages[:-2] if resumed else messages)
 
 
 def _message_content_text(content: object) -> str:
@@ -6190,9 +6322,12 @@ def _runtime_knowledge_hit(hit: KnowledgeChunk, *, k_index: int) -> dict[str, ob
 
 def _citation_snippet(text: str) -> str:
     normalized = " ".join(text.split())
-    if len(normalized) <= 260:
+    if len(normalized) <= CITATION_SNIPPET_CHARS:
         return normalized
-    return f"{normalized[:257].rstrip()}..."
+    # Whole words only: a value glued to a word is not recognized, so half of one
+    # must not be shown either.
+    cut = normalized[: CITATION_SNIPPET_CHARS - 2].rsplit(" ", 1)[0]
+    return f"{cut[: CITATION_SNIPPET_CHARS - 3].rstrip()}..."
 
 
 def _resolve_chat_attachments(
@@ -6251,6 +6386,8 @@ def _audit_runtime_context(runtime_context: dict[str, object]) -> dict[str, obje
     audit_context.pop("attachment_previews", None)
     audit_context.pop("retrieval_query", None)
     audit_context.pop("privacy_concealed_prompt", None)
+    # The audit records which sources were used, never their whole text.
+    audit_context.pop("citation_texts", None)
     # Audit records which images were forwarded, never the base64 payloads.
     attachment_images = audit_context.pop("attachment_images", None)
     if isinstance(attachment_images, list):
@@ -6379,33 +6516,84 @@ def _audit_runtime_artifact(item: dict[str, object]) -> dict[str, object]:
     }
 
 
-_KNOWLEDGE_CITATION_MARKER = re.compile(r"[\[［【]\s*K\s*(\d+)\s*[\]］】]")
-
-
-def _citations_actually_referenced(
+def _reply_citations(
     answer: str,
-    citations: list[ChatCitation],
+    runtime_context: dict[str, object],
+    provider_citations: Sequence[ChatCitation] = (),
+    *,
+    filters: Sequence[ContentFilter] = (),
 ) -> list[ChatCitation]:
-    """Drop knowledge chunks the answer never cited.
-
-    Retrieval supplies several chunks per turn and every one of them used to be
-    returned as a citation, so an answer grounded in one document appeared to
-    cite sources it never used. Only knowledge citations carry a ``k_index`` the
-    model can reference; web results and fetched URLs are attributed by the
-    provider and pass through untouched.
-
-    If the answer contains no ``[K#]`` marker at all there is nothing to match
-    on -- the model may simply not have used the convention -- so the list is
-    returned unchanged rather than emptied.
-    """
-    referenced = {int(index) for index in _KNOWLEDGE_CITATION_MARKER.findall(answer)}
-    if not referenced:
-        return citations
+    """The sources of a finished reply, on every path that returns one."""
+    hits = runtime_context.get("knowledge_hits")
+    used = citations_used(
+        answer,
+        _merge_citations(_citations_from_runtime(runtime_context), provider_citations),
+        keep_consulted_web=runtime_context.get("surface") == "draft",
+        chunk_texts={
+            str(hit.get("chunk_id")): str(hit.get("text") or "")
+            for hit in (hits if isinstance(hits, list) else [])
+            if isinstance(hit, dict)
+        },
+    )
+    screen = _CitationScreen(_privacy_output_categories(runtime_context), filters)
+    whole_texts = _citation_texts(runtime_context)
     return [
-        citation
-        for citation in citations
-        if citation.k_index is None or citation.k_index in referenced
+        _screened_citation(citation, whole_texts.get(citation.id, citation.snippet), screen)
+        for citation in used
     ]
+
+
+def _citation_texts(runtime_context: dict[str, object]) -> dict[str, str]:
+    texts = runtime_context.get("citation_texts")
+    return texts if isinstance(texts, dict) else {}
+
+
+@dataclass(frozen=True, slots=True)
+class _CitationScreen:
+    """The reply's own concealment and output rules, for text quoted beside it."""
+
+    categories: list[str] | None
+    filters: Sequence[ContentFilter]
+
+    def _evaluated(self, text: str) -> FilterEvaluation:
+        concealed = conceal(text, self.categories).text if self.categories is not None else text
+        return evaluate_content_filters(self.filters, concealed, "output")
+
+    def __call__(self, text: str) -> str:
+        evaluation = self._evaluated(text)
+        return CITATION_WITHHELD if evaluation.blocked else evaluation.text
+
+    def snippet(self, whole_text: str) -> str:
+        """Screen first, cut after, or a value on the cut no longer matches its rule.
+
+        Concealment reads all the text. A block rule reads only a little past the
+        cut, so a term far beyond what is shown does not withhold it.
+        """
+        redacted = self._evaluated(" ".join(whole_text.split())).text
+        shown = redacted[: CITATION_SNIPPET_CHARS + CITATION_SCREEN_MARGIN_CHARS]
+        if self._evaluated(shown).blocked:
+            return CITATION_WITHHELD
+        return _citation_snippet(redacted)
+
+
+def _screened_citation(
+    citation: ChatCitation, whole_text: str, screen: _CitationScreen
+) -> ChatCitation:
+    """A citation never shows what the reply had to hide."""
+    fields = citation.model_dump(exclude={"snippet"})
+    return citation.model_copy(
+        update={"snippet": screen.snippet(whole_text), **screened_fields(fields, screen)}
+    )
+
+
+def _completion_citations(
+    response: ChatCompletionResponse,
+    runtime_context: dict[str, object],
+    filters: Sequence[ContentFilter],
+) -> list[ChatCitation]:
+    """Judge a finished response. Its citations so far are the provider's own."""
+    answer = "\n".join(str(choice.message.get("content") or "") for choice in response.choices)
+    return _reply_citations(answer, runtime_context, response.citations, filters=filters)
 
 
 def _citations_from_runtime(runtime_context: dict[str, object]) -> list[ChatCitation]:
@@ -6478,12 +6666,14 @@ def _web_citation_from_annotation(annotation: object, index: int) -> ChatCitatio
         source_name=title,
         source_type="web",
         source_uri=url,
-        snippet=_citation_snippet(content),
+        snippet=content,
+        # The provider attached it to this reply's text, so no marker is needed.
+        cited=True,
     )
 
 
 def _merge_citations(
-    primary: list[ChatCitation], secondary: list[ChatCitation]
+    primary: Sequence[ChatCitation], secondary: Sequence[ChatCitation]
 ) -> list[ChatCitation]:
     citations: list[ChatCitation] = []
     seen: set[tuple[str, ...]] = set()
@@ -6613,6 +6803,8 @@ def _messages_with_runtime_context(
             )
         )
     messages: list[dict[str, Any]] = list(request.messages)
+    if runtime_context.get("earlier_markers_stale"):
+        messages = _without_earlier_markers(messages)
     attachment_images = runtime_context.get("attachment_images")
     if include_attachment_images and isinstance(attachment_images, list) and attachment_images:
         messages = _messages_with_attachment_images(messages, attachment_images)
@@ -6621,6 +6813,24 @@ def _messages_with_runtime_context(
     return [
         {"role": "system", "content": "\n\n".join(system_prompts)},
         *messages,
+    ]
+
+
+def _without_earlier_markers(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Take earlier replies' source markers out of what the model sees.
+
+    Numbers are per turn, so a [K1] the model repeated from an earlier reply
+    would silently cite whatever is K1 now. A resumed partial is this turn's
+    own text and keeps its markers.
+    """
+    current = len(messages) - 2 if _resumes_dropped_stream(messages) else None
+    return [
+        {**message, "content": strip_citation_markers(message["content"])}
+        if index != current
+        and message.get("role") == "assistant"
+        and isinstance(message.get("content"), str)
+        else message
+        for index, message in enumerate(messages)
     ]
 
 
@@ -6679,7 +6889,7 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
         f"- Knowledge: {_runtime_list(runtime_context.get('knowledge_names'))}",
         f"- Tools: {_runtime_list(runtime_context.get('tool_names'))}",
         f"- Agent workflow requested: {'yes' if runtime_context.get('agent_enabled') else 'no'}",
-        f"- Citations required: {'yes' if runtime_context.get('citations_enabled') else 'no'}",
+        f"- Citations required: {'yes' if _citations_required(runtime_context) else 'no'}",
         (
             "- Long-form requests: produce the complete requested paper, memo, report, or draft; "
             "do not stop at an outline or ask the user to request the next section."
@@ -6794,7 +7004,13 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             context_lines.append(
                 f"- Web search: live results from platform-hosted web search are included below, "
                 f"retrieved today, {today}. They are more current than your training data - "
-                "trust them for anything recent and cite the [W#] sources by URL."
+                + (
+                    "trust them for anything recent. Cite each claim that relies on a result "
+                    "inline with its exact [W#] label (for example, [W1]), and cite only "
+                    "results you actually used."
+                    if _prompt_cites_strictly(runtime_context)
+                    else "trust them for anything recent and cite the [W#] sources by URL."
+                )
             )
         else:
             context_lines.append(
@@ -6946,7 +7162,18 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
     if isinstance(knowledge_hits, list) and knowledge_hits:
         if runtime_context.get("citations_enabled"):
             context_lines.append(
-                "- Knowledge citations: cite grounded claims inline with the exact [K#] "
+                "- Knowledge citations: the excerpts below were retrieved automatically, so "
+                "some may be irrelevant to the question. Ignore those: never cite or mention "
+                "an excerpt you did not use. For the rest, cite grounded claims inline with "
+                "the exact [K#] label shown below (for example, [K1]): every claim that relies "
+                "on an excerpt ends with its marker, and a marker appears only on a claim that "
+                "excerpt supports. Write each marker exactly as shown, with nothing else inside "
+                "the brackets. Do not renumber or invent sources. If you repeat a fact from an "
+                "earlier reply, cite the excerpt below that supports it, or leave it unmarked if "
+                "none does. After a diagram or table with no prose, end with a line naming the "
+                "markers used. If no excerpt is relevant, use no [K#] marker."
+                if _prompt_cites_strictly(runtime_context)
+                else "- Knowledge citations: cite grounded claims inline with the exact [K#] "
                 "label shown below (for example, [K1]); do not renumber or invent sources."
             )
         context_lines.append("Retrieved knowledge excerpts:")
@@ -6979,7 +7206,9 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
                 details = str(hit.get("source_details") or "").strip()
                 if details:
                     label = f"{label} [{details}]"
-                context_lines.append(f"- {label}: {_prompt_excerpt(text)}")
+                context_lines.append(
+                    f"- {label}: {_prompt_excerpt(text, limit=KNOWLEDGE_EXCERPT_CHARS)}"
+                )
     web_results = runtime_context.get("web_results")
     if isinstance(web_results, list) and web_results:
         engine = str(runtime_context.get("web_search_engine") or "web")
@@ -6994,6 +7223,13 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
                 context_lines.append(
                     f"- [W{index}] {title} ({url}): {_prompt_excerpt(snippet or title)}"
                 )
+    if knowledge_hits and _prompt_cites_strictly(runtime_context):
+        # Instructions at the tail are the ones models hold on to, and missing
+        # markers now mean missing sources.
+        context_lines.append(
+            "Reminder: end each claim that relies on an excerpt with its exact [K#] marker, "
+            "and leave out excerpts you did not use."
+        )
     parts.append("\n".join(context_lines))
 
     # The requirements checklist goes last on purpose: instructions at the tail
@@ -7002,6 +7238,28 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
     if checklist:
         parts.append(checklist)
     return "\n\n".join(parts)
+
+
+def _citations_required(runtime_context: dict[str, object]) -> bool:
+    """A plain chat has nothing to cite, so "required" would only confuse the rule."""
+    if not runtime_context.get("citations_enabled"):
+        return False
+    source_keys = (
+        "knowledge_hits",
+        "web_enabled",
+        "attachment_names",
+        "fetched_urls",
+        "mcp_tool_results",
+    )
+    has_sources = any(runtime_context.get(key) for key in source_keys)
+    return has_sources or runtime_context.get("surface") == "draft"
+
+
+def _prompt_cites_strictly(runtime_context: dict[str, object]) -> bool:
+    """Reply citations are judged by marker; Drafts documents keep their wording."""
+    return bool(runtime_context.get("citations_enabled")) and (
+        runtime_context.get("surface") != "draft"
+    )
 
 
 # Attached prompt templates and skill files are authored instructions, so they

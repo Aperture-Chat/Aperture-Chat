@@ -40,7 +40,7 @@ const SECTIONS = [
     summary: "What Aperture Chat is and how to read this guide.",
     blocks: [
       p(
-        "Aperture Chat is your organization's workspace assistant. You can chat with approved AI models, draft documents and slide decks, search your organization's knowledge, and schedule recurring work. Review the sources and work trace when a response uses connected knowledge or tools.",
+        "Aperture Chat is your organization's workspace assistant. You can chat with approved AI models, draft documents, slide decks, and spreadsheets, search your organization's knowledge, and schedule recurring work. Review the sources and work trace when a response uses connected knowledge or tools.",
       ),
       p(
         "This guide explains where to look and what to choose. Words in bold — like Save version — match the labels on screen. If a step says “hover”, rest your pointer on the item without clicking; controls that offer extra help show it nearby.",
@@ -168,7 +168,7 @@ const SECTIONS = [
       ),
       sub("Resizing and collapsing the sidebar"),
       list([
-        "Click the small chevron (‹) near the top of the sidebar to collapse it and give your work more room. Click the chevron again (›) to bring it back.",
+        "Click the short bar at the top of the sidebar's edge to collapse it and give your work more room. Click it again to bring the sidebar back.",
         "Drag the sidebar's right edge to make it wider or narrower. Double-click that edge to collapse it.",
         "On a narrow window or a phone, the sidebar hides behind a menu button (three stacked lines, ☰) in the top-left corner. Tap it to open the menu; tap the dimmed area to close it.",
       ]),
@@ -184,7 +184,7 @@ const SECTIONS = [
       ]),
       sub("Where the consoles live"),
       p(
-        "Administrators choose Admin console near the bottom of the sidebar; platform owners also see Platform console. The account drawer's Management section lists the same consoles. Regular users see neither. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
+        "Administrators choose Admin console near the bottom of the sidebar; platform owners also see Platform console. The account drawer's Workspace section lists the same consoles. Regular users see neither. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
       ),
       sub("Returning to a view"),
       p("The browser address follows the workspace view and console tab. Browser Back and Forward return to those views; opening a saved chat or draft link still checks your account's access. A link does not share private content or grant permission to another person."),
@@ -315,9 +315,10 @@ const SECTIONS = [
     blocks: [
       sub("The work trace"),
       list([
-        "While a reply is being produced, a single status line shows the current step, a live timer, and how many steps remain (for example “4s · step 2 of 5”).",
-        "Click that line at any time — while running or after — to expand the full trace: which model was routed, what context was prepared, whether web search ran, and how the answer was finalized.",
-        "While a reply is still streaming, a stop button appears — its label is Stop this response. Clicking it halts the reply and keeps the conversation.",
+        "While a reply is being produced, the trace runs on the page above it: the assistant's name and is working, a live timer, each step as it really happens, and what comes next.",
+        "Choose · stop beside the timer to halt a reply. The conversation is kept.",
+        "When the reply finishes, the line says how long it took, for example Worked for 12s, with the number of steps and any checks or flags.",
+        "Click that line at any time to expand or fold the trace. It lists what actually happened: the model used, the sources searched, how long the model thought, and the checks that ran.",
       ]),
       sub("Actions under each response"),
       list([
@@ -325,7 +326,7 @@ const SECTIONS = [
         "Thumbs up / thumbs down — sends feedback your administrators can review.",
         "Branch — starts a new chat that continues from that response, leaving the original untouched.",
         "Regenerate response — asks the model to answer the same prompt again. Version arrows appear on the response with a counter (for example “2 / 3”) so you can flip between the versions it has produced.",
-        "Transfer to Drafts — turns the response into an editable document in the Drafts workspace, where you can format, version, and export it.",
+        "Transfer to Drafts — opens a chooser with Word document, Slide deck, and Spreadsheet, and suggests the one that fits the reply. The result opens in Drafts, where you can edit, version, and export it.",
       ]),
       sub("Actions under your own messages"),
       list([
@@ -343,10 +344,34 @@ const SECTIONS = [
       ]),
       sub("Citations and token usage"),
       list([
-        "When a reply used the web or your knowledge bases, numbered citations appear with it. Click a citation to open the original source.",
+        "When a reply cites your knowledge bases or the web, numbered markers appear in its text and a button sits under it. It reads View 2 citations when every row was cited, and View 2 sources when the list also holds a consulted web result, an attachment, or a tool result.",
+        "Click a knowledge source or marker to open the real document at the cited passage (see “Check a source”). Web sources open their page in a new tab.",
         "A small token count appears under a reply only when the model provider actually reported one — the platform never shows an estimate dressed up as a real number.",
       ]),
       lesson("user", "work-traces"),
+    ],
+  },
+  {
+    id: "code-in-chat",
+    part: "chat",
+    minRole: "user",
+    title: "Work with code in chat",
+    summary: "Edit code in place, ask AI to change a selection, download a file, and preview it in the canvas.",
+    blocks: [
+      p("Code in a reply is a working block, not just text. It is highlighted by language, and its toolbar lets you edit it where it sits, have AI change only the part you select, download it under a sensible file name, and open a preview in the canvas at the right edge."),
+      note("tip", "Select the smallest piece that needs changing before you use Ask AI, and say what should stay the same. You review the result before it replaces anything."),
+      lesson("user", "code-in-chat"),
+    ],
+  },
+  {
+    id: "edit-replies",
+    part: "chat",
+    minRole: "user",
+    title: "Edit tables and diagrams in a reply",
+    summary: "Correct a table in place, send it to a spreadsheet, and shape a diagram before you share it.",
+    blocks: [
+      p("Tables and structure diagrams in a reply can be changed directly, so a small fix does not need another prompt. Edits to a table save into the reply, and Transfer to Drafts carries them into a spreadsheet. Structure diagrams have themes, connector and corner styles, cards you can drag, arrows you can bend, and per-card colors, and their PNG export keeps what you see."),
+      lesson("user", "edit-replies"),
     ],
   },
   {
@@ -456,11 +481,30 @@ const SECTIONS = [
         "Current chat and Model — the user-message and response counts, and which model is active.",
         "Tokens used — shown only when the model provider reported real numbers. Otherwise the panel says “Not reported by the provider”.",
         "Tools — exactly what is switched on for your next message: web search, knowledge, agent mode, plus any automations or MCP connections you added in the composer. “Off” means nothing is active.",
-        "Sources gathered — every web source (as clickable links) and workspace citation collected during this conversation.",
+        "Sources gathered — the web sources and knowledge documents replies in this conversation cited, each with the passage it relied on. Click a knowledge row to open the document at that passage.",
         "Symbol shortcuts — at the bottom of the panel, the five symbols you can type in the message box and what each one pulls in. See “Symbol shortcuts: / @ # $ >”.",
       ]),
       p("The Context window meter describes how much context this conversation uses. For older conversations without provider counts it can show ≈ and estimated from message length. Treat that as an estimate; Tokens used remains based on actual provider reports. When the context window fills, start a new chat and include the details it needs to continue reliably."),
       lesson("user", "session-details"),
+    ],
+  },
+  {
+    id: "check-sources",
+    part: "chat",
+    minRole: "user",
+    title: "Check a source: open the cited document",
+    summary: "Open the document behind an answer, land on the cited passage, and verify it before you rely on it.",
+    blocks: [
+      p("A cited answer is only as good as the passage behind it, so Aperture Chat takes you to that passage. Click a source row or an inline marker such as [K1] and the real document opens beside the chat, at the cited place, with the passage marked and quoted in a Cited passage callout."),
+      list([
+        "PDF, Word, PowerPoint, Excel, and scanned files open as real pages on servers that can convert them, with page, zoom, and go-to-page controls. Text files open as pages of text.",
+        "Go to the cited passage returns to the mark after you browse. Download original saves the file as it was uploaded.",
+        "A document is listed only when the reply wrote its marker. Passages that were searched but not cited stay out of the list, so a reply can show no sources at all. That can mean the documents did not apply, or that the reply drew on them without marking it. To get markers, ask again and add: cite the source after each sentence. Treat an unsourced answer as unchecked.",
+        "A marker shows where the reply says a claim came from. Read the passage to confirm it says what the reply says.",
+        "Library rows open the same viewer: click a file's name or its Preview button.",
+      ]),
+      note("info", "Files uploaded before this feature have no stored original, so they open as their indexed text with a note, and there is no Download original. You can still read the passage. For real pages, ask whoever manages the knowledge base to upload the file again and remove the old copy. Uploading adds a new document."),
+      lesson("user", "check-sources"),
     ],
   },
 
@@ -500,7 +544,7 @@ const SECTIONS = [
     summary: "Generate, edit, version, and export documents with the drafting assistant.",
     blocks: [
       p(
-        "Click Drafts in the sidebar. The view pairs a full document editor with an AI assistant rail on the left that writes into the editor for you. A Draft format switch at the top of the editor has two buttons — Document and Deck. This section covers document mode; “Building a slide deck” covers deck mode.",
+        "Click Drafts in the sidebar. The view pairs a full document editor with an AI assistant rail on the left that writes into the editor for you. The rail at the top of the editor has three formats: Document, Deck, and Spreadsheet. This section covers documents; “Building a slide deck” and “Build a spreadsheet” cover the others.",
       ),
       note("info", "If the model selector says No models connected, AI drafting, AI rename, inline AI edits, and AI deck prompts are unavailable. You can still edit manually, import, save, use document history, and export. Follow the setup guidance for your role or ask your administrator for access to a working model."),
       sub("Generating a draft"),
@@ -554,16 +598,17 @@ const SECTIONS = [
       ]),
       sub("Versions and comparing"),
       list([
-        "Click Save version whenever the draft reaches a good state. You can restore an earlier version at any time from the draft's history.",
+        "Click Save version whenever the draft reaches a good state. Versions of this draft lists the versions made since you opened it. Leave Drafts, reload the page, or reopen the draft, and the list clears: the draft starts again at Version 1, with your latest saved work. Returning to a version changes only what is on screen. To keep it, export it now, or change something and choose Save version.",
         "Compare versions opens a read-only visual redline of two saved versions, so you can see exactly what changed between them. It needs two genuinely different saved versions before it activates.",
-        "Open Document history to browse saved documents and decks. Hover or keyboard-focus an entry for a preview. Archive moves finished work into Archived, where Unarchive restores it; Delete requires confirmation and permanently removes the saved item and revisions.",
-        "Read the save status: account-backed documents and decks can be reopened after sign-in on another device. A pending or failed save stays a working copy in this browser. If the chip reads Local only — server save failed, choose Retry beside it; if it reads Draft changed elsewhere, choose Reload server copy and review the account version before saving again.",
+        "Open Document history to browse saved documents, decks, and spreadsheets. Hover or keyboard-focus an entry for a preview. Archive moves finished work into Archived, where Unarchive restores it; Delete requires confirmation and permanently removes the saved item and revisions.",
+        "Read the save status: account-backed documents, decks, and spreadsheets can be reopened after sign-in on another device. A pending or failed save stays a working copy in this browser. If the status reads Local only, choose Retry beside it; if it reads Draft changed elsewhere, choose Reload server copy and review the account version before saving again.",
       ]),
       sub("Leaving with unsaved changes"),
       p("When you leave an edited draft through workspace navigation, open another chat or draft, or choose Sign out, the unsaved-changes dialog lets you Keep editing, Save copy and continue, or Discard and continue. The saved copy goes into local document history in this browser. If browser storage fails, the app keeps you in the draft so you can recover it. A forced security sign-out can still interrupt work; save important changes regularly."),
       sub("Exporting"),
       list([
-        "Click Export to open the export panel. In document mode it offers a Word document (an editable Word file with preview page breaks and embedded images), Markdown (best for plain text or web publishing), and Print / Save as PDF, which opens your browser's print dialog with the saved version — choose “Save as PDF” there to keep a PDF copy.",
+        "Click Export to open the export panel. In document mode it offers a Word document (an editable Word file with preview page breaks and embedded images), Markdown (best for plain text or web publishing), PDF document (an archival PDF/A file built on the server, with searchable text, embedded fonts, and bookmarks from your headings), and Print, which opens your browser's print dialog with the saved version.",
+        "Choose PDF document when the file will be filed, sent, or kept. Long documents show progress and can be canceled.",
         "Exports always run from a saved version. If you have unsaved edits, the panel says Save your edits first and offers a one-click Save version and export (or Save version and print) button.",
         "When your browser supports it, choose Choose a location to select a destination, or Browser downloads to use its download folder. If the chosen location cannot be written, the file is sent to your browser downloads instead and the status says so. Word and print retain document formatting; Markdown preserves the text without its typography. Exporting a file does not by itself upload pending work to your account.",
       ]),
@@ -580,9 +625,9 @@ const SECTIONS = [
     part: "workspace",
     minRole: "user",
     title: "Hand a chat request to Drafts",
-    summary: "Send a document or deck request from chat straight into the editor.",
+    summary: "Send a document, deck, or spreadsheet request from chat straight into the editor.",
     blocks: [
-      p("When a chat message asks for a document (a memo, a letter, a report) or a slide deck, the message waits above the composer with a card. Write this in Drafts? offers Write in Drafts or Continue in chat; for slides, Build this as a slide deck? offers Build in deck editor or Draft slides in chat. Nothing is sent until you choose."),
+      p("When a chat message asks for a document (a memo, a letter, a report), a slide deck, or a spreadsheet, the message waits above the composer with a card. Write this in Drafts? offers Write in Drafts or Continue in chat; for slides, Build this as a slide deck? offers Build in deck editor or Draft slides in chat; spreadsheets, trackers, and budgets get the same choice. Nothing is sent until you choose."),
       list([
         "Write in Drafts (or Build in deck editor) opens Drafts and starts the document or deck from your request, with no retyping. The rail says Writing the document you asked for in chat. The chat's model (unless you starred a drafting default), its Web and knowledge choices, your attached files, and earlier messages in the conversation travel with the request; the card notes when your files and this conversation come along.",
         "Continue in chat (or Draft slides in chat) sends the message to the chat as usual.",
@@ -634,7 +679,7 @@ const SECTIONS = [
     summary: "Turn a draft into slides, edit them, brand them, and export real PowerPoint.",
     blocks: [
       p(
-        "Deck mode turns the Drafts workspace into a slide editor with a real PowerPoint export. Click the Deck button on the Draft format switch. If the draft already has document content, a dialog asks “Turn this draft into slides?” — choose Start a blank deck to keep the document untouched, or Convert into slides to split its headings and text into slides. Your document versions are kept either way.",
+        "Deck mode turns the Drafts workspace into a slide editor with a real PowerPoint export. Choose Deck on the format rail. If the draft already has document content, a dialog asks “Turn this draft into slides?” — choose Start a blank deck to keep the document untouched, or Convert into slides to split its headings and text into slides. Your document versions are kept either way.",
       ),
       sub("The filmstrip"),
       list([
@@ -645,7 +690,7 @@ const SECTIONS = [
       ]),
       sub("Slide layouts"),
       p(
-        "Above the slide, Layouts previews seven arrangements: Title, Title + bullets, Two columns, Image + caption, Section, Quote, and Closing. Select one to switch the selected slide. The layout chip in the slide's corner opens the Change layout panel on the left, with the same layouts grouped as Openers, Content, Pictures, and Highlights. Themes offers five color palettes — Aperture, Midnight, Editorial, Violet, and Forest; a palette change recolors every slide, keeps text, media, and layout, and can be undone. The chevron beside Layouts folds the strip away to give the slide more room.",
+        "Above the slide, Layouts previews the arrangements, including Title, Title + bullets, Two columns, Image + caption, Picture + bullets, Statement, Big number, Section, Quote, and Closing. Select one to switch the selected slide. The layout chip in the slide's corner opens the Change layout panel on the left, with the same layouts grouped as Openers, Content, Pictures, and Highlights. Themes offers seven designs — Aperture, Signal, Violet, Editorial, Midnight, Forest, and Swiss. Each has its own colors, fonts, and slide shape; a change restyles every slide, keeps text, media, and layout, and can be undone. The chevron beside Layouts folds the strip away to give the slide more room.",
       ),
       sub("Editing slide text"),
       list([
@@ -724,6 +769,19 @@ const SECTIONS = [
     ],
   },
   {
+    id: "spreadsheets",
+    part: "workspace",
+    minRole: "user",
+    title: "Build a spreadsheet",
+    summary: "Have the assistant build a workbook, check its work, and finish it with formulas, tables, charts, and files.",
+    blocks: [
+      p("Choose Spreadsheet on the format rail for an Excel-style workbook beside the Spreadsheet Assistant. It can build a whole workbook from a plain request, or change one cell or one table, and it writes real formulas you can read and change. Your workbook saves to your account like any other draft."),
+      note("tip", "Always check the totals. Click the numbers you care about and read the status bar, press F2 on a total to see its formula, and ask the assistant to fix anything that looks wrong. A recalculation only proves a formula has no error, not that it adds the right cells."),
+      lesson("user", "spreadsheet-basics"),
+      lesson("user", "spreadsheet-editing"),
+    ],
+  },
+  {
     id: "unsynced-work",
     part: "workspace",
     minRole: "user",
@@ -796,7 +854,14 @@ const SECTIONS = [
       list([
         "Type # in the composer to reference a knowledge source or choose from Files in knowledge sources. A file choice references its name in your prompt and searches that file's knowledge source; the row says which source will be searched.",
         "Or turn on the Knowledge switch in send options to let the reply search your enabled bases.",
-        "Replies grounded in knowledge return citations that link straight back to the source documents.",
+        "Replies grounded in knowledge carry markers that open the cited document at the passage (see “Check a source”).",
+      ]),
+      sub("Going deeper"),
+      list([
+        "When you add a web page, Pages to read chooses how far to go: This page, Linked pages, or Two levels. Linked pages stay on the same site, and anything its robots.txt excludes is skipped.",
+        "Look for fresh pages on this site when answering lets a question fetch a page that was not read up front. The reply marks it Live page. Turn it Off to answer only from the pages already read.",
+        "Handwriting and images, on the knowledge base's Settings, decides how scans and pictures are read. AI reading on uses an image-capable model for handwriting, stamps, and pictures. Standard OCR only keeps pages on your server and still reads printed scans.",
+        "Each file keeps its own properties, such as author, dates, and sensitivity labels. Open a file's details under Indexed files to read them. Click a file's name or Preview to read the file itself.",
       ]),
       note("info", "The # shortcut menu shows Loading files… while retrieving file choices. If Some files could not be loaded appears, use Retry in that menu. Files from sources that loaded successfully remain usable. If access was removed or a source needs configuration, ask your administrator to resolve it."),
       lesson("user", "knowledge"),
@@ -900,15 +965,14 @@ const SECTIONS = [
         "Click your account card (your initials or photo) at the very bottom of the sidebar. The account drawer opens with everything about you in one place.",
       ),
       list([
-        "Profile — click the card with your name and the pencil icon to edit your display name, firm, website, bio, phone number, and photo (upload an image up to 5 MB, or paste a URL). Click Save profile when done, or Cancel to discard.",
-        "Management — administrators and platform owners see this section, listing the consoles they can open; the sidebar's Admin console and Platform console links go to the same places. Regular users do not have it.",
+        "Profile — choose Edit on the card with your name to change your display name, firm, website, bio, phone number, and photo (upload an image up to 5 MB, or paste a URL). Choose Save profile when done, or Cancel to discard. The card also shows your role, your organization, any personal token caps, and how you sign in.",
+        "Workspace — administrators and platform owners see the consoles they can open here, plus View as, which previews the workspace as a lower role. A note reminds you which role you are previewing; switch back the same way.",
         "Personalization memory — opens your private memory manager when the feature is enabled. Use it to control, review, add, correct, pin, forget, or clear what the assistant remembers about you.",
-        "Password — accounts that sign in with a password can change it here (click the pencil, enter the current password, then the new one twice — at least 12 characters). The app continues with a new authenticated session after saving and revokes previous sessions. Accounts that sign in through SSO manage their password with the SSO provider instead, and the panel says so.",
-        "Security — choose Manage security to set up an authenticator for a local account, review the remaining recovery-code count, or replace codes after verifying your identity. Turning verification off is available only when organization policy permits it and signs you out. SSO accounts follow their identity-provider settings for voluntary enrollment.",
-        "Role and organization — your role, your organization, any personal token caps that apply to you, and how you sign in.",
-        "View as — if your role allows it, preview the workspace exactly as a lower role would see it. A note reminds you which role you are previewing; switch back the same way.",
-        "Usage this month — your prompts, responses, and estimated tokens.",
-        "Archived chats — every chat you have archived, with buttons to restore each one to your sidebar or delete it permanently.",
+        "Security — choose Manage to set up an authenticator for a local account, review the remaining recovery-code count, or replace codes after verifying your identity. Turning verification off is available only when organization policy permits it and signs you out. SSO accounts follow their identity provider.",
+        "Password — accounts that sign in with a password choose Change, then enter the current password and the new one twice (at least 12 characters). The app continues with a new authenticated session after saving and revokes previous sessions. Accounts that sign in through SSO change their password with their identity provider.",
+        "API access — when your role allows it, create a personal key for OpenAI-compatible tools. A key is shown once. Rotate replaces it and Revoke removes it, and each asks you to confirm.",
+        "Usage this month — your Requests, Chats, and Tokens, counted from the first of the month in UTC. Requests include automatic chat titles.",
+        "Archived chats — choose View to restore a chat you archived or delete it permanently.",
         "Sign out — ends your session and returns to the sign-in screen.",
       ]),
       lesson("user", "account-mobile-help"),
@@ -1000,7 +1064,7 @@ const SECTIONS = [
     summary: "Where the console lives and what its eleven tenant-governance tabs control.",
     blocks: [
       steps([
-        "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Management section lists it too.)",
+        "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Workspace section lists it too.)",
         "The console opens with eleven tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Reports, Policies, Datasets, Audit, and Alerts. Policies is always present between Analytics and Datasets; service-wide availability determines which organization controls are active inside it.",
       ]),
       p(
@@ -1376,6 +1440,18 @@ const SECTIONS = [
     ],
   },
   {
+    id: "admin-ethical-walls",
+    part: "admin",
+    minRole: "admin",
+    title: "Ethical walls and file properties",
+    summary: "Limit a document to a named group for every role, prove it holds, and read the audit trail.",
+    blocks: [
+      p("An ethical wall limits a document to the members of chosen groups. It applies to every role, including administrators: outside the wall, chat cannot find the document and the viewer refuses to open it. A wall can be set on a document under its details, or read from a wall named in the file's own metadata."),
+      note("warning", "Know what a wall does not cover. People who manage the knowledge base still see that the file exists, who may find it, and its properties, so keep sensitive words out of file names and properties. A wall does not rewrite replies already saved, and administrators can still read those replies in User Prompt Activity."),
+      lesson("admin", "admin-ethical-walls"),
+    ],
+  },
+  {
     id: "admin-retention",
     part: "admin",
     minRole: "admin",
@@ -1509,7 +1585,7 @@ const SECTIONS = [
     summary: "The highest access level, its seven tabs, and the role ceilings.",
     blocks: [
       steps([
-        "Click Platform console (building icon) near the bottom of the sidebar. (Only platform owners see it; the account drawer's Management section lists it as Platform owner console.)",
+        "Click Platform console (building icon) near the bottom of the sidebar. (Only platform owners see it; the account drawer's Workspace section lists it as Platform owner console.)",
         "The console has seven tabs: Org Settings, Models, Providers, Analytics, Reports, Audit, and Alerts. Org Settings holds organization configuration; API keys live on each provider's card under Providers.",
       ]),
       p("Keep the three role ceilings in mind — they explain who can touch what across the entire platform:"),

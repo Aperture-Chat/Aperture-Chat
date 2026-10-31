@@ -9,7 +9,7 @@
  * the same as the reply's copy and feedback buttons, with no backdrop, so the
  * trace reads as part of the page. Steps arrive with a short rise,
  * the step in progress carries a slow orbit and a shimmer, and reduced
- * motion turns all of it off. The Drafts trace keeps .pending-trace. */
+ * motion turns all of it off. Drafts uses this trace too. */
 
 .work-trace {
   /* One icon color for every step, matching .message-icon-action, so it

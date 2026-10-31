@@ -45,14 +45,14 @@ test("security-driven sign-out bypasses the voluntary workspace recovery guard",
   expect(onRequestSignOut).not.toHaveBeenCalled();
 });
 
-test("security is collapsed by default and loads account status only after Manage security", async () => {
-  const fetchMock = mockSecurity();
+test("the security panel stays collapsed until asked, with its summary already live", async () => {
+  mockSecurity();
   renderAccount();
   expect(screen.getByRole("button", { name: "Manage security" })).toHaveAttribute("aria-expanded", "false");
-  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/mfa/"))).toBe(false);
+  expect(await screen.findByText("On · 10 recovery codes left")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Two-step verification" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Manage security" }));
   expect(await screen.findByRole("button", { name: "Replace recovery codes" })).toBeInTheDocument();
-  expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/mfa/status"))).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Close security" }));
   expect(screen.queryByRole("heading", { name: "Two-step verification" })).not.toBeInTheDocument();
 });
@@ -66,10 +66,8 @@ test("pending security mutations and unsaved recovery codes guard all drawer exi
   fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
   const account = screen.getByRole("dialog", { name: "Account" });
   const signOut = within(account).getByRole("button", { name: /Sign out/ });
-  const management = within(account).getByText("Management").closest("details")!;
-  management.open = true;
   const consoleButton = within(account).getByRole("button", { name: /Platform owner console Providers/ });
-  const previewButton = within(account).getByRole("button", { name: "User", exact: true });
+  const previewButton = within(account).getByRole("radio", { name: "User" });
   fireEvent.click(screen.getByRole("button", { name: "Create new recovery codes" }));
   expect(screen.getByRole("button", { name: "Close security" })).toBeDisabled();
   expect(within(account).getByRole("button", { name: "Close", exact: true })).toBeDisabled();
@@ -100,4 +98,41 @@ test("pending security mutations and unsaved recovery codes guard all drawer exi
   fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(within(account).getByRole("button", { name: "Close", exact: true }));
   expect(screen.queryByRole("dialog", { name: "Account" })).not.toBeInTheDocument();
+});
+
+function mockEnrollment() {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/auth/mfa/status")) return json({ enabled: false, tenant_required: false, confirmed_at: null, recovery_codes_remaining: 0, can_disable: false });
+    return json({ caps: [], usage_date: "2026-09-04" });
+  }));
+}
+
+test("Escape leaves an untouched security step without leaving the drawer", async () => {
+  mockEnrollment();
+  renderAccount();
+  const account = screen.getByRole("dialog", { name: "Account" });
+  fireEvent.click(within(account).getByRole("button", { name: "Manage security" }));
+  fireEvent.click(await within(account).findByRole("button", { name: "Set up authenticator" }));
+  await within(account).findByLabelText("Current password");
+  (document.activeElement as HTMLElement).blur();
+
+  fireEvent.keyDown(document, { key: "Escape" });
+
+  expect(await within(account).findByRole("button", { name: "Set up authenticator" })).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Account" })).toBeInTheDocument();
+});
+
+test("Escape keeps a password typed into a security step", async () => {
+  mockEnrollment();
+  renderAccount();
+  const account = screen.getByRole("dialog", { name: "Account" });
+  fireEvent.click(within(account).getByRole("button", { name: "Manage security" }));
+  fireEvent.click(await within(account).findByRole("button", { name: "Set up authenticator" }));
+  fireEvent.change(await within(account).findByLabelText("Current password"), { target: { value: "half-typed" } });
+
+  fireEvent.keyDown(document, { key: "Escape" });
+
+  expect(within(account).getByLabelText("Current password")).toHaveValue("half-typed");
+  expect(within(account).getByText("Unsaved changes. Choose Cancel to discard them.")).toBeInTheDocument();
 });

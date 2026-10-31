@@ -15,7 +15,7 @@
  * not portaled), which is reported as a product bug.
  */
 const { helpers } = require("./user-common.cjs");
-const { composer, sendChat, waitForReply, scrollTo } = helpers;
+const { composer, sendChat, waitForReply, scrollTo, foldTrace } = helpers;
 
 async function microphonePage(kit) {
   // Loaded here so the walkthrough registry can be read without Playwright.
@@ -75,7 +75,8 @@ const userDictation = {
     let figure;
     for (let attempt = 0; attempt < 3 && !figure; attempt += 1) {
       const before = await sendChat(page, "Show the stages of a synthetic vendor onboarding process as a Graphviz diagram. Use exactly this style: a dot code block containing digraph onboarding { rankdir=LR; Request -> Screening -> Contract -> Onboarded; } with no other attributes. After the code block, add one sentence.");
-      const reply = await waitForReply(page, before, { timeout: 900000 });
+      const reply = await waitForReply(page, before, { timeout: 2400000 });
+      await foldTrace(page, reply);
       const panel = reply.locator(".md-diagram-panel");
       await panel.first().waitFor({ timeout: 30000 }).catch(() => {});
       await scrollTo(page, panel.first(), "center").catch(() => {});

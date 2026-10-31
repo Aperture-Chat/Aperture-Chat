@@ -1,0 +1,535 @@
+{
+  "_comment": "Every bracket form, shared by services/api/tests/test_citation_marker_forms.py and apps/web/src/lib/citationTargets.test.ts so the server and the client cannot drift. `markers` is what the bracket cites; an empty list means ordinary prose.",
+  "forms": [
+    {
+      "bracket": "[K1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[W2]",
+      "markers": [
+        "W2"
+      ]
+    },
+    {
+      "bracket": "[U1]",
+      "markers": [
+        "U1"
+      ]
+    },
+    {
+      "bracket": "[K12]",
+      "markers": [
+        "K12"
+      ]
+    },
+    {
+      "bracket": "[K 1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[ K1 ]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "【K1】",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "［K1］",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1; K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1/K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 & K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 and K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1，K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1；K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1、K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1, W2]",
+      "markers": [
+        "K1",
+        "W2"
+      ]
+    },
+    {
+      "bracket": "[K1-K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1–K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1—K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1-3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1, K3-K4]",
+      "markers": [
+        "K1",
+        "K3",
+        "K4"
+      ]
+    },
+    {
+      "bracket": "[K1, p. 50]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1 p. 50]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, pp. 50-51]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1 page 50]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, pages 50 and 51]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, slide 3]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1; sheet Q3]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, K2, p. 4]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1, Page 50]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[W2 form instructions]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 statement]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 is the key]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 see K2]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1a]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1, Note]",
+      "markers": []
+    },
+    {
+      "bracket": "[Note]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1, K2, and K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1; and K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 y K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 et K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 und K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 и K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 和 K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1和K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1، K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[K1 to K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1〜K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[K1～K3]",
+      "markers": [
+        "K1",
+        "K2",
+        "K3"
+      ]
+    },
+    {
+      "bracket": "[Source: K1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[Sources: K1, K2]",
+      "markers": [
+        "K1",
+        "K2"
+      ]
+    },
+    {
+      "bracket": "[Ref K1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[Ref. K1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[Reference: K1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1.]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1,]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "\\[K1\\]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[^K1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[Ｋ1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[К1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[Κ1]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[Ｗ1]",
+      "markers": [
+        "W1"
+      ]
+    },
+    {
+      "bracket": "[Ｕ1]",
+      "markers": [
+        "U1"
+      ]
+    },
+    {
+      "bracket": "[K1 (p. 40)]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1: p. 40]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1 - p. 40]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, S. 4]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, página 4]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, 第4页]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1: Harlow survey.pdf]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, Harlow survey.pdf, p. 40]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, see the appendix]",
+      "markers": []
+    },
+    {
+      "bracket": "[see K1]",
+      "markers": []
+    },
+    {
+      "bracket": "[k1]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 statement.pdf]",
+      "markers": []
+    },
+    {
+      "bracket": "[W2 instructions.pdf]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 sheet]",
+      "markers": []
+    },
+    {
+      "bracket": "[W2 sheet]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 page]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 s. corner parcel]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 sheet of paper]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1 - statement.pdf]",
+      "markers": []
+    },
+    {
+      "bracket": "[K1, Sheet: Q3]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1 pp. 4-5]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1, Slide 3]",
+      "markers": [
+        "K1"
+      ]
+    },
+    {
+      "bracket": "[K1 (Harlow survey.pdf)]",
+      "markers": [
+        "K1"
+      ]
+    }
+  ]
+}

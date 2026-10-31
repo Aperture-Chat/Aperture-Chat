@@ -1,24 +1,16 @@
 import {
   Archive,
-  ArchiveRestore,
   ArrowLeft,
   Bot,
   Brain,
   Bug,
-  Camera,
-  Check,
   ListChecks,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   CircleHelp,
   Clock3,
-  Copy,
   Folder,
   FolderPlus,
   FileText,
-  KeyRound,
-  LogOut,
   Menu,
   MessageSquare,
   Moon,
@@ -26,8 +18,6 @@ import {
   Pin,
   PinOff,
   Plus,
-  RefreshCw,
-  Pencil,
   Search,
   ShieldCheck,
   Smartphone,
@@ -39,7 +29,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { createPortal } from "react-dom";
-import { Fragment, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { Fragment, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import { LazyChunkBoundary, lazyWithReload } from "../lib/lazyChunk";
 
@@ -56,7 +46,6 @@ import type {
   AccountApiKeyCreateResponse,
   AccountApiKeyStatus,
   BootstrapData,
-  ChatMessage,
   ChatThread,
   IssueReportRecord,
   IssueReportSubmission,
@@ -73,7 +62,7 @@ import {
 import type { ChatStore } from "../lib/chatStore";
 import { buildCommands } from "../lib/commands";
 import { UnsyncedWorkBadge } from "./UnsyncedWorkBadge";
-import { getMyUsageBudget, type MyUsageBudget } from "../lib/api/auth";
+import { roleLabel } from "../lib/accountDrawer";
 import { isBlankNewChat } from "../lib/chatStore";
 import { usableModels } from "../lib/modelAccess";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
@@ -85,7 +74,8 @@ import { DEFAULT_THEME_SCHEDULE, type ThemeSchedule } from "../lib/useThemeSched
 import { PlatformUpdateRow } from "./PlatformUpdateRow";
 import { Logo } from "./Primitives";
 import { UserAvatar } from "./UserAvatar";
-import { AccountSecurity } from "./AccountSecurity";
+import { AccountDrawer } from "./AccountDrawer";
+import type { EscapeLayer } from "./AccountRow";
 import { IssueReportForm } from "./IssueReportForm";
 import { MyReportsPanel, type MyReportsApi } from "./MyReportsPanel";
 import { forgetLegacyReadState, isThreadUnread } from "../lib/chatReadState";
@@ -149,22 +139,6 @@ const NAV_TOOLTIPS: Record<
 const DEFAULT_RAIL_WIDTH = 226;
 const MIN_RAIL_WIDTH = 208;
 const MAX_RAIL_WIDTH = 340;
-
-const ROLE_LABELS: Record<Role, string> = {
-  PLATFORM_OWNER: "Platform Owner",
-  TENANT_ADMIN: "Admin",
-  TEMP_USER: "Temp User",
-  POWER_USER: "Power User",
-  AUDITOR: "Auditor",
-  AGENT_APPROVER: "Agent Approver",
-  USER: "User",
-};
-
-const PREVIEW_ROLE_LABELS: Partial<Record<Role, string>> = {
-  PLATFORM_OWNER: "Platform admin",
-  TENANT_ADMIN: "Admin",
-  USER: "User",
-};
 
 type ChatFolder = {
   id: string;
@@ -250,11 +224,6 @@ const PINNED_PREVIEW_LIMIT = 3;
  * flex grants the recent list, so taller windows show more chats. */
 const RECENT_PREVIEW_LIMIT = 4;
 const RECENT_PREVIEW_MAX = 40;
-const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-/* Avatars render at 96px or smaller but the data URL is stored inline on the
- * user record and shipped with every bootstrap/session-resume payload, so
- * uploads are downscaled before storing. 512px covers retina rendering. */
-const PROFILE_PHOTO_MAX_EDGE = 512;
 
 export function AppShell(props: ComponentProps<typeof UserAppShell>) {
   // A new identity gets fresh local state before persistence effects run.
@@ -339,7 +308,7 @@ function UserAppShell({
   onProfileUpdate?: (payload: AccountProfileUpdateRequest) => void | User | Promise<User | void>;
   onPasswordUpdate?: (payload: AccountPasswordUpdateRequest) => void | Promise<void>;
   onApiKeyLoad?: () => Promise<AccountApiKeyStatus>;
-  onApiKeyCreate?: () => Promise<AccountApiKeyCreateResponse>;
+  onApiKeyCreate?: (options: { replace: boolean }) => Promise<AccountApiKeyCreateResponse>;
   onApiKeyRevoke?: () => Promise<AccountApiKeyStatus>;
   onSubmitIssueReport?: (payload: IssueReportSubmission) => Promise<IssueReportRecord | void>;
   myReportsApi?: MyReportsApi;
@@ -407,12 +376,16 @@ function UserAppShell({
   const [lastExpandedFolderId, setLastExpandedFolderId] = useState<string | null>(null);
   const [pendingFolderThreadId, setPendingFolderThreadId] = useState<string | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const overlayOpenerRef = useRef<HTMLElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
 
   const width = useViewportWidth();
   const isDrawer = width <= BREAKPOINTS.drawer;
   const autoCollapsed = currentView === "drafts";
   const collapsed = (isRailCollapsed || autoCollapsed) && !isDrawer;
+  // A drawer, the palette, or Memory holds focus, so the shell behind it is out of reach.
+  const shellInert = Boolean(drawer || paletteOpen || memoryOpen);
   useModalFocus(sidebarRef, isDrawer && navOpen, () => setNavOpen(false));
 
   // The active blank "New chat" is the empty-state landing, not a list entry.
@@ -634,9 +607,24 @@ function UserAppShell({
 
   const openUtilityDrawer = (nextDrawer: UtilityDrawerKey) => {
     if (securityCloseBlockedRef.current) return;
+    // Read now: the sidebar goes inert in the commit that opens the drawer, which
+    // blurs this element before any effect can see it.
+    if (!drawer && document.activeElement instanceof HTMLElement) overlayOpenerRef.current = document.activeElement;
     setDrawer(nextDrawer);
     closeDrawer();
   };
+
+  const overlayOpen = Boolean(drawer) || memoryOpen;
+  useEffect(() => {
+    if (overlayOpen) return;
+    const opener = overlayOpenerRef.current;
+    overlayOpenerRef.current = null;
+    // Something else already took focus, such as a composer in an opened chat.
+    const focused = document.activeElement;
+    if (!opener || (focused !== document.body && focused !== opener)) return;
+    const stillReachable = opener.isConnected && !opener.closest("[inert]") && opener.getBoundingClientRect().right >= 0;
+    (stillReachable ? opener : menuButtonRef.current)?.focus({ preventScroll: true });
+  }, [overlayOpen]);
 
   const handleSelectView = (view: ViewKey) => {
     if (securityCloseBlockedRef.current) return;
@@ -1100,6 +1088,7 @@ function UserAppShell({
         {
           gridTemplateColumns: `${visibleRailWidth}px minmax(0, 1fr)`,
           "--app-content-left": isDrawer ? "0px" : `${visibleRailWidth}px`,
+          "--rail-open-width": `${railWidth}px`,
         } as CSSProperties
       }
     >
@@ -1107,12 +1096,13 @@ function UserAppShell({
       {isDrawer && (
         <button
           type="button"
+          ref={menuButtonRef}
           className="mobile-hamburger"
           aria-label={navOpen ? "Close menu" : "Open menu"}
           data-tooltip={navOpen ? "Hide the navigation menu and return to your work" : "Open the menu to switch views and find your chats"}
           aria-expanded={navOpen}
           aria-controls="workspace-navigation"
-          inert={Boolean(drawer || paletteOpen || memoryOpen)}
+          inert={shellInert}
           onClick={() => setNavOpen((value) => !value)}
         >
           <Menu size={18} />
@@ -1128,6 +1118,29 @@ function UserAppShell({
         />
       )}
 
+      {/* The rail's edge is the control. It sits outside the rail so nothing in
+       * the logo row moves when the rail narrows, and before it so it stays
+       * the first stop for the keyboard. */}
+      {!isDrawer && !autoCollapsed && (
+        <button
+          className="rail-seam"
+          type="button"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          aria-controls="workspace-navigation"
+          data-tooltip={
+            collapsed
+              ? "Expand the sidebar to see your chats and folders again"
+              : "Collapse the sidebar to give your workspace more room"
+          }
+          inert={shellInert}
+          onClick={() => setIsRailCollapsed((value) => !value)}
+        >
+          <span className="rail-seam-bar" aria-hidden="true" />
+          <span className="rail-seam-bar" aria-hidden="true" />
+        </button>
+      )}
+
       <aside
         id="workspace-navigation"
         ref={sidebarRef}
@@ -1135,29 +1148,18 @@ function UserAppShell({
         role={isDrawer && navOpen ? "dialog" : undefined}
         aria-modal={isDrawer && navOpen ? true : undefined}
         aria-label={isDrawer && navOpen ? "Navigation" : undefined}
-        inert={Boolean((isDrawer && !navOpen) || drawer || paletteOpen || memoryOpen)}
+        inert={(isDrawer && !navOpen) || shellInert}
         tabIndex={-1}
       >
         <div className="sidebar-top">
-          <Logo compact={collapsed} brand={data.currentTenant} />
+          {/* Both logos stay mounted so one can dissolve into the other. */}
+          <div className="rail-brand">
+            <Logo decorative={collapsed} brand={data.currentTenant} />
+            <Logo compact decorative={!collapsed} brand={data.currentTenant} />
+          </div>
           {isDrawer && (
             <button className="icon-button" type="button" aria-label="Close navigation" onClick={closeDrawer}>
               <X size={18} />
-            </button>
-          )}
-          {!isDrawer && !autoCollapsed && (
-            <button
-              className="icon-button sidebar-collapse-button"
-              type="button"
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              data-tooltip={
-                collapsed
-                  ? "Expand the sidebar to see your chats and folders again"
-                  : "Collapse the sidebar to give your workspace more room"
-              }
-              onClick={() => setIsRailCollapsed((value) => !value)}
-            >
-              {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
             </button>
           )}
         </div>
@@ -1214,132 +1216,132 @@ function UserAppShell({
           )}
         </nav>
 
-        {!collapsed && (
-          <div className="sidebar-main chat-library">
-            {/* Chat history shows folders first, then pinned chats, then
-             * everything recent. Group labels appear only when more than one
-             * group exists, so a short history stays one list. The heading
-             * hides or shows the whole history. */}
-            <div className="section-label-row chat-library-heading">
-              <button
-                className="chat-library-toggle"
-                type="button"
-                aria-label="Chats"
-                aria-expanded={!chatsHidden}
-                aria-controls="sidebar-chat-sections"
-                aria-description={hiddenChatsSummary}
-                data-tooltip={chatsHidden ? "Show your chats" : "Hide your chats"}
-                onClick={() => updateChatsHidden(!chatsHidden)}
-              >
-                <span className="section-label">Chats</span>
-                <ChevronDown className="chat-library-chevron" size={14} aria-hidden="true" />
-                {chatsHidden && activeChats.length > 0 && (
-                  <span className="chat-library-count" aria-hidden="true">
-                    {activeChats.length}
-                  </span>
-                )}
-                {hiddenChatsUnread && <span className="chat-library-unread" aria-hidden="true" />}
-              </button>
-              {!chatsHidden && (
-                <button
-                  className="section-icon-button folder-create-button"
-                  type="button"
-                  aria-label="Create chat folder"
-                  aria-pressed={isCreatingFolder && folderCreateParentId === null}
-                  data-tooltip="Create a folder to group related chats in your sidebar"
-                  onClick={() => {
-                    setPendingFolderThreadId(null);
-                    if (isCreatingFolder && folderCreateParentId === null) {
-                      setIsCreatingFolder(false);
-                    } else {
-                      startCreatingFolder(null);
-                    }
-                  }}
-                >
-                  <FolderPlus size={15} />
-                </button>
+        {/* The list stays mounted at its open width, so the closing rail passes
+         * over it instead of reflowing it, and inert keeps it out of reach. */}
+        <div className="sidebar-main chat-library" inert={collapsed}>
+          {/* Chat history shows folders first, then pinned chats, then
+           * everything recent. Group labels appear only when more than one
+           * group exists, so a short history stays one list. The heading
+           * hides or shows the whole history. */}
+          <div className="section-label-row chat-library-heading">
+            <button
+              className="chat-library-toggle"
+              type="button"
+              aria-label="Chats"
+              aria-expanded={!chatsHidden}
+              aria-controls="sidebar-chat-sections"
+              aria-description={hiddenChatsSummary}
+              data-tooltip={chatsHidden ? "Show your chats" : "Hide your chats"}
+              onClick={() => updateChatsHidden(!chatsHidden)}
+            >
+              <span className="section-label">Chats</span>
+              <ChevronDown className="chat-library-chevron" size={14} aria-hidden="true" />
+              {chatsHidden && activeChats.length > 0 && (
+                <span className="chat-library-count" aria-hidden="true">
+                  {activeChats.length}
+                </span>
               )}
-            </div>
-
+              {hiddenChatsUnread && <span className="chat-library-unread" aria-hidden="true" />}
+            </button>
             {!chatsHidden && (
-              <div id="sidebar-chat-sections" className="chat-navigation-panel">
-                {(folders.length > 0 || (isCreatingFolder && folderCreateParentId === null)) && (
-                  <div className="chat-section folder-section" role="group" aria-label="Folders">
-                    {isCreatingFolder && folderCreateParentId === null && folderCreateForm}
-                    {folders.length > 0 && (
-                      <div className={clsx("sidebar-list-preview", rootFolders.length > FOLDER_PREVIEW_LIMIT && "has-overflow")}>
-                        {visibleFolders.map((folder) => renderFolderNode(folder, 0))}
-                      </div>
-                    )}
-                    {rootFolders.length > FOLDER_PREVIEW_LIMIT && (
-                      <button
-                        className="link-button sidebar-view-all"
-                        type="button"
-                        data-tooltip="Open the full list of your folders and their chats"
-                        onClick={() => openUtilityDrawer("all-folders")}
-                      >
-                        View all folders
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {pinnedChats.length > 0 && (
-                  <div className="chat-section" role="group" aria-labelledby="sidebar-pinned-label">
-                    <span className="chat-section-label" id="sidebar-pinned-label">Pinned</span>
-                    <div className={clsx("sidebar-list-preview", pinnedChats.length > PINNED_PREVIEW_LIMIT && "has-overflow")}>
-                      {visiblePinnedChats.map(renderChatRow)}
-                    </div>
-                    {pinnedChats.length > PINNED_PREVIEW_LIMIT && (
-                      <button
-                        className="link-button sidebar-view-all"
-                        type="button"
-                        data-tooltip="See every chat you have pinned in one place"
-                        onClick={() => openUtilityDrawer("all-pinned")}
-                      >
-                        View all pinned
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="chat-section recent-section" role="group" aria-labelledby="sidebar-recent-label">
-                  <span
-                    className={clsx(
-                      "chat-section-label",
-                      !(pinnedChats.length > 0 || folders.length > 0) && "sr-only",
-                    )}
-                    id="sidebar-recent-label"
-                  >
-                    Recent
-                  </span>
-                  {recentChats.length > 0 ? (
-                    <>
-                      <div
-                        ref={recentListRef}
-                        className={clsx("sidebar-list-preview", recentChats.length > recentFitCount && "has-overflow")}
-                      >
-                        {visibleRecentChats.map(renderChatRow)}
-                      </div>
-                      {recentChats.length > recentFitCount && (
-                        <button
-                          className="link-button sidebar-view-all"
-                          type="button"
-                          data-tooltip="Browse your full chat history beyond the recent list"
-                          onClick={() => openUtilityDrawer("all-chats")}
-                        >
-                          View all chats
-                        </button>
-                      )}
-                    </>
-                  ) : activeChats.length === 0 ? (
-                    <p className="sidebar-empty">Your conversations will appear here.</p>
-                  ) : null}
-                </div>
-              </div>
+              <button
+                className="section-icon-button folder-create-button"
+                type="button"
+                aria-label="Create chat folder"
+                aria-pressed={isCreatingFolder && folderCreateParentId === null}
+                data-tooltip="Create a folder to group related chats in your sidebar"
+                onClick={() => {
+                  setPendingFolderThreadId(null);
+                  if (isCreatingFolder && folderCreateParentId === null) {
+                    setIsCreatingFolder(false);
+                  } else {
+                    startCreatingFolder(null);
+                  }
+                }}
+              >
+                <FolderPlus size={15} />
+              </button>
             )}
           </div>
-        )}
+
+          {!chatsHidden && (
+            <div id="sidebar-chat-sections" className="chat-navigation-panel">
+              {(folders.length > 0 || (isCreatingFolder && folderCreateParentId === null)) && (
+                <div className="chat-section folder-section" role="group" aria-label="Folders">
+                  {isCreatingFolder && folderCreateParentId === null && folderCreateForm}
+                  {folders.length > 0 && (
+                    <div className={clsx("sidebar-list-preview", rootFolders.length > FOLDER_PREVIEW_LIMIT && "has-overflow")}>
+                      {visibleFolders.map((folder) => renderFolderNode(folder, 0))}
+                    </div>
+                  )}
+                  {rootFolders.length > FOLDER_PREVIEW_LIMIT && (
+                    <button
+                      className="link-button sidebar-view-all"
+                      type="button"
+                      data-tooltip="Open the full list of your folders and their chats"
+                      onClick={() => openUtilityDrawer("all-folders")}
+                    >
+                      View all folders
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {pinnedChats.length > 0 && (
+                <div className="chat-section" role="group" aria-labelledby="sidebar-pinned-label">
+                  <span className="chat-section-label" id="sidebar-pinned-label">Pinned</span>
+                  <div className={clsx("sidebar-list-preview", pinnedChats.length > PINNED_PREVIEW_LIMIT && "has-overflow")}>
+                    {visiblePinnedChats.map(renderChatRow)}
+                  </div>
+                  {pinnedChats.length > PINNED_PREVIEW_LIMIT && (
+                    <button
+                      className="link-button sidebar-view-all"
+                      type="button"
+                      data-tooltip="See every chat you have pinned in one place"
+                      onClick={() => openUtilityDrawer("all-pinned")}
+                    >
+                      View all pinned
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="chat-section recent-section" role="group" aria-labelledby="sidebar-recent-label">
+                <span
+                  className={clsx(
+                    "chat-section-label",
+                    !(pinnedChats.length > 0 || folders.length > 0) && "sr-only",
+                  )}
+                  id="sidebar-recent-label"
+                >
+                  Recent
+                </span>
+                {recentChats.length > 0 ? (
+                  <>
+                    <div
+                      ref={recentListRef}
+                      className={clsx("sidebar-list-preview", recentChats.length > recentFitCount && "has-overflow")}
+                    >
+                      {visibleRecentChats.map(renderChatRow)}
+                    </div>
+                    {recentChats.length > recentFitCount && (
+                      <button
+                        className="link-button sidebar-view-all"
+                        type="button"
+                        data-tooltip="Browse your full chat history beyond the recent list"
+                        onClick={() => openUtilityDrawer("all-chats")}
+                      >
+                        View all chats
+                      </button>
+                    )}
+                  </>
+                ) : activeChats.length === 0 ? (
+                  <p className="sidebar-empty">Your conversations will appear here.</p>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="sidebar-bottom">
           <div className="utility-rows">
@@ -1472,7 +1474,7 @@ function UserAppShell({
           }}
         />
       </aside>
-      <main id="workspace-content" tabIndex={-1} className="main-surface" inert={Boolean((isDrawer && navOpen) || drawer || paletteOpen || memoryOpen)}>{children}</main>
+      <main id="workspace-content" tabIndex={-1} className="main-surface" inert={(isDrawer && navOpen) || shellInert}>{children}</main>
       {paletteOpen && (
         <CommandPalette
           userId={data.me.id}
@@ -1632,7 +1634,7 @@ function UtilityDrawer({
   onProfileUpdate?: (payload: AccountProfileUpdateRequest) => void | User | Promise<User | void>;
   onPasswordUpdate?: (payload: AccountPasswordUpdateRequest) => void | Promise<void>;
   onApiKeyLoad?: () => Promise<AccountApiKeyStatus>;
-  onApiKeyCreate?: () => Promise<AccountApiKeyCreateResponse>;
+  onApiKeyCreate?: (options: { replace: boolean }) => Promise<AccountApiKeyCreateResponse>;
   onApiKeyRevoke?: () => Promise<AccountApiKeyStatus>;
   onSubmitIssueReport?: (payload: IssueReportSubmission) => Promise<IssueReportRecord | void>;
   onOpenIssueReport: () => void;
@@ -1650,35 +1652,13 @@ function UtilityDrawer({
   // Personal daily token caps (only finite ones are ever returned). Fetched
   // when the account drawer opens so the meter reflects today's usage.
   const drawerRef = useRef<HTMLElement>(null);
-  useModalFocus(drawerRef, true, onClose);
-  const [securityOpen, setSecurityOpen] = useState(false);
-  const securityPanelId = useId();
-  // Keep the active security flow as the only interactive account section.
-  // Its recovery codes must survive navigation, profile/password changes,
-  // role previews, sign-out, and keyboard shortcuts until acknowledged.
-  useLayoutEffect(() => {
-    if (!securityCloseBlocked) return;
-    const siblings = Array.from(drawerRef.current?.querySelector(".account-drawer-list")?.children ?? [])
-      .filter((element): element is HTMLElement => element instanceof HTMLElement && !element.classList.contains("account-security-section"));
-    for (const element of siblings) element.setAttribute("inert", "");
-    return () => { for (const element of siblings) element.removeAttribute("inert"); };
-  }, [securityCloseBlocked]);
-  const [myUsageBudget, setMyUsageBudget] = useState<MyUsageBudget | null>(null);
-  useEffect(() => {
-    if (drawer !== "account") return;
-    let active = true;
-    getMyUsageBudget(data.me.id)
-      .then((budget) => {
-        if (active) setMyUsageBudget(budget);
-      })
-      .catch(() => {
-        if (active) setMyUsageBudget(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [drawer, data.me.id]);
-
+  // Open layers inside a drawer take Escape first, wherever focus happens to be.
+  const escapeLayers = useRef<EscapeLayer[]>([]);
+  useModalFocus(drawerRef, true, () => {
+    const innermost = escapeLayers.current.at(-1);
+    if (innermost) innermost.current();
+    else onClose();
+  });
   const title =
     drawer === "help"
       ? "Help"
@@ -1696,40 +1676,15 @@ function UtilityDrawer({
               ? "All folders"
               : "All chats";
   const availableModels = useMemo(() => usableModels(data), [data]);
-  const accountUsage = useMemo(() => accountUsageSummary(threads), [threads]);
   const canOpenAdmin = data.me.role === "TENANT_ADMIN" || data.me.role === "PLATFORM_OWNER";
   const canOpenPlatform = data.me.role === "PLATFORM_OWNER";
-  const visibleAccountConsoles = consoleNav.filter(({ key }) =>
-    key === "platform" ? canOpenPlatform : canOpenAdmin,
-  );
-  const previewRoleOptions = useMemo(() => availablePreviewRoles(actualRole), [actualRole]);
-  const activePreviewRole = viewAsRole ?? actualRole;
+  const accountConsoles = consoleNav
+    .filter(({ key }) => (key === "platform" ? canOpenPlatform : canOpenAdmin))
+    .map(({ key, icon }) => ({ key, icon, tooltip: NAV_TOOLTIPS[key] }));
   const activeThreads = threads.filter((thread) => !thread.archived);
   const pinnedThreads = activeThreads.filter((thread) => thread.pinned);
-  const archivedThreads = threads.filter((thread) => thread.archived);
-  const profileFormId = useId();
-  const profilePhotoInputId = useId();
-  const passwordFormId = useId();
-  const archiveSectionId = useId();
-  const [profileEditing, setProfileEditing] = useState(false);
-  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(() => profileDraftFromUser(data.me));
-  const [passwordEditing, setPasswordEditing] = useState(false);
-  const [passwordDraft, setPasswordDraft] = useState<PasswordDraft>(emptyPasswordDraft);
-  const [profileStatus, setProfileStatus] = useState<string | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [passwordStatus, setPasswordStatus] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [isSavingPassword, setIsSavingPassword] = useState(false);
-  const [apiKeyStatus, setApiKeyStatus] = useState<AccountApiKeyStatus | null>(null);
-  const [apiKeySecret, setApiKeySecret] = useState<string | null>(null);
-  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
-  const [apiKeyBusy, setApiKeyBusy] = useState(false);
-  const [apiCopied, setApiCopied] = useState<"url" | "key" | null>(null);
-  const [archiveOpen, setArchiveOpen] = useState(false);
   const [chatFilterText, setChatFilterText] = useState("");
   const [folderMenuThreadId, setFolderMenuThreadId] = useState<string | null>(null);
-  const canUpdatePassword = data.me.auth_method === "local";
   const normalizedChatFilter = chatFilterText.trim().toLowerCase();
   const filteredActiveThreads = normalizedChatFilter
     ? activeThreads.filter((thread) => thread.title.toLowerCase().includes(normalizedChatFilter))
@@ -1742,31 +1697,6 @@ function UtilityDrawer({
       : data.me.group_ids.some((groupId) =>
           Boolean(data.groups.find((group) => group.id === groupId)?.permissions.api_access),
         ));
-  const apiAccessEnabled = apiKeyStatus?.enabled ?? locallyGrantedApiAccess;
-  const apiBaseUrl = `${window.location.origin.replace(/\/$/, "")}/v1`;
-
-  const handleDeleteArchived = (thread: ChatThread) => {
-    const confirmed = window.confirm(
-      `Permanently delete "${thread.title}"? This removes the full conversation and cannot be undone.`,
-    );
-    if (!confirmed) return;
-    onDeleteThread(thread.id);
-  };
-
-  useEffect(() => {
-    setProfileDraft(profileDraftFromUser(data.me));
-    setPasswordDraft(emptyPasswordDraft());
-    setProfileError(null);
-    setPasswordError(null);
-    setProfileStatus(null);
-    setPasswordStatus(null);
-    setProfileEditing(false);
-    setPasswordEditing(false);
-    setApiKeyStatus(null);
-    setApiKeySecret(null);
-    setApiKeyError(null);
-    setApiCopied(null);
-  }, [data.me.id]);
 
   // The title filter and any open folder menu are scoped to one drawer
   // visit; switching panels clears them.
@@ -1877,215 +1807,6 @@ function UtilityDrawer({
       )}
     </div>
   );
-
-  useEffect(() => {
-    if (drawer !== "account" || !onApiKeyLoad) return;
-    let cancelled = false;
-    setApiKeyBusy(true);
-    setApiKeyError(null);
-    void onApiKeyLoad()
-      .then((status) => {
-        if (!cancelled) setApiKeyStatus(status);
-      })
-      .catch((error) => {
-        if (!cancelled) setApiKeyError(error instanceof Error ? error.message : "Could not load API access.");
-      })
-      .finally(() => {
-        if (!cancelled) setApiKeyBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [data.me.id, drawer, onApiKeyLoad]);
-
-  useEffect(() => {
-    if (!profileEditing) setProfileDraft(profileDraftFromUser(data.me));
-  }, [data.me.avatar_url, data.me.bio, data.me.display_name, data.me.firm_name, data.me.phone, data.me.website_url, profileEditing]);
-
-  const handleProfilePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setProfileError("Choose an image file for your profile photo.");
-      return;
-    }
-    if (file.size > PROFILE_IMAGE_MAX_BYTES) {
-      setProfileError("Choose a profile photo that is 5 MB or smaller.");
-      return;
-    }
-    void (async () => {
-      let result: string | null = null;
-      if (typeof createImageBitmap === "function") {
-        result = await downscaleProfilePhotoToDataUrl(file);
-      }
-      if (!result) {
-        // No bitmap/canvas support here: store the raw file, which the 5 MB
-        // gates above and at submit time still bound.
-        result = await readProfilePhotoAsDataUrl(file);
-      }
-      if (!result) {
-        setProfileError("Could not read that image file.");
-        return;
-      }
-      setProfileError(null);
-      setProfileDraft((current) => ({ ...current, avatarUrl: result }));
-    })();
-  };
-
-  const handleProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!onProfileUpdate) {
-      setProfileError("Profile updates are not connected.");
-      return;
-    }
-    const displayName = profileDraft.displayName.trim();
-    const firmName = profileDraft.firmName.trim();
-    const websiteUrl = profileDraft.websiteUrl.trim();
-    const phone = profileDraft.phone.trim();
-    const bio = profileDraft.bio.trim();
-    const avatarUrl = profileDraft.avatarUrl.trim();
-    if (!displayName) {
-      setProfileError("Enter a username or display name.");
-      return;
-    }
-    if (websiteUrl && !/^https?:\/\/\S+$/i.test(websiteUrl)) {
-      setProfileError("Use a complete http(s) website URL.");
-      return;
-    }
-    if (avatarUrl && !isProfileImageReference(avatarUrl)) {
-      setProfileError("Use an http(s), relative, or uploaded image for your profile photo.");
-      return;
-    }
-    if (avatarUrl.startsWith("data:image/")) {
-      const decodedBytes = profileImageDataUrlByteLength(avatarUrl);
-      if (decodedBytes === null) {
-        setProfileError("Uploaded profile photo data is invalid.");
-        return;
-      }
-      if (decodedBytes > PROFILE_IMAGE_MAX_BYTES) {
-        setProfileError("Choose a profile photo that is 5 MB or smaller.");
-        return;
-      }
-    }
-
-    setIsSavingProfile(true);
-    setProfileError(null);
-    setProfileStatus(null);
-    try {
-      await onProfileUpdate({
-        display_name: displayName,
-        firm_name: firmName || null,
-        website_url: websiteUrl || null,
-        phone: phone || null,
-        bio: bio || null,
-        avatar_url: avatarUrl || null,
-      });
-      setProfileEditing(false);
-      setProfileStatus("Profile saved.");
-    } catch (error) {
-      setProfileError(error instanceof Error ? error.message : "Could not save profile.");
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
-
-  const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!onPasswordUpdate) {
-      setPasswordError("Password updates are not connected.");
-      return;
-    }
-    if (!canUpdatePassword) {
-      setPasswordError("Password changes are managed by your SSO provider.");
-      return;
-    }
-    if (!passwordDraft.currentPassword) {
-      setPasswordError("Enter your current password.");
-      return;
-    }
-    if (passwordDraft.newPassword.length < 12) {
-      setPasswordError("Use a password with at least 12 characters.");
-      return;
-    }
-    if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
-      setPasswordError("The new passwords do not match.");
-      return;
-    }
-
-    setIsSavingPassword(true);
-    setPasswordError(null);
-    setPasswordStatus(null);
-    try {
-      await onPasswordUpdate({
-        current_password: passwordDraft.currentPassword,
-        new_password: passwordDraft.newPassword,
-      });
-      setPasswordDraft(emptyPasswordDraft());
-      setPasswordStatus("Password updated.");
-      setPasswordEditing(false);
-    } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : "Could not update password.");
-    } finally {
-      setIsSavingPassword(false);
-    }
-  };
-
-  const handleApiKeyCreate = async () => {
-    if (!onApiKeyCreate) {
-      setApiKeyError("API key management is not connected.");
-      return;
-    }
-    if (apiKeyStatus?.has_key) {
-      const confirmed = window.confirm(
-        "Rotate this API key? The current key will stop working immediately.",
-      );
-      if (!confirmed) return;
-    }
-    setApiKeyBusy(true);
-    setApiKeyError(null);
-    setApiKeySecret(null);
-    try {
-      const created = await onApiKeyCreate();
-      setApiKeyStatus(created);
-      setApiKeySecret(created.secret_value);
-    } catch (error) {
-      setApiKeyError(error instanceof Error ? error.message : "Could not create the API key.");
-    } finally {
-      setApiKeyBusy(false);
-    }
-  };
-
-  const handleApiKeyRevoke = async () => {
-    if (!onApiKeyRevoke) {
-      setApiKeyError("API key management is not connected.");
-      return;
-    }
-    const confirmed = window.confirm(
-      "Revoke this API key? Any connected coding tools will lose access immediately.",
-    );
-    if (!confirmed) return;
-    setApiKeyBusy(true);
-    setApiKeyError(null);
-    try {
-      setApiKeyStatus(await onApiKeyRevoke());
-      setApiKeySecret(null);
-    } catch (error) {
-      setApiKeyError(error instanceof Error ? error.message : "Could not revoke the API key.");
-    } finally {
-      setApiKeyBusy(false);
-    }
-  };
-
-  const copyApiValue = async (value: string, field: "url" | "key") => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setApiCopied(field);
-      window.setTimeout(() => setApiCopied((current) => (current === field ? null : current)), 1800);
-    } catch {
-      setApiKeyError("Clipboard access is unavailable. Select and copy the value manually.");
-    }
-  };
 
   return (
     <>
@@ -2303,703 +2024,34 @@ function UtilityDrawer({
         )}
 
         {drawer === "account" && (
-          <div className="drawer-list account-drawer-list">
-            <button
-              className="drawer-account drawer-account-button"
-              type="button"
-              aria-label={`Edit account profile for ${data.me.display_name}`}
-              data-tooltip="Edit your display name, firm, website, bio, phone number, and photo"
-              onClick={() => setProfileEditing(true)}
-            >
-              <UserAvatar user={data.me} />
-              <span className="account-profile-summary">
-                <strong className="account-profile-name">{data.me.display_name}</strong>
-                <span className="account-profile-field">
-                  <span className="account-profile-field-label">Email</span>
-                  <small>{data.me.email}</small>
-                </span>
-                {data.me.phone && (
-                  <span className="account-profile-field">
-                    <span className="account-profile-field-label">Phone</span>
-                    <small>{data.me.phone}</small>
-                  </span>
-                )}
-                {data.me.firm_name && (
-                  <span className="account-profile-field">
-                    <span className="account-profile-field-label">Position</span>
-                    <small>{data.me.firm_name}</small>
-                  </span>
-                )}
-                {data.me.bio && (
-                  <span className="account-profile-field">
-                    <span className="account-profile-field-label">Bio</span>
-                    <small>{data.me.bio}</small>
-                  </span>
-                )}
-              </span>
-              <Pencil size={16} />
-            </button>
-            {visibleAccountConsoles.length > 0 && (
-              <details className="drawer-card account-collapsible-card account-console-card">
-                <summary className="account-collapsible-summary">
-                  <span className="account-collapsible-summary-copy">
-                    <strong>Management</strong>
-                    <small>
-                      {currentView === "platform"
-                        ? "Platform owner console active"
-                        : currentView === "admin"
-                          ? "Admin console active"
-                          : `${visibleAccountConsoles.length} ${visibleAccountConsoles.length === 1 ? "console" : "consoles"} available`}
-                    </small>
-                  </span>
-                  <ChevronDown className="account-collapsible-chevron" size={16} aria-hidden="true" />
-                </summary>
-                <div className="account-collapsible-content account-console-actions">
-                  {visibleAccountConsoles.map(({ key, icon: Icon }) => {
-                    const isActive = currentView === key;
-                    const label = key === "platform" ? "Platform owner console" : "Admin console";
-                    const pendingRequests =
-                      key === "admin" && typeof data.modelAccessRequestCount === "number"
-                        ? data.modelAccessRequestCount
-                        : 0;
-                    const description =
-                      key === "platform"
-                        ? "Providers, organization policy, and audit"
-                        : pendingRequests > 0
-                          ? `${pendingRequests} model access ${pendingRequests === 1 ? "request" : "requests"} waiting`
-                          : "Users, groups, model access, and connections";
-                    return (
-                      <button
-                        key={key}
-                        className={clsx("account-console-link", isActive && "is-active")}
-                        type="button"
-                        aria-current={isActive ? "page" : undefined}
-                        data-tooltip={NAV_TOOLTIPS[key]}
-                        onClick={() => onSelectView(key)}
-                      >
-                        <Icon size={16} />
-                        <span>
-                          <strong>{label}</strong>
-                          <small>{description}</small>
-                        </span>
-                        {pendingRequests > 0 && (
-                          <span className="pill pill-warning" aria-label={`${pendingRequests} pending model access requests`}>
-                            {pendingRequests}
-                          </span>
-                        )}
-                        <ChevronRight size={15} aria-hidden="true" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </details>
-            )}
-            {profileStatus && !profileEditing && <small className="drawer-success account-inline-status">{profileStatus}</small>}
-            {profileEditing && (
-              <form className="drawer-card account-profile-form" onSubmit={handleProfileSubmit} noValidate>
-                <div className="account-form-heading">
-                  <strong>Profile</strong>
-                  <span>Update the identity details shown in role-authorized user directories.</span>
-                </div>
-                <div className="account-avatar-editor">
-                  <UserAvatar
-                    user={{
-                      ...data.me,
-                      display_name: profileDraft.displayName || data.me.display_name,
-                      avatar_url: profileDraft.avatarUrl || null,
-                    }}
-                    className="avatar account-profile-avatar"
-                  />
-                  <div className="account-photo-actions">
-                    <label
-                      className="secondary-button"
-                      htmlFor={profilePhotoInputId}
-                      data-tooltip="Choose an image from your device for your profile photo"
-                    >
-                      <Camera size={14} />
-                      Upload photo
-                    </label>
-                    <input
-                      id={profilePhotoInputId}
-                      className="sr-only"
-                      type="file"
-                      accept="image/*"
-                      onChange={handleProfilePhotoChange}
-                    />
-                    <small className="account-photo-hint">Image files up to 5 MB.</small>
-                    {profileDraft.avatarUrl && (
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        data-tooltip="Remove your photo and go back to your initials avatar"
-                        onClick={() => setProfileDraft((current) => ({ ...current, avatarUrl: "" }))}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <label htmlFor={`${profileFormId}-name`}>
-                  Username
-                  <input
-                    id={`${profileFormId}-name`}
-                    value={profileDraft.displayName}
-                    onChange={(event) => setProfileDraft((current) => ({ ...current, displayName: event.target.value }))}
-                    placeholder="Your display name"
-                    maxLength={120}
-                  />
-                </label>
-                <label htmlFor={`${profileFormId}-phone`}>
-                  Phone number
-                  <input
-                    id={`${profileFormId}-phone`}
-                    value={profileDraft.phone}
-                    onChange={(event) => setProfileDraft((current) => ({ ...current, phone: event.target.value }))}
-                    placeholder="+1 555 0100"
-                    maxLength={40}
-                  />
-                </label>
-                <label htmlFor={`${profileFormId}-firm`}>
-                  Firm or organization
-                  <input
-                    id={`${profileFormId}-firm`}
-                    value={profileDraft.firmName}
-                    onChange={(event) => setProfileDraft((current) => ({ ...current, firmName: event.target.value }))}
-                    placeholder="Organization name"
-                    maxLength={160}
-                  />
-                </label>
-                <label htmlFor={`${profileFormId}-website`}>
-                  Website
-                  <input
-                    id={`${profileFormId}-website`}
-                    type="url"
-                    value={profileDraft.websiteUrl}
-                    onChange={(event) => setProfileDraft((current) => ({ ...current, websiteUrl: event.target.value }))}
-                    placeholder="https://example.com"
-                    maxLength={2048}
-                  />
-                </label>
-                <label htmlFor={`${profileFormId}-photo-url`}>
-                  Profile photo URL
-                  <input
-                    id={`${profileFormId}-photo-url`}
-                    value={profileDraft.avatarUrl}
-                    onChange={(event) => setProfileDraft((current) => ({ ...current, avatarUrl: event.target.value }))}
-                    placeholder="https://example.com/photo.jpg"
-                  />
-                </label>
-                <label htmlFor={`${profileFormId}-bio`}>
-                  Bio
-                  <textarea
-                    id={`${profileFormId}-bio`}
-                    value={profileDraft.bio}
-                    onChange={(event) => setProfileDraft((current) => ({ ...current, bio: event.target.value }))}
-                    placeholder="Add a short note about your role or focus."
-                    rows={4}
-                    maxLength={500}
-                  />
-                </label>
-                {profileError && <small className="drawer-error">{profileError}</small>}
-                <div className="drawer-form-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    data-tooltip="Discard your profile edits and keep your current details"
-                    onClick={() => {
-                      setProfileDraft(profileDraftFromUser(data.me));
-                      setProfileEditing(false);
-                      setProfileError(null);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="primary-button account-form-submit-button"
-                    type="submit"
-                    disabled={isSavingProfile}
-                    data-tooltip="Save these profile changes so teammates see them"
-                  >
-                    {isSavingProfile ? "Saving…" : "Save profile"}
-                  </button>
-                </div>
-              </form>
-            )}
-            {apiAccessEnabled && <details className="drawer-card account-collapsible-card account-api-card">
-              <summary className="account-collapsible-summary">
-                <span className="account-collapsible-summary-copy">
-                  <strong>API access</strong>
-                  <small>{apiKeyStatus?.has_key ? "Personal key active" : "OpenAI-compatible access"}</small>
-                </span>
-                <span className="account-api-state is-enabled">Enabled</span>
-                <ChevronDown className="account-collapsible-chevron" size={16} aria-hidden="true" />
-              </summary>
-              <div className="account-collapsible-content">
-                {apiKeyBusy && apiKeyStatus === null ? (
-                  <span>Checking your API access…</span>
-                ) : (
-                  <div className="account-api-content">
-                  <label>
-                    Platform URL
-                    <span className="account-api-value-row">
-                      <input aria-label="Platform API URL" readOnly value={apiBaseUrl} />
-                      <button
-                        className="secondary-button account-api-copy-button"
-                        type="button"
-                        aria-label="Copy platform API URL"
-                        data-tooltip="Copy the OpenAI-compatible base URL"
-                        onClick={() => void copyApiValue(apiBaseUrl, "url")}
-                      >
-                        {apiCopied === "url" ? <Check size={14} /> : <Copy size={14} />}
-                        {apiCopied === "url" ? "Copied" : "Copy"}
-                      </button>
-                    </span>
-                  </label>
-                  {apiKeySecret ? (
-                    <div className="account-api-secret">
-                      <strong>New API key</strong>
-                      <span>Copy it now. For security, the full key is shown only once.</span>
-                      <span className="account-api-value-row">
-                        <input aria-label="New API key" readOnly value={apiKeySecret} />
-                        <button
-                          className="secondary-button account-api-copy-button"
-                          type="button"
-                          aria-label="Copy API key"
-                          data-tooltip="Copy this key before closing the account panel"
-                          onClick={() => void copyApiValue(apiKeySecret, "key")}
-                        >
-                          {apiCopied === "key" ? <Check size={14} /> : <Copy size={14} />}
-                          {apiCopied === "key" ? "Copied" : "Copy"}
-                        </button>
-                      </span>
-                    </div>
-                  ) : apiKeyStatus?.has_key ? (
-                    <div className="account-api-existing">
-                      <span>
-                        <b>Active key</b>
-                        <code>{apiKeyStatus.masked_value}</code>
-                      </span>
-                      <small>
-                        Created {formatApiTimestamp(apiKeyStatus.created_at)}
-                        {apiKeyStatus.last_used_at
-                          ? ` · Last used ${formatApiTimestamp(apiKeyStatus.last_used_at)}`
-                          : " · Not used yet"}
-                      </small>
-                    </div>
-                  ) : (
-                    <span>Create a personal key to use this workspace through its OpenAI-compatible API.</span>
-                  )}
-                  <div className="account-api-actions">
-                    <button
-                      className="primary-button account-api-action-button"
-                      type="button"
-                      disabled={apiKeyBusy || !onApiKeyCreate}
-                      data-tooltip={apiKeyStatus?.has_key ? "Replace the current API key" : "Create a personal API key"}
-                      onClick={() => void handleApiKeyCreate()}
-                    >
-                      {apiKeyStatus?.has_key ? <RefreshCw size={14} /> : <KeyRound size={14} />}
-                      {apiKeyStatus?.has_key ? "Rotate key" : "Create key"}
-                    </button>
-                    {apiKeyStatus?.has_key && (
-                      <button
-                        className="secondary-button account-api-action-button is-danger"
-                        type="button"
-                        disabled={apiKeyBusy || !onApiKeyRevoke}
-                        data-tooltip="Revoke the current key immediately"
-                        onClick={() => void handleApiKeyRevoke()}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </div>
-                  </div>
-                )}
-                {apiKeyError && <small className="drawer-error">{apiKeyError}</small>}
-              </div>
-            </details>}
-            {memoryAvailable && onOpenMemory && (
-              <button
-                className="drawer-row"
-                type="button"
-                data-tooltip="Review, correct, or delete what the assistant remembers about you"
-                onClick={onOpenMemory}
-              >
-                <Brain size={16} />
-                <span>
-                  <strong>Personalization memory</strong>
-                  <small>{memoryDrawerHint(data)}</small>
-                </span>
-              </button>
-            )}
-            <section className="drawer-card account-security-section" aria-label="Account security">
-              <div className="account-card-heading">
-                <span className="account-password-heading-copy">
-                  <strong>Security</strong>
-                  <small>Authenticator and recovery codes</small>
-                </span>
-                <button className="secondary-button" type="button" aria-expanded={securityOpen}
-                  aria-controls={securityPanelId} disabled={securityCloseBlocked}
-                  onClick={() => setSecurityOpen((open) => !open)}>
-                  <ShieldCheck size={15} /> {securityOpen ? "Close security" : "Manage security"}
-                </button>
-              </div>
-              {securityOpen && <div id={securityPanelId} className="account-security-expanded">
-                {securityCloseBlocked && <p className="account-security-guard-note" role="status">Finish verification or save your recovery codes before leaving this panel.</p>}
-                <AccountSecurity user={data.me} onSignOut={onSignOut} onCloseGuardChange={onSecurityCloseGuardChange} />
-              </div>}
-            </section>
-            <div
-              className={`drawer-card account-password-card ${passwordEditing ? "is-editing" : "is-compact"}`}
-            >
-              <div className="account-card-heading">
-                <span className="account-password-heading-copy">
-                  <strong>Password</strong>
-                  {!passwordEditing && (
-                    <small>{canUpdatePassword ? "Local account" : "Managed by SSO"}</small>
-                  )}
-                </span>
-                {canUpdatePassword ? (
-                  <button
-                    className="secondary-button account-password-edit-button"
-                    type="button"
-                    aria-expanded={passwordEditing}
-                    aria-controls={`${passwordFormId}-panel`}
-                    data-tooltip={
-                      passwordEditing
-                        ? "Close the password form without making changes"
-                        : "Open the form to set a new account password"
-                    }
-                    onClick={() => {
-                      setPasswordEditing((current) => !current);
-                      setPasswordError(null);
-                    }}
-                  >
-                    <Pencil size={14} />
-                    {passwordEditing ? "Close" : "Edit"}
-                  </button>
-                ) : (
-                  <KeyRound size={16} aria-hidden="true" />
-                )}
-              </div>
-              {canUpdatePassword ? (
-                passwordEditing ? (
-                  <form id={`${passwordFormId}-panel`} className="account-password-form" onSubmit={handlePasswordSubmit} noValidate>
-                    <label htmlFor={`${passwordFormId}-current`}>
-                      Current password
-                      <input
-                        id={`${passwordFormId}-current`}
-                        type="password"
-                        autoComplete="current-password"
-                        value={passwordDraft.currentPassword}
-                        onChange={(event) =>
-                          setPasswordDraft((current) => ({ ...current, currentPassword: event.target.value }))
-                        }
-                      />
-                    </label>
-                    <label htmlFor={`${passwordFormId}-new`}>
-                      New password
-                      <input
-                        id={`${passwordFormId}-new`}
-                        type="password"
-                        autoComplete="new-password"
-                        value={passwordDraft.newPassword}
-                        onChange={(event) =>
-                          setPasswordDraft((current) => ({ ...current, newPassword: event.target.value }))
-                        }
-                        placeholder="At least 12 characters"
-                      />
-                    </label>
-                    <label htmlFor={`${passwordFormId}-confirm`}>
-                      Confirm new password
-                      <input
-                        id={`${passwordFormId}-confirm`}
-                        type="password"
-                        autoComplete="new-password"
-                        value={passwordDraft.confirmPassword}
-                        onChange={(event) =>
-                          setPasswordDraft((current) => ({ ...current, confirmPassword: event.target.value }))
-                        }
-                      />
-                    </label>
-                    {passwordError && <small className="drawer-error">{passwordError}</small>}
-                    {passwordStatus && <small className="drawer-success">{passwordStatus}</small>}
-                    <div className="drawer-form-actions">
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        data-tooltip="Close the password form and keep your current password"
-                        onClick={() => {
-                          setPasswordEditing(false);
-                          setPasswordDraft(emptyPasswordDraft());
-                          setPasswordError(null);
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="primary-button account-form-submit-button"
-                        type="submit"
-                        disabled={isSavingPassword}
-                        data-tooltip="Replace your current password with the new one"
-                      >
-                        {isSavingPassword ? "Updating…" : "Update password"}
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  passwordStatus && <small className="drawer-success">{passwordStatus}</small>
-                )
-              ) : null}
-            </div>
-            <div className="drawer-card account-detail-card">
-              <div className="account-detail-grid">
-                <span>
-                  <b>Role</b>
-                  {roleLabel(data.me.role)}
-                </span>
-                <span>
-                  <b>Organization</b>
-                  {data.currentTenant.name}
-                </span>
-                {(myUsageBudget?.caps ?? []).map((cap) => (
-                  <span key={`${cap.scope}:${cap.label}`}>
-                    <b>
-                      {cap.scope === "user"
-                        ? cap.budget_period === "lifetime"
-                          ? "Temporary token grant"
-                          : `${cap.budget_period === "day" ? "Daily" : cap.budget_period === "week" ? "Weekly" : "Monthly"} tokens`
-                        : `${cap.label} · ${cap.budget_period}`}
-                    </b>
-                    {cap.reported_tokens.toLocaleString()} / {cap.daily_token_limit.toLocaleString()}{" "}
-                    used this {cap.budget_period}
-                  </span>
-                ))}
-                <span>
-                  <b>Auth method</b>
-                  {data.me.auth_method ?? "sso"}
-                </span>
-              </div>
-            </div>
-            {previewRoleOptions.length > 1 && (
-              <div className="drawer-card view-as-card">
-                <strong>View as</strong>
-                <span>Preview the workspace with another role.</span>
-                <div className="view-as-options" role="group" aria-label="Preview role">
-                  {previewRoleOptions.map((role) => {
-                    const selected = activePreviewRole === role;
-                    return (
-                      <button
-                        key={role}
-                        className={clsx("view-as-option", selected && "is-active")}
-                        type="button"
-                        aria-pressed={selected}
-                        data-tooltip={
-                          role === actualRole
-                            ? "Return to your own role and stop previewing"
-                            : `Preview the workspace as a ${previewRoleLabel(role)} would see it`
-                        }
-                        onClick={() => onViewAsRoleChange(role === actualRole ? null : role)}
-                      >
-                        {previewRoleLabel(role)}
-                      </button>
-                    );
-                  })}
-                </div>
-                {viewAsRole && (
-                  <small className="view-as-note">
-                    Previewing {previewRoleLabel(viewAsRole)}. Your account role is {previewRoleLabel(actualRole)}.
-                  </small>
-                )}
-              </div>
-            )}
-            <div className="drawer-card">
-              <strong>Usage this month</strong>
-              <div className="account-usage-grid">
-                <span>
-                  <b>{accountUsage.prompts}</b>
-                  prompts
-                </span>
-                <span>
-                  <b>{accountUsage.responses}</b>
-                  responses
-                </span>
-                <span>
-                  <b>{formatNumber(accountUsage.estimatedTokens)}</b>
-                  est. tokens
-                </span>
-              </div>
-            </div>
-            <div className="drawer-card account-archived-card">
-              <div className="account-card-heading">
-                <strong>Archived chats</strong>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  aria-expanded={archiveOpen}
-                  aria-controls={`${archiveSectionId}-panel`}
-                  data-tooltip={
-                    archiveOpen
-                      ? "Collapse your archived chats"
-                      : "Review archived chats to restore or permanently delete them"
-                  }
-                  onClick={() => setArchiveOpen((current) => !current)}
-                >
-                  <Archive size={14} />
-                  {archiveOpen ? "Close" : archivedThreads.length > 0 ? `View (${archivedThreads.length})` : "View"}
-                </button>
-              </div>
-              {archiveOpen ? (
-                <div id={`${archiveSectionId}-panel`} className="account-archived-list">
-                  {archivedThreads.length > 0 ? (
-                    archivedThreads.map((thread) => (
-                      <div className="account-archived-row" key={thread.id}>
-                        {thread.used_agent ? <Bot size={16} /> : <MessageSquare size={16} />}
-                        <ChatPreview thread={thread}>
-                          <span className="account-archived-summary" tabIndex={0}>
-                            <strong>{thread.title}</strong>
-                            <small>Archived · {thread.updated_at}</small>
-                          </span>
-                        </ChatPreview>
-                        <span className="account-archived-actions">
-                          <button
-                            className="archived-chat-action"
-                            type="button"
-                            aria-label={`Restore ${thread.title}`}
-                            data-tooltip={`Return "${thread.title}" to your sidebar`}
-                            onClick={() => onRestoreThread(thread.id)}
-                          >
-                            <ArchiveRestore size={14} />
-                          </button>
-                          <button
-                            className="archived-chat-action is-danger"
-                            type="button"
-                            aria-label={`Permanently delete ${thread.title}`}
-                            data-tooltip={`Permanently delete "${thread.title}" — this cannot be undone`}
-                            onClick={() => handleDeleteArchived(thread)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="account-archived-empty">
-                      No archived chats. Archive a chat from the sidebar to keep it here without deleting it.
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <span>
-                  {archivedThreads.length > 0
-                    ? `${archivedThreads.length} archived ${archivedThreads.length === 1 ? "chat" : "chats"}. Restore them or permanently delete them.`
-                    : "Chats you archive from the sidebar are kept here."}
-                </span>
-              )}
-            </div>
-            {onSignOut && (
-              <button
-                className="drawer-row"
-                type="button"
-                data-tooltip={`Sign out of ${data.currentTenant.chat_brand_name?.trim() || "Aperture Chat"} and end this session`}
-                onClick={onRequestSignOut ?? onSignOut}
-              >
-                <LogOut size={16} />
-                <span>
-                  <strong>Sign out</strong>
-                  <small>End this session.</small>
-                </span>
-              </button>
-            )}
-          </div>
+          <AccountDrawer
+            data={data}
+            actualRole={actualRole}
+            viewAsRole={viewAsRole}
+            onViewAsRoleChange={onViewAsRoleChange}
+            threads={threads}
+            consoles={accountConsoles}
+            currentView={currentView}
+            onSelectView={onSelectView}
+            onSecurityCloseGuardChange={onSecurityCloseGuardChange}
+            escapeLayers={escapeLayers.current}
+            apiAccessGranted={locallyGrantedApiAccess}
+            onApiKeyLoad={onApiKeyLoad}
+            onApiKeyCreate={onApiKeyCreate}
+            onApiKeyRevoke={onApiKeyRevoke}
+            onProfileUpdate={onProfileUpdate}
+            onPasswordUpdate={onPasswordUpdate}
+            memoryHint={memoryAvailable ? memoryDrawerHint(data) : null}
+            onOpenMemory={onOpenMemory}
+            onRestoreThread={onRestoreThread}
+            onDeleteThread={onDeleteThread}
+            onSignOut={onSignOut}
+            onRequestSignOut={onRequestSignOut}
+          />
         )}
       </aside>
     </>
   );
-}
-
-type ProfileDraft = {
-  displayName: string;
-  firmName: string;
-  websiteUrl: string;
-  phone: string;
-  bio: string;
-  avatarUrl: string;
-};
-
-type PasswordDraft = {
-  currentPassword: string;
-  newPassword: string;
-  confirmPassword: string;
-};
-
-function profileDraftFromUser(user: User): ProfileDraft {
-  return {
-    displayName: user.display_name,
-    firmName: user.firm_name ?? "",
-    websiteUrl: user.website_url ?? "",
-    phone: user.phone ?? "",
-    bio: user.bio ?? "",
-    avatarUrl: user.avatar_url ?? "",
-  };
-}
-
-function emptyPasswordDraft(): PasswordDraft {
-  return {
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  };
-}
-
-async function downscaleProfilePhotoToDataUrl(file: File): Promise<string | null> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, PROFILE_PHOTO_MAX_EDGE / Math.max(bitmap.width, bitmap.height, 1));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    // JPEG keeps photos small; PNG sources stay PNG so transparency survives.
-    return file.type === "image/png"
-      ? canvas.toDataURL("image/png")
-      : canvas.toDataURL("image/jpeg", 0.85);
-  } catch {
-    return null;
-  }
-}
-
-function readProfilePhotoAsDataUrl(file: File): Promise<string | null> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      resolve(typeof reader.result === "string" && reader.result ? reader.result : null);
-    });
-    reader.addEventListener("error", () => resolve(null));
-    reader.readAsDataURL(file);
-  });
-}
-
-function isProfileImageReference(value: string) {
-  if (value.startsWith("data:image/")) return true;
-  if (value.startsWith("/")) return true;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function profileImageDataUrlByteLength(value: string): number | null {
-  const commaIndex = value.indexOf(",");
-  if (commaIndex < 0 || !value.slice(0, commaIndex).toLowerCase().includes(";base64")) return null;
-  const encoded = value.slice(commaIndex + 1).replace(/\s/g, "");
-  if (!encoded) return 0;
-  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
-  return Math.floor((encoded.length * 3) / 4) - padding;
 }
 
 /** Moves focus within a chat row menu: step 0 focuses the first item, and
@@ -3011,41 +2063,6 @@ function focusChatMenuItem(menu: HTMLElement | null, step: 1 | -1 | 0) {
   const current = items.indexOf(document.activeElement as HTMLButtonElement);
   const next = step === 0 || current < 0 ? 0 : (current + step + items.length) % items.length;
   items[next]?.focus();
-}
-
-function availablePreviewRoles(role: Role): Role[] {
-  if (role === "PLATFORM_OWNER") return ["PLATFORM_OWNER", "TENANT_ADMIN", "USER"];
-  if (role === "TENANT_ADMIN") return ["TENANT_ADMIN", "USER"];
-  return [role];
-}
-
-function previewRoleLabel(role: Role) {
-  return PREVIEW_ROLE_LABELS[role] ?? roleLabel(role);
-}
-
-function roleLabel(role: string) {
-  return ROLE_LABELS[role as Role] ?? "User";
-}
-
-function formatApiTimestamp(value?: string | null) {
-  if (!value) return "recently";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: parsed.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(parsed);
-}
-
-function accountUsageSummary(threads: ChatThread[]) {
-  const messages = threads.flatMap((thread) => thread.messages);
-  const prompts = messages.filter((message) => message.role === "user").length;
-  const responses = messages.filter((message) => message.role === "assistant" && message.status !== "pending").length;
-  const estimatedTokens = messages.reduce((total, message) => total + estimateTokens(message), 0);
-  return { prompts, responses, estimatedTokens };
 }
 
 function previewThreads(threads: ChatThread[], limit: number, activeChatId: string): ChatThread[] {
@@ -3064,17 +2081,6 @@ function previewFolders(folders: ChatFolder[], limit: number, expandedFolderId: 
     return [...folders.slice(0, limit - 1), folders[expandedIndex]];
   }
   return folders.slice(0, limit);
-}
-
-function estimateTokens(message: ChatMessage) {
-  const content = message.content.trim();
-  const contentTokens = content ? Math.max(1, Math.ceil(content.length / 4)) : 0;
-  const attachmentTokens = (message.attachments?.length ?? 0) * 25;
-  return contentTokens + attachmentTokens;
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
 function readSavedRailWidth() {

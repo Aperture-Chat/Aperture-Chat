@@ -412,12 +412,15 @@ export function WorkTrace({
   state,
   onStop,
   thinkingTraces = [],
+  upNext,
 }: {
   message: ChatMessage;
   brandName: string;
   state: "pending" | "complete";
   onStop?: () => void;
   thinkingTraces?: string[];
+  /** A run with a planned path says what comes next instead of the reply's default. */
+  upNext?: string;
 }) {
   const assistantName = brandName || "The assistant";
   const pending = state === "pending";
@@ -425,7 +428,8 @@ export function WorkTrace({
   const steps = readTrace(message.activityTrace);
   const reveal = useTraceReveal(pending, message.startedAtMs, steps);
   const startedAt = message.startedAtMs ?? now;
-  const running = pending ? visibleRunningView(message, startedAt, now, reveal.shown) : null;
+  const view = pending ? visibleRunningView(message, startedAt, now, reveal.shown) : null;
+  const running = view && upNext ? { ...view, upNext } : view;
   const summary = traceSummary(steps);
 
   return (

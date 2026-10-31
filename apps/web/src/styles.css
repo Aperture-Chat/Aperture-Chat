@@ -289,6 +289,7 @@ button:disabled {
   overflow: hidden;
   transition: background var(--speed) var(--ease);
   --sidebar-padding-y: 14px;
+  --sidebar-top-height: 38px;
   --sidebar-nav-gap: 2px;
   --sidebar-nav-margin: 18px 0 13px;
   --sidebar-nav-row-height: 36px;
@@ -338,74 +339,18 @@ button:disabled {
 }
 
 .sidebar.is-collapsed {
-  align-items: center;
   padding-inline: 9px;
 }
 
+/* The same height in both states, so the rows below never move. */
 .sidebar .sidebar-top {
   flex: 0 0 auto;
+  min-height: var(--sidebar-top-height);
 }
 
-.rail-collapsed .sidebar-top {
-  flex-direction: column;
-  gap: 12px;
-}
-
-.rail-collapsed .nav-item,
-.rail-collapsed .minor-row {
-  justify-content: center;
-  padding-inline: 0;
-}
-
-.rail-collapsed .primary-nav {
-  width: 100%;
-}
-
-.rail-collapsed .nav-item.is-active,
-.rail-collapsed .minor-row.is-selected {
-  box-shadow: none;
-}
-
-.rail-collapsed .nav-item span,
-.rail-collapsed .minor-row span,
 .rail-collapsed .nav-disclosure,
-.rail-collapsed .sidebar-section,
-.rail-collapsed .account-card > div:not(.avatar),
-.rail-collapsed .account-card svg {
+.rail-collapsed .sidebar-section {
   display: none;
-}
-
-.rail-collapsed .utility-rows {
-  display: grid;
-  gap: 6px;
-  width: 100%;
-  margin-top: auto;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.rail-collapsed .utility-rows .minor-row {
-  width: 44px;
-  min-height: 44px;
-  margin-inline: auto;
-  padding: 0;
-  border-radius: 12px;
-}
-
-.rail-collapsed .account-card {
-  grid-template-columns: 1fr;
-  width: 46px;
-  height: 46px;
-  margin-top: 8px;
-  padding: 3px;
-  justify-items: center;
-  border-radius: 999px;
-}
-
-.rail-collapsed .account-card .avatar {
-  display: grid;
-  width: 36px;
-  height: 36px;
 }
 
 .sidebar-dark {
@@ -1699,8 +1644,10 @@ a.nav-item {
 }
 
 @media (max-height: 760px) {
-  .sidebar:not(.is-collapsed) {
+  /* Density applies to both states, or short windows would shift the rows. */
+  .app .sidebar {
     --sidebar-padding-y: 12px;
+    --sidebar-top-height: 34px;
     --sidebar-nav-gap: 2px;
     --sidebar-nav-margin: 14px 0 10px;
     --sidebar-nav-row-height: 34px;
@@ -1730,11 +1677,6 @@ a.nav-item {
     height: 24px;
   }
 
-  .sidebar:not(.is-collapsed) .sidebar-collapse-button {
-    width: 34px;
-    min-height: 34px;
-  }
-
   .sidebar:not(.is-collapsed) .account-card .avatar {
     width: 36px;
     height: 36px;
@@ -1750,7 +1692,7 @@ a.nav-item {
 }
 
 @media (max-height: 660px) {
-  .sidebar:not(.is-collapsed) {
+  .app .sidebar {
     --sidebar-padding-y: 10px;
     --sidebar-nav-gap: 1px;
     --sidebar-nav-margin: 10px 0 8px;
@@ -1992,8 +1934,7 @@ a.nav-item {
 }
 
 .drawer-row,
-.drawer-card,
-.drawer-account {
+.drawer-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -2007,49 +1948,6 @@ a.nav-item {
   text-align: left;
 }
 
-.drawer-account-button {
-  grid-template-columns: auto minmax(0, 1fr) auto;
-}
-
-.account-profile-summary {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.drawer-account .account-profile-name {
-  margin-bottom: 2px;
-}
-
-.drawer-account .account-profile-field {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  align-items: baseline;
-  gap: 7px;
-  min-width: 0;
-}
-
-.drawer-account .account-profile-field-label {
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  line-height: 1.35;
-  text-transform: uppercase;
-}
-
-.drawer-account .account-profile-field small {
-  min-width: 0;
-  margin-top: 0;
-  line-height: 1.35;
-}
-
-.drawer-account-button:hover {
-  border-color: var(--teal);
-  background: var(--teal-soft);
-  color: var(--teal);
-}
-
 .drawer-row:hover {
   border-color: var(--teal);
   background: var(--teal-soft);
@@ -2059,9 +1957,7 @@ a.nav-item {
 .drawer-row strong,
 .drawer-row small,
 .drawer-card strong,
-.drawer-card span:where(:not(.avatar)),
-.drawer-account strong,
-.drawer-account small {
+.drawer-card span:where(:not(.avatar)) {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2069,7 +1965,6 @@ a.nav-item {
 }
 
 .drawer-row small,
-.drawer-account small,
 .drawer-card span:where(:not(.avatar)) {
   color: var(--muted);
   font-size: 12px;
@@ -2167,499 +2062,12 @@ a.nav-item {
   margin-right: 5px;
 }
 
-.account-profile-form,
-.account-password-form,
-.account-profile-card,
-.account-password-card {
-  gap: 10px;
-}
-
-.account-form-heading,
-.account-card-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.account-form-heading {
-  display: grid;
-  justify-content: stretch;
-  gap: 2px;
-}
-
-.account-form-heading span {
-  white-space: normal;
-  line-height: 1.35;
-}
-
-.account-avatar-editor {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.account-profile-avatar {
-  width: 56px;
-  height: 56px;
-  font-size: 15px;
-}
-
-.account-photo-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-}
-
-.account-photo-hint {
-  flex-basis: 100%;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.account-profile-card > span {
-  white-space: normal;
-  line-height: 1.4;
-}
-
-.account-inline-status {
-  padding: 0 2px;
-}
-
-.account-password-card > span {
-  white-space: normal;
-  line-height: 1.4;
-}
-
-.account-password-card.is-compact {
-  gap: 0;
-  padding-block: 10px;
-}
-
-.drawer-card .account-password-heading-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-  margin-top: 0;
-  color: inherit;
-  font-size: inherit;
-}
-
-.account-password-heading-copy small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-password-edit-button {
-  height: 32px;
-  min-height: 32px;
-  padding-inline: 10px;
-  font-size: 12px;
-}
-
-.account-password-card.is-compact > .drawer-success {
-  margin-top: 8px;
-}
-
-.account-detail-card {
-  gap: 0;
-}
-
-.account-console-card {
-  gap: 9px;
-  padding: 10px;
-  background: var(--surface-soft);
-}
-
-.account-console-heading {
-  padding: 0 2px;
-}
-
-.account-console-heading span {
-  white-space: normal;
-  line-height: 1.35;
-}
-
-.account-console-actions {
-  display: grid;
-  gap: 6px;
-}
-
-.account-console-link {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  min-height: 48px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--text);
-  padding: 8px 10px;
-  text-align: left;
-  transition:
-    border-color var(--speed) var(--ease),
-    background var(--speed) var(--ease),
-    color var(--speed) var(--ease);
-}
-
-.account-console-link:hover,
-.account-console-link.is-active {
-  border-color: var(--teal-border);
-  background: var(--teal-soft);
-  color: var(--teal-strong);
-}
-
-.account-console-link > span,
-.account-console-link strong,
-.account-console-link small {
-  display: block;
-  min-width: 0;
-}
-
-.account-console-link strong,
-.account-console-link small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-console-link strong {
-  font-size: 12px;
-}
-
-.account-console-link small {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.account-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px 12px;
-}
-
-.account-detail-grid span {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: normal;
-}
-
-.account-detail-grid b {
-  color: var(--text-strong);
-  font-size: 11px;
-}
-
-.account-contact-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.account-contact-grid span {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  white-space: normal;
-}
-
-.account-contact-grid b {
-  color: var(--text-strong);
-  font-size: 11px;
-}
-
-.account-password-form {
-  display: grid;
-}
-
-.account-api-card {
-  gap: 10px;
-  border-color: color-mix(in srgb, var(--teal-border) 68%, var(--border));
-  background: color-mix(in srgb, var(--teal-soft) 26%, var(--surface));
-}
-
-.account-collapsible-card {
-  display: block;
-  padding: 0;
-  overflow: hidden;
-}
-
-.account-collapsible-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px 12px;
-  cursor: pointer;
-  list-style: none;
-  transition:
-    background var(--speed) var(--ease),
-    color var(--speed) var(--ease);
-}
-
-.account-collapsible-summary::-webkit-details-marker {
-  display: none;
-}
-
-.account-collapsible-summary::marker {
-  content: "";
-}
-
-.account-collapsible-summary:hover {
-  background: color-mix(in srgb, var(--teal-soft) 54%, transparent);
-  color: var(--teal-strong);
-}
-
-.account-collapsible-card[open] > .account-collapsible-summary {
-  border-bottom: 1px solid var(--border);
-}
-
-.drawer-card .account-collapsible-summary-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  margin: 0;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.account-collapsible-summary-copy small {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-collapsible-chevron {
-  flex: 0 0 auto;
-  color: var(--muted);
-  transition: transform 180ms var(--ease);
-}
-
-.account-collapsible-card[open] .account-collapsible-chevron {
-  transform: rotate(180deg);
-}
-
-.account-collapsible-content {
-  padding: 10px 12px 12px;
-}
-
-.account-api-card .account-collapsible-summary {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-}
-
-.account-api-heading-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.account-api-heading-copy small,
-.account-api-card > span,
-.account-api-content > span,
-.account-api-secret > span {
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.4;
-  white-space: normal;
-}
-
-.account-api-state {
-  flex: 0 0 auto;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  padding: 0;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-
-.account-api-state.is-enabled {
-  color: var(--teal-strong);
-}
-
-.account-api-content,
-.account-api-secret,
-.account-api-existing {
-  display: grid;
-  gap: 7px;
-}
-
-.account-api-content > label {
-  display: grid;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.account-api-card .account-api-value-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 0;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.account-api-value-row input {
-  min-width: 0;
-  height: 32px;
-  padding: 0 9px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
-  letter-spacing: -0.01em;
-}
-
-.account-api-copy-button,
-.account-api-action-button {
-  flex: 0 0 auto;
-  min-width: 0;
-  height: 32px;
-  min-height: 32px;
-  padding: 0 9px;
-  font-size: 11.5px;
-  line-height: 1;
-}
-
-.account-api-secret {
-  padding: 9px;
-  border: 1px solid color-mix(in srgb, var(--amber, #b45309) 30%, var(--border));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--amber, #b45309) 7%, var(--surface));
-}
-
-.account-api-existing {
-  padding: 8px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-.account-api-existing > span {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.account-api-existing code {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-api-existing small {
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.35;
-}
-
-.account-api-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.account-api-action-button.is-danger {
-  color: var(--red);
-}
-
-.account-api-action-button.is-danger:hover {
-  border-color: color-mix(in srgb, var(--red) 38%, var(--border));
-  background: var(--red-soft);
-}
-
-@media (max-height: 760px) {
-  .account-utility-drawer {
-    top: 8px;
-    right: 8px;
-    bottom: 8px;
-    width: min(392px, calc(100vw - 16px));
-    padding: 12px;
-  }
-
-  .account-utility-drawer header {
-    margin-bottom: 10px;
-  }
-
-  .account-utility-drawer .drawer-list {
-    gap: 8px;
-  }
-
-  .account-utility-drawer .drawer-row,
-  .account-utility-drawer .drawer-card,
-  .account-utility-drawer .drawer-account {
-    padding: 10px;
-  }
-
-  .account-utility-drawer .account-usage-grid {
-    gap: 6px;
-  }
-
-  .account-utility-drawer .account-usage-grid span {
-    padding: 7px;
-  }
-
-  .account-utility-drawer .view-as-options {
-    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-  }
-}
-
 .drawer-form-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
-}
-
-.account-profile-form .drawer-form-actions button,
-.account-password-form .drawer-form-actions button {
-  flex: 0 0 auto;
-  height: 32px;
-  min-height: 32px;
-  padding-inline: 10px;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.account-form-submit-button {
-  min-width: 0;
-  box-shadow: 0 4px 12px -8px rgba(6, 106, 120, 0.7);
 }
 
 .drawer-error,
@@ -2691,161 +2099,6 @@ a.nav-item {
 .drawer-folder-chat-list .drawer-row {
   background: var(--surface-soft);
   padding: 10px;
-}
-
-.account-usage-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.account-usage-grid span {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.3;
-  white-space: normal;
-}
-
-.account-usage-grid b {
-  color: var(--text-strong);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.account-archived-card {
-  gap: 8px;
-}
-
-.account-archived-card > span {
-  white-space: normal;
-  line-height: 1.45;
-}
-
-.account-archived-list {
-  display: grid;
-  gap: 7px;
-  margin-top: 3px;
-}
-
-.account-archived-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  color: var(--muted);
-}
-
-.account-archived-row > span:first-of-type {
-  min-width: 0;
-}
-
-.account-archived-row strong,
-.account-archived-row small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-archived-row strong {
-  color: var(--text);
-  font-size: 12.5px;
-}
-
-.account-archived-row small {
-  color: var(--muted);
-  font-size: 11.5px;
-  margin-top: 2px;
-}
-
-.account-archived-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.archived-chat-action {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.archived-chat-action:hover {
-  border-color: var(--teal);
-  background: var(--teal-soft);
-  color: var(--teal);
-}
-
-.archived-chat-action.is-danger:hover {
-  border-color: var(--red-border);
-  background: var(--red-soft);
-  color: var(--red);
-}
-
-.account-archived-empty {
-  white-space: normal;
-  line-height: 1.45;
-}
-
-.view-as-card {
-  gap: 8px;
-}
-
-.view-as-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.view-as-option {
-  min-height: 34px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.view-as-option:hover {
-  border-color: var(--teal);
-  color: var(--teal);
-}
-
-.view-as-option.is-active {
-  border-color: var(--teal);
-  background: var(--teal-soft);
-  color: var(--teal-strong);
-  box-shadow: inset 0 0 0 1px var(--teal);
-}
-
-.drawer-card .view-as-note {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: normal;
 }
 
 .drawer-card label {
@@ -3601,8 +2854,11 @@ a.nav-item {
 }
 
 /* ---------- Document assistant ---------- */
+/* Locked to the window at every width: the document, deck, or grid scrolls in
+   its own pane, so the toolbar, page navigator, and status bar stay in view. */
 .document-assistant-page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   background: var(--surface);
   overflow: hidden;
 }
@@ -3610,7 +2866,7 @@ a.nav-item {
 .document-assistant-shell {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-  height: 100vh;
+  height: 100%;
   min-height: 0;
   background: var(--surface);
 }
@@ -4029,6 +3285,7 @@ a.nav-item {
 
 .draft-source-details {
   flex: 0 1 auto;
+  align-content: start;
   max-height: 300px;
   overflow-y: auto;
 }
@@ -4179,50 +3436,7 @@ a.nav-item {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.draft-work-trace {
-  max-width: none;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0 0 2px;
-}
-
-.draft-work-trace .pending-trace-step small {
-  font-size: 11px;
-}
-
-.draft-work-trace.is-complete {
-  margin-bottom: 0;
-  border: 0;
-  background: transparent;
-}
-
-.draft-work-trace .pending-trace-header {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  margin-bottom: 2px;
-}
-
-.draft-work-trace .pending-trace-header small {
-  font-size: 11px;
-}
-
-.draft-work-trace ol {
-  gap: 5px;
-}
-
-.draft-work-trace .pending-trace-step {
-  gap: 10px;
-}
-
-.draft-work-trace .pending-trace-step strong {
-  font-size: 12.5px;
-}
-
-.draft-event {
+}.draft-event {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: 10px;
@@ -4548,7 +3762,7 @@ a.nav-item {
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
   background: var(--surface);
 }
@@ -7448,34 +6662,7 @@ a.nav-item {
     transform: translateY(-4px);
     opacity: 1;
   }
-}
-
-.pending-trace {
-  display: grid;
-  gap: 10px;
-  max-width: 620px;
-  border: 1px solid color-mix(in srgb, var(--teal) 24%, var(--border));
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--teal-soft) 42%, var(--surface));
-  padding: 12px;
-}
-
-.pending-trace.is-complete {
-  margin-bottom: 12px;
-  background: color-mix(in srgb, var(--teal-soft) 32%, var(--surface));
-  border-color: color-mix(in srgb, var(--teal) 20%, var(--border));
-}
-
-.pending-trace.is-complete .pending-trace-header {
-  color: var(--teal-strong);
-}
-
-.pending-trace.is-complete .pending-trace-header svg,
-.pending-trace.is-complete .pending-trace-step.is-active .pending-trace-icon svg {
-  animation: none;
-}
-
-/* Live streamed reply: text writes in top-to-bottom, and the writing edge
+}/* Live streamed reply: text writes in top-to-bottom, and the writing edge
  * carries a soft accent-colored flowing glow — a thin animated gradient line
  * under the newest text plus a faint wash rising above it. Display-only
  * chrome; it never sits between the user and the real streamed tokens.
@@ -7610,224 +6797,7 @@ a.nav-item {
     background-size: 100% 100%;
     box-shadow: none;
   }
-}
-
-.pending-trace-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--teal-strong);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.pending-trace-header svg {
-  animation: apx-trace-pulse 1.6s ease-in-out infinite;
-}
-
-.pending-trace-header small {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 720;
-}
-
-.pending-trace-note {
-  margin: -2px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.pending-trace ol {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.pending-trace-step {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  color: var(--muted);
-}
-
-.pending-trace-step strong,
-.pending-trace-step small {
-  display: block;
-}
-
-.pending-trace-step strong {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 760;
-  line-height: 1.3;
-}
-
-.pending-trace-step small {
-  margin-top: 2px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.pending-trace-step.is-queued {
-  opacity: 0.56;
-}
-
-.pending-trace-step.is-done .pending-trace-icon {
-  background: var(--teal-soft);
-  color: var(--teal);
-}
-
-.pending-trace-step.is-active .pending-trace-icon {
-  background: var(--teal);
-  color: #ffffff;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--teal-ring) 60%, transparent);
-}
-
-.pending-trace-icon {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--faint);
-}
-
-.pending-trace-step.is-active .pending-trace-icon svg {
-  animation: apx-trace-spin 1.25s linear infinite;
-}
-
-.pending-trace-toggle {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  border: 0;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: inherit;
-  color: inherit;
-}
-
-.pending-trace-caret-button {
-  display: inline-flex;
-  flex-shrink: 0;
-  margin: 0;
-  border: 0;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-  color: inherit;
-}
-
-.pending-trace-header svg.pending-trace-caret {
-  flex-shrink: 0;
-  color: var(--faint);
-  animation: none;
-  transition: transform 0.18s ease;
-}
-
-.pending-trace.is-expanded .pending-trace-caret {
-  transform: rotate(180deg);
-}
-
-.pending-trace.is-collapsed .pending-trace-step {
-  animation: apx-trace-step-in 0.25s ease;
-}
-
-@keyframes apx-trace-step-in {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.pending-trace.draft-work-trace {
-  max-width: none;
-  margin: 0;
-  gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--teal) 42%, var(--border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--teal-soft) 36%, var(--surface));
-  padding: 10px;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--teal) 8%, transparent),
-    0 8px 24px color-mix(in srgb, var(--teal) 8%, transparent);
-}
-
-.pending-trace.draft-work-trace.is-complete {
-  margin: 0;
-  border-color: color-mix(in srgb, var(--teal) 34%, var(--border));
-  background: color-mix(in srgb, var(--teal-soft) 26%, var(--surface));
-}
-
-.draft-work-trace .pending-trace-header {
-  display: flex;
-  margin-bottom: 0;
-  color: color-mix(in srgb, var(--teal) 78%, var(--text-strong));
-}
-
-.draft-work-trace .pending-trace-toggle {
-  gap: 7px;
-}
-
-.draft-work-trace .pending-trace-toggle > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.draft-work-trace .pending-trace-header small {
-  flex-shrink: 0;
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.draft-work-trace .pending-trace-note {
-  color: color-mix(in srgb, var(--muted) 88%, var(--teal));
-  font-size: 11px;
-}
-
-.draft-work-trace .pending-trace-step.is-active .pending-trace-icon {
-  background: var(--teal);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--teal) 18%, transparent);
-}
-
-@keyframes apx-trace-pulse {
-  0%,
-  100% {
-    opacity: 0.72;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.08);
-  }
-}
-
-@keyframes apx-trace-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.message-error {
+}.message-error {
   margin: 0;
   color: color-mix(in srgb, var(--red) 88%, var(--text));
   background: var(--red-soft);
@@ -9843,16 +8813,6 @@ body.nav-locked {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.account-archived-summary {
-  min-width: 0;
-  border-radius: 6px;
-  outline: none;
-}
-
-.account-archived-summary:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 36%, transparent);
 }
 
 @keyframes chat-preview-in {
@@ -20237,14 +19197,8 @@ button.retention-tagged-title:focus-visible strong {
     grid-template-columns: minmax(0, 1fr) 0;
   }
 
-  .document-assistant-page {
-    overflow: auto;
-  }
-
   .document-assistant-shell {
     grid-template-columns: minmax(0, 1fr);
-    height: auto;
-    min-height: 100vh;
   }
 
   .document-assistant-rail {
@@ -20271,29 +19225,6 @@ button.retention-tagged-title:focus-visible strong {
   .document-assistant-rail.is-drawer > .draft-tool-drawer {
     flex: 1 1 auto;
     max-height: none;
-  }
-
-  .document-editor-workspace {
-    height: auto;
-    min-height: 100vh;
-  }
-
-  /* Deck mode stays viewport-locked at every width, like PowerPoint: the
-     window never scrolls as a whole. The filmstrip scrolls under the toolbar
-     and the stage fills what remains. The auto-height rules above exist for
-     long documents, which do need the page to scroll. */
-  .document-assistant-page.is-deck-mode {
-    overflow: hidden;
-  }
-
-  .is-deck-mode .document-assistant-shell {
-    height: 100vh;
-    min-height: 0;
-  }
-
-  .is-deck-mode .document-editor-workspace {
-    height: 100vh;
-    min-height: 0;
   }
 
   .document-editor-body.has-citation-panel {
@@ -20443,7 +19374,8 @@ button.retention-tagged-title:focus-visible strong {
 
   .draft-rail-tab {
     position: absolute;
-    top: 50%;
+    /* Above the page navigator, which centers on the scroller below the toolbars. */
+    top: calc(50% - 56px);
     left: 0;
     display: grid;
     place-items: center;
@@ -20931,6 +19863,19 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 @media (max-width: 560px) {
+  /* Phones scroll the whole page: the toolbars take too much of a small screen
+     to stay, so they roll away and the document gets the room. */
+  .document-assistant-page:not(.is-deck-mode, .is-sheet-mode) {
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+  }
+
+  .document-assistant-page:not(.is-deck-mode, .is-sheet-mode) :is(.document-assistant-shell, .document-editor-workspace) {
+    height: auto;
+    min-height: 100dvh;
+  }
+
   .document-assistant-rail {
     padding: 20px 16px 20px;
   }

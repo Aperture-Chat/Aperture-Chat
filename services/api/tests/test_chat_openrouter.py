@@ -296,7 +296,10 @@ def test_runtime_context_is_validated_audited_and_sent_to_model(monkeypatch) -> 
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": "Runtime-aware answer"},
+                        "message": {
+                            "role": "assistant",
+                            "content": "Runtime-aware answer [K1] [K2]",
+                        },
                         "finish_reason": "stop",
                     }
                 ],
@@ -452,6 +455,12 @@ def test_openrouter_web_search_sends_web_plugin_and_returns_web_citations(monkey
         "locator": None,
         "chunk_id": None,
         "k_index": None,
+        "w_index": None,
+        "u_index": None,
+        "document_id": None,
+        "knowledge_config_id": None,
+        "passage": None,
+        "cited": True,
     }
     assert get_store().audit_events[-1].metadata["runtime_context"]["web_enabled"] is True
 
@@ -761,6 +770,12 @@ def test_non_openrouter_models_use_platform_web_search(monkeypatch) -> None:
             "locator": None,
             "chunk_id": None,
             "k_index": None,
+            "w_index": 1,
+            "u_index": None,
+            "document_id": None,
+            "knowledge_config_id": None,
+            "passage": None,
+            "cited": True,
         }
     ]
 
@@ -2050,6 +2065,12 @@ def test_agent_profile_invokes_configured_mcp_tool_for_chat_runtime(monkeypatch)
         "locator": None,
         "chunk_id": None,
         "k_index": None,
+        "w_index": None,
+        "u_index": None,
+        "document_id": None,
+        "knowledge_config_id": None,
+        "passage": None,
+        "cited": None,
     }
 
     runtime_context = get_store().audit_events[-1].metadata["runtime_context"]
@@ -2272,6 +2293,12 @@ def test_uploaded_attachment_ids_feed_runtime_prompt_citations_and_audit(monkeyp
             "locator": None,
             "chunk_id": None,
             "k_index": None,
+            "w_index": None,
+            "u_index": None,
+            "document_id": None,
+            "knowledge_config_id": None,
+            "passage": None,
+            "cited": None,
         }
     ]
 

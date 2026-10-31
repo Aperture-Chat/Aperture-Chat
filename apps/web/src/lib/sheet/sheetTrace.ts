@@ -5,7 +5,7 @@
  * `<kind>:<slug>` ids, so WorkTrace draws them as it draws a chat reply. */
 
 import { startTrace } from "../workTrace";
-import type { ChatActivityTraceStep, ChatMessage } from "../types";
+import type { ChatActivityTraceStep } from "../types";
 import type { FormulaProblem } from "./recalc";
 import type { Workbook } from "./sheetModel";
 
@@ -18,8 +18,6 @@ export type SheetRunOutcome =
   | { kind: "answered" }
   | { kind: "unreadable" }
   | { kind: "failed"; error: string };
-
-export type SheetRun = { activity: Step[]; startedAt: number; endedAt?: number };
 
 function plural(count: number, singular: string, many = `${singular}s`): string {
   return `${count.toLocaleString("en-US")} ${count === 1 ? singular : many}`;
@@ -87,20 +85,4 @@ function outcomeSteps(outcome: SheetRunOutcome): Step[] {
 /** How the run ended, after the steps already recorded. */
 export function sheetRunFinished(activity: Step[], outcome: SheetRunOutcome): Step[] {
   return [...activity, ...outcomeSteps(outcome)];
-}
-
-/** The run as the chat message WorkTrace reads: pending until it ends, then
- * with the length it took. Nothing streams into the trace, so it stays empty. */
-export function sheetRunMessage(run: SheetRun): ChatMessage {
-  const ended = typeof run.endedAt === "number";
-  return {
-    id: `sheet-run-${run.startedAt}`,
-    role: "assistant",
-    content: "",
-    createdAt: new Date(run.startedAt).toISOString(),
-    activityTrace: run.activity,
-    startedAtMs: run.startedAt,
-    status: ended ? "ok" : "pending",
-    ...(ended ? { durationMs: run.endedAt! - run.startedAt } : {}),
-  };
 }

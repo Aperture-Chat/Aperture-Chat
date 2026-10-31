@@ -15,7 +15,7 @@ import {
   type MfaMethod,
 } from "../lib/api";
 import type { User } from "../lib/types";
-import "./account-security.css";
+import { UNSAVED_NOTE, useFormEscape } from "./AccountRow";
 
 type Step = "overview" | "start" | "enroll" | "recovery" | "regenerate" | "disable";
 
@@ -24,6 +24,8 @@ type AccountSecurityProps = {
   onSignOut?: () => void;
   /** Prevent drawer dismissal while a mutation or unsaved codes need attention. */
   onCloseGuardChange?: (blocked: boolean) => void;
+  /** Keeps the drawer's summary line in step with this panel. */
+  onStatusChange?: (status: MfaAccountStatus) => void;
 };
 
 export function AccountSecurity(props: AccountSecurityProps) {
@@ -35,6 +37,7 @@ function AccountSecurityForUser({
   user,
   onSignOut,
   onCloseGuardChange,
+  onStatusChange,
 }: AccountSecurityProps) {
   const [status, setStatus] = useState<MfaAccountStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,6 +59,8 @@ function AccountSecurityForUser({
   const mutationPending = useRef(false);
   const guardCallback = useRef(onCloseGuardChange);
   guardCallback.current = onCloseGuardChange;
+  const statusCallback = useRef(onStatusChange);
+  statusCallback.current = onStatusChange;
 
   useEffect(() => {
     const current = ++generation.current;
@@ -73,6 +78,22 @@ function AccountSecurityForUser({
     });
     return () => { generation.current += 1; controller.abort(); };
   }, [user.id, loadAttempt]);
+
+  useEffect(() => { if (status) statusCallback.current?.(status); }, [status]);
+  // Recovery codes stay until acknowledged, and a running request has to finish.
+  const heldByEscape = useFormEscape(step !== "overview" && step !== "recovery" && !pending, Boolean(password || code), () => resetEditor());
+
+  // Each step replaces the one before it, so focus has to move with it. Waits
+  // for a reload to finish, or the key it lands on would vanish.
+  const stepRoot = useRef<HTMLDivElement>(null);
+  const focusedStep = useRef(step);
+  useEffect(() => {
+    if (loading || focusedStep.current === step) return;
+    focusedStep.current = step;
+    const root = stepRoot.current;
+    const target = root?.querySelector<HTMLElement>("[data-step-focus]") ?? root?.querySelector<HTMLElement>("input, button:not(:disabled)");
+    target?.focus();
+  });
 
   const blocked = pending || (step === "recovery" && !savedCodes);
   useEffect(() => { guardCallback.current?.(blocked); }, [blocked]);
@@ -175,39 +196,38 @@ function AccountSecurityForUser({
   }
 
   return (
-    <section className="drawer-card account-security" aria-labelledby={`${id}-title`} aria-busy={loading || pending}>
-      <header className="account-security-heading">
-        <span className="account-security-icon"><ShieldCheck size={18} /></span>
-        <div><h3 id={`${id}-title`}>Two-step verification</h3><p>An extra layer of protection for your account.</p></div>
-        {status && <span className={`account-security-badge ${status.enabled ? "is-enabled" : ""}`}>{status.enabled ? "On" : "Off"}</span>}
-      </header>
+    <section className="account-security" aria-labelledby={`${id}-title`} aria-busy={loading || pending}>
+      <h4 id={`${id}-title`}>Two-step verification</h4>
+      <div ref={stepRoot} className="account-security-step">
       {loading ? <p className="account-security-note" role="status"><Loader2 size={15} className="spin" /> Loading security settings…</p> : !status ? (
-        <button className="secondary-button compact" type="button" onClick={() => setLoadAttempt((value) => value + 1)}>Retry security settings</button>
+        <div className="drawer-form-actions"><button className="secondary-button compact" type="button" onClick={() => setLoadAttempt((value) => value + 1)}>Retry security settings</button></div>
       ) : step === "overview" ? (
         <>
           {status.tenant_required && <p className="account-security-note">Required by your organization. You cannot turn this off.</p>}
           {status.enabled ? <>
-            <p className="account-security-note">Your authenticator is connected. {status.recovery_codes_remaining} recovery {status.recovery_codes_remaining === 1 ? "code remains" : "codes remain"}.</p>
-            <div className="account-security-actions">
-              <button className="secondary-button compact" type="button" onClick={() => begin("regenerate")}><KeyRound size={15} /> Replace recovery codes</button>
+            <p className="account-security-note">Your authenticator is connected.</p>
+            <div className="drawer-form-actions">
               {status.can_disable && onSignOut && <button className="secondary-button compact" type="button" onClick={() => begin("disable")}>Turn off verification</button>}
+              <button data-step-focus className="secondary-button compact" type="button" onClick={() => begin("regenerate")}><KeyRound size={15} /> Replace recovery codes</button>
             </div>
           </> : user.auth_method === "local" ? (
-            <button className="secondary-button compact" type="button" onClick={() => begin("start")}><ShieldCheck size={15} /> Set up authenticator</button>
+            <div className="drawer-form-actions"><button className="secondary-button compact" type="button" onClick={() => begin("start")}><ShieldCheck size={15} /> Set up authenticator</button></div>
           ) : <p className="account-security-note">Your organization manages sign-in. Use your identity provider's security settings to manage verification. Contact your administrator if this workspace requires an additional authenticator.</p>}
         </>
       ) : step === "recovery" && recoveryCodes ? (
         <div className="account-security-form">
-          <h4>Save your recovery codes</h4>
+          <h5 data-step-focus tabIndex={-1}>Save your recovery codes</h5>
           <p className="account-security-note">These are shown only now. Each code works once if you cannot use your authenticator. Any previous recovery codes have been replaced.</p>
           <ul className="account-security-codes">{recoveryCodes.map((recoveryCode) => <li key={recoveryCode}>{recoveryCode}</li>)}</ul>
-          <button className="secondary-button compact" type="button" onClick={async () => {
-            try { await navigator.clipboard.writeText(recoveryCodes.join("\n")); setCopyStatus("Codes copied. Store them somewhere safe."); }
-            catch { setCopyStatus("Copy was unavailable. Select and copy the codes manually."); }
-          }}><Copy size={15} /> Copy recovery codes</button>
           {copyStatus && <p className="account-security-note" role="status">{copyStatus}</p>}
           <label className="account-security-check"><input type="checkbox" checked={savedCodes} onChange={(event) => setSavedCodes(event.target.checked)} />I stored these recovery codes somewhere safe.</label>
-          <button className="primary-button compact" type="button" disabled={!savedCodes} onClick={() => { resetEditor(); setLoadAttempt((value) => value + 1); }}><Check size={15} /> Done</button>
+          <div className="drawer-form-actions">
+            <button className="secondary-button compact" type="button" onClick={async () => {
+              try { await navigator.clipboard.writeText(recoveryCodes.join("\n")); setCopyStatus("Codes copied. Store them somewhere safe."); }
+              catch { setCopyStatus("Copy was unavailable. Select and copy the codes manually."); }
+            }}><Copy size={15} /> Copy recovery codes</button>
+            <button className="primary-button compact" type="button" disabled={!savedCodes} onClick={() => { resetEditor(); setLoading(true); setLoadAttempt((value) => value + 1); }}><Check size={15} /> Done</button>
+          </div>
         </div>
       ) : (
         <form className="account-security-form" onSubmit={(event) => void submit(event)} noValidate>
@@ -221,20 +241,22 @@ function AccountSecurityForUser({
               <span className="account-security-note">Setup key</span><code className="account-security-secret">{enrollment.secret}</code>
               <label className="account-security-check"><input type="checkbox" checked={savedAuthenticator} disabled={pending} onChange={(event) => setSavedAuthenticator(event.target.checked)} />I added this account to my authenticator.</label>
             </> : <>
-              <h4>{step === "disable" ? "Turn off two-step verification?" : "Replace your recovery codes?"}</h4>
+              <h5>{step === "disable" ? "Turn off two-step verification?" : "Replace your recovery codes?"}</h5>
               <p className="account-security-note">{step === "disable" ? "Your authenticator and recovery codes will stop working. You will be signed out and can sign in again using your usual sign-in method." : "Your old recovery codes will stop working. Enter a current code to create a new set."}</p>
             </>}
             <label htmlFor={`${id}-code`}>{method === "totp" ? "Authenticator code" : "Recovery code"}<input id={`${id}-code`} type="text" inputMode={method === "totp" ? "numeric" : "text"} autoComplete="one-time-code" maxLength={64} disabled={pending} value={code} onChange={(event) => setCode(event.target.value)} placeholder={method === "totp" ? "6-digit code" : "Recovery code"} required /></label>
             {step !== "enroll" && (status?.recovery_codes_remaining ?? 0) > 0 && <button className="link-button" type="button" disabled={pending} onClick={() => { setMethod((value) => value === "totp" ? "recovery_code" : "totp"); setCode(""); setError(null); }}>{method === "totp" ? "Use a recovery code instead" : "Use an authenticator code instead"}</button>}
           </>}
-          <div className="account-security-actions">
-            <button className="primary-button compact" type="submit" disabled={pending || retrySeconds > 0 || (step === "enroll" && !savedAuthenticator)}>{pending ? <Loader2 size={15} className="spin" /> : <ShieldCheck size={15} />}{step === "start" ? "Continue setup" : step === "enroll" ? "Verify authenticator" : step === "disable" ? "Turn off and sign out" : "Create new recovery codes"}</button>
+          {heldByEscape && <p className="account-security-note" role="status">{UNSAVED_NOTE}</p>}
+          <div className="drawer-form-actions">
             <button className="secondary-button compact" type="button" disabled={pending} onClick={resetEditor}>Cancel</button>
+            <button className="primary-button compact" type="submit" disabled={pending || retrySeconds > 0 || (step === "enroll" && !savedAuthenticator)}>{pending ? <Loader2 size={15} className="spin" /> : <ShieldCheck size={15} />}{step === "start" ? "Continue setup" : step === "enroll" ? "Verify authenticator" : step === "disable" ? "Turn off and sign out" : "Create new recovery codes"}</button>
           </div>
         </form>
       )}
       {error && <p className="drawer-error" role="alert">{error}</p>}
       {retrySeconds > 0 && <p className="account-security-note" role="status">Try again in {retrySeconds} seconds.</p>}
+      </div>
     </section>
   );
 }

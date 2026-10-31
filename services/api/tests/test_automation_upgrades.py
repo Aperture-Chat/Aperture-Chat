@@ -282,7 +282,8 @@ def test_agent_step_brings_instructions_skills_and_knowledge(monkeypatch) -> Non
     monkeypatch.setattr(store, "retrieve_knowledge", fake_retrieve)
     captured: list[dict] = []
     monkeypatch.setattr(
-        "app.routes.automations.get_model_gateway_client", lambda: _gateway(captured)
+        "app.routes.automations.get_model_gateway_client",
+        lambda: _gateway(captured, reply="Economy under six hours [K1]."),
     )
     created = client.post(
         "/api/automations",
@@ -305,6 +306,137 @@ def test_agent_step_brings_instructions_skills_and_knowledge(monkeypatch) -> Non
     step = run.json()["transcript"][0]
     assert step["agent"] is True
     assert step["knowledge_sources"] == ["Travel Policy.pdf"]
+
+
+def _knowledge_hit(chunk_id: str, source_name: str) -> KnowledgeChunk:
+    return KnowledgeChunk(
+        id=chunk_id,
+        knowledge_config_id="knowledge-policy-library",
+        document_id=f"doc-{chunk_id}",
+        tenant_id="tenant-example",
+        source_name=source_name,
+        source_uri=f"kb://{chunk_id}",
+        source_type="file",
+        text=f"Passage from {source_name}.",
+        updated_at="2026-07-01T00:00:00+00:00",
+    )
+
+
+@pytest.mark.parametrize(
+    ("reply", "listed"),
+    [
+        ("Only the second passage [K2].", ["Parking.pdf"]),
+        ("In passage order [K2] and [K1].", ["Travel.pdf", "Parking.pdf"]),
+        ("Both passages of one file [K1, K3].", ["Travel.pdf"]),
+        ("A plain answer with no markers.", []),
+        ("An invented passage [K9].", []),
+    ],
+)
+def test_an_agent_step_lists_only_the_sources_its_output_cited(
+    monkeypatch, reply: str, listed: list[str]
+) -> None:
+    _activate_openrouter()
+    agent_id = _agent_profile()
+    store = get_store()
+    hits = [
+        _knowledge_hit("chunk-1", "Travel.pdf"),
+        _knowledge_hit("chunk-2", "Parking.pdf"),
+        _knowledge_hit("chunk-3", "Travel.pdf"),
+    ]
+    monkeypatch.setattr(store, "retrieve_knowledge", lambda *_a, **_k: hits)
+    monkeypatch.setattr(
+        "app.routes.automations.get_model_gateway_client", lambda: _gateway(reply=reply)
+    )
+    created = client.post(
+        "/api/automations",
+        json=_payload(
+            steps=[{"model_id": agent_id, "instruction": "Answer."}],
+            prompt="What is the policy?",
+        ),
+        headers=headers(),
+    ).json()
+
+    run = client.post(f"/api/automations/{created['id']}/run", headers=headers())
+
+    assert run.status_code == 200, run.text
+    assert run.json()["transcript"][0]["knowledge_sources"] == listed
+
+
+def test_a_later_step_does_not_inherit_an_earlier_steps_source_numbers(monkeypatch) -> None:
+    _activate_openrouter()
+    agent_id = _agent_profile()
+    store = get_store()
+    answers = iter([[_knowledge_hit("escrow", "Escrow.pdf")], [_knowledge_hit("menu", "Menu.pdf")]])
+    monkeypatch.setattr(store, "retrieve_knowledge", lambda *_a, **_k: next(answers))
+    inputs: list[str] = []
+
+    class Echo:
+        def complete(self, *, messages: list[dict], **_kwargs: object) -> dict:
+            inputs.append(messages[-1]["content"])
+            text = "The holdback is twelve percent [K1]." if len(inputs) == 1 else inputs[-1]
+            message = {"role": "assistant", "content": text}
+            return {"choices": [{"message": message, "finish_reason": "stop"}], "usage": {}}
+
+    monkeypatch.setattr("app.routes.automations.get_model_gateway_client", lambda: Echo())
+    created = client.post(
+        "/api/automations",
+        json=_payload(
+            steps=[
+                {"model_id": agent_id, "instruction": "Answer."},
+                {"model_id": agent_id, "instruction": "Rewrite."},
+            ],
+            prompt="Explain the [K1] line of the holdback.",
+        ),
+        headers=headers(),
+    ).json()
+
+    run = client.post(f"/api/automations/{created['id']}/run", headers=headers())
+
+    assert run.status_code == 200, run.text
+    transcript = run.json()["transcript"]
+    assert "[K1]" in inputs[0], "the person's own prompt is not a source marker"
+    assert "[K1]" not in inputs[1]
+    assert transcript[0]["output"] == "The holdback is twelve percent [K1]."
+    assert transcript[0]["knowledge_sources"] == ["Escrow.pdf"]
+    assert transcript[1]["knowledge_sources"] == []
+
+
+def test_a_marker_in_a_plain_fence_cannot_cross_steps(monkeypatch) -> None:
+    _activate_openrouter()
+    agent_id = _agent_profile()
+    store = get_store()
+    answers = iter([[_knowledge_hit("escrow", "Escrow.pdf")], [_knowledge_hit("menu", "Menu.pdf")]])
+    monkeypatch.setattr(store, "retrieve_knowledge", lambda *_a, **_k: next(answers))
+    inputs: list[str] = []
+
+    class Lifts:
+        def complete(self, *, messages: list[dict], **_kwargs: object) -> dict:
+            inputs.append(messages[-1]["content"])
+            text = (
+                "Draft:\n```\nThe holdback is twelve percent [K1].\n```"
+                if len(inputs) == 1
+                else "Client version: " + inputs[-1].split("```")[1].strip()
+            )
+            message = {"role": "assistant", "content": text}
+            return {"choices": [{"message": message, "finish_reason": "stop"}], "usage": {}}
+
+    monkeypatch.setattr("app.routes.automations.get_model_gateway_client", lambda: Lifts())
+    created = client.post(
+        "/api/automations",
+        json=_payload(
+            steps=[
+                {"model_id": agent_id, "instruction": "Answer."},
+                {"model_id": agent_id, "instruction": "Rewrite."},
+            ],
+            prompt="What is the holdback?",
+        ),
+        headers=headers(),
+    ).json()
+
+    run = client.post(f"/api/automations/{created['id']}/run", headers=headers())
+
+    assert run.status_code == 200, run.text
+    assert run.json()["transcript"][1]["knowledge_sources"] == []
 
 
 def test_agent_step_with_disabled_skill_fails_with_the_reason(monkeypatch) -> None:

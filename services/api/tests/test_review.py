@@ -1252,39 +1252,37 @@ def test_an_answer_citing_only_unknown_indexes_still_fails() -> None:
     assert "[K9]" in str(raised.value)
 
 
-def test_chat_citations_drop_chunks_the_answer_never_referenced() -> None:
-    """Retrieval supplies several chunks per turn; returning all of them made an
-    answer look like it cited sources it never used."""
-    from app.models.schemas import ChatCitation
-    from app.routes.chat import _citations_actually_referenced
+@pytest.mark.parametrize(
+    "answer",
+    ["Backed by [K1, K2].", "Backed by [K1; K2].", "Backed by [K1][K2].", "Backed by [K1-K2]."],
+)
+def test_a_review_answer_may_cite_in_any_form_real_models_write(answer: str) -> None:
+    used = _used_citations(answer, [_citation(1), _citation(2)])
 
-    def knowledge(k_index: int) -> ChatCitation:
-        return ChatCitation(
-            id=f"cite-{k_index}",
-            source_name=f"doc-{k_index}.pdf",
-            source_type="knowledge",
-            source_uri="https://example.test/doc",
-            snippet="chunk text",
-            k_index=k_index,
-        )
+    assert [citation.k_index for citation in used] == [1, 2]
 
-    web = ChatCitation(
-        id="cite-web-1",
-        source_name="Result",
-        source_type="web",
-        source_uri="https://example.test",
-        snippet="snippet",
-    )
-    supplied = [knowledge(1), knowledge(2), web]
 
-    only_first = _citations_actually_referenced("Grounded in [K1].", supplied)
-    assert [c.id for c in only_first] == ["cite-1", "cite-web-1"]
+def test_a_review_answer_lists_each_citation_once_in_order_of_first_use() -> None:
+    used = _used_citations("Backed by [K2], [K1, K2].", [_citation(1), _citation(2)])
 
-    # The same model emits full-width brackets in other contexts.
-    wide = _citations_actually_referenced("Grounded in 【K2】.", supplied)
-    assert [c.id for c in wide] == ["cite-2", "cite-web-1"]
+    assert [citation.k_index for citation in used] == [2, 1]
 
-    # No marker at all means the model did not use the convention; keeping every
-    # citation is better than returning none.
-    unmarked = _citations_actually_referenced("A plain answer.", supplied)
-    assert [c.id for c in unmarked] == ["cite-1", "cite-2", "cite-web-1"]
+
+def test_a_review_range_past_the_end_is_not_an_invented_index() -> None:
+    used = _used_citations("Backed by [K2-K9].", [_citation(1), _citation(2)])
+
+    assert [citation.k_index for citation in used] == [2]
+
+
+def test_a_review_answer_citing_only_an_unknown_range_still_fails() -> None:
+    with pytest.raises(ReviewCellExecutionError) as raised:
+        _used_citations("Backed by [K7-K9].", [_citation(1)])
+
+    assert "[K7]" in str(raised.value)
+
+
+def test_a_review_answer_with_no_marker_still_fails() -> None:
+    with pytest.raises(ReviewCellExecutionError) as raised:
+        _used_citations("A plain answer.", [_citation(1)])
+
+    assert "did not include a verifiable document citation" in str(raised.value)

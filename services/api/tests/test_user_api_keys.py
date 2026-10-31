@@ -448,3 +448,49 @@ def test_personal_key_preserves_agentic_tool_calls_and_openai_stream_chunks(
     assert '"tool_calls"' in streamed.text
     assert '"model": "gpt-4.1"' in streamed.text
     assert streamed.text.endswith("data: [DONE]\n\n")
+
+
+def _bearer(secret: str) -> dict[str, str]:
+    return {"authorization": f"Bearer {secret}"}
+
+
+def test_creating_over_a_live_key_is_refused_and_the_key_keeps_working() -> None:
+    enable_api_access()
+    first = client.post("/api/auth/api-key", headers=headers("user-jane"))
+    assert first.status_code == 200
+    secret = first.json()["secret_value"]
+
+    for request in ({}, {"json": {}}, {"json": {"replace": False}}):
+        refused = client.post("/api/auth/api-key", headers=headers("user-jane"), **request)
+        assert refused.status_code == 409
+        assert "already have an API key" in refused.json()["detail"]
+
+    assert client.get("/v1/models", headers=_bearer(secret)).status_code == 200
+
+
+def test_an_explicit_replace_rotates_the_key() -> None:
+    enable_api_access()
+    old = client.post("/api/auth/api-key", headers=headers("user-jane")).json()["secret_value"]
+
+    replaced = client.post("/api/auth/api-key", headers=headers("user-jane"), json={"replace": True})
+
+    assert replaced.status_code == 200
+    assert client.get("/v1/models", headers=_bearer(old)).status_code == 401
+    assert client.get("/v1/models", headers=_bearer(replaced.json()["secret_value"])).status_code == 200
+
+
+def test_replace_with_no_live_key_simply_creates_one() -> None:
+    enable_api_access()
+
+    created = client.post("/api/auth/api-key", headers=headers("user-jane"), json={"replace": True})
+
+    assert created.status_code == 200
+    assert client.get("/v1/models", headers=_bearer(created.json()["secret_value"])).status_code == 200
+
+
+def test_a_revoked_key_can_be_created_again_without_replace() -> None:
+    enable_api_access()
+    assert client.post("/api/auth/api-key", headers=headers("user-jane")).status_code == 200
+    assert client.delete("/api/auth/api-key", headers=headers("user-jane")).status_code == 200
+
+    assert client.post("/api/auth/api-key", headers=headers("user-jane")).status_code == 200

@@ -44,7 +44,9 @@ characters, full-width digits, and Unicode dashes cannot hide a value.
 
 Limits: detection does not recognize names or free-text descriptions of health
 conditions. Drafts are documents of record and are not rewritten. Uploaded files
-are stored as uploaded. Only the text extracted for the model is concealed.
+are stored as uploaded, and the document viewer shows them that way to anyone
+who may read the knowledge base. Only the text extracted for the model is
+concealed.
 
 ### Hardening of existing controls
 

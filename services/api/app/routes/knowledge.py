@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -6,13 +7,13 @@ from dataclasses import dataclass, field
 from html import escape
 from datetime import UTC, datetime
 from threading import Lock
-from typing import Any
-from urllib.parse import urlencode
+from typing import Any, BinaryIO
+from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.core.box import BoxError, BoxItem, get_box_client
@@ -33,11 +34,19 @@ from app.core.api_source_fetch import (
     fetch_api_source,
     parse_header_lines,
 )
+from app.core.knowledge_originals import DocumentRef
 from app.core.knowledge_walls import (
     DOCUMENT_WALLS_SETTING,
     document_wall_overrides,
     wall_group_ids,
 )
+from app.core.document_rendition import (
+    PreparedDocument,
+    RenditionOptions,
+    page_index,
+    prepare_document,
+)
+from app.core.document_view import locate_passage, recorded_span, target_for, text_segments
 from app.core.document_metadata import (
     PROPERTIES_LOCATOR,
     bounded_metadata,
@@ -95,10 +104,14 @@ from app.core.policy import (
 from app.models.schemas import (
     ConnectorConfig,
     KnowledgeChunk,
+    KnowledgeChunkLocation,
     KnowledgeConfig,
     KnowledgeApiSourceCreateRequest,
     KnowledgeDocument,
     KnowledgeDocumentAccessRequest,
+    KnowledgeDocumentView,
+    KnowledgeDocumentViewSegment,
+    KnowledgeDocumentViewTarget,
     KnowledgeIndexStatus,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
@@ -114,6 +127,7 @@ from app.repositories.seed import SeedStore, knowledge_sync_status
 from app.routes.dependencies import current_user
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+logger = logging.getLogger("aperture.knowledge")
 
 
 @router.get("/{config_id}/oauth/authorize-url")
@@ -503,6 +517,7 @@ async def upload_documents(
     new_chunks: list[KnowledgeChunk] = []
     notes: list[str] = []
     uploaded_bytes = 0
+    uploads: list[_IndexedUpload] = []
     usage = _LazyUsage(
         lambda: _begin_knowledge_media_usage(
             usage_orchestrator,
@@ -524,6 +539,7 @@ async def upload_documents(
                 new_vision_reader=new_vision_reader,
                 synced_at=synced_at,
             )
+            uploads.append(indexed)
             uploaded_bytes += indexed.byte_count
             notes.extend(indexed.notes)
             new_documents.append(indexed.document)
@@ -548,6 +564,8 @@ async def upload_documents(
         provider_status="live",
         provider_message=provider_message,
     )
+    # Only once the documents exist, so a batch that fails partway keeps no bytes.
+    await run_in_threadpool(_retain_uploads, store, config, uploads)
     await run_in_threadpool(
         store.record_audit,
         actor,
@@ -676,13 +694,243 @@ def set_document_access(
     )
 
 
+@router.get("/chunks/{chunk_id}/location")
+def chunk_location(
+    chunk_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> KnowledgeChunkLocation:
+    """Which document a saved citation points at, for citations that predate
+    ``document_id``. Every refusal is a 404, so a chunk id proves nothing."""
+    chunk = store.knowledge_chunk(chunk_id)
+    if chunk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CHUNK)
+    try:
+        config, document = _viewable_document(
+            chunk.knowledge_config_id, chunk.document_id, actor, store, access="location"
+        )
+    except HTTPException as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CHUNK) from exc
+    return KnowledgeChunkLocation(knowledge_config_id=config.id, document_id=document.id)
+
+
+@router.get("/{config_id}/documents/{document_id}/view")
+def document_view(
+    config_id: str,
+    document_id: str,
+    response: Response,
+    chunk_id: str | None = None,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> KnowledgeDocumentView:
+    """How to present a document, and where its cited passage is."""
+    config, document = _viewable_document(config_id, document_id, actor, store, access="view")
+    # The excerpt and segments are the document's own text.
+    response.headers["Cache-Control"] = "private, no-store"
+    prepared = _prepared_document(config, document, store)
+    chunks = store.knowledge_document_chunks(config.id, document.id)
+    cited = next((chunk for chunk in chunks if chunk.id == chunk_id), None)
+    return KnowledgeDocumentView(
+        document_id=document.id,
+        knowledge_config_id=config.id,
+        name=document.name,
+        content_type=prepared.content_type,
+        mode=prepared.mode,
+        file_url=_view_file_url(config.id, document.id) if prepared.file_path else None,
+        original_available=prepared.original_available,
+        page_count=prepared.page_count,
+        target=_cited_target(cited, chunks, prepared, _document_ref(config, document), store),
+        segments=_view_segments(document, chunks) if prepared.mode == "text" else None,
+        notice=prepared.notice,
+    )
+
+
+@router.get("/{config_id}/documents/{document_id}/view/file")
+def document_view_file(
+    config_id: str,
+    document_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> FileResponse:
+    """The bytes the viewer renders: a PDF or an image, never anything active."""
+    config, document = _viewable_document(config_id, document_id, actor, store, access="file")
+    prepared = _prepared_document(config, document, store)
+    if prepared.file_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NO_STORED_FILE)
+    return FileResponse(
+        prepared.file_path,
+        media_type=_view_media_type(prepared),
+        headers={**_PRIVATE_FILE_HEADERS, "Content-Disposition": "inline"},
+    )
+
+
+@router.get("/{config_id}/documents/{document_id}/original")
+def document_original(
+    config_id: str,
+    document_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> FileResponse:
+    """The file as it was stored, as a download the browser cannot render."""
+    config, document = _viewable_document(config_id, document_id, actor, store, access="original")
+    path = store.knowledge_originals.path(_document_ref(config, document))
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NO_STORED_FILE)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=_safe_source_name(document.name, fallback="document"),
+        headers=_PRIVATE_FILE_HEADERS,
+    )
+
+
+_UNKNOWN_CONFIGURATION = "Unknown knowledge configuration."
+_UNKNOWN_DOCUMENT = "Unknown knowledge document."
+_UNKNOWN_CHUNK = "Unknown knowledge passage."
+_NO_STORED_FILE = "No stored file for this document."
+_PRIVATE_FILE_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+def _viewable_document(
+    config_id: str,
+    document_id: str,
+    actor: User,
+    store: SeedStore,
+    *,
+    access: str,
+) -> tuple[KnowledgeConfig, KnowledgeDocument]:
+    """The one gate for reading a document's content.
+
+    Unlike ``_get_viewable_config`` this admits nobody to a disabled base, and
+    unlike ``documents()`` it has no operator bypass: an ethical wall screens
+    every role. A base the actor cannot read answers like a missing base, and a
+    walled document like a missing document, so neither id proves anything. The
+    wall refusal is still audited: in a wall product, the attempts are the signal.
+    """
+    assert_group_permission(actor, store.groups, "knowledge_access", "Knowledge access")
+    try:
+        config = _get_readable_config(config_id, actor, store)
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CONFIGURATION
+        ) from exc
+    document = _knowledge_document_or_404(config, document_id, store)
+    details = {"document_id": document.id, "access": access}
+    if not knowledge_wall_allows(actor, wall_group_ids(document.wall)):
+        store.record_audit(
+            actor, "knowledge.document.view_denied", config.id, details, runtime_state_changed=False
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_DOCUMENT)
+    store.record_audit(
+        actor, "knowledge.document.viewed", config.id, details, runtime_state_changed=False
+    )
+    return config, document
+
+
+def _document_ref(config: KnowledgeConfig, document: KnowledgeDocument) -> DocumentRef:
+    return DocumentRef(config.tenant_id, config.id, document.id)
+
+
+def _retain_original(
+    store: SeedStore, config: KnowledgeConfig, document_id: str, source: BinaryIO | bytes
+) -> None:
+    """A document that cannot keep its file still opens, as text, so a full disk
+    costs the viewer the layout rather than failing the ingest. A base purged
+    while a sync was running keeps nothing: no later delete would find the bytes."""
+    if config.id not in store.knowledge_configs:
+        return
+    try:
+        store.knowledge_originals.save(DocumentRef(config.tenant_id, config.id, document_id), source)
+    except OSError:
+        logger.exception("Could not store the original of %s", document_id)
+
+
+def _retain_uploads(store: SeedStore, config: KnowledgeConfig, uploads: list["_IndexedUpload"]) -> None:
+    for upload in uploads:
+        _retain_original(store, config, upload.document.id, upload.source)
+
+
+RetainOriginal = Callable[[str, bytes | None], None]
+
+
+def _retain_nothing(_document_id: str, _content: bytes | None) -> None:
+    return None
+
+
+def _original_retainer(config: KnowledgeConfig, store: SeedStore) -> RetainOriginal:
+    """What a connector does with each download. ``None`` means the source would
+    not give the file up, so what was kept from an earlier sync goes too."""
+
+    def retain(document_id: str, content: bytes | None) -> None:
+        if content is None:
+            store.knowledge_originals.delete_document(
+                DocumentRef(config.tenant_id, config.id, document_id)
+            )
+        else:
+            _retain_original(store, config, document_id, content)
+
+    return retain
+
+
+def _prepared_document(
+    config: KnowledgeConfig, document: KnowledgeDocument, store: SeedStore
+) -> PreparedDocument:
+    settings = get_settings()
+    return prepare_document(
+        store.knowledge_originals,
+        _document_ref(config, document),
+        name=document.name,
+        options=RenditionOptions(
+            soffice=settings.knowledge_rendition_soffice_path,
+            timeout_seconds=settings.knowledge_rendition_timeout_seconds,
+            memory_mb=settings.knowledge_rendition_memory_mb,
+            require_isolation=settings.environment.strip().lower() != "local",
+            private_directories=settings.private_data_directories,
+        ),
+    )
+
+
+def _view_segments(
+    document: KnowledgeDocument, chunks: list[KnowledgeChunk]
+) -> list[KnowledgeDocumentViewSegment]:
+    """A metadata-only document's one chunk describes the file; it is not its text."""
+    return [] if document.status == "metadata-only" else text_segments(chunks)
+
+
+def _cited_target(
+    cited: KnowledgeChunk | None,
+    chunks: list[KnowledgeChunk],
+    prepared: PreparedDocument,
+    ref: DocumentRef,
+    store: SeedStore,
+) -> KnowledgeDocumentViewTarget | None:
+    if cited is None:
+        return None
+    pdf = prepared.file_path
+    if prepared.mode != "pdf" or pdf is None:
+        return target_for(cited, recorded_span(cited))
+    span = locate_passage(cited, chunks, lambda: page_index(store.knowledge_originals, ref, pdf))
+    return target_for(cited, span)
+
+
+def _view_file_url(config_id: str, document_id: str) -> str:
+    return f"/api/knowledge/{quote(config_id, safe='')}/documents/{quote(document_id, safe='')}/view/file"
+
+
+def _view_media_type(prepared: PreparedDocument) -> str:
+    return "application/pdf" if prepared.mode == "pdf" else prepared.content_type
+
+
 def _knowledge_document_or_404(
     config: KnowledgeConfig, document_id: str, store: SeedStore
 ) -> KnowledgeDocument:
     for document in store.knowledge_documents_for(config.id):
         if document.id == document_id:
             return document
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown knowledge document.")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_DOCUMENT)
 
 
 def _wall_group_choice(
@@ -1110,6 +1358,7 @@ class _IndexedUpload:
     chunks: list[KnowledgeChunk]
     notes: list[str]
     byte_count: int
+    source: BinaryIO
 
 
 async def _index_uploaded_file(
@@ -1177,7 +1426,7 @@ async def _index_uploaded_file(
     notes = _vision_notes(filename, vision) + _extraction_notes(
         filename, document, truncated=truncated, max_chars=settings.knowledge_max_extracted_chars
     )
-    return _IndexedUpload(document, chunks, notes, file_bytes)
+    return _IndexedUpload(document, chunks, notes, file_bytes, file.file)
 
 
 def _extraction_notes(
@@ -1681,9 +1930,7 @@ def _knowledge_oauth_callback_url(config_id: str) -> str:
 def _get_readable_config(config_id: str, actor: User, store: SeedStore) -> KnowledgeConfig:
     config = store.knowledge_configs.get(config_id)
     if config is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Unknown knowledge configuration."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CONFIGURATION)
     assert_knowledge_access(actor, config)
     return config
 
@@ -1813,7 +2060,7 @@ def _sync_box_documents(
         if item.type != "file":
             continue
         document, document_chunks, used_file_text = _box_document_and_chunks(
-            config, item, client, new_reader
+            config, item, client, new_reader, retain=_original_retainer(config, store)
         )
         documents.append(document)
         chunks.extend(document_chunks)
@@ -1888,6 +2135,7 @@ def _sync_microsoft_graph_documents(
         client,
         download_kwargs=download_kwargs,
         new_reader=new_reader,
+        retain=_original_retainer(config, store),
     )
     return _cloud_sync_result(
         provider_name="Microsoft Graph",
@@ -1942,7 +2190,7 @@ def _sync_google_drive_documents(
         )
 
     documents, chunks, downloaded, metadata_only = _cloud_documents_and_chunks(
-        config, items, client, new_reader=new_reader
+        config, items, client, new_reader=new_reader, retain=_original_retainer(config, store)
     )
     return _cloud_sync_result(
         provider_name="Google Drive",
@@ -1991,7 +2239,7 @@ def _sync_imanage_documents(
         return None, None, "error", f"iManage sync failed ({exc}); using cached indexed inventory."
 
     documents, chunks, downloaded, metadata_only = _cloud_documents_and_chunks(
-        config, items, client, new_reader=new_reader
+        config, items, client, new_reader=new_reader, retain=_original_retainer(config, store)
     )
     return _cloud_sync_result(
         provider_name="iManage",
@@ -2079,6 +2327,7 @@ def _cloud_documents_and_chunks(
     *,
     download_kwargs: dict[str, object] | None = None,
     new_reader: NewPageReader = _no_page_reader,
+    retain: RetainOriginal = _retain_nothing,
 ) -> tuple[list[KnowledgeDocument], list[KnowledgeChunk], int, int]:
     documents: list[KnowledgeDocument] = []
     chunks: list[KnowledgeChunk] = []
@@ -2093,6 +2342,7 @@ def _cloud_documents_and_chunks(
             client,
             download_kwargs=download_kwargs or {},
             new_reader=new_reader,
+            retain=retain,
         )
         documents.append(document)
         chunks.extend(document_chunks)
@@ -2152,16 +2402,19 @@ def _cloud_document_and_chunks(
     *,
     download_kwargs: dict[str, object],
     new_reader: NewPageReader = _no_page_reader,
+    retain: RetainOriginal = _retain_nothing,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk], bool]:
     document = _cloud_document(config, item)
     try:
         content = _download_cloud_file(client, item, download_kwargs=download_kwargs)
     except (AttributeError, CloudSourceError):
+        retain(document.id, None)
         chunks = [_inventory_chunk(config, document, 0)]
         document.chunk_count = len(chunks)
         document.status = "metadata-only"
         return document, chunks, False
 
+    retain(document.id, content)
     extracted = extract_document(
         item.name,
         content,
@@ -2252,6 +2505,8 @@ def _box_document_and_chunks(
     item: BoxItem,
     client: object,
     new_reader: NewPageReader = _no_page_reader,
+    *,
+    retain: RetainOriginal = _retain_nothing,
 ) -> tuple[KnowledgeDocument, list[KnowledgeChunk], bool]:
     document = _box_document(config, item)
     # Template metadata (walls, matters, classifications) lives beside the
@@ -2262,11 +2517,13 @@ def _box_document_and_chunks(
     try:
         content = client.download_file(file_id=item.id)
     except (AttributeError, BoxError):
+        retain(document.id, None)
         chunks = [_inventory_chunk(config, document, 0)]
         document.chunk_count = len(chunks)
         document.status = "metadata-only"
         return document, chunks, False
 
+    retain(document.id, content)
     extracted = extract_document(
         item.name, content, vision=new_reader(), **_extraction_settings()
     )

@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { describe, expect, it, test, vi } from "vitest";
 import mermaid from "mermaid";
+import type { ChatCitation } from "../lib/types";
+import { CitationMarkerContext } from "./CitationMarker";
 import { Markdown } from "./Markdown";
 
 vi.mock("mermaid", () => ({
@@ -681,4 +683,375 @@ test("a metadata JSON block in a prose answer renders as a summary visual", () =
   render(<Markdown content={`Findings follow.\n\n\`\`\`json\n${body}\n\`\`\``} />);
   expect(document.querySelector('[data-diagram-type="structured-summary"]')).toBeInTheDocument();
   expect(document.querySelector(".md-code-panel")).toBeNull();
+});
+
+describe("citation markers in a reply", () => {
+  const handbook: ChatCitation = {
+    id: "cite-1",
+    source_name: "Handbook.pdf",
+    source_type: "upload",
+    source_uri: "upload://handbook",
+    snippet: "",
+    k_index: 1,
+    chunk_id: "chunk-1",
+    document_id: "doc-1",
+    knowledge_config_id: "kb-1",
+    locator: "Page 40",
+  };
+  const article: ChatCitation = {
+    id: "cite-2",
+    source_name: "News article",
+    source_type: "web",
+    source_uri: "https://example.com/story",
+    snippet: "",
+    w_index: 1,
+    cited: true,
+  };
+
+  function renderReply(content: string, citations: ChatCitation[]) {
+    const onOpen = vi.fn();
+    render(
+      <CitationMarkerContext.Provider value={{ citations, onOpen }}>
+        <Markdown content={content} />
+      </CitationMarkerContext.Provider>,
+    );
+    return onOpen;
+  }
+
+  const viewerRequest = { kind: "document", configId: "kb-1", documentId: "doc-1", chunkId: "chunk-1" };
+
+  it("opens the document from a knowledge marker", () => {
+    const onOpen = renderReply("Files stay seven years [K1].", [handbook]);
+    fireEvent.click(screen.getByRole("button", { name: "Open source K1: Handbook.pdf, Page 40" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining(viewerRequest));
+  });
+
+  it("takes focus on click, so closing the viewer can return to the marker", () => {
+    renderReply("Files stay seven years [K1].", [handbook]);
+    const marker = screen.getByRole("button", { name: /Open source K1/ });
+    fireEvent.click(marker);
+    expect(marker).toHaveFocus();
+  });
+
+  it("opens an old citation through its chunk", () => {
+    const onOpen = renderReply("Old reply [K1].", [
+      { ...handbook, document_id: undefined, knowledge_config_id: undefined, locator: null },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Open source K1: Handbook.pdf" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ kind: "chunk", chunkId: "chunk-1" }));
+  });
+
+  it("opens a web marker as a link in a new tab", () => {
+    const onOpen = renderReply("Reported today [W1].", [article]);
+    const link = screen.getByRole("link", { name: "Open source W1: News article" });
+    expect(link).toHaveAttribute("href", "https://example.com/story");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("links a fetched URL's marker too", () => {
+    renderReply("From the page [U1].", [{ ...article, w_index: null, u_index: 1 }]);
+    expect(screen.getByRole("link", { name: "Open source U1: News article" })).toBeInTheDocument();
+  });
+
+  it("never renders a stored unsafe address as a marker link", () => {
+    renderReply("Reported [W1].", [{ ...article, source_uri: "javascript:alert(1)" }]);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(document.querySelector('[data-cite-index="W1"]')).toHaveTextContent("W1");
+  });
+
+  // Review finding 2 and ruling R1: the renderer never edits a reply.
+  describe("a bracket the reply's citations do not explain", () => {
+    it.each([
+      ["employees should attach [W2] to the return."],
+      ["attach [W2, W4] and the [K1] to the return."],
+      ["partners receive a Schedule [K1] each March."],
+      ["the court in Smith [K1] at 45 held otherwise"],
+      ["[K1-K3] and [K1–3] and [K 1] and 【K1】 and ［K1］"],
+    ])("stays as written with no citations: %s", (content) => {
+      renderReply(content, []);
+      expect(document.body).toHaveTextContent(content);
+      expect(document.querySelector(".md-cite-marker")).toBeNull();
+    });
+
+    it("stays as written in a table cell", () => {
+      renderReply("| A |\n| --- |\n| [K1] and [W2] |", []);
+      expect(document.body).toHaveTextContent("[K1] and [W2]");
+    });
+
+    it("stays as written when only the other letter is in use", () => {
+      renderReply("The form [W2] was filed [K1].", [handbook]);
+      expect(document.body).toHaveTextContent("The form [W2] was filed");
+      expect(screen.getByRole("button", { name: /Open source K1/ })).toBeInTheDocument();
+    });
+
+    it("keeps an old web reply's markers, whose citations carry no number", () => {
+      renderReply("Reported [W1].", [{ ...article, w_index: undefined }]);
+      expect(document.body).toHaveTextContent("Reported [W1].");
+    });
+
+    it("keeps the unknown half of a mixed bracket", () => {
+      renderReply("Both [K1, W2].", [handbook]);
+      expect(screen.getByRole("button", { name: /Open source K1/ })).toBeInTheDocument();
+      expect(document.body).toHaveTextContent("[W2]");
+    });
+
+    it("keeps a page note with a bracket it leaves alone", () => {
+      renderReply("See [K1, p. 50].", []);
+      expect(document.body).toHaveTextContent("See [K1, p. 50].");
+    });
+  });
+
+  describe("a number the reply invented", () => {
+    it("is dropped when that letter is in use", () => {
+      renderReply("Unsupported claim [K7] and [W3].", [handbook, article]);
+      expect(document.querySelector(".md-cite-marker")).toBeNull();
+      expect(document.body).not.toHaveTextContent("K7");
+      expect(document.body).not.toHaveTextContent("W3");
+    });
+
+    it("takes its space with it, so no hole is left", () => {
+      renderReply("Nothing here [K7]. Missing web [W3].", [handbook, article]);
+      expect(document.body).toHaveTextContent("Nothing here. Missing web.");
+    });
+
+    it("takes one space only", () => {
+      renderReply("Two  [K7] gaps", [handbook]);
+      expect(document.querySelector(".md-paragraph")?.textContent).toBe("Two  gaps");
+    });
+
+    it("drops only the unmatched number in a list", () => {
+      renderReply("Both [K1, K2].", [handbook]);
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      expect(document.body).not.toHaveTextContent("K2");
+    });
+  });
+
+  it.each(["[K1, K2]", "[K1; K2]", "[K1][K2]", "[K1-K2]", "[K1–K2]", "[K1/K2]", "[K1，K2]", "[K1、K2]", "[K1 K2]"])(
+    "reads %s as two markers",
+    (markers) => {
+      renderReply(`Claim ${markers}.`, [handbook, { ...handbook, id: "cite-3", chunk_id: "chunk-2", k_index: 2 }]);
+      expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["K1", "K2"]);
+      expect(document.body).not.toHaveTextContent("[");
+    },
+  );
+
+  it.each(["[K1, p. 50]", "[K1 page 50]", "[K1, pp. 50-51]", "[K1, slide 3]", "[K1; sheet Q3]"])(
+    "turns %s into a key with no raw bracket left",
+    (marker) => {
+      renderReply(`Claim ${marker}.`, [handbook]);
+      expect(screen.getByRole("button", { name: /Open source K1/ })).toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent("[");
+    },
+  );
+
+  it.each([
+    "[Source: K1]",
+    "[Sources: K1]",
+    "[Ref K1]",
+    "[K1.]",
+    "[K1,]",
+    "[^K1]",
+    "\\[K1\\]",
+    "[К1]",
+    "[Ｋ1]",
+    "[K1 (p. 40)]",
+    "[K1: p. 40]",
+    "[K1, Harlow survey.pdf, p. 40]",
+  ])("turns %s into a key too", (marker) => {
+    renderReply(`Claim ${marker}.`, [handbook]);
+    expect(screen.getByRole("button", { name: /Open source K1/ })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("[");
+  });
+
+  it.each(["[k1]", "[see K1]", "[K1, see the appendix]", "[K1 statement]"])("leaves the prose %s alone", (text) => {
+    renderReply(`Claim ${text}.`, [handbook]);
+    expect(document.body).toHaveTextContent(`Claim ${text}.`);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("reads a list longer than the old bracket limit", () => {
+    const citations = Array.from({ length: 23 }, (_, index) => ({ ...handbook, id: `c${index}`, k_index: index + 1 }));
+    renderReply(`Claim [${citations.map((_, index) => `K${index + 1}`).join(", ")}].`, citations);
+    expect(screen.getAllByRole("button")).toHaveLength(23);
+  });
+
+  it("reads the full-width brackets some models write", () => {
+    renderReply("Claim ［K1］ and 【K1】.", [handbook]);
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("leaves prose in brackets alone, however it starts", () => {
+    renderReply("See the [W2 form instructions] and the [K1 tax schedule], with **bold [K9 text]**.", [handbook]);
+    expect(document.body).toHaveTextContent("See the [W2 form instructions] and the [K1 tax schedule], with bold [K9 text].");
+    expect(document.querySelector(".md-cite-marker")).toBeNull();
+  });
+
+  it("still reads formatting inside a bracket that is not a marker", () => {
+    renderReply("A [K1 **loud** note] here.", [handbook]);
+    expect(screen.getByText("loud").tagName).toBe("STRONG");
+  });
+
+  it("keeps a marker readable when its citation has nowhere to go", () => {
+    renderReply("Claim [K1].", [{ ...handbook, chunk_id: null, document_id: null, knowledge_config_id: null }]);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(document.querySelector('[data-cite-index="K1"]')).toHaveTextContent("K1");
+  });
+
+  it("stays inert in a hover preview", () => {
+    render(
+      <CitationMarkerContext.Provider value={{ citations: [handbook], onOpen: vi.fn() }}>
+        <Markdown content="Claim [K1]." preview />
+      </CitationMarkerContext.Provider>,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(document.querySelector('[data-cite-index="K1"]')).toHaveTextContent("K1");
+  });
+
+  it("shows inert pending markers while streaming, for every form", () => {
+    render(<Markdown content="Claim [K1], [W2], and [K3, K4]." streaming />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(Array.from(document.querySelectorAll(".md-cite-marker")).map((node) => node.textContent)).toEqual([
+      "K1",
+      "W2",
+      "K3",
+      "K4",
+    ]);
+  });
+
+  it("resolves a pending marker on done, into a key or the words as written", () => {
+    const { rerender } = render(<Markdown content="Claim [K1] and [W2]." streaming />);
+    rerender(
+      <CitationMarkerContext.Provider value={{ citations: [handbook], onOpen: vi.fn() }}>
+        <Markdown content="Claim [K1] and [W2]." />
+      </CitationMarkerContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: /Open source K1/ })).toBeInTheDocument();
+    expect(document.body).toHaveTextContent("and [W2].");
+  });
+
+  // Surfaces with no citations to offer behave as they did before markers were keys.
+  it("keeps [W2] and lists literal where no citations apply", () => {
+    render(<Markdown content="Attach [W2] and [K3, K4] to it, per [K1]." />);
+    expect(document.body).toHaveTextContent("Attach [W2] and [K3, K4] to it, per");
+    expect(document.querySelector('[data-cite-index="K1"]')).toHaveTextContent("K1");
+    expect(document.querySelectorAll(".md-cite-marker")).toHaveLength(1);
+  });
+
+  // The server counts these as citations and strips them with their URL. A
+  // model's URL behind a K1 label is not where the citation points.
+  describe("a marker with a link target", () => {
+    it("is the marker when the reply cited that number", () => {
+      const onOpen = renderReply("See [K1](https://made-up.example/k) here.", [handbook]);
+      expect(screen.queryByRole("link")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: /Open source K1/ }));
+      expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ chunkId: "chunk-1" }));
+    });
+
+    it("opens the citation's own address for a web marker, not the model's", () => {
+      renderReply("See [W1](https://made-up.example/w).", [article]);
+      expect(screen.getByRole("link", { name: /Open source W1/ })).toHaveAttribute("href", "https://example.com/story");
+    });
+
+    it("is dropped, URL and all, when the number does not exist", () => {
+      renderReply("Claim [K7](https://made-up.example/k).", [handbook]);
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(document.querySelector(".md-paragraph")?.textContent).toBe("Claim.");
+    });
+
+    it("stays a real link when this reply has no citations of that letter", () => {
+      renderReply("Fill in [W2](https://irs.example/w2).", [handbook]);
+      expect(screen.getByRole("link", { name: "W2" })).toHaveAttribute("href", "https://irs.example/w2");
+    });
+
+    it("stays a real link where no citations apply", () => {
+      render(<Markdown content="See [K1](https://example.com/k)." />);
+      expect(screen.getByRole("link", { name: "K1" })).toHaveAttribute("href", "https://example.com/k");
+    });
+
+    it("stays a plain label in a hover preview", () => {
+      render(
+        <CitationMarkerContext.Provider value={{ citations: [handbook], onOpen: vi.fn() }}>
+          <Markdown content="See [K1](https://example.com/k)." preview />
+        </CitationMarkerContext.Provider>,
+      );
+      expect(screen.queryByRole("button")).toBeNull();
+      expect(document.querySelector(".md-link")).toHaveTextContent("K1");
+    });
+
+    it("shows a pending marker while streaming", () => {
+      render(<Markdown content="See [K1](https://example.com/k)." streaming />);
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(document.querySelector('[data-cite-index="K1"]')).toHaveTextContent("K1");
+    });
+
+    it("leaves an ordinary link alone", () => {
+      renderReply("Read [the policy](https://example.com/p).", [handbook]);
+      expect(screen.getByRole("link", { name: "the policy" })).toBeInTheDocument();
+    });
+  });
+
+  describe("a marker inside emphasis", () => {
+    it.each([
+      ["**Bold claim with a marker [K1].**", "STRONG"],
+      ["*Italic claim [K1]*", "EM"],
+      ["_Underscore claim [K1]_", "EM"],
+    ])("is a key inside %s", (content, tag) => {
+      renderReply(content, [handbook]);
+      const key = screen.getByRole("button", { name: /Open source K1/ });
+      expect(key.closest(tag.toLowerCase())).not.toBeNull();
+      expect(document.body).not.toHaveTextContent("[K1]");
+    });
+
+    it("keeps the words around it", () => {
+      renderReply("**Before [K1] after.**", [handbook]);
+      expect(document.querySelector("strong")).toHaveTextContent("Before");
+      expect(document.querySelector("strong")).toHaveTextContent("after.");
+    });
+
+    it("reads every form", () => {
+      renderReply("**Claim [K1, p. 40] and [Sources: K1].**", [handbook]);
+      expect(screen.getAllByRole("button")).toHaveLength(2);
+      expect(document.body).not.toHaveTextContent("[");
+    });
+
+    it("drops an invented number and its space", () => {
+      renderReply("**Claim [K7].**", [handbook]);
+      expect(document.querySelector("strong")?.textContent).toBe("Claim.");
+    });
+
+    it("leaves a bracket this reply did not cite as written", () => {
+      renderReply("**Attach [W2] today.**", [handbook]);
+      expect(document.querySelector("strong")?.textContent).toBe("Attach [W2] today.");
+    });
+
+    it("treats a linked marker the same way", () => {
+      renderReply("**Claim [K1](https://made-up.example/k).**", [handbook]);
+      expect(screen.getByRole("button", { name: /Open source K1/ })).toBeInTheDocument();
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+
+    it("does not start parsing other formatting inside emphasis", () => {
+      renderReply("**call snake_case_name [K1] now**", [handbook]);
+      expect(document.querySelector("strong")).toHaveTextContent("call snake_case_name");
+      expect(document.querySelector("strong em")).toBeNull();
+    });
+
+    it("leaves emphasis with no markers exactly as before", () => {
+      render(<Markdown content="**plain bold** and *plain italic*" />);
+      expect(document.querySelector("strong")?.textContent).toBe("plain bold");
+      expect(document.querySelector("em")?.textContent).toBe("plain italic");
+    });
+  });
+
+  it("shows one key for a number written twice", () => {
+    renderReply("Claim [K1, K1] and [K1, K1-K2].", [handbook, { ...handbook, id: "cite-3", chunk_id: "chunk-2", k_index: 2 }]);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["K1", "K1", "K2"]);
+  });
+
+  it("marks citations inside tables and lists too", () => {
+    renderReply("- Item [K1]\n\n| A |\n| --- |\n| Cell [K1] |", [handbook]);
+    expect(screen.getAllByRole("button", { name: "Open source K1: Handbook.pdf, Page 40" })).toHaveLength(2);
+  });
 });

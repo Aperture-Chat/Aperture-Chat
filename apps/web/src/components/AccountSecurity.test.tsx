@@ -119,7 +119,7 @@ test("security status failure is retriable and never appears as verification dis
   expect(screen.queryByText("Off")).not.toBeInTheDocument();
   available = true;
   fireEvent.click(retry);
-  expect(await screen.findByText("On")).toBeInTheDocument();
+  expect(await screen.findByText("Your authenticator is connected.")).toBeInTheDocument();
 });
 
 test("changing accounts removes in-progress enrollment secrets", async () => {
@@ -158,4 +158,60 @@ test("enrollment completion cannot restore a signed-out account after the panel 
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(getSessionToken()).toBeNull();
   expect(guard).toHaveBeenLastCalledWith(false);
+});
+
+test("the panel names the feature once and leaves the state to the drawer row", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => json(enabled)));
+  render(<AccountSecurity user={localUser} onSignOut={vi.fn()} />);
+
+  expect(await screen.findByRole("heading", { level: 4, name: "Two-step verification" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Replace recovery codes" })).toBeInTheDocument();
+  expect(screen.queryByText("An extra layer of protection for your account.")).not.toBeInTheDocument();
+  expect(screen.queryByText("On")).not.toBeInTheDocument();
+  expect(screen.queryByText(/recovery codes? remain/)).not.toBeInTheDocument();
+});
+
+test("focus moves into each step and back out", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => json(disabled)));
+  render(<AccountSecurity user={localUser} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Set up authenticator" }));
+  await waitFor(() => expect(screen.getByLabelText("Current password")).toHaveFocus());
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Set up authenticator" })).toHaveFocus());
+});
+
+test("recovery codes take focus, because they are shown only once", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).endsWith("/regenerate")) return json({ recovery_codes: ["AAAA-1", "BBBB-2"] });
+    return json(enabled);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<AccountSecurity user={localUser} onSignOut={vi.fn()} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Replace recovery codes" }));
+  fireEvent.change(await screen.findByLabelText("Authenticator code"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create new recovery codes" }));
+
+  const heading = await screen.findByRole("heading", { name: "Save your recovery codes" });
+  await waitFor(() => expect(heading).toHaveFocus());
+});
+
+test("Escape cannot leave unsaved recovery codes", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).endsWith("/regenerate")) return json({ recovery_codes: ["AAAA-1"] });
+    return json(enabled);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<AccountSecurity user={localUser} onSignOut={vi.fn()} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Replace recovery codes" }));
+  fireEvent.change(await screen.findByLabelText("Authenticator code"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create new recovery codes" }));
+  const heading = await screen.findByRole("heading", { name: "Save your recovery codes" });
+
+  fireEvent.keyDown(heading, { key: "Escape" });
+
+  expect(screen.getByText("AAAA-1")).toBeInTheDocument();
 });

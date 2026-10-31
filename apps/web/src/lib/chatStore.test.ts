@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { sampleData } from "../data/sampleData";
 import * as api from "./api";
 import {
+  messageWithActiveResponseVersion,
   preservePendingTraceState,
   resumablePendingAssistant,
   targetModelForRequest,
@@ -421,4 +422,130 @@ test("server snapshots never move a read position backwards", () => {
   expect(preservePendingTraceState(local, stale).last_read_message_id).toBe("a2");
   const ahead = { ...local, last_read_message_id: "a2" };
   expect(preservePendingTraceState({ ...local, last_read_message_id: "a1" }, ahead).last_read_message_id).toBe("a2");
+});
+
+test("each response version keeps the sources of its own reply", () => {
+  const citation = (id: string): NonNullable<ChatMessage["citations"]>[number] => ({
+    id,
+    source_name: id,
+    source_type: "upload",
+    source_uri: `upload://${id}`,
+    snippet: "Passage.",
+    k_index: 1,
+  });
+  const version = (id: string, citations: ChatMessage["citations"]) => ({
+    id,
+    label: id,
+    content: "Grounded [K1].",
+    status: "ok",
+    citations,
+    createdAt: "10:00 AM",
+  });
+  const message = (activeResponseVersionIndex: number): ChatMessage => ({
+    id: "reply",
+    role: "assistant",
+    content: "Grounded [K1].",
+    createdAt: "10:00 AM",
+    status: "ok",
+    citations: [],
+    metadata: {
+      activeResponseVersionIndex,
+      responseVersions: [
+        version("first", [citation("first-document")]),
+        version("second", [citation("second-document")]),
+      ],
+    },
+  });
+
+  expect(messageWithActiveResponseVersion(message(0)).citations?.map((item) => item.id)).toEqual(["first-document"]);
+  expect(messageWithActiveResponseVersion(message(1)).citations?.map((item) => item.id)).toEqual(["second-document"]);
+});
+
+async function seedArchivedThread(view: { result: { current: ReturnType<typeof useChatStore> } }) {
+  let threadId = "";
+  await act(async () => {
+    threadId = view.result.current.sendMessageInNewThread("Keep me until the server agrees")?.id ?? "";
+  });
+  await act(async () => {
+    view.result.current.archiveThread(threadId);
+  });
+  return threadId;
+}
+
+test("a refused permanent delete keeps the chat and reports the server's reason", async () => {
+  const data = structuredClone(sampleData);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  const refusal = new api.ChatRequestError("This chat is protected by a legal hold.", 409);
+  vi.spyOn(api, "deleteChatThread").mockRejectedValue(refusal);
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_userId, thread) => thread);
+  const created = await seedArchivedThread(view);
+
+  let outcome: unknown;
+  await act(async () => {
+    outcome = await view.result.current.deleteThread(created).catch((error: unknown) => error);
+  });
+
+  expect(outcome).toBe(refusal);
+  expect(view.result.current.threads.some((thread) => thread.id === created)).toBe(true);
+});
+
+test("a confirmed permanent delete leaves the list only once the server agrees", async () => {
+  const data = structuredClone(sampleData);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  let confirm!: (value: { status: string; id: string }) => void;
+  vi.spyOn(api, "deleteChatThread").mockImplementation(() => new Promise((resolve) => { confirm = resolve; }));
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_userId, thread) => thread);
+  const created = await seedArchivedThread(view);
+
+  let finished!: Promise<void>;
+  act(() => {
+    finished = view.result.current.deleteThread(created);
+  });
+  expect(view.result.current.threads.some((thread) => thread.id === created)).toBe(true);
+
+  await act(async () => {
+    confirm({ status: "deleted", id: created });
+    await finished;
+  });
+  expect(view.result.current.threads.some((thread) => thread.id === created)).toBe(false);
+});
+
+test("a chat the server no longer has still leaves the list", async () => {
+  const data = structuredClone(sampleData);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  vi.spyOn(api, "deleteChatThread").mockRejectedValue(new api.ChatRequestError("Chat thread not found.", 404));
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_userId, thread) => thread);
+  const created = await seedArchivedThread(view);
+
+  await act(async () => {
+    await view.result.current.deleteThread(created);
+  });
+
+  expect(view.result.current.threads.some((thread) => thread.id === created)).toBe(false);
+});
+
+test("deleting the open chat lands on a blank one, and a blank chat needs no server", async () => {
+  const data = structuredClone(sampleData);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  const remove = vi.spyOn(api, "deleteChatThread").mockResolvedValue({ status: "deleted", id: "x" });
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_userId, thread) => thread);
+  let created = "";
+  await act(async () => {
+    created = view.result.current.sendMessageInNewThread("The open chat")?.id ?? "";
+  });
+  expect(view.result.current.activeThread?.id).toBe(created);
+
+  await act(async () => {
+    await view.result.current.deleteThread(created);
+  });
+
+  expect(view.result.current.activeThread?.id).not.toBe(created);
+  expect(view.result.current.threads.map((thread) => thread.id)).toContain(view.result.current.activeThread?.id);
+  expect(remove).toHaveBeenCalledTimes(1);
+
+  const blank = view.result.current.activeThread?.id ?? "";
+  await act(async () => {
+    await view.result.current.deleteThread(blank);
+  });
+  expect(remove).toHaveBeenCalledTimes(1);
 });

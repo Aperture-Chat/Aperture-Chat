@@ -14,7 +14,7 @@
  * message to the newly granted model.
  */
 const { helpers } = require("./user-common.cjs");
-const { scrollTo, signInWithPassword, createPerson, sendChat, waitForReply } = helpers;
+const { scrollTo, signInWithPassword, createPerson, sendChat, waitForReply, foldTrace } = helpers;
 
 const MODEL_NAME = "Qwen3.5 9B Finance";
 const PERSON = { email: "riley.park@example.test", name: "Riley Park" };
@@ -107,7 +107,8 @@ const userModels = {
     await page.getByRole("button", { name: "Select model" }).click();
     await page.locator(".workspace-header .model-menu").getByRole("option", { name: new RegExp(MODEL_NAME) }).click();
     const before = await sendChat(page, "In one sentence, what should a finance team check before approving a vendor invoice?");
-    await waitForReply(page, before, { timeout: 900000 });
+    const reply = await waitForReply(page, before, { timeout: 2400000 });
+    await foldTrace(page, reply);
     await shot("models-reply");
   },
 };

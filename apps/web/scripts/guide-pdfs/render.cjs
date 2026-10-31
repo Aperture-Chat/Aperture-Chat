@@ -53,7 +53,7 @@ function renderLesson(block) {
 const SECTION_FIGURES = {
   layout: ["user/chat-home.png", "The chat workspace: navigation on the left, model selection above, and the message composer in the main area."],
   drafts: ["user/drafts.png", "Drafts combines the document editor with a separate assistant and document controls."],
-  "settings-account": ["user/account-security-overview.png", "Your account includes profile settings, password controls, and two-step verification."],
+  "settings-account": ["user/account-overview.png", "Your account includes profile settings, password controls, and two-step verification."],
   "admin-overview": ["admin/users-list.png", "The Admin console opens the workspace controls available to your administrator account."],
   "admin-connectors": ["admin/cn-panel.png", "Admin console → Connections → Connectors: each source's switch, Configure, Hide, and test results for this workspace."],
   "admin-reports": ["admin/rp-queue.png", "Admin console → Reports lists the tickets people send from Help, with Needs reply first."],

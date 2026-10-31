@@ -387,26 +387,8 @@ def test_a5_models_round_trip_complete_chat_and_authority_records(tmp_path: Path
     "messages",
     [
         {"id": "not-an-array"},
-        [
-            {
-                "id": "message-a5",
-                "role": "user",
-                "content": "Hello",
-                "createdAt": "Now",
-                "extra": True,
-            }
-        ],
-        [
-            {
-                "id": "message-a5",
-                "role": "user",
-                "content": "Hello",
-                "createdAt": "Now",
-                "attachments": [
-                    {"name": "bad.txt", "size": "1 B", "kind": "Text", "unknown": True}
-                ],
-            }
-        ],
+        ["not-an-object"],
+        [{"id": "message-a5", "role": "user"}],
     ],
 )
 def test_chat_message_json_fails_closed_on_corrupt_raw_rows(
@@ -427,6 +409,38 @@ def test_chat_message_json_fails_closed_on_corrupt_raw_rows(
         with pytest.raises((StatementError, ValueError)):
             with session_scope(factory) as session:
                 session.scalar(select(ChatThreadRow))
+    finally:
+        engine.dispose()
+
+
+def test_chat_message_json_reads_rows_a_newer_version_wrote(tmp_path: Path) -> None:
+    engine = create_application_engine(_sqlite_url(tmp_path / "a5-newer.sqlite3"))
+    upgrade_database(engine)
+    factory = create_session_factory(engine)
+    messages = [
+        {
+            "id": "message-a5",
+            "role": "user",
+            "content": "Hello",
+            "createdAt": "Now",
+            "extra": True,
+            "attachments": [{"name": "a.txt", "size": "1 B", "kind": "Text", "unknown": True}],
+        }
+    ]
+    try:
+        with session_scope(factory) as session:
+            session.add(ChatThreadRow.from_model(_thread()))
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE chat_threads SET messages = :messages WHERE id = :thread_id"),
+                {"messages": json.dumps(messages), "thread_id": "thread-a5"},
+            )
+        with session_scope(factory) as session:
+            stored = session.scalar(select(ChatThreadRow))
+            assert stored is not None
+            message = stored.to_model().messages[0].model_dump(mode="json")
+        assert "extra" not in message
+        assert "unknown" not in message["attachments"][0]
     finally:
         engine.dispose()
 
