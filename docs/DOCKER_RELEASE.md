@@ -146,6 +146,11 @@ configuration. Backing up only `runtime_state.json` is insufficient. Use a
 consistent database backup or stop writes during the backup; copying a live
 SQLite main file alone can omit WAL transactions.
 
+The volume also holds `knowledge_originals/`, a copy of every uploaded and
+connector-synced knowledge file plus its cached rendition, so it grows with the
+knowledge bases. Files stored there are readable by anyone with access to the
+volume, the same as the databases.
+
 The optional `postgres` profile starts PostgreSQL but does not migrate data or
 switch the API. Review the dry-run/import procedures in
 `services/api/app/db/transfer_database.py`, then configure
@@ -231,6 +236,54 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.17
+
+- **Document viewer for knowledge sources.** Citations and Knowledge Library
+  names open the document itself at the cited page. Uploads and connector syncs
+  now keep the original file on the data volume (`knowledge_originals/`), so
+  plan for that growth; documents indexed earlier still open, as text, at their
+  cited passage until they are uploaded or synced again.
+- The API image now includes headless LibreOffice (Writer, Calc, Impress), and
+  grows by about 450 MB, to about 2.9 GB. It converts Office, RTF, and OpenDocument
+  files on first view, one at a time, using up to
+  `APERTURE_KNOWLEDGE_RENDITION_MEMORY_MB`
+  (default 4096, minimum 2048) of address space, for at most
+  `APERTURE_KNOWLEDGE_RENDITION_TIMEOUT_SECONDS` (default 120). No migration.
+- Conversions run as the image's unprivileged `aperture-render` account, which
+  cannot read the data volume, so the API must start as root to drop to it, as the
+  shipped image does. If it runs under another `user:`, or the data directory can
+  be entered by anyone else, documents open as text with a notice. Both compose
+  files set `APERTURE_ENVIRONMENT=production`. A container started by hand with no
+  environment defaults to `local`, where that refusal does not apply, so do not
+  rely on it outside a laptop. `scripts/prove-rendition-image.sh` builds the image
+  and proves the conversion sandbox inside it, on the LibreOffice it ships.
+- **Citations list only what the reply used.** A knowledge document appears as a
+  source only when the reply cites it, and web results the reply did not cite
+  are marked as consulted. Citations gain new stored fields. No migration, but
+  the fields are forward-only: v0.5.17 refuses to load any chat row that holds
+  them, so rolling back to v0.5.17 needs the data volume backup taken before the
+  upgrade as well as the older images. This release reads rows from newer
+  versions, so later field additions will not repeat this.
+- **Search finds the passage that answers.** A term past three mentions in a
+  passage no longer adds to its score, so naming what was asked beats repeating
+  one word. Existing indexes need no rebuild.
+- **Chat offers the slide deck editor for more requests.** Requests for slides,
+  a deck, or anything PowerPoint are recognized by their grammar, including
+  typos, and pasted text no longer triggers an offer as often.
+- **Account drawer rebuilt.** Profile, workspace consoles, View as, security, API
+  access, this month's usage, and archived chats share one design, and every
+  item was validated. `GET /api/auth/me/usage-summary` is new. `POST
+  /api/auth/api-key` now returns 409 over a live key unless the request sends
+  `{"replace": true}`. The web and API images must ship together.
+- **Drafts stays in view.** Documents scroll in their own pane above 560 px, so
+  the page navigator and status bar stay on screen and the page count follows
+  the scroll. Documents and decks use the same work trace as chat. Library file
+  rows gain a Preview button that opens the document viewer.
+- **The sidebar collapses with one smooth motion**, from a short bar on its edge.
+- **Training covers everything above.** The library grows to 71 lessons with
+  spreadsheets, checking sources, code in chat, editing tables and diagrams, and
+  ethical walls, and 27 lessons are re-narrated. The three PDF guides are rebuilt.
+
 ## New Since v0.5.16
 
 - **Spreadsheets in Drafts.** Drafts gains a third format beside Document and
@@ -276,8 +329,8 @@ traffic.
   `APERTURE_DRAFT_PDF_EXPORT_TIMEOUT_SECONDS`, and
   `APERTURE_DRAFT_PDF_EXPORT_RETENTION_MINUTES`. Upgrading from v0.5.16
   changes both the API and web images.
-- API and web images publish as `v0.5.17-dev`, `v0.5.17-test`, and
-  `v0.5.17-main`. Stable `v0.5.17` and `latest` promote inspected test images
+- API and web images publish as `v0.5.18-dev`, `v0.5.18-test`, and
+  `v0.5.18-main`. Stable `v0.5.18` and `latest` promote inspected test images
   without rebuilding.
 
 ## New Since v0.5.15

@@ -63,13 +63,12 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.17](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.17)**:
-> Drafts gains Excel-style spreadsheets with formulas, pivots, charts, xlsx
-> import and export, and an AI assistant; the Export panel builds real
-> PDF/A-2b files on the server; chat tables are editable and transfer to a
-> document, deck, or spreadsheet; and the whole platform fits a phone screen.
-> v0.5.16 added knowledge metadata, ethical walls, and site crawling.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0516) and
+> **Current release: [v0.5.18](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.18)**:
+> Citations open the real document at the cited passage, and only documents a
+> reply cited are listed; the Account drawer is rebuilt; Drafts keeps its page
+> navigator and status bar in view; and training covers every recent feature in
+> 71 lessons. v0.5.17 added Excel-style spreadsheets and server-built PDF/A files.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0517) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -100,14 +99,14 @@ policies appropriate for your organization's data.
 | --- | --- |
 | ![Document editor with a project brief, compact formatting toolbar, save status, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor in dark mode: the project brief rebuilt as a deck in the Editorial design, with a big-number slide, theme choices, and the slide panel](docs/images/deck-dark.png) |
 
-- **One workspace, two formats.** Switch between **Document** and **Deck** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
+- **One workspace, three formats.** Switch between **Document**, **Deck**, and **Spreadsheet** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
-- **Start from chat.** Ask for a document or a deck in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
+- **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts (including statement, big-number, and picture-with-bullets), and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and seven theme designs, a slide sorter, snapping guides, and presenter view round it out.
-- **Versions you can trust.** Save versions, compare and restore revisions, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
+- **Versions you can trust.** Save versions, compare and return to versions while a draft is open, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
-- **Export.** Download Word (`.docx`), Markdown (`.md`), or PowerPoint (`.pptx`), or print a paginated PDF.
+- **Export.** Download Word (`.docx`), Markdown (`.md`), PowerPoint (`.pptx`), or Excel (`.xlsx`), build an archival PDF/A file, or print.
 
 <details>
 <summary><b>Document in dark mode, deck in light mode</b></summary>
@@ -171,7 +170,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.17
+#   APERTURE_IMAGE_TAG=v0.5.18
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -192,7 +191,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.17 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.18 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -227,10 +226,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.17` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.18` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.17-dev`, `v0.5.17-test`, `v0.5.17-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.18-dev`, `v0.5.18-test`, `v0.5.18-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
