@@ -1,13 +1,26 @@
 import {
   apiBase,
+  apiBlobRequest,
+  apiFileRequest,
   authHeaders,
   apiRequest,
+  isRecord,
   readApiError,
   pathId,
   ChatRequestError,
   type ApiMutationOptions,
 } from "./http";
-import type { KnowledgeDocument, KnowledgeIndexStatus, KnowledgeSyncResult } from "../types";
+import type {
+  KnowledgeChunkLocation,
+  KnowledgeDocument,
+  KnowledgeDocumentNotice,
+  KnowledgeDocumentSegment,
+  KnowledgeDocumentTarget,
+  KnowledgeDocumentView,
+  KnowledgeDocumentViewMode,
+  KnowledgeIndexStatus,
+  KnowledgeSyncResult,
+} from "../types";
 
 export function listKnowledgeDocuments(
   userId: string,
@@ -266,4 +279,133 @@ export function knowledgeApiSourceOAuthCallbackUrl(configId: string): string {
   // page origin is the API origin.
   if (apiBase) return `${apiBase}${path}`;
   return typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+}
+
+// ---------------------------------------------------------- document viewing
+
+const VIEW_MODES: readonly string[] = ["pdf", "image", "text"] satisfies KnowledgeDocumentViewMode[];
+const VIEW_NOTICES: readonly string[] = [
+  "original_missing",
+  "conversion_unavailable",
+  "conversion_failed",
+  "privacy_restricted",
+] satisfies KnowledgeDocumentNotice[];
+
+function documentPath(configId: string, documentId: string) {
+  return `/api/knowledge/${pathId(configId)}/documents/${pathId(documentId)}`;
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+function pageOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : null;
+}
+
+function parseTarget(raw: unknown): KnowledgeDocumentTarget | null {
+  if (!isRecord(raw)) return null;
+  const page = pageOrNull(raw.page);
+  return {
+    page,
+    page_end: pageOrNull(raw.page_end) ?? page,
+    locator: textOrNull(raw.locator),
+    excerpt: textOrNull(raw.excerpt) ?? "",
+    chunk_id: textOrNull(raw.chunk_id),
+    exact: raw.exact === true,
+  };
+}
+
+function parseSegments(raw: unknown): KnowledgeDocumentSegment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isRecord).map((segment, index) => ({
+    id: textOrNull(segment.id) ?? `segment-${index}`,
+    page: pageOrNull(segment.page),
+    locator: textOrNull(segment.locator),
+    text: typeof segment.text === "string" ? segment.text : "",
+  }));
+}
+
+/** Checks the view where it enters, so the viewer can trust its shape. */
+export function parseKnowledgeDocumentView(raw: unknown): KnowledgeDocumentView {
+  if (!isRecord(raw) || !VIEW_MODES.includes(String(raw.mode))) {
+    throw new ChatRequestError("The document could not be read.");
+  }
+  return {
+    document_id: String(raw.document_id ?? ""),
+    knowledge_config_id: String(raw.knowledge_config_id ?? ""),
+    name: textOrNull(raw.name) ?? "Document",
+    content_type: textOrNull(raw.content_type) ?? "",
+    mode: raw.mode as KnowledgeDocumentViewMode,
+    file_url: textOrNull(raw.file_url),
+    original_available: raw.original_available === true,
+    page_count: pageOrNull(raw.page_count),
+    target: parseTarget(raw.target),
+    segments: parseSegments(raw.segments),
+    notice: VIEW_NOTICES.includes(String(raw.notice)) ? (raw.notice as KnowledgeDocumentNotice) : null,
+  };
+}
+
+/** What the viewer shows for a document, aimed at `chunkId` when given. */
+export async function getKnowledgeDocumentView(
+  userId: string,
+  configId: string,
+  documentId: string,
+  options: ApiMutationOptions & { chunkId?: string | null } = {},
+): Promise<KnowledgeDocumentView> {
+  const query = options.chunkId ? `?chunk_id=${encodeURIComponent(options.chunkId)}` : "";
+  const raw = await apiRequest<unknown>(userId, `${documentPath(configId, documentId)}/view${query}`, {
+    signal: options.signal,
+  });
+  return parseKnowledgeDocumentView(raw);
+}
+
+/** The bytes the viewer renders. Built from the ids, never from a server or
+ * citation URL, so nothing stored can steer this authenticated request. */
+export function loadKnowledgeDocumentBytes(
+  userId: string,
+  configId: string,
+  documentId: string,
+  options: ApiMutationOptions = {},
+): Promise<Blob> {
+  return apiBlobRequest(userId, `${documentPath(configId, documentId)}/view/file`, options);
+}
+
+/** The file name a download response carries, or null. */
+export function contentDispositionName(header: string | null): string | null {
+  if (!header) return null;
+  const encoded = /filename\*=(?:UTF-8|utf-8)''([^;]+)/.exec(header)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.trim());
+    } catch {
+      // A malformed name falls through to the plain form.
+    }
+  }
+  return /filename="?([^";]+)"?/.exec(header)?.[1]?.trim() ?? null;
+}
+
+export type OriginalFile = { blob: Blob; filename: string | null };
+
+/** The stored upload, with the name the server gave it. */
+export async function loadKnowledgeDocumentOriginal(
+  userId: string,
+  configId: string,
+  documentId: string,
+  options: ApiMutationOptions = {},
+): Promise<OriginalFile> {
+  const response = await apiFileRequest(userId, `${documentPath(configId, documentId)}/original`, options);
+  return { blob: await response.blob(), filename: contentDispositionName(response.headers.get("Content-Disposition")) };
+}
+
+/** Finds the document behind a chunk, for citations saved before they carried
+ * document ids. 404 when it is gone or out of this person's reach. */
+export function locateKnowledgeChunk(
+  userId: string,
+  chunkId: string,
+  options: ApiMutationOptions = {},
+): Promise<KnowledgeChunkLocation> {
+  return apiRequest<KnowledgeChunkLocation>(userId, `/api/knowledge/chunks/${pathId(chunkId)}/location`, {
+    signal: options.signal,
+  });
 }

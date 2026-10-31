@@ -39,6 +39,8 @@ SEARCH_CACHE_MAX_CHUNKS = 250_000
 _EMPTY_DENSE = "[]"
 QUERY_EMBED_WAIT_SECONDS = 5.0
 PROPERTIES_WEIGHT = 0.6
+# A term past this many mentions adds nothing, so naming what was asked beats repeating one word.
+LEXICAL_TERM_CAP = 3
 
 
 @dataclass
@@ -569,6 +571,26 @@ class LocalVectorStore:
             ).fetchall()
         return [KnowledgeChunk.model_validate_json(row["payload"]) for row in rows]
 
+    def chunks_for_document(self, config_id: str, document_id: str) -> list[KnowledgeChunk]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                select payload
+                from knowledge_chunks
+                where knowledge_config_id = ? and document_id = ?
+                order by ordinal
+                """,
+                (config_id, document_id),
+            ).fetchall()
+        return [KnowledgeChunk.model_validate_json(row["payload"]) for row in rows]
+
+    def chunk(self, chunk_id: str) -> KnowledgeChunk | None:
+        with self._lock:
+            row = self._connection.execute(
+                "select payload from knowledge_chunks where id = ?", (chunk_id,)
+            ).fetchone()
+        return KnowledgeChunk.model_validate_json(row["payload"]) if row is not None else None
+
     def search(
         self,
         actor: User,
@@ -643,7 +665,7 @@ class LocalVectorStore:
                 if not knowledge_chunk_visible_to_user(actor, chunk):
                     continue
                 searchable = index.searchable[row]
-                lexical_score = sum(searchable.count(term) for term in query_terms)
+                lexical_score = _lexical_score(searchable, query_terms)
                 exact_score = 4.0 if normalized_query and normalized_query in searchable else 0.0
                 sparse_score = _sparse_cosine(
                     query_vector, query_norm, index.sparse[row], index.sparse_norms[row]
@@ -1102,6 +1124,10 @@ def _norm(values: Any) -> float:
     return sum(value * value for value in values) ** 0.5
 
 
+def _lexical_score(searchable: str, query_terms: set[str]) -> int:
+    return sum(min(searchable.count(term), LEXICAL_TERM_CAP) for term in query_terms)
+
+
 def _chunk_score(
     chunk: KnowledgeChunk,
     query_terms: set[str],
@@ -1112,7 +1138,7 @@ def _chunk_score(
     dense_chunk_vector: list[float],
 ) -> float:
     searchable = f"{chunk.source_name} {chunk.text}".lower()
-    lexical_score = sum(searchable.count(term) for term in query_terms)
+    lexical_score = _lexical_score(searchable, query_terms)
     normalized_query = " ".join(query.lower().split())
     exact_score = 4.0 if normalized_query and normalized_query in searchable else 0.0
     sparse_vector_score = _cosine_similarity(query_vector, chunk_vector)

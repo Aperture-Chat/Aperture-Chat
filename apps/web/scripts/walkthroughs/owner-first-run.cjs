@@ -106,7 +106,7 @@ const firstWorkspace = {
     await form.getByRole("button", { name: "Save Provider" }).click();
     const card = page.locator(".provider-card").filter({ hasText: "Local model server" });
     // Saving syncs the catalog and runs a test chat; the shared model may queue it.
-    await card.waitFor({ timeout: 300000 });
+    await card.waitFor({ timeout: 900000 });
     await card.locator(".pill", { hasText: "Connected" }).waitFor({ timeout: 600000 });
     await page.waitForTimeout(800);
     await scrollTo(page, card, "center");

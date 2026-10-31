@@ -11,9 +11,10 @@
  * uploads the Word file as a reusable template.
  *
  * user-document-templates places the Mutual NDA template, has the model draft
- * it from a request, applies a plain-English layout request (no model call),
- * saves a version, applies a template's layout to existing text, and applies
- * the MLA layout from Assistant settings.
+ * it from a request,
+ * reopens the draft and applies a plain-English layout request (no model call,
+ * saved as a new version), applies a template's layout to existing text, and
+ * applies the MLA layout from Assistant settings to a short essay.
  *
  * Every file is synthetic and generated at run time in a temporary directory.
  */
@@ -165,7 +166,7 @@ async function syntheticPolicyPdf(kit, file) {
     .break { break-before: page; }
   </style></head><body>
     <h1>Vendor Security Policy</h1>
-    ${sections.map(([title, text], index) => `<h2${index === 3 ? ' class="break"' : ""}>${index + 1}. ${title}</h2><p>${text}</p><p>${text}</p>`).join("")}
+    ${sections.map(([title, text], index) => `<h2${index === 3 ? ' class="break"' : ""}>${index + 1}. ${title}</h2><p>${text}</p>`).join("")}
   </body></html>`;
   await page.setContent(html);
   const label = "font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #5c6b7a; width: 100%; padding: 0 0.9in;";
@@ -199,6 +200,20 @@ async function scrollToPageTop(page) {
   await page.waitForTimeout(500);
 }
 
+/** Step the status bar's zoom down until the first page's footer is in view. */
+async function showWholePage(page) {
+  const footer = page.locator(".document-page-chrome-box.is-footer").first();
+  const pane = page.locator(".document-page-scroll");
+  for (let step = 0; step < 6; step += 1) {
+    const [foot, view] = [await footer.boundingBox(), await pane.boundingBox()];
+    if (foot && view && foot.y + foot.height <= view.y + view.height) return;
+    await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+    await page.waitForTimeout(500);
+    await scrollToPageTop(page);
+  }
+  throw new Error("The page footer did not fit in view.");
+}
+
 async function openDrafts(kit) {
   const page = await kit.app("user", "/drafts");
   await body(page).waitFor();
@@ -210,11 +225,11 @@ async function openDrafts(kit) {
 async function saveVersion(page) {
   const save = page.getByRole("button", { name: "Save version", exact: true });
   if (await save.isEnabled()) await save.click();
-  await page.locator(".document-server-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
+  await page.locator(".document-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
   await page.waitForTimeout(1200);
   if (await save.isEnabled()) {
     await save.click();
-    await page.locator(".document-server-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
+    await page.locator(".document-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
     await page.waitForTimeout(700);
   }
 }
@@ -297,6 +312,8 @@ const userDraftWordPdf = {
         throw new Error("The PDF footer did not come through with page numbers.");
       }
       await scrollToPageTop(page);
+      // Zoom out until one whole page, header to footer, is on screen.
+      await showWholePage(page);
       await shot("pdf-opened");
       await page.context().close();
 
@@ -338,7 +355,7 @@ const userDraftWordPdf = {
       for (let attempt = 0; attempt < 3 && !kept; attempt += 1) {
         if (attempt === 0) await composer.getByRole("button", { name: "Run AI instruction" }).click();
         else await composer.getByRole("button", { name: "Try again" }).click();
-        await page.locator(".ai-composer.is-review").waitFor({ timeout: 600000 });
+        await page.locator(".ai-composer.is-review").waitFor({ timeout: 3600000 });
         await page.waitForTimeout(800);
         kept = await composer.locator(".ai-composer-kept").isVisible();
       }
@@ -377,6 +394,11 @@ const userDraftWordPdf = {
   },
 };
 
+const ESSAY = [
+  "# Why vendor reviews matter",
+  "A vendor review asks a simple question: can this supplier be trusted with what it will receive? The answer depends on evidence, not on reputation.",
+  "A short, repeatable review gives every synthetic supplier the same questions and leaves a record that a later reader can check.",
+];
 const NDA_REQUEST = "Fill this in for Example Corporation and Northwind Example Supplies, effective 1 November 2026, for a joint vendor security review.";
 const LAYOUT_REQUEST = "Use 1.5 line spacing and 1.25-inch margins";
 
@@ -395,7 +417,7 @@ const userDocumentTemplates = {
     await page.getByRole("textbox", { name: "Document title", exact: true }).fill("Vendor agreement changes");
     await body(page).click();
     for (const line of [
-      "Vendor agreement changes",
+      "# Vendor agreement changes",
       "The renewal date moves to 1 December 2026.",
       "The monthly report now includes open security findings.",
       "All other terms stay the same.",
@@ -412,10 +434,16 @@ const userDocumentTemplates = {
     if (!/The renewal date moves to 1 December 2026\./.test(await body(page).innerText())) throw new Error("Applying the template changed the text.");
     await page.waitForTimeout(1200);
     await shot("template-existing");
-    await page.getByRole("button", { name: "Choose template" }).click();
-    await page.waitForTimeout(400);
+    await page.context().close();
 
-    // 6. MLA layout from Assistant settings.
+    // 6. MLA layout from Assistant settings, on a short essay.
+    page = await openDrafts(kit);
+    await page.getByRole("textbox", { name: "Document title", exact: true }).fill("Why vendor reviews matter");
+    await body(page).click();
+    for (const line of ESSAY) {
+      await page.keyboard.type(line, { delay: 8 });
+      await page.keyboard.press("Enter");
+    }
     await page.getByRole("button", { name: "Assistant settings", exact: true }).click();
     await page.locator(".draft-settings-panel").waitFor();
     await page.waitForTimeout(500);
@@ -447,8 +475,8 @@ const userDocumentTemplates = {
     await panel.getByRole("button", { name: "Create Mutual NDA draft" }).click();
     const busy = page.locator(".draft-assistant-title small.is-working");
     await busy.waitFor({ timeout: 30000 });
-    await busy.waitFor({ state: "detached", timeout: 900000 });
-    await page.locator(".document-server-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
+    await busy.waitFor({ state: "detached", timeout: 3600000 });
+    await page.locator(".document-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
     await page.waitForTimeout(1500);
     if (!/Northwind Example Supplies/.test(await body(page).innerText())) throw new Error("The NDA draft does not name the parties.");
     if ((await page.getByRole("button", { name: "Choose template" }).getAttribute("aria-expanded")) === "true") {
@@ -458,13 +486,26 @@ const userDocumentTemplates = {
     await page.waitForTimeout(600);
     await shot("template-drafted");
 
-    // 4. A plain-English layout request is applied without a model call.
+    // 4. A plain-English layout request is applied without a model call. The
+    // draft is reopened first: a finished trace re-attaches under the next
+    // request, and its time would read as the layout change's own.
+    const drafted = await page.getByRole("textbox", { name: "Document title", exact: true }).inputValue();
+    await page.reload();
+    await body(page).waitFor();
+    await page.waitForTimeout(1500);
+    await page.getByRole("button", { name: "Document history", exact: true }).click();
+    await page.locator(".draft-history-document-card").filter({ hasText: drafted }).first().click();
+    await body(page).getByText("Northwind Example Supplies").first().waitFor({ timeout: 30000 });
+    await page.waitForTimeout(1200);
+    if (await page.locator(".draft-history-panel").isVisible().catch(() => false)) await page.getByRole("button", { name: "Document history", exact: true }).click();
     await page.locator("#draft-assistant-command").fill(LAYOUT_REQUEST);
     await page.waitForTimeout(300);
     await shot("layout-request", { keepFocus: true });
     await page.locator("#draft-assistant-command").press("Enter");
     await page.locator(".draft-event").filter({ hasText: "no model call was needed" }).waitFor({ timeout: 30000 });
-    await saveVersion(page);
+    // The layout saves itself as a new version: Saved, with Save version off.
+    await page.locator(".document-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
+    if (await page.getByRole("button", { name: "Save version", exact: true }).isEnabled()) throw new Error("The layout change should already be saved.");
     await page.evaluate(() => document.querySelector("[aria-label='Document body']")?.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(800);
     await shot("layout-applied");

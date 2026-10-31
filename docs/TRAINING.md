@@ -4,16 +4,16 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **65 lessons, 704 scenes, 65 MP3 tracks, and 10,179 seconds of narration timelines (169 minutes 39 seconds)**. Its 638 measured focus-map entries comprise 259 user targets and 379 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **71 lessons, 862 scenes, 71 MP3 tracks, and 12,879 seconds of narration timelines (214 minutes 39 seconds)**. Its 792 measured focus-map entries comprise 394 user targets and 398 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 28 | 274 | 259 | 28 | 3577 | 31 |
-| Administrator | 17 | 207 | 197 | 17 | 2902 | 49 |
-| Platform owner | 20 | 223 | 182 | 20 | 3700 | 70 |
-| Total | 65 | 704 | 638 | 65 | 10179 | — |
+| User | 33 | 412 | 394 | 33 | 5945 | 35 |
+| Administrator | 18 | 227 | 216 | 18 | 3235 | 54 |
+| Platform owner | 20 | 223 | 182 | 20 | 3699 | 75 |
+| Total | 71 | 862 | 792 | 71 | 12879 | — |
 
-All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 31/49/70 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
+All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 35/54/75 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
 Lesson counts and timings below are generated from the TypeScript catalog with `--include-drafts`; focus maps, MP3 counts, guide sections, and PDF-copy equality are checked separately. Including drafts inventories proposed content; it never publishes a lesson.
 
@@ -48,6 +48,8 @@ Scenes follow a consistent arc: an optional opening checklist card, where to fin
 ### Evidence rules
 
 - Every screenshot is a real state captured from an isolated instance with synthetic data. Screens are never staged, edited, or composited, and success is never simulated.
+- A small local model may refuse something hosted models accept, such as two system messages. A capture may then use a transport-only proxy that merges them, so the frames show the real flow and the model's real output. The `code-in-chat` Ask AI frames were captured this way. Never change a reply or a frame.
+- A trace shows real elapsed time. Run model-backed captures one at a time, so a queue never makes a reply look slow.
 - **Instruction cards** (`card` scenes) are drawn by the video composition and are labeled with where the steps happen (for example "Do this in · Microsoft Entra admin center"). They are used only for steps outside the product, such as a vendor console or a phone's share sheet, and for opening checklists. They never imitate another product's interface.
 - When a path cannot run locally (a paid vendor account, an image model), the lesson shows the real product state that can be produced, teaches the outside steps with a card, and says plainly what the learner will see. For example, the Entra and Okta presets are typed into the real form but not saved as working, while Google's public issuer is genuinely tested.
 - Captures never contain filled password or one-time-code fields, authenticator QR codes, setup secrets, or recovery codes; the walkthrough runner refuses them.
@@ -83,32 +85,37 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Audience | Track | Title | Lesson ID | Scenes | Cards | Seconds |
 | --- | --- | --- | --- | ---: | ---: | ---: |
 | User | Get started | Request access and enter your workspace | `access-and-sign-in` | 16 | 2 | 230 |
-| User | Get started | Start chatting | `chat-basics` | 8 | 0 | 98 |
+| User | Get started | Start chatting | `chat-basics` | 8 | 0 | 116 |
 | User | Get started | Choose models and request access | `model-access` | 8 | 0 | 118 |
-| User | Get started | Protect your account and recover access | `account-security` | 12 | 1 | 171 |
-| User | Chat | Symbol shortcuts: / @ # $ > | `composer-commands` | 11 | 0 | 109 |
-| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 163 |
-| User | Chat | Attach files and sources | `attachments` | 9 | 1 | 128 |
+| User | Get started | Protect your account and recover access | `account-security` | 12 | 1 | 177 |
+| User | Chat | Symbol shortcuts: / @ # $ > | `composer-commands` | 12 | 0 | 128 |
+| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 187 |
+| User | Chat | Attach files and sources | `attachments` | 9 | 1 | 129 |
 | User | Chat | Dictation, images, and diagrams | `dictation-images` | 6 | 0 | 106 |
-| User | Chat | Follow the work trace and act on replies | `work-traces` | 8 | 0 | 103 |
-| User | Chat | Session details and context | `session-details` | 4 | 0 | 59 |
+| User | Chat | Follow the work trace and act on replies | `work-traces` | 13 | 0 | 199 |
+| User | Chat | Work with code in chat | `code-in-chat` | 16 | 0 | 213 |
+| User | Chat | Edit tables and diagrams in a reply | `edit-replies` | 13 | 0 | 180 |
+| User | Chat | Session details and context | `session-details` | 4 | 0 | 62 |
+| User | Chat | Check a source: open the cited document | `check-sources` | 17 | 0 | 257 |
 | User | Chat | Preview chats at a glance | `chat-previews` | 2 | 0 | 34 |
-| User | Chat | Personal data in your chats | `personal-data` | 5 | 0 | 75 |
-| User | Drafts and decks | Draft documents | `drafts` | 16 | 0 | 217 |
-| User | Drafts and decks | Hand a chat request to Drafts | `chat-to-drafts` | 7 | 0 | 95 |
-| User | Drafts and decks | Open a Word or PDF file and keep its formatting | `draft-word-pdf` | 10 | 0 | 118 |
-| User | Drafts and decks | Start from a template and set the page layout | `document-templates` | 9 | 0 | 108 |
-| User | Drafts and decks | Build a slide deck | `deck-basics` | 14 | 0 | 170 |
-| User | Drafts and decks | Edit slides: layouts, pictures, and text | `deck-editing` | 13 | 0 | 190 |
-| User | Drafts and decks | Save, organize, and recover your drafts | `save-and-recover-work` | 10 | 0 | 132 |
-| User | Agents, knowledge, and automations | Agent profiles | `agents` | 10 | 0 | 126 |
-| User | Agents, knowledge, and automations | Knowledge bases | `knowledge` | 11 | 0 | 144 |
+| User | Chat | Personal data in your chats | `personal-data` | 5 | 0 | 74 |
+| User | Drafts, decks, and spreadsheets | Draft documents | `drafts` | 23 | 0 | 373 |
+| User | Drafts, decks, and spreadsheets | Hand a chat request to Drafts | `chat-to-drafts` | 9 | 0 | 153 |
+| User | Drafts, decks, and spreadsheets | Open a Word or PDF file and keep its formatting | `draft-word-pdf` | 10 | 0 | 138 |
+| User | Drafts, decks, and spreadsheets | Start from a template and set the page layout | `document-templates` | 9 | 0 | 126 |
+| User | Drafts, decks, and spreadsheets | Build a slide deck | `deck-basics` | 17 | 0 | 238 |
+| User | Drafts, decks, and spreadsheets | Edit slides: layouts, pictures, and text | `deck-editing` | 17 | 0 | 242 |
+| User | Drafts, decks, and spreadsheets | Build a spreadsheet with the assistant | `spreadsheet-basics` | 22 | 1 | 362 |
+| User | Drafts, decks, and spreadsheets | Work in a spreadsheet: formulas, tables, charts, and files | `spreadsheet-editing` | 28 | 0 | 468 |
+| User | Drafts, decks, and spreadsheets | Save, organize, and recover your drafts | `save-and-recover-work` | 13 | 0 | 186 |
+| User | Agents, knowledge, and automations | Agent profiles | `agents` | 11 | 0 | 151 |
+| User | Agents, knowledge, and automations | Knowledge bases | `knowledge` | 17 | 0 | 262 |
 | User | Agents, knowledge, and automations | Tools and the Library | `tools-automations` | 7 | 0 | 83 |
 | User | Agents, knowledge, and automations | Scheduled automations | `scheduled-automations` | 15 | 0 | 162 |
 | User | Organize and personalize | Organize and find your work | `organize` | 9 | 0 | 96 |
 | User | Organize and personalize | Search, commands, and workspace links | `search-and-commands` | 7 | 0 | 80 |
-| User | Organize and personalize | Personalization memory | `personalization-memory` | 7 | 0 | 88 |
-| User | Organize and personalize | Personalize, use mobile, and get help | `account-mobile-help` | 10 | 1 | 128 |
+| User | Organize and personalize | Personalization memory | `personalization-memory` | 7 | 0 | 96 |
+| User | Organize and personalize | Personalize, use mobile, and get help | `account-mobile-help` | 20 | 1 | 273 |
 | User | Organize and personalize | Report a problem and follow it up | `report-and-follow-up` | 18 | 2 | 246 |
 | Administrator | Accounts and access | Approve access and finish sign-in | `admin-access-onboarding` | 17 | 1 | 209 |
 | Administrator | Accounts and access | Users and accounts | `admin-users` | 12 | 0 | 159 |
@@ -119,8 +126,9 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Administrator | Workspace controls | Policies and memory governance | `admin-policies` | 10 | 0 | 158 |
 | Administrator | Workspace controls | Manage workspace connectors | `admin-connectors` | 21 | 5 | 350 |
 | Administrator | Workspace controls | Response actions and Library connections | `admin-tools` | 12 | 0 | 158 |
-| Administrator | Privacy and training data | Protect personal data | `admin-personal-data` | 13 | 0 | 200 |
+| Administrator | Privacy and training data | Protect personal data | `admin-personal-data` | 13 | 0 | 210 |
 | Administrator | Privacy and training data | Build training datasets from ratings and corrections | `admin-training-datasets` | 18 | 0 | 276 |
+| Administrator | Privacy and training data | Wall off documents and read file properties | `admin-ethical-walls` | 20 | 1 | 323 |
 | Administrator | Oversight and compliance | Tenant analytics | `admin-analytics` | 9 | 0 | 123 |
 | Administrator | Oversight and compliance | Tenant audit | `admin-audit` | 7 | 0 | 93 |
 | Administrator | Oversight and compliance | Alerts and delivery | `admin-alerts` | 9 | 1 | 133 |
@@ -138,7 +146,7 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Platform owner | Single sign-on | Single sign-on with Google Workspace | `sso-google` | 6 | 4 | 98 |
 | Platform owner | Single sign-on | Single sign-on with WorkOS | `sso-workos` | 15 | 4 | 250 |
 | Platform owner | Single sign-on | Go live: groups, MFA, and enforcement | `sso-security` | 7 | 1 | 128 |
-| Platform owner | Policies and branding | Policies, budget, and the connector ceiling | `policies-connectors` | 15 | 1 | 240 |
+| Platform owner | Policies and branding | Policies, budget, and the connector ceiling | `policies-connectors` | 15 | 1 | 239 |
 | Platform owner | Policies and branding | Platform branding | `branding` | 11 | 0 | 197 |
 | Platform owner | Policies and branding | Review workspace search readiness | `search-index` | 4 | 0 | 62 |
 | Platform owner | Monitoring and compliance | Analytics: runtime, activity, and usage | `runtime-analytics` | 9 | 0 | 123 |
@@ -362,3 +370,13 @@ Optional WorkOS AuthKit sign-in (see [WORKOS_SSO.md](WORKOS_SSO.md)) is taught b
 - **Focus and layout:** 11 focus regions were measured from the live DOM and imported against the published PNG bytes; all 15 scenes were rendered through the composition with no overlap between title cards, captions, and highlights.
 - **Administrator guidance:** *Tenant SSO and provisioning* gained a WorkOS (AuthKit) path, and its troubleshooting now reflects that new SSO cards keep the display name you type.
 - **Guides:** the owner guide gained the section *Single sign-on: WorkOS AuthKit with your own account*; the user, administrator, and owner PDFs were regenerated (95, 150, and 212 pages), the changed pages were rasterized and inspected, and each pair of copies is byte-identical.
+
+## Spreadsheets, sources, and code lessons — October 31, 2026
+
+The Drafts spreadsheet format, the document viewer, the Account drawer, chat code blocks, editable chat tables and diagrams, ethical walls, and the chat work trace in Drafts all shipped after the October 21 recapture. This refresh added six lessons, re-recorded every lesson those changes touched, and rebuilt the guides.
+
+- **New lessons (6):** user *Build a spreadsheet with the assistant* (`spreadsheet-basics`), *Work in a spreadsheet: formulas, tables, charts, and files* (`spreadsheet-editing`), `code-in-chat`, `edit-replies`, and `check-sources`; administrator *Wall off documents and read file properties* (`admin-ethical-walls`). The Drafts track is now *Drafts, decks, and spreadsheets*.
+- **Evidence:** walkthrough modules ran on isolated synthetic instances against a local Qwen 3.5 9B, one model-backed capture at a time, because a trace shows real elapsed time. Frames that show a long "Worked for" time keep it, and their narration says a small local test model was used. Frames from modules that were not re-run still show the older sidebar collapse control, which no narration mentions. `account-authenticator-verify.png` and `account-recovery-save.png` keep the older Account panel because the capture kit refuses frames with secret fields. `chat-images.png` is unchanged because no local image model was available.
+- **Narration:** 27 tracks were regenerated with the same Kokoro voice and compared with their scripts by Whisper (agreement 0.970–1.000).
+- **Help count:** `help-drawer.png`, `report-help.png`, and `report-unread.png` print the playlist total, so any change to a lesson's timing needs those frames recaptured from `user-account` and `user-reports`.
+- **Guides:** the user, administrator, and owner PDFs were regenerated (122, 180, and 242 pages). Every page was rasterized and checked for blank pages and ink at the page edges, and the new sections were inspected. Each pair of copies is byte-identical.

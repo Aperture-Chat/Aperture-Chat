@@ -1,0 +1,802 @@
+/* Knowledge document viewer, and the citation controls that open it.
+
+   Speaks the artifact canvas's language: a crisp slab sliding in from the right
+   over a dimmed sliver of the page. Keys are raised, the page well is recessed,
+   and the passage is the one lit thing on the paper. Pages stay white in dark
+   mode, because they are the document, not the interface. */
+
+/* ---------------------------------------------- citation controls in the app */
+
+/* Read-only tags are recessed, never ovals. */
+.md-cite-marker {
+  border-radius: 5px;
+}
+
+.md-cite-marker.is-open {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.md-cite-open {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+  color: var(--teal-strong);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.5;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.md-cite-open:hover {
+  border-color: var(--teal);
+  box-shadow: var(--tactile-raised-hover);
+}
+
+/* The accent is too dim for small text on dark; it stays on the key's edge. */
+.theme-dark .md-cite-open {
+  color: var(--text);
+}
+
+.md-cite-open:active {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+.session-source-group li.is-document {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.session-source-open {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-source-open:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--tactile-raised-hover);
+}
+
+.session-source-open:active {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+.session-source-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.session-source-marker {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-engraved, none);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.library-page .knowledge-row-main strong:has(.knowledge-document-open) {
+  display: flex;
+  min-width: 0;
+}
+
+.knowledge-document-open {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-overflow: ellipsis;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.knowledge-document-open:hover {
+  color: var(--teal-strong);
+  text-decoration-color: currentColor;
+}
+
+.theme-dark .knowledge-document-open:hover {
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------- the blade */
+
+.dv-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+}
+
+.dv-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(4, 16, 24, 0.46);
+  cursor: default;
+  animation: apx-fade 200ms var(--ease) both;
+}
+
+.dv-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: clamp(40px, 12vw, 180px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--tactile-float);
+  outline: none;
+  animation: dv-panel-in 320ms var(--ease) both;
+  container-type: inline-size;
+}
+
+@keyframes dv-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+.dv-toolbar {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg));
+}
+
+.dv-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dv-title strong {
+  overflow: hidden;
+  color: var(--text-strong, var(--text));
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dv-title-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-engraved, none);
+  color: var(--muted);
+}
+
+.dv-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* A recessed track holding its keys and the value they change. */
+.dv-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--tactile-track-border, var(--border));
+  border-radius: 10px;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-track-shadow, none);
+}
+
+.dv-position,
+.dv-zoom-value {
+  padding: 0 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dv-position {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* A recessed field; the ring sits on its own edge. */
+.dv-page-field {
+  min-width: 0;
+  height: 26px;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  outline: none;
+  background: var(--tactile-field, var(--surface));
+  box-shadow: var(--tactile-field-shadow, none);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+}
+
+.dv-page-field:focus {
+  border-color: var(--teal);
+  box-shadow: var(--tactile-field-focus, none);
+}
+
+/* Read by screen readers once scrolling stops; the toolbar shows the page. */
+.dv-position-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dv-page-suffix-compact {
+  display: none;
+}
+
+.dv-zoom {
+  position: relative;
+  display: inline-flex;
+}
+
+.dv-zoom-toggle {
+  display: none;
+}
+
+.dv-zoom-value {
+  min-width: 46px;
+  padding: 0 2px;
+}
+
+.dv-inline-error {
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dv-notice {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.dv-callout {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.dv-callout-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0;
+  color: var(--text-strong, var(--text));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dv-callout-toggle.icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  margin-left: auto;
+  padding: 0;
+}
+
+.dv-callout-toggle svg {
+  transition: transform 160ms var(--ease);
+}
+
+.dv-callout-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+/* A text key: it sits in the reading flow, and a raised key here would shout. */
+.dv-callout-more {
+  justify-self: start;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.dv-callout-heading small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dv-callout blockquote {
+  display: -webkit-box;
+  margin: 0;
+  padding: 0 0 0 10px;
+  overflow: hidden;
+  border-left: 3px solid var(--dv-mark-edge);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.dv-callout[data-shown="full"] blockquote {
+  display: block;
+  max-height: min(38vh, 16em);
+  overflow-y: auto;
+}
+
+.dv-callout > small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.dv-state {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 32px 20px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.dv-state strong {
+  color: var(--text-strong, var(--text));
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.dv-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ----------------------------------------------------------------- the pages */
+
+.dv-panel {
+  --dv-mark: #ffdf6b;
+  --dv-mark-tint: #fff1c2;
+  --dv-mark-edge: #d9a400;
+}
+
+.dv-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--tactile-track, var(--surface-soft));
+  box-shadow: var(--tactile-engraved, none);
+  outline: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dv-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--teal);
+}
+
+.dv-pages {
+  position: relative;
+  min-width: 100%;
+  margin: 0 auto;
+}
+
+.dv-page {
+  position: absolute;
+  left: 50%;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px #0000001f, 0 1px 3px #00000029;
+  transform: translateX(-50%);
+}
+
+.dv-page-canvas,
+.dv-page-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dv-page-failed {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: #5b6770;
+  font-size: 13px;
+}
+
+/* pdf.js positions these spans over the canvas; they are invisible but
+   selectable, and they are what the passage highlight is drawn on. */
+/* Multiply, as a real highlighter does: the words under a mark stay black. */
+.textLayer {
+  mix-blend-mode: multiply;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: clip;
+  color-scheme: only light;
+  forced-color-adjust: none;
+  letter-spacing: normal;
+  line-height: 1;
+  opacity: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  transform-origin: 0 0;
+  word-spacing: normal;
+}
+
+.textLayer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+  -webkit-user-select: text;
+  white-space: pre;
+}
+
+.textLayer > span,
+.textLayer .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  z-index: 1;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.textLayer .markedContent {
+  display: contents;
+}
+
+/* pdf.js sizes a rotated page's layer upright and leaves the turn to CSS. */
+.textLayer[data-main-rotation="90"] {
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.textLayer[data-main-rotation="180"] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.textLayer[data-main-rotation="270"] {
+  transform: rotate(270deg) translateX(-100%);
+}
+
+.textLayer .endOfContent {
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  display: block;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.textLayer ::selection {
+  background: color-mix(in srgb, var(--teal) 30%, transparent);
+  color: transparent;
+}
+
+.dv-mark {
+  border-radius: 2px;
+  background: var(--dv-mark);
+  color: inherit;
+}
+
+.dv-mark.is-tint {
+  background: var(--dv-mark-tint);
+}
+
+.textLayer .dv-mark {
+  color: transparent;
+}
+
+/* Text fallback: the same paper, set from the indexed text. */
+.dv-paper-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+}
+
+.dv-paper {
+  flex: 0 0 auto;
+  width: min(100%, calc(760px * var(--dv-zoom, 1)));
+  max-width: none;
+  padding: clamp(24px, 6cqi, 56px);
+  background: #fff;
+  box-shadow: 0 0 0 1px #0000001f, 0 1px 3px #00000029;
+  color: #20262b;
+  font-size: calc(14.5px * var(--dv-zoom, 1));
+  line-height: 1.65;
+}
+
+.dv-paper h3 {
+  margin: 0 0 1em;
+  color: #5b6770;
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.dv-paper-text {
+  margin: 0 0 1em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.dv-paper-text:last-child {
+  margin-bottom: 0;
+}
+
+/* Block flow, not centered grid: a centered box wider than its scroller would
+   hang off the left edge, where scrolling cannot reach. */
+.dv-image-stage {
+  padding: 16px;
+}
+
+.dv-image-stage img {
+  display: block;
+  width: calc(100% * var(--dv-zoom, 1));
+  max-width: none;
+  height: auto;
+  margin-inline: auto;
+  background: #fff;
+  box-shadow: 0 0 0 1px #0000001f, 0 1px 3px #00000029;
+}
+
+/* ------------------------------------------------------- narrow and phones */
+
+@container (max-width: 820px) {
+  .dv-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .dv-toolbar > .dv-controls {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+  .dv-panel {
+    left: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .dv-toolbar {
+    padding: 8px 10px;
+  }
+
+  .dv-callout {
+    padding: 8px 12px 10px;
+  }
+
+  .dv-callout blockquote {
+    -webkit-line-clamp: 2;
+  }
+
+  .dv-notice {
+    padding: 7px 12px;
+  }
+
+  .dv-paper-stack {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .dv-paper {
+    padding: 22px 18px;
+  }
+}
+
+/* One row of controls on a phone; the pages are what matters here. */
+@media (max-width: 440px) {
+  .dv-controls {
+    gap: 4px;
+  }
+
+  .dv-toolbar .dv-control-group .icon-button,
+  .dv-toolbar .dv-controls > .icon-button {
+    width: 38px;
+    min-width: 38px;
+  }
+
+  .dv-position {
+    padding: 0 4px;
+  }
+
+  .dv-position-noun,
+  .dv-page-suffix {
+    display: none;
+  }
+
+  .dv-page-suffix-compact {
+    display: inline;
+  }
+
+  .dv-zoom-value {
+    display: none;
+  }
+}
+
+/* Too narrow for everything on one row: zoom folds behind its own key. */
+@media (max-width: 360px) {
+  .dv-toolbar .dv-control-group .icon-button,
+  .dv-toolbar .dv-controls .icon-button {
+    width: 34px;
+    min-width: 34px;
+  }
+
+  /* The file's own page stays in the callout and in what is announced. */
+  .dv-page-suffix-compact.is-relabelled {
+    display: none;
+  }
+
+  .dv-zoom-toggle {
+    display: inline-flex;
+  }
+
+  .dv-zoom > .dv-control-group {
+    display: none;
+  }
+
+  .dv-zoom.is-open > .dv-control-group {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 4;
+    display: inline-flex;
+  }
+}
+
+/* A phone on its side has height to spare for nothing but the page. */
+@media (max-height: 500px) and (pointer: coarse) {
+  .dv-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding: 4px 10px;
+  }
+
+  .dv-toolbar > .dv-controls {
+    grid-row: auto;
+    grid-column: auto;
+    flex-wrap: nowrap;
+  }
+
+  .dv-title-icon,
+  .dv-position-noun,
+  .dv-page-suffix {
+    display: none;
+  }
+
+  .dv-page-suffix-compact {
+    display: inline;
+  }
+
+  .dv-callout {
+    padding: 2px 12px;
+  }
+}
+
+@media (pointer: coarse) {
+  /* A marker is drawn small; the finger gets a real target. */
+  .md-cite-open::after {
+    content: "";
+    position: absolute;
+    inset: -12px -8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dv-panel,
+  .dv-backdrop {
+    animation: none;
+  }
+}

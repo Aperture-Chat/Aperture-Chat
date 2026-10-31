@@ -85,11 +85,21 @@ export function BrandArtwork({
   return <img src={lockup.imageUrl} alt={lockup.name ? "" : label} className={className} />;
 }
 
-export function Logo({ compact = false, brand }: { compact?: boolean; brand?: BrandAssets | null }) {
+export function Logo({
+  compact = false,
+  decorative = false,
+  brand,
+}: {
+  compact?: boolean;
+  /** A layer behind the visible logo, which alone names the brand. */
+  decorative?: boolean;
+  brand?: BrandAssets | null;
+}) {
   const label = brand?.chat_brand_name?.trim() || DEFAULT_BRAND_NAME;
+  const naming = decorative ? { "aria-hidden": true } : { "aria-label": label };
   if (compact) {
     return (
-      <div className="logo logo-compact" aria-label={label}>
+      <div className="logo logo-compact" {...naming}>
         <span className="logo-mark">
           <BrandIcon sources={compactBrandSources(brand)} size={28} title={label} className="custom-logo-mark" />
         </span>
@@ -98,7 +108,7 @@ export function Logo({ compact = false, brand }: { compact?: boolean; brand?: Br
   }
   const lockup = brandLockup(brand);
   return (
-    <div className={clsx("logo", lockup.source === "logo" && "has-logo-image", !lockup.name && "logo-image-only")} aria-label={label}>
+    <div className={clsx("logo", lockup.source === "logo" && "has-logo-image", !lockup.name && "logo-image-only")} {...naming}>
       <span className="logo-mark">
         <BrandArtwork lockup={lockup} label={label} className="custom-logo-mark" />
       </span>

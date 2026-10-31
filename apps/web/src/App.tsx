@@ -672,9 +672,9 @@ export function App() {
     return loadAccountApiKey(sessionUserId);
   }, [sessionUserId]);
 
-  const handleAccountApiKeyCreate = useCallback(async (): Promise<AccountApiKeyCreateResponse> => {
+  const handleAccountApiKeyCreate = useCallback(async (options: { replace: boolean }): Promise<AccountApiKeyCreateResponse> => {
     if (!sessionUserId) throw new Error("Sign in before creating an API key.");
-    return createAccountApiKey(sessionUserId);
+    return createAccountApiKey(sessionUserId, options);
   }, [sessionUserId]);
 
   const handleAccountApiKeyRevoke = useCallback(async (): Promise<AccountApiKeyStatus> => {

@@ -216,8 +216,11 @@ def test_thread_save_order_and_strict_message_json_fail_closed() -> None:
                 text("update chat_threads set messages = :messages where id = :thread_id"),
                 {"messages": json.dumps(corrupt), "thread_id": "thread-one"},
             )
-        with pytest.raises((StatementError, ValueError), match="unknown|Stored chat message"):
-            repository.get_chat_thread("thread-one")
+        # A newer version may have written the row, so reads drop what they do
+        # not know. Writes stay strict.
+        loaded = repository.get_chat_thread("thread-one")
+        assert loaded is not None
+        assert "unknown_runtime_field" not in loaded.messages[0].model_dump()
 
         nonfinite = _thread("thread-nan")
         nonfinite.messages[0].metadata["invalid"] = float("nan")

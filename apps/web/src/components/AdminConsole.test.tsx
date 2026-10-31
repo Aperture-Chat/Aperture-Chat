@@ -1569,10 +1569,11 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
     "Alerts and delivery",
     "Data retention and tagging",
     "Work reported problems in Reports",
+    "Wall off documents and read file properties",
   ]) {
     expect(screen.getByRole("button", { name: `Watch ${title}` })).toBeInTheDocument();
   }
-  expect(screen.getAllByText(/guided video$/)).toHaveLength(17);
+  expect(screen.getAllByText(/guided video$/)).toHaveLength(18);
 
   const guidePdf = screen.getByRole("link", { name: /Administrator guide \(PDF\)/ });
   expect(guidePdf).toHaveAttribute("href", "/docs/aperture-admin-guide.pdf");

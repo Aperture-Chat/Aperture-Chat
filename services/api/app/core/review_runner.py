@@ -9,13 +9,13 @@ transactional SQL rather than ``runtime_state.json``.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from threading import RLock
 from typing import Any, Callable
 
+from app.core.citation_use import marker_spans
 from app.core.content_filters import (
     ContentRuleMatch,
     evaluate_content_filters,
@@ -56,11 +56,6 @@ from app.repositories.seed import SeedStore
 REVIEW_CONTEXT_CHUNKS = 5
 REVIEW_MAX_OUTPUT_TOKENS = 2_048
 MAX_REVIEW_CONCURRENCY = 8
-# Models answering in or after CJK context emit full-width brackets -- the same
-# model that writes "[K1]" here will write "【K1】" elsewhere. Matching only the
-# ASCII form threw away correct answers as uncited, which made review grids look
-# entirely broken on short documents while working on long ones.
-_CITATION_PATTERN = re.compile(r"[\[［【]\s*K\s*(\d+)\s*[\]］】]")
 
 
 class ReviewRunConfigurationError(RuntimeError):
@@ -813,33 +808,20 @@ def _completion_text(payload: object) -> str:
 
 def _used_citations(answer: str, citations: list[ReviewCitation]) -> list[ReviewCitation]:
     by_index = {citation.k_index: citation for citation in citations}
-    used: list[ReviewCitation] = []
-    seen: set[int] = set()
-    raw_indices = _CITATION_PATTERN.findall(answer)
-    if not raw_indices:
+    spans = marker_spans(answer, "K")
+    if not spans:
         raise ReviewCellExecutionError(
             "The model answer did not include a verifiable document citation."
         )
-    unknown: list[int] = []
-    for raw_index in raw_indices:
-        index = int(raw_index)
-        citation = by_index.get(index)
-        if citation is None:
-            # Drop the invented reference rather than the whole answer. Failing
-            # the cell outright meant one stray index discarded work that was
-            # otherwise correctly grounded in the supplied chunks.
-            if index not in unknown:
-                unknown.append(index)
-            continue
-        if index not in seen:
-            used.append(citation)
-            seen.add(index)
+    # Drop an invented reference rather than the whole answer. Failing the cell
+    # outright meant one stray index discarded work that was otherwise correctly
+    # grounded in the supplied chunks.
+    cited = (index for first, last in spans for index in by_index if first <= index <= last)
+    used = [by_index[index] for index in dict.fromkeys(cited)]
     if not used:
-        cited = ", ".join(f"[K{index}]" for index in unknown)
+        invented = ", ".join(f"[K{first}]" for first in dict.fromkeys(f for f, _last in spans))
         raise ReviewCellExecutionError(
-            f"The model answer cited {cited}, which was not supplied to this review cell."
-            if unknown
-            else "The model answer did not include a verifiable document citation."
+            f"The model answer cited {invented}, which was not supplied to this review cell."
         )
     return used
 

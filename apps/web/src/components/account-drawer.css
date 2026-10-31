@@ -1,0 +1,926 @@
+/* Account drawer: one designed object instead of a stack of equal cards.
+
+   The hardware is the platform's (tactile-controls.css). A floor one step off
+   the slabs lets them read as raised without a colored glow. Identity leads,
+   then titled groups of hairline-divided rows. Read-only facts and usage sit in
+   recessed wells, and every action is a raised key at the row's right end, so
+   the eye finds what can be pressed. Loaded after tactile-controls.css. */
+
+.account-utility-drawer {
+  --account-floor: var(--surface-soft);
+  --account-slab: var(--surface);
+  --account-gutter: 14px;
+  /* One inset for everything inside a slab, so keys and wells share an edge. */
+  --account-inset: 12px;
+  --account-key: 34px;
+  --account-quiet-icon: color-mix(in srgb, var(--muted) 78%, var(--teal));
+  --account-warning-ink: var(--amber, #b45309);
+  /* --red alone falls under 4.5:1 on a recessed well in light mode. */
+  --account-error-ink: color-mix(in srgb, var(--red) 82%, #000);
+  padding: 0;
+  background: var(--account-floor);
+  /* The sticky header covers this much; focus must land clear of it. */
+  scroll-padding-block: 84px 12px;
+}
+
+/* Dark surfaces climb in lightness, so the floor and slab swap to stay raised. */
+.theme-dark .account-utility-drawer {
+  --account-floor: var(--surface);
+  --account-slab: var(--surface-soft);
+  --account-warning-ink: color-mix(in srgb, var(--amber, #b45309) 55%, #fff);
+  --account-error-ink: color-mix(in srgb, var(--red) 62%, #fff);
+}
+
+.account-utility-drawer > header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 14px var(--account-gutter) 10px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--border);
+  background: var(--account-floor);
+}
+
+.account-drawer-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px var(--account-gutter) var(--account-gutter);
+  padding-bottom: max(var(--account-gutter), env(safe-area-inset-bottom));
+}
+
+.account-drawer-list [inert] {
+  opacity: 0.55;
+}
+
+/* --- Sections ------------------------------------------------------------- */
+
+.account-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-inline: 4px;
+}
+
+.account-section-heading h3,
+.account-section-aside {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.account-section-aside {
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.account-slab,
+.account-identity {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--account-slab);
+  box-shadow: var(--tactile-slab);
+}
+
+.account-slab {
+  overflow: hidden;
+}
+
+.account-slab-padded {
+  display: grid;
+  gap: 10px;
+  padding: var(--account-inset);
+}
+
+/* --- Wells: what you read, never press ------------------------------------- */
+
+.account-well {
+  margin: 0;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 10px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+}
+
+/* --- Identity -------------------------------------------------------------- */
+
+.account-identity {
+  display: grid;
+  gap: 12px;
+  padding: var(--account-inset);
+}
+
+.account-identity-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.account-identity-head .avatar {
+  width: 46px;
+  height: 46px;
+  font-size: 15px;
+}
+
+.account-identity-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.account-identity-copy strong {
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.account-identity-copy small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.account-profile-details {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--tactile-track-border);
+}
+
+.account-profile-details > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.account-profile-details dt,
+.account-facts b,
+.account-usage-stats dt {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.account-profile-details dd {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.account-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-facts li {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.account-facts li + li {
+  border-left: 1px solid var(--tactile-track-border);
+}
+
+.account-facts span {
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* --- Rows ------------------------------------------------------------------ */
+
+.account-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 56px;
+  margin: 0;
+  padding: 9px var(--account-inset);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+/* After .account-row, whose border reset would otherwise erase the hairline. */
+.account-slab:not(.account-slab-padded) > * + :not(.account-row-panel) {
+  border-top: 1px solid var(--border);
+}
+
+/* Rows that are the control. Menus and navigation rows work the same way:
+   flat at rest, tinted on hover, pressed in when held or current. */
+.account-row.is-pressable {
+  cursor: pointer;
+  list-style: none;
+  transition: background 140ms ease;
+}
+
+.account-row.is-pressable::-webkit-details-marker {
+  display: none;
+}
+
+.account-row.is-pressable:hover {
+  background: color-mix(in srgb, var(--account-floor) 72%, transparent);
+}
+
+.account-row.is-pressable:active,
+.account-row.is-active {
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+}
+
+.account-row-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 9px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+  color: var(--account-quiet-icon);
+}
+
+.account-row-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.account-row-copy strong {
+  color: var(--text-strong);
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.account-row-copy small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.account-row-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--account-quiet-icon);
+}
+
+.account-row-chevron {
+  color: var(--account-quiet-icon);
+  transition: transform 160ms ease;
+}
+
+.account-disclosure[open] .account-row-chevron {
+  transform: rotate(180deg);
+}
+
+.account-row-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 var(--account-inset) var(--account-inset);
+}
+
+.account-panel-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.account-warning {
+  color: var(--account-warning-ink);
+  font-weight: 600;
+}
+
+/* Keys in rows and panels stay slim so the row, not the key, sets the rhythm. */
+.account-drawer-list .secondary-button,
+.account-drawer-list .primary-button,
+.account-drawer-list .danger-button {
+  min-height: var(--account-key);
+  padding-inline: 12px;
+  font-size: 12px;
+}
+
+/* Not yet is a different thing from ready: unavailable keys stop looking lit. */
+.account-drawer-list :is(.secondary-button, .primary-button, .danger-button):is(:disabled, [aria-disabled="true"]) {
+  box-shadow: none;
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* One action layout: secondary then main, at the right edge, wrapping if it must. */
+.account-drawer-list .drawer-form-actions {
+  flex-wrap: wrap;
+}
+
+/* --- Workspace: role preview ------------------------------------------------- */
+
+.account-drawer-list .rail-switch-option {
+  font-size: 12px;
+}
+
+.account-view-as-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* --- Usage ----------------------------------------------------------------- */
+
+.account-usage-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.account-usage-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.account-usage-stats > div + div {
+  border-left: 1px solid var(--tactile-track-border);
+}
+
+/* The label comes first for screen readers, and the figure leads on screen. */
+.account-usage-stats dd {
+  order: -1;
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.account-usage-stats dd.is-unreported {
+  display: flex;
+  align-items: center;
+  min-height: 23px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.account-usage-status {
+  padding: 18px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.account-usage-note {
+  padding-inline: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.account-meter {
+  display: grid;
+  gap: 5px;
+  padding-inline: 2px;
+}
+
+.account-meter-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+}
+
+.account-meter-copy strong {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.account-meter-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-meter-track {
+  display: block;
+  overflow: hidden;
+  height: 8px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 5px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+}
+
+.account-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--tactile-lit);
+}
+
+/* A spent cap means replies are being refused. */
+.account-meter.is-spent .account-meter-fill {
+  background: var(--account-warning-ink);
+}
+
+.account-meter.is-spent .account-meter-copy small {
+  color: var(--account-warning-ink);
+  font-weight: 600;
+}
+
+/* --- Archived chats ---------------------------------------------------------- */
+
+.account-archived-list {
+  display: grid;
+  overflow-y: auto;
+  max-height: 320px;
+  padding: 0;
+  list-style: none;
+}
+
+.account-archived-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 10px;
+}
+
+.account-archived-row:has(.account-confirm) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.account-archived-row .drawer-error {
+  grid-column: 1 / -1;
+}
+
+.account-archived-row + .account-archived-row {
+  border-top: 1px solid var(--tactile-track-border);
+}
+
+.account-archived-icon {
+  display: grid;
+  color: var(--account-quiet-icon);
+}
+
+.account-archived-summary {
+  display: grid;
+  min-width: 0;
+  border-radius: 6px;
+  outline: none;
+}
+
+.account-archived-summary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--teal);
+}
+
+.account-archived-summary strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-archived-summary small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.account-archived-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.account-delete-action:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.account-archived-empty {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* --- Inline confirmation --------------------------------------------------- */
+
+.account-confirm {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-confirm p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.account-confirm .danger-button:not(:disabled) {
+  border-color: var(--tactile-lit-border);
+  background: var(--tactile-danger-lit);
+  color: #fff;
+  box-shadow: var(--tactile-lit-shadow);
+}
+
+/* --- API access ------------------------------------------------------------ */
+
+.account-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.account-api-value-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.account-api-secret,
+.account-api-existing {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.account-api-secret strong,
+.account-api-existing b {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.account-api-secret p,
+.account-api-existing small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.account-api-existing > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+}
+
+.account-api-existing code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* --- Forms ------------------------------------------------------------------ */
+
+.account-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 11px;
+}
+
+.account-form label:not(.secondary-button),
+.account-security-form > label:not(.account-security-check) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.account-form input:not([type="file"]),
+.account-form textarea,
+.account-api-value-row input,
+.account-security-form input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 var(--control-padding-x);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--tactile-field);
+  box-shadow: var(--tactile-field-shadow);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: var(--control-line-height);
+}
+
+/* A read-only value and its Copy key are one line, one height. */
+.account-api-value-row input {
+  height: var(--account-key);
+  min-height: var(--account-key);
+  font-size: 12px;
+}
+
+.account-form textarea {
+  height: auto;
+  min-height: 86px;
+  padding-block: 9px;
+  line-height: 1.35;
+  resize: vertical;
+}
+
+.account-form input:not([type="file"]):focus,
+.account-form textarea:focus,
+.account-api-value-row input:focus,
+.account-security-form input:not([type="checkbox"]):focus {
+  border-color: var(--teal);
+  box-shadow: var(--tactile-field-shadow), var(--tactile-field-focus);
+  outline: none;
+}
+
+.account-photo-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.account-profile-avatar {
+  width: 56px;
+  height: 56px;
+  font-size: 19px;
+}
+
+.account-photo-actions {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.account-photo-actions small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account-photo-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.account-photo-keys label {
+  cursor: pointer;
+}
+
+.account-photo-keys label:has(+ input:focus-visible) {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.account-drawer-list .drawer-error {
+  margin: 0;
+  color: var(--account-error-ink);
+}
+
+.account-drawer-list .drawer-success {
+  color: var(--accent-ink, var(--teal-strong));
+}
+
+/* --- Sign out: quiet, last, never red --------------------------------------- */
+
+.account-drawer-list .account-signout {
+  width: 100%;
+  border-color: var(--border);
+  background: var(--account-slab);
+  color: var(--muted);
+}
+
+.account-drawer-list .account-signout:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+/* --- Two-step verification panel -------------------------------------------- */
+
+.account-security {
+  display: grid;
+  gap: 12px;
+}
+
+.account-security h4 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.account-security-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.account-security-note {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-security-form {
+  display: grid;
+  gap: 11px;
+}
+
+.account-security-form h5 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 13.5px;
+  font-weight: 650;
+  outline: none;
+}
+
+.account-security-qr {
+  justify-self: start;
+  padding: 14px;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.account-security-secret {
+  display: block;
+  padding: 9px 11px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 9px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+
+.account-security .account-security-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-security .account-security-check input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: var(--teal);
+}
+
+.account-security-codes {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 10px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+  list-style: none;
+}
+
+.account-security-codes li {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.account-security-guard-note {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 9px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* --- Phone: the drawer becomes a full sheet ---------------------------------- */
+
+@media (max-width: 640px) {
+  .account-utility-drawer {
+    --account-gutter: 12px;
+    --account-key: 40px;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .account-row {
+    min-height: 60px;
+  }
+}
+
+/* Narrow phones: the name gets the width, and the facts stack so labels fit. */
+@media (max-width: 400px) {
+  .account-edit-label {
+    display: none;
+  }
+
+  .account-drawer-list .account-identity-head .secondary-button {
+    width: var(--account-key);
+    padding-inline: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .account-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-facts li {
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .account-facts li + li {
+    border-top: 1px solid var(--tactile-track-border);
+    border-left: 0;
+  }
+}

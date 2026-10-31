@@ -2,8 +2,8 @@
  * search index, performed for real on the synthetic instance. Run each module
  * from a freshly reset instance.
  *
- * owner-policies turns Downstream API access on and shows the API access card
- * that appears for an administrator; sets a tiny daily token ceiling, records
+ * owner-policies turns Downstream API access on and shows the API access row
+ * that appears in an administrator's Account drawer; sets a tiny daily token ceiling, records
  * the real refusal a user then receives, and sets the ceiling back to
  * unlimited.
  *
@@ -84,12 +84,13 @@ const policies = {
     await page.waitForTimeout(400);
     await shot("pc-policy-saved");
 
-    // The effect: an administrator now has API access in their account panel.
+    // The effect: an administrator now has API access in the Account drawer.
     const admin = kit.use(await kit.app("admin", "/"));
     await admin.getByRole("button", { name: /^Account:/ }).click();
-    const card = admin.locator(".account-api-card");
+    const card = admin.locator("details.account-disclosure");
     await card.waitFor();
     await card.locator("summary").click();
+    await card.getByRole("button", { name: "Create key" }).waitFor();
     await admin.waitForTimeout(600);
     await scrollTo(admin, card, "center");
     await shot("pc-api-access");

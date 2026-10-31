@@ -334,7 +334,8 @@ import { effectiveStyle } from "../lib/sheet/sheetOps";
 import { SHEET_TEMPLATES, buildSheetTemplate } from "../lib/sheet/templates";
 import { XLSX_MIME_TYPE, buildXlsxWorkbook } from "../lib/sheet/xlsxExport";
 import { describeChanges, workbookPlainText, workbookTitleFrom } from "../lib/sheet/sheetAi";
-import { type SheetRunOutcome, sheetRunFinished, sheetRunFixing, sheetRunMessage, sheetRunReplied, sheetRunStart } from "../lib/sheet/sheetTrace";
+import { type SheetRunOutcome, sheetRunFinished, sheetRunFixing, sheetRunReplied, sheetRunStart } from "../lib/sheet/sheetTrace";
+import { type DraftStepId, type DraftTraceState, type DraftTraceStep, draftRunMessage, draftRunNext, traceAnchorId } from "../lib/draftTrace";
 import { runSheetAiFlow } from "../lib/sheet/sheetAiFlow";
 import {
   type Workbook,
@@ -766,29 +767,6 @@ type ProgressiveDraftTiming = {
   resourceDelayMs: number;
   pageDelayMs: number;
   validationDelayMs: number;
-};
-
-type DraftTraceStep = {
-  id: string;
-  label: string;
-  detail: string;
-};
-
-type DraftTraceState = {
-  steps: DraftTraceStep[];
-  activeIndex: number;
-  complete: boolean;
-  startedAt: number;
-  endedAt?: number;
-  /** A spreadsheet run is told the chat trace's way: the facts it recorded
-   * and any thinking the model exposed, drawn by WorkTrace in place of the
-   * preset steps above. */
-  sheetRun?: {
-    activity: ChatActivityTraceStep[];
-    thinking: string[];
-    /** The request it works on; the trace sits under it, as in the chat. */
-    requestEventId: string;
-  };
 };
 
 const TEXT_COLOR_SWATCHES = ["#111827", "#0f766e", "#1d4ed8", "#b91c1c", "#7c3aed"];
@@ -2474,6 +2452,16 @@ export function DocumentAssistantWorkspace({
   const [documentToolPanel, setDocumentToolPanel] = useState<"text" | "paragraph" | "more" | null>(null);
   const [deckDesignTab, setDeckDesignTab] = useState<"layouts" | "themes">("layouts");
   const assistantWorking = draftTrace !== null && !draftTrace.complete;
+  const draftTraceAnchor = draftTrace ? traceAnchorId(draftTrace, events) : null;
+  const draftWorkTrace = draftTrace && (
+    <WorkTrace
+      message={draftRunMessage(draftTrace)}
+      brandName={workspaceName}
+      state={draftTrace.complete ? "complete" : "pending"}
+      thinkingTraces={draftTrace.sheetRun?.thinking}
+      upNext={draftRunNext(draftTrace)}
+    />
+  );
   const documentAiEditing = assistantWorking || docAi?.phase === "working";
   // Any deck AI at work — assistant drafting, the image pass, a selection
   // rewrite, or either image dialog — lights the slide's green working edge.
@@ -3385,19 +3373,27 @@ export function DocumentAssistantWorkspace({
     draftTimersRef.current.push(timerId);
   }
 
-  function advanceDraftTrace(stepId: string, complete = false) {
+  function advanceDraftTrace(stepId: DraftStepId) {
     setDraftTrace((current) => {
       if (!current) return current;
       const stepIndex = current.steps.findIndex((step) => step.id === stepId);
       if (stepIndex < 0) return current;
-      return {
-        ...current,
-        activeIndex: complete
-          ? current.steps.length
-          : Math.max(current.activeIndex, stepIndex),
-        complete: complete || current.complete,
-      };
+      return { ...current, activeIndex: Math.max(current.activeIndex, stepIndex) };
     });
+  }
+
+  function finishDraftTrace(failure?: string) {
+    setDraftTrace((current) =>
+      current
+        ? {
+            ...current,
+            complete: true,
+            activeIndex: failure ? current.activeIndex : current.steps.length,
+            endedAt: current.endedAt ?? Date.now(),
+            ...(failure ? { failure } : {}),
+          }
+        : current,
+    );
   }
 
   function selectDraftingModel(agentId: string) {
@@ -5957,7 +5953,7 @@ export function DocumentAssistantWorkspace({
       setStatus(`The spreadsheet assistant could not finish: ${draftErrorText(error)}`);
       setEvents((list) => [...list, draftEvent("system", "sheet-failed", `The spreadsheet request failed: ${draftErrorText(error)}`)]);
     } finally {
-      setDraftTrace((trace) => (trace ? { ...trace, complete: true, activeIndex: trace.steps.length, endedAt: Date.now() } : trace));
+      finishDraftTrace();
       revisionInFlightRef.current = false;
     }
   }
@@ -6096,7 +6092,7 @@ export function DocumentAssistantWorkspace({
         fallbackNotice =
           "The model's structured output failed validation twice, so the deck was built from its outline instead.";
       } else {
-        setDraftTrace((current) => (current ? { ...current, complete: true } : current));
+        finishDraftTrace(`The revision failed validation twice: ${parsed.error}`);
         setStatus(
           `The deck revision failed validation twice and was not applied: ${parsed.error}`,
         );
@@ -6168,7 +6164,7 @@ export function DocumentAssistantWorkspace({
       if (artPassPlanned) {
         advanceDraftTrace("artwork");
       } else {
-        setDraftTrace((current) => (current ? { ...current, complete: true, activeIndex: traceSteps.length } : current));
+        finishDraftTrace();
       }
       setStatus(
         fallbackNotice
@@ -6196,9 +6192,7 @@ export function DocumentAssistantWorkspace({
         await applyWebBackgroundsForDeck(artDeck);
       }
       if (artPassPlanned) {
-        setDraftTrace((current) =>
-          current ? { ...current, complete: true, activeIndex: current.steps.length } : current,
-        );
+        finishDraftTrace();
       }
     } catch (error) {
       const message =
@@ -6207,7 +6201,7 @@ export function DocumentAssistantWorkspace({
           : error instanceof Error
             ? error.message
             : "The deck request failed before slides were returned.";
-      setDraftTrace((current) => (current ? { ...current, complete: true } : current));
+      finishDraftTrace(message);
       setEvents((current) => [
         ...current,
         draftEvent("system", "deck-draft-failed", `Deck request failed: ${message}`),
@@ -7958,12 +7952,7 @@ export function DocumentAssistantWorkspace({
       setDocumentHistory(completedHistory);
       setActiveHistoryItemId(null);
       setEvents([userEvent, assistantCompletionEvent]);
-      setDraftTrace({
-        steps: traceSteps,
-        activeIndex: traceSteps.length,
-        complete: true,
-        startedAt: Date.now(),
-      });
+      finishDraftTrace();
       window.setTimeout(() => {
         editorRef.current?.focus();
         updatePageMetrics();
@@ -8283,12 +8272,7 @@ export function DocumentAssistantWorkspace({
       setStatus(`${nextVersion.label} applied from provider revision.`);
       setDocumentHistory(completedHistory);
       setEvents(completedEvents);
-      setDraftTrace({
-        steps: traceSteps,
-        activeIndex: traceSteps.length,
-        complete: true,
-        startedAt: Date.now(),
-      });
+      finishDraftTrace();
       window.setTimeout(() => editorRef.current?.focus(), 0);
     } catch (error) {
       const message =
@@ -11267,20 +11251,13 @@ export function DocumentAssistantWorkspace({
               className={`draft-event-list ${events.length === 0 && !draftTrace ? "is-empty" : ""}`}
               aria-label="Assistant events"
             >
-              {draftTrace && !draftTrace.sheetRun && <DraftWorkTrace trace={draftTrace} workspaceName={workspaceName} />}
               {events.map((event) => (
                 <Fragment key={event.id}>
                   <DraftEventRow event={event} />
-                  {draftTrace?.sheetRun?.requestEventId === event.id && (
-                    <WorkTrace
-                      message={sheetRunMessage({ activity: draftTrace.sheetRun.activity, startedAt: draftTrace.startedAt, endedAt: draftTrace.endedAt })}
-                      brandName={workspaceName}
-                      state={draftTrace.complete ? "complete" : "pending"}
-                      thinkingTraces={draftTrace.sheetRun.thinking}
-                    />
-                  )}
+                  {event.id === draftTraceAnchor && draftWorkTrace}
                 </Fragment>
               ))}
+              {draftTraceAnchor === null && draftWorkTrace}
             </div>
             {events.length === 0 && !draftTrace && !activeAssistantTool && (
               <div className="draft-chat-empty">
@@ -16814,103 +16791,6 @@ function draftAgentTraceSteps({
     detail: "Formatting the document, citations, images, and export-ready state.",
   });
   return steps;
-}
-
-function DraftWorkTrace({
-  trace,
-  workspaceName,
-}: {
-  trace: DraftTraceState;
-  workspaceName: string;
-}) {
-  const [now, setNow] = useState(Date.now());
-  const [expanded, setExpanded] = useState(false);
-  const isPending = !trace.complete;
-  const elapsedSeconds = Math.floor(Math.max(0, now - trace.startedAt) / 1000);
-  const currentIndex = Math.min(trace.activeIndex, trace.steps.length - 1);
-  const visibleSteps = expanded
-    ? trace.steps
-    : isPending && trace.steps[currentIndex]
-      ? [trace.steps[currentIndex]]
-      : [];
-
-  useEffect(() => {
-    if (!isPending) return undefined;
-    const interval = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(interval);
-  }, [isPending]);
-
-  return (
-    <div
-      className={`pending-trace draft-work-trace ${trace.complete ? "is-complete" : ""} ${
-        expanded ? "is-expanded" : "is-collapsed"
-      }`}
-      role={isPending ? "status" : "region"}
-      aria-live={isPending ? "polite" : undefined}
-      aria-label={`${workspaceName} document work trace`}
-    >
-      <div className="pending-trace-header">
-        <button
-          className="pending-trace-toggle"
-          type="button"
-          aria-expanded={expanded}
-          aria-label={expanded ? "Collapse work trace" : "Expand work trace"}
-          data-tooltip={
-            expanded
-              ? "Collapse the trace to show only the current document step"
-              : "Expand the trace to see every step in this document edit"
-          }
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <Sparkles size={15} />
-          <span>{trace.complete ? "Document work trace" : `${workspaceName} is drafting`}</span>
-          <small>
-            {isPending
-              ? `${elapsedSeconds}s · step ${currentIndex + 1} of ${trace.steps.length}`
-              : `complete · ${trace.steps.length} ${trace.steps.length === 1 ? "step" : "steps"}`}
-          </small>
-        </button>
-        <button
-          className="pending-trace-caret-button"
-          type="button"
-          tabIndex={-1}
-          aria-hidden="true"
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <ChevronDown size={14} className="pending-trace-caret" />
-        </button>
-      </div>
-      {isPending && (
-        <p className="pending-trace-note">
-          The current draft stays intact while this revision is assembled and checked.
-        </p>
-      )}
-      {visibleSteps.length > 0 && (
-        <ol>
-          {visibleSteps.map((step) => {
-            const index = trace.steps.indexOf(step);
-            const stepState =
-              trace.complete || index < trace.activeIndex
-                ? "done"
-                : index === trace.activeIndex
-                  ? "active"
-                  : "queued";
-            return (
-              <li className={`pending-trace-step is-${stepState}`} key={step.id}>
-                <span className="pending-trace-icon" aria-hidden="true">
-                  {stepState === "done" ? <CheckCircle2 size={12} /> : <Clock3 size={12} />}
-                </span>
-                <span>
-                  <strong>{step.label}</strong>
-                  <small>{step.detail}</small>
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
-  );
 }
 
 /** Starter requests for the empty draft chat. They only fill the message box;

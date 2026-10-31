@@ -156,3 +156,98 @@ def test_usage_records_listing_is_scoped_and_newest_first() -> None:
     ).json()
     assert len(owner_records) == 4
     assert owner_records[-1]["user_id"] == "user-owner"
+
+
+# --- Personal usage: the Account drawer's "Usage this month" ------------------
+
+
+def _record_at(user_id: str, when: datetime, *, tokens: int | None, thread_id: str | None = None) -> None:
+    store = get_store()
+    store.record_usage(
+        actor=store.users[user_id],
+        model_id="gpt-4o",
+        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": tokens} if tokens else None,
+        thread_id=thread_id,
+    )
+    last = len(store.usage_records) - 1
+    store.usage_records[last] = store.usage_records[last].model_copy(update={"created_at": when})
+
+
+def _freeze_now(monkeypatch: pytest.MonkeyPatch, value: datetime) -> None:
+    from app.core import clock
+
+    monkeypatch.setattr(clock, "now", lambda: value)
+
+
+def test_personal_summary_counts_only_this_utc_month(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_store().usage_records.clear()
+    _freeze_now(monkeypatch, datetime(2026, 10, 30, 12, tzinfo=UTC))
+    _record_at("user-jane", datetime(2026, 9, 30, 23, 59, 59, tzinfo=UTC), tokens=5000, thread_id="september")
+    _record_at("user-jane", datetime(2026, 10, 1, 0, 0, tzinfo=UTC), tokens=60, thread_id="first")
+    _record_at("user-jane", datetime(2026, 10, 30, 11, 0, tzinfo=UTC), tokens=40, thread_id="first")
+    _record_at("user-jane", datetime(2026, 10, 30, 11, 30, tzinfo=UTC), tokens=None, thread_id="second")
+    _record_at("user-jane", datetime(2026, 10, 30, 11, 45, tzinfo=UTC), tokens=None, thread_id=None)
+
+    response = client.get("/api/auth/me/usage-summary", headers=headers("user-jane"))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requests"] == 4
+    assert body["chats"] == 2
+    assert body["total_tokens"] == 100
+    assert body["tokens_reported_requests"] == 2
+    assert body["period_start"] == "2026-10-01"
+    assert body["period_end"] == "2026-10-31"
+    assert body["resets_at"].startswith("2026-11-01T00:00:00")
+
+
+def test_personal_summary_resets_at_the_month_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_store().usage_records.clear()
+    _record_at("user-jane", datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC), tokens=60, thread_id="october")
+
+    _freeze_now(monkeypatch, datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC))
+    last_second = client.get("/api/auth/me/usage-summary", headers=headers("user-jane")).json()
+    assert (last_second["requests"], last_second["total_tokens"]) == (1, 60)
+
+    _freeze_now(monkeypatch, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
+    next_month = client.get("/api/auth/me/usage-summary", headers=headers("user-jane")).json()
+    assert (next_month["requests"], next_month["chats"], next_month["total_tokens"]) == (0, 0, None)
+    assert next_month["period_start"] == "2026-11-01"
+
+
+def test_personal_summary_is_only_the_callers_own_usage() -> None:
+    _seed_usage()
+
+    body = client.get("/api/auth/me/usage-summary", headers=headers("user-admin")).json()
+
+    assert body["requests"] == 1
+    assert body["total_tokens"] == 20
+
+
+def test_personal_summary_reports_null_not_zero_when_no_provider_reported_tokens() -> None:
+    get_store().usage_records.clear()
+    store = get_store()
+    store.record_usage(actor=store.users["user-jane"], model_id="gpt-4o", usage=None)
+
+    body = client.get("/api/auth/me/usage-summary", headers=headers("user-jane")).json()
+
+    assert body["requests"] == 1
+    assert body["total_tokens"] is None
+    assert body["tokens_reported_requests"] == 0
+
+
+def test_personal_summary_matches_the_admin_console_for_the_same_user() -> None:
+    _seed_usage()
+
+    mine = client.get("/api/auth/me/usage-summary", headers=headers("user-jane")).json()
+    admin = client.get(
+        "/api/admin/usage-summary", params={"user_id": "user-jane"}, headers=headers("user-admin")
+    ).json()["totals"]
+
+    assert mine["requests"] == admin["messages"]
+    assert mine["total_tokens"] == admin["total_tokens"]
+    assert mine["tokens_reported_requests"] == admin["tokens_reported_messages"]
+
+
+def test_personal_summary_requires_a_signed_in_user() -> None:
+    assert client.get("/api/auth/me/usage-summary").status_code == 401

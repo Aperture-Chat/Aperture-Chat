@@ -12,10 +12,11 @@
  * chats keep rendering.
  */
 
+import { markerEntryLabel, parseMarkerBracket, type MarkerEntry, type MarkerLetter } from "./citationTargets";
 import { parseMarkdownBlocks, resolveDiagramBlock, type MarkdownBlock } from "./markdown";
 import { parseStewardDiagram, parseStructuredSummaryDiagram } from "./stewardDiagram";
 import type { ChatStreamActivity } from "./streamActivity";
-import type { ChatActivityTraceStep, ChatCitation } from "./types";
+import type { ChatActivityTraceStep, ChatCitation, ChatMessage } from "./types";
 
 export type TraceKind =
   | "route"
@@ -555,8 +556,9 @@ function diagramChecks(code: CodeBlock[]): ChatActivityTraceStep[] {
   return checks;
 }
 
-const CITATION_MARKER = /\[(K|U)([1-9][0-9]?)\]/g;
 const MAX_LISTED_MARKERS = 4;
+const BRACKET = /\\?[[［【][^[\]［］【】\n]{1,200}\\?[\]］】]/g;
+const FETCHED_ID = /^cite-fetch-(\d+)$/;
 
 function proseText(blocks: MarkdownBlock[]): string {
   return blocks
@@ -568,19 +570,32 @@ function proseText(blocks: MarkdownBlock[]): string {
     .join("\n");
 }
 
-function markerHasSource(marker: string, citations: ChatCitation[]): boolean {
-  const index = Number(marker.slice(1));
-  return marker.startsWith("K")
-    ? citations.some((citation) => citation.k_index === index)
-    : citations.some((citation) => citation.id === `cite-fetch-${index}`);
+/** A fetched URL saved before `u_index` existed is numbered only by its id. */
+function citedIndex(citation: ChatCitation, letter: MarkerLetter): number | null {
+  if (letter === "K") return citation.k_index ?? null;
+  if (letter === "W") return citation.w_index ?? null;
+  const legacy = FETCHED_ID.exec(citation.id)?.[1];
+  return citation.u_index ?? (legacy ? Number(legacy) : null);
+}
+
+function entryHasSource({ letter, first, last }: MarkerEntry, citations: ChatCitation[]): boolean {
+  return citations.some((citation) => {
+    const index = citedIndex(citation, letter);
+    return index !== null && first <= index && index <= last;
+  });
 }
 
 function citationChecks(blocks: MarkdownBlock[], citations: ChatCitation[]): ChatActivityTraceStep[] {
-  const markers = [...new Set([...proseText(blocks).matchAll(CITATION_MARKER)].map((match) => `${match[1]}${match[2]}`))];
-  if (markers.length === 0) return [];
-  const missing = markers.filter((marker) => !markerHasSource(marker, citations));
+  const parsed = [...proseText(blocks).matchAll(BRACKET)].flatMap((match) => parseMarkerBracket(match[0]));
+  // [K#] and [U#] are ours; [W2] with no web source in the reply is a tax form.
+  const webInUse = citations.some((citation) => citedIndex(citation, "W") !== null);
+  const entries = parsed.filter((entry) => entry.letter !== "W" || webInUse);
+  if (entries.length === 0) return [];
+  const missing = [
+    ...new Set(entries.filter((entry) => !entryHasSource(entry, citations)).map(markerEntryLabel)),
+  ];
   if (missing.length === 0) {
-    return [stepOf("check:citations", "Every citation links to a source", `${plural(markers.length, "marker")} matched`)];
+    return [stepOf("check:citations", "Every citation links to a source", `${plural(entries.length, "marker")} matched`)];
   }
   const listed = missing.slice(0, MAX_LISTED_MARKERS).map((marker) => `[${marker}]`).join(", ");
   const more = missing.length > MAX_LISTED_MARKERS ? ", …" : "";
@@ -655,6 +670,24 @@ export function liveTraceView(
       ? "Show the reply once it clears screening"
       : "Start writing the reply";
   return { steps, activeIndex, current: steps[activeIndex]!, upNext };
+}
+
+export type TraceRun = { activity: ChatActivityTraceStep[]; startedAt: number; endedAt?: number };
+
+/** A run that is not a chat reply, as the message WorkTrace reads: pending until
+ * it ends, then with the length it took. Nothing streams into it, so it stays empty. */
+export function traceRunMessage(run: TraceRun): ChatMessage {
+  const ended = typeof run.endedAt === "number";
+  return {
+    id: `trace-run-${run.startedAt}`,
+    role: "assistant",
+    content: "",
+    createdAt: new Date(run.startedAt).toISOString(),
+    activityTrace: run.activity,
+    startedAtMs: run.startedAt,
+    status: ended ? "ok" : "pending",
+    ...(ended ? { durationMs: run.endedAt! - run.startedAt } : {}),
+  };
 }
 
 export type TraceSummary = { steps: number; checks: number; flags: number };

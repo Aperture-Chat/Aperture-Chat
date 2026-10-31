@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { readTrace } from "../workTrace";
+import { readTrace, traceRunMessage } from "../workTrace";
 import type { FormulaProblem } from "./recalc";
 import { blankWorkbook, parseWorkbook } from "./sheetModel";
-import { sheetRunFinished, sheetRunFixing, sheetRunMessage, sheetRunReplied, sheetRunStart } from "./sheetTrace";
+import { sheetRunFinished, sheetRunFixing, sheetRunReplied, sheetRunStart } from "./sheetTrace";
 
 function workbookOf(input: unknown) {
   const parsed = parseWorkbook(input);
@@ -100,7 +100,7 @@ describe("sheetRunFinished", () => {
   });
 });
 
-describe("sheetRunMessage", () => {
+describe("traceRunMessage", () => {
   const activity = [
     ...sheetRunStart({ ...START, workbook: blankWorkbook() }),
     ...sheetRunReplied([], 0, 5_000),
@@ -108,18 +108,18 @@ describe("sheetRunMessage", () => {
   ];
 
   it("is a pending reply with no length while the run works", () => {
-    const message = sheetRunMessage({ activity, startedAt: 1_000 });
+    const message = traceRunMessage({ activity, startedAt: 1_000 });
     expect(message).toMatchObject({ role: "assistant", content: "", status: "pending", startedAtMs: 1_000, activityTrace: activity });
     expect(message.durationMs).toBeUndefined();
-    expect(message.id).toBe("sheet-run-1000");
+    expect(message.id).toBe("trace-run-1000");
   });
 
   it("knows how long a finished run took", () => {
-    expect(sheetRunMessage({ activity, startedAt: 1_000, endedAt: 15_500 })).toMatchObject({ status: "ok", durationMs: 14_500 });
+    expect(traceRunMessage({ activity, startedAt: 1_000, endedAt: 15_500 })).toMatchObject({ status: "ok", durationMs: 14_500 });
   });
 
   it("reads back as the chat trace's kinds", () => {
-    expect(readTrace(sheetRunMessage({ activity, startedAt: 0 }).activityTrace).map((step) => step.kind)).toEqual([
+    expect(readTrace(traceRunMessage({ activity, startedAt: 0 }).activityTrace).map((step) => step.kind)).toEqual([
       "route", "context", "think", "table", "check", "done",
     ]);
   });

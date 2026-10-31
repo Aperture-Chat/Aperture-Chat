@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 from datetime import UTC, date, datetime
 from typing import Any
@@ -126,6 +127,43 @@ def _reject_unknown_model_fields(
         raise ValueError(f"Chat message data contains unknown {model_type.__name__} fields.")
 
 
+logger = logging.getLogger(__name__)
+
+_NESTED_CHAT_MODELS: tuple[tuple[str, type[ChatAttachment | ChatCitation | ChatActivityTraceStep]], ...] = (
+    ("attachments", ChatAttachment),
+    ("citations", ChatCitation),
+    ("activityTrace", ChatActivityTraceStep),
+)
+
+
+def _known_fields(value: Any, model_type: type[Any]) -> Any:
+    if not isinstance(value, dict):
+        return value
+    known = {key: item for key, item in value.items() if key in model_type.model_fields}
+    if len(known) != len(value):
+        logger.warning("Ignoring stored %s fields this version does not know.", model_type.__name__)
+    return known
+
+
+def _without_unknown_chat_fields(value: Any) -> Any:
+    """Drop fields this version does not know from a stored row.
+
+    A newer version may have written the row. Refusing it on read would make
+    every query that includes it fail, so a rollback could not open any chat.
+    """
+    if not isinstance(value, list):
+        return value
+    messages = []
+    for item in value:
+        message = _known_fields(item, ChatMessage)
+        if isinstance(message, dict):
+            for key, model_type in _NESTED_CHAT_MODELS:
+                if isinstance(message.get(key), list):
+                    message[key] = [_known_fields(entry, model_type) for entry in message[key]]
+        messages.append(message)
+    return messages
+
+
 def _canonical_chat_messages(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise ValueError("Expected a JSON array containing only chat-message objects.")
@@ -191,7 +229,7 @@ class StrictChatMessagesJSON(TypeDecorator[list[dict[str, Any]]]):
         del dialect
         if value is None:
             return None
-        return self._validated(value)
+        return self._validated(_without_unknown_chat_fields(value))
 
 
 class Base(DeclarativeBase):

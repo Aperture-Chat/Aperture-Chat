@@ -155,3 +155,15 @@ def build_usage_summary(records: list[UsageRecord]) -> dict[str, Any]:
         ),
         "backfilled_record_count": sum(1 for record in records if record.source == "backfill"),
     }
+
+
+def build_personal_usage(records: list[UsageRecord]) -> dict[str, Any]:
+    """One person's totals, with the same meaning as ``build_usage_summary``."""
+
+    totals = build_usage_summary(records)["totals"]
+    return {
+        "requests": totals["messages"],
+        "chats": len({record.thread_id for record in records if record.thread_id}),
+        "total_tokens": totals["total_tokens"],
+        "tokens_reported_requests": totals["tokens_reported_messages"],
+    }

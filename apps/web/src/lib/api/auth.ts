@@ -525,12 +525,14 @@ export function loadAccountApiKey(
   });
 }
 
+/** The server refuses with a 409 if a key is live, unless `replace` is set. */
 export function createAccountApiKey(
   userId: string,
-  options: ApiMutationOptions = {},
+  options: ApiMutationOptions & { replace?: boolean } = {},
 ): Promise<AccountApiKeyCreateResponse> {
   return apiRequest<AccountApiKeyCreateResponse>(userId, "/api/auth/api-key", {
     method: "POST",
+    body: { replace: options.replace ?? false },
     signal: options.signal,
   });
 }

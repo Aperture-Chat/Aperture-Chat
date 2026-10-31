@@ -94,8 +94,6 @@
 .primary-nav::before { content: ""; position: absolute; inset-block: 0; left: 0; width: 1px; background: var(--brand-edge); transform: translateX(-50%); }
 .primary-nav .nav-item::before { content: ""; position: absolute; left: -12px; top: 50%; box-sizing: border-box; width: 7px; height: 7px; border: 1px solid var(--border-strong); border-radius: 1px; background: var(--primary-nav-node-fill, var(--rail)); transform: translate(-50%, -50%) rotate(45deg); }
 .primary-nav .nav-item.is-active::before { display: block; background: var(--primary-nav-node-fill, var(--rail)); border-color: var(--teal-2); box-shadow: 0 0 0 3px var(--brand-wash); }
-.rail-collapsed .primary-nav { border-left: 0; padding-left: 0; margin-left: 0; }
-.rail-collapsed .primary-nav::before, .rail-collapsed .primary-nav .nav-item::before { display: none; }
 .sidebar-dark .nav-item.is-active { background: rgb(255 255 255 / 12%); color: white; }
 .sidebar-dark .nav-item.is-active > svg { color: inherit; }
 .sidebar-dark .nav-item { color: #bfd0d4; }
@@ -126,7 +124,6 @@ span.mini-avatar.avatar-initials {
   pointer-events: none;
   z-index: -1;
 }
-.sidebar .sidebar-collapse-button { border-color: transparent; background: transparent; }
 .utility-rows .minor-row { font-weight: 500; }
 .sidebar-resize-handle { touch-action: none; }
 .workspace-header { min-height: 66px; padding-block: 12px; background: var(--bg); backdrop-filter: none; border-bottom-color: var(--border); }
@@ -508,7 +505,6 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 .theme-mode-row .minor-row { flex: 1; min-width: 0; }
 .theme-schedule-button { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; box-shadow: none; color: inherit; cursor: pointer; }
 .theme-schedule-button.is-active { color: var(--teal); }
-.rail-collapsed .theme-mode-row { flex-direction: column; }
 .theme-schedule-enabled { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 0 20px; font-size: 14px; }
 .theme-schedule-times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .theme-schedule-times label { display: grid; gap: 10px; min-width: 0; font-size: 13px; }
@@ -529,7 +525,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
  * hover or focus, and management consoles live beside Help at the bottom. */
 .nav-shortcut { margin-left: auto; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--faint); font: inherit; font-size: 10.5px; font-weight: 600; line-height: 1.5; letter-spacing: 0.02em; }
 .sidebar-dark .nav-shortcut { border-color: rgb(255 255 255 / 18%); color: #9fb4ba; }
-.rail-collapsed .nav-shortcut, .is-drawer .nav-shortcut { display: none; }
+.is-drawer .nav-shortcut { display: none; }
 @media (pointer: coarse) { .nav-shortcut { display: none; } }
 
 .chat-library { padding-top: 12px; }
@@ -575,7 +571,6 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 
 a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
 .console-link-count { margin-left: auto; min-width: 20px; justify-content: center; font-size: 11px; }
-.rail-collapsed .minor-row .console-link-count { display: inline-flex; position: absolute; top: 3px; right: 3px; min-width: 16px; padding: 0 4px; font-size: 10px; }
 
 .help-row:hover, .help-row:focus-within { background: transparent; color: inherit; }
 .sidebar-dark .help-row:hover, .sidebar-dark .help-row:focus-within { background: transparent; color: inherit; }

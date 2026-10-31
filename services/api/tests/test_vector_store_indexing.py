@@ -7,7 +7,7 @@ import time
 
 from app.core.security import SecretVault
 import app.core.vector_store as vector_store_module
-from app.core.vector_store import LocalVectorStore
+from app.core.vector_store import LocalVectorStore, _lexical_score
 from app.models.schemas import KnowledgeChunk, KnowledgeDocument, Role, User
 from app.repositories.seed import SeedStore
 
@@ -212,6 +212,35 @@ def test_cached_search_matches_streaming_scores() -> None:
     )[:5]
     assert [hit.id for hit in cached] == [chunk.id for _score, chunk in streamed]
     assert [round(hit.score, 6) for hit in cached] == [round(score, 6) for score, _chunk in streamed]
+
+
+def test_a_chunk_naming_every_term_beats_one_that_repeats_a_single_term() -> None:
+    """A long file repeats its nouns, and raw counts let that outvote the one
+    passage that names what was asked. Page 40 ranked ninth this way, and a
+    file's only mention of a place ranked forty-seventh."""
+    store = LocalVectorStore(":memory:")
+    document = _document()
+    filler = " ".join(["The eastern culvert confirms the recorded culvert."] * 4)
+    answer = "The Osprey Landing culvert overflowed twice in the spring."
+    store.upsert_sources([document], _chunks(document, [filler, filler, answer]))
+    actor = _actor()
+    query = "What happened at the Osprey Landing culvert?"
+
+    hits = store.search(actor, [CONFIG_ID], query, limit=1)
+    assert [hit.text for hit in hits] == [answer]
+
+    terms = {"happened", "osprey", "landing", "culvert"}
+    streamed = store._stream_scores(  # noqa: SLF001
+        actor, CONFIG_ID, query, terms, dict.fromkeys(terms, 1.0), None, None
+    )
+    assert max(streamed, key=lambda item: item[0])[1].text == answer
+
+
+def test_a_term_stops_adding_after_three_mentions() -> None:
+    assert _lexical_score("culvert culvert", {"culvert"}) == 2
+    assert _lexical_score("culvert culvert culvert", {"culvert"}) == 3
+    assert _lexical_score("culvert " * 9, {"culvert"}) == 3
+    assert _lexical_score("culvert culvert osprey", {"culvert", "osprey"}) == 3
 
 
 def test_tenant_admin_sees_group_restricted_chunks_in_their_tenant() -> None:

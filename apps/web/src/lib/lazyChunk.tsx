@@ -32,7 +32,12 @@ export function lazyWithReload<T extends ComponentType<any>>(
  * workspace. Retry handles temporary failures; reload is an explicit choice
  * when an older tab needs the current asset manifest. */
 export class LazyChunkBoundary extends Component<
-  { label: string; children: ReactNode },
+  {
+    label: string;
+    children: ReactNode;
+    /** Draws the failure itself, for a surface that opens over the page. */
+    renderFailure?: (actions: { reload: () => void }) => ReactNode;
+  },
   { failed: boolean; retryToken: object }
 > {
   state = { failed: false, retryToken: {} };
@@ -44,6 +49,9 @@ export class LazyChunkBoundary extends Component<
   render() {
     if (!this.state.failed) {
       return <ChunkRetryContext.Provider value={this.state.retryToken}>{this.props.children}</ChunkRetryContext.Provider>;
+    }
+    if (this.props.renderFailure) {
+      return this.props.renderFailure({ reload: () => window.location.reload() });
     }
     return (
       <div className="drawer-card chunk-load-error" role="alert">

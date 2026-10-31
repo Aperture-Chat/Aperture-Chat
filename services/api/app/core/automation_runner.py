@@ -28,6 +28,7 @@ from app.core.automation_schedule import (
     parse_instant,
     resolve_zone,
 )
+from app.core.citation_use import cited_numbers, strip_citation_markers
 from app.core.connector_availability import connector_enabled_for_tenant
 from app.core.markdown_document import markdown_to_document_html
 from app.core.model_gateway import (
@@ -161,6 +162,13 @@ def _step_web_search_tools(
     return [tool]
 
 
+def _cited_sources(output: str, passage_sources: list[str]) -> list[str]:
+    """The distinct source names the step's output cited, by [K#] passage number."""
+    numbered = dict(enumerate(passage_sources, start=1))
+    cited = cited_numbers(output, "K", numbered)
+    return list(dict.fromkeys(numbered[number] for number in sorted(cited)))
+
+
 def _web_sources_from_annotations(message: Mapping[str, Any]) -> list[tuple[str, str]]:
     """(title, url) pairs from OpenRouter url_citation annotations, deduped."""
     annotations = message.get("annotations")
@@ -283,8 +291,7 @@ def _step_context(
                     f"[K{len(passages) + 1}] {hit.source_name}: "
                     f"{_excerpt(' '.join(hit.text.split()), AGENT_STEP_PASSAGE_CHARS)}"
                 )
-                if hit.source_name not in sources:
-                    sources.append(hit.source_name)
+                sources.append(hit.source_name)
             if passages:
                 sections.append(
                     "Reference passages retrieved from this agent's knowledge. Ground your "
@@ -347,7 +354,11 @@ def execute_chain(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Step {index} ({model.name}) is not runnable: {route.status_message}",
             )
-        step_input = carry or "Begin the automation."
+        # Source numbers are per step, so an earlier step's markers would cite
+        # this step's passages. The transcript keeps the output as written.
+        step_input = (strip_citation_markers(carry) if index > 1 else carry) or (
+            "Begin the automation."
+        )
         context_sections, knowledge_sources = _step_context(
             store, actor, model, step_input, step_label=f"Step {index} ({model.name})"
         )
@@ -430,7 +441,7 @@ def execute_chain(
                     "output": content,
                     "truncated": truncated,
                     "agent": is_workspace_agent_profile(model),
-                    "knowledge_sources": knowledge_sources,
+                    "knowledge_sources": _cited_sources(content, knowledge_sources),
                 }
             )
             carry = content

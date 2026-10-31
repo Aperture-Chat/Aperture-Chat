@@ -892,3 +892,21 @@ def test_concurrent_first_owner_setup_creates_exactly_one_owner(monkeypatch) -> 
     assert len(owners) == 1
     assert store.verify_password_credential(owners[0].id, "valid-owner-password-123")
     assert sum(event.action == "auth.bootstrap_owner_created" for event in store.audit_events) == 1
+
+
+def test_profile_empty_string_clears_a_field_and_null_leaves_it() -> None:
+    fields = {
+        "firm_name": "Harbor & Vale LLP",
+        "website_url": "https://example.test",
+        "phone": "+1 555 0100",
+        "bio": "Synthetic bio.",
+        "avatar_url": "https://example.test/photo.png",
+    }
+    headers = {"x-aperture-user": "user-jane"}
+    assert client.patch("/api/auth/profile", headers=headers, json=fields).status_code == 200
+
+    unchanged = client.patch("/api/auth/profile", headers=headers, json=dict.fromkeys(fields)).json()
+    assert {name: unchanged[name] for name in fields} == fields
+
+    cleared = client.patch("/api/auth/profile", headers=headers, json=dict.fromkeys(fields, "")).json()
+    assert {name: cleared[name] for name in fields} == dict.fromkeys(fields)

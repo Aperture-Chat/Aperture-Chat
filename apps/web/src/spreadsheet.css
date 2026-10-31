@@ -1111,9 +1111,6 @@
 .document-assistant-page.is-sheet-mode .document-editor-workspace { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
 
 @media (max-width: 1180px) {
-  .document-assistant-page.is-sheet-mode { overflow: hidden; }
-  .is-sheet-mode .document-assistant-shell { height: 100vh; min-height: 0; }
-  .is-sheet-mode .document-editor-workspace { height: 100vh; min-height: 0; }
   .sheet-side-panel { position: absolute; z-index: 25; top: 0; right: 0; bottom: 0; width: min(340px, 100%); }
 }
 

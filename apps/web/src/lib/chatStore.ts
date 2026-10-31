@@ -759,7 +759,8 @@ export type ChatStore = {
   /** Returns an archived thread to the sidebar without changing its folder. */
   restoreThread: (chatId: string) => void;
   /** Permanently removes a thread locally and on the server. */
-  deleteThread: (chatId: string) => void;
+  /** Rejects with the server's reason when it refuses; the chat then stays. */
+  deleteThread: (chatId: string) => Promise<void>;
   moveThreadToFolder: (chatId: string, folderId: string | null) => void;
   branchFromMessage: (messageId: string) => ChatThread | null;
   regenerateResponse: (messageId: string) => boolean;
@@ -1327,16 +1328,17 @@ export function useChatStore(
   );
 
   const deleteThread = useCallback(
-    (chatId: string) => {
+    async (chatId: string) => {
       const existing = threadsRef.current.find((thread) => thread.id === chatId);
       if (!existing) return;
-      setThreads((current) => current.filter((thread) => thread.id !== chatId));
+      // Permanent delete can be refused (a legal hold, an outage), so the chat
+      // leaves only once the server agrees. A 404 means it is already gone.
       if (enabled && !isBlankNewChat(existing)) {
-        deleteChatThread(persona, chatId).catch(() => {
-          // Local removal already happened; a failed server delete resurfaces
-          // the thread on the next hydration instead of faking success.
+        await deleteChatThread(persona, chatId).catch((error: unknown) => {
+          if (!(error instanceof ChatRequestError && error.status === 404)) throw error;
         });
       }
+      setThreads((current) => current.filter((thread) => thread.id !== chatId));
 
       if (activeIdRef.current !== chatId) return;
       const remaining = threadsRef.current.filter((thread) => thread.id !== chatId);
