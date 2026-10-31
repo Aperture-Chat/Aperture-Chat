@@ -331,6 +331,7 @@
    Desktop density uses 20–30px keys. Under a finger these grow to at least
    36px (40px where a row has room) without changing their look. */
 @media (max-width: 640px) and (pointer: coarse), (max-height: 500px) and (pointer: coarse) {
+  .rail-switch-option,
   .message-icon-action,
   .chat-title-rename-button,
   .section-icon-button,

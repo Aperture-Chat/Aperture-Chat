@@ -1,7 +1,7 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Check, Code2, Copy, Download, Eye, LoaderCircle, Pencil, TriangleAlert, Workflow } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { codeArtifactFilename, codeArtifactLanguage, precedingHeadings } from "../lib/codeArtifacts";
 import { copyCodeToClipboard, triggerBlobDownload } from "../lib/clipboard";
 import {
@@ -19,6 +19,13 @@ import { StewardDiagramFigure } from "./StewardDiagram";
 import { StableLabel } from "./Primitives";
 import { renderConcealed } from "./ConcealedText";
 import { ArtifactCanvasBlade, downloadCode, useArtifactCanvas } from "./ArtifactCanvas";
+import {
+  CitationMarkerContext,
+  renderCitationBracket,
+  renderLinkedMarker,
+  type InlineCitations,
+  type RenderedBracket,
+} from "./CitationMarker";
 import { CodeLines } from "./CodeLines";
 import { MarkdownTableBlock } from "./MarkdownTable";
 import { CodeBlockEditor, CodeEditButtons, CodeSaveNotice } from "./CodeBlockEditor";
@@ -72,23 +79,79 @@ function previewBlockWeight(block: MarkdownBlock) {
   }
 }
 
-function renderInline(text: string, preview = false): ReactNode[] {
+const LINK_TARGET = String.raw`https?:\/\/[^)\s]+|\/api\/[^)\s]+`;
+/** A bracket that might hold citation markers. parseMarkerBracket decides. */
+const MARKER_BRACKET = String.raw`\\?[[［【](?=[^\]］】\n]{0,600}[KWUＫＷＵКΚ]\s*\d)([^[\]［］【】\n]{1,600})[\]］】]`;
+// \(…\) is the only inline math delimiter — single-dollar text such as $5M
+// is finance prose and must never be parsed as math.
+const INLINE_TOKENS = [
+  String.raw`!\[([^\]]*)\]\((${LINK_TARGET})(?:\s+"[^"]*")?\)`,
+  String.raw`\[([^\]]+)\]\((${LINK_TARGET})\)`,
+  String.raw`\\\((.+?)\\\)`,
+  MARKER_BRACKET,
+  String.raw`\*\*([^*]+)\*\*`,
+  "`([^`]+)`",
+  String.raw`\*([^*]+)\*`,
+  "_([^_]+)_",
+].join("|");
+const MARKER_IN_EMPHASIS = new RegExp(String.raw`(${MARKER_BRACKET})(\((?:${LINK_TARGET})\))?`, "g");
+
+/** The words before a marker. A dropped marker takes its leading space along. */
+function textBefore(text: string, from: number, to: number, bracket: RenderedBracket | null) {
+  const before = text.slice(from, to);
+  return bracket?.dropped ? before.replace(/ $/, "") : before;
+}
+
+/** The citation a token stands for, whether written plain or with a link. */
+function tokenCitation(match: RegExpExecArray, citations: InlineCitations): RenderedBracket | null {
+  if (match[7] !== undefined) return renderCitationBracket(match[0], citations);
+  return match[4] !== undefined ? renderLinkedMarker(match[4], citations) : null;
+}
+
+/** Bold and italic text keeps its words exactly as written, except that markers
+ * inside it are markers: models often bold a conclusion, citation included. */
+function emphasisContent(
+  text: string,
+  citations: InlineCitations,
+  words: (part: string, key: number) => ReactNode,
+): ReactNode {
+  if (!citations.scope && !citations.streaming) return words(text, 0);
   const nodes: ReactNode[] = [];
-  // \(…\) is the only inline math delimiter — single-dollar text such as $5M
-  // is finance prose and must never be parsed as math. [K#]/[U#] citation
-  // tokens sit after the link alternative so a real [K1](url) link still wins.
-  const regex =
-    /(!\[([^\]]*)\]\((https?:\/\/[^)\s]+|\/api\/[^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/api\/[^)\s]+)\)|\\\((.+?)\\\)|\[(K[1-9][0-9]?|U[1-9])\]|\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*|_([^_]+)_)/g;
+  let at = 0;
+  for (const match of text.matchAll(MARKER_IN_EMPHASIS)) {
+    const marker = match[3] ? renderLinkedMarker(match[2], citations) : renderCitationBracket(match[1], citations);
+    if (!marker) continue;
+    nodes.push(
+      <Fragment key={nodes.length}>{words(textBefore(text, at, match.index, marker), nodes.length)}</Fragment>,
+      <Fragment key={nodes.length + 1}>{marker.node}</Fragment>,
+    );
+    at = match.index + match[0].length;
+  }
+  nodes.push(<Fragment key={nodes.length}>{words(text.slice(at), nodes.length)}</Fragment>);
+  return nodes;
+}
+
+function renderInline(
+  text: string,
+  preview = false,
+  citations: Omit<InlineCitations, "preview"> = { scope: null, streaming: false },
+): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const inlineCitations = { ...citations, preview };
+  const regex = new RegExp(`(${INLINE_TOKENS})`, "g");
   let lastIndex = 0;
   let key = 0;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
+    const bracket = tokenCitation(match, inlineCitations);
     if (match.index > lastIndex) {
-      nodes.push(<Fragment key={key++}>{renderConcealed(text.slice(lastIndex, match.index), `i${key}`)}</Fragment>);
+      nodes.push(<Fragment key={key++}>{renderConcealed(textBefore(text, lastIndex, match.index, bracket), `i${key}`)}</Fragment>);
     }
     if (match[3] !== undefined) {
       nodes.push(<InlineImage alt={match[2] ?? ""} key={`${key++}-${match[3]}`} url={match[3]} />);
+    } else if (bracket) {
+      nodes.push(<Fragment key={key++}>{bracket.node}</Fragment>);
     } else if (match[4] !== undefined) {
       nodes.push(
         preview ? (
@@ -102,20 +165,20 @@ function renderInline(text: string, preview = false): ReactNode[] {
     } else if (match[6] !== undefined) {
       nodes.push(<InlineMath key={key++} math={match[6]} source={match[0]} />);
     } else if (match[7] !== undefined) {
+      // Not a marker after all: keep the bracket and read on inside it.
+      nodes.push(<Fragment key={key++}>{match[0][0]}</Fragment>);
+      regex.lastIndex = match.index + 1;
+    } else if (match[8] !== undefined) {
+      const strongKey = key++;
       nodes.push(
-        <sup
-          key={key++}
-          className="md-cite-marker"
-          data-cite-index={match[7]}
-          title={`Source ${match[7]}`}
-        >
-          {match[7]}
-        </sup>,
+        <strong key={strongKey}>
+          {emphasisContent(match[8], inlineCitations, (part, partKey) => renderConcealed(part, `s${strongKey}-${partKey}`))}
+        </strong>,
       );
-    } else if (match[8] !== undefined) nodes.push(<strong key={key++}>{renderConcealed(match[8], `s${key}`)}</strong>);
+    }
     else if (match[9] !== undefined) nodes.push(<code key={key++}>{match[9]}</code>);
-    else if (match[10] !== undefined) nodes.push(<em key={key++}>{match[10]}</em>);
-    else if (match[11] !== undefined) nodes.push(<em key={key++}>{match[11]}</em>);
+    else if (match[10] !== undefined) nodes.push(<em key={key++}>{emphasisContent(match[10], inlineCitations, (part) => part)}</em>);
+    else if (match[11] !== undefined) nodes.push(<em key={key++}>{emphasisContent(match[11], inlineCitations, (part) => part)}</em>);
     lastIndex = regex.lastIndex;
   }
   if (lastIndex < text.length) {
@@ -177,7 +240,9 @@ export function Markdown({
   const headingHints = precedingHeadings(renderedBlocks);
   const occurrences = codeOccurrences(renderedBlocks);
   const saveTable = tableSaver(renderedBlocks, { onUpdateTable, streaming, preview });
-  const renderCell = (text: string) => renderInline(text, preview);
+  const scope = useContext(CitationMarkerContext);
+  const inline = (text: string) => renderInline(text, preview, { scope, streaming });
+  const renderCell = inline;
   return (
     <div className="markdown">
       {renderedBlocks.map((block, index) => {
@@ -186,7 +251,7 @@ export function Markdown({
           const Tag = `h${level}` as "h3" | "h4" | "h5" | "h6";
           return (
             <Tag key={index} className="md-heading">
-              {renderInline(block.text, preview)}
+              {inline(block.text)}
             </Tag>
           );
         }
@@ -195,7 +260,7 @@ export function Markdown({
             return (
               <ol key={index} className="md-list md-list-ordered">
                 {block.items.map((item, itemIndex) => (
-                  <li key={itemIndex}>{renderInline(item, preview)}</li>
+                  <li key={itemIndex}>{inline(item)}</li>
                 ))}
               </ol>
             );
@@ -203,7 +268,7 @@ export function Markdown({
           return (
             <ul key={index} className="md-list">
               {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{renderInline(item, preview)}</li>
+                <li key={itemIndex}>{inline(item)}</li>
               ))}
             </ul>
           );
@@ -281,7 +346,7 @@ export function Markdown({
               {block.lines.map((line, lineIndex) => (
                 <Fragment key={lineIndex}>
                   {lineIndex > 0 && <br />}
-                  {renderInline(line, preview)}
+                  {inline(line)}
                 </Fragment>
               ))}
             </blockquote>
@@ -292,7 +357,7 @@ export function Markdown({
             {block.lines.map((line, lineIndex) => (
               <Fragment key={lineIndex}>
                 {lineIndex > 0 && <br />}
-                {renderInline(line, preview)}
+                {inline(line)}
               </Fragment>
             ))}
           </p>

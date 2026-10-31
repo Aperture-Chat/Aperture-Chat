@@ -22,6 +22,8 @@ import json
 import re
 from dataclasses import dataclass
 
+from app.core.citation_use import marker_spans
+
 TARGET_WORDS_PER_REQUESTED_PAGE = 350
 MIN_LONG_FORM_WORDS = 1200
 # Below this the "outline instead of the deliverable" heuristic is unreliable.
@@ -272,7 +274,9 @@ def _verify_code(directive: Directive, text: str) -> str | None:
 
 
 def _verify_citations(directive: Directive, text: str) -> str | None:
-    if re.search(r"https?://\S+", text) or re.search(r"\[[KWM]\d+\]", text) or "](" in text:
+    if re.search(r"https?://\S+", text) or re.search(r"\[M\d+\]", text) or "](" in text:
+        return None
+    if any(marker_spans(text, label) for label in ("K", "W", "U")):
         return None
     # Academic citations need not be hyperlinks. Require both a bibliography
     # with entries and an author/title parenthetical, not just its heading.

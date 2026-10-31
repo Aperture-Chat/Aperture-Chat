@@ -1717,6 +1717,67 @@ export type ChatCitation = {
   /** One-based stable index matching the exact [K#] label in the model
    * prompt. Absent for non-knowledge citations (web, uploads, MCP). */
   k_index?: number | null;
+  /** The [W#] number of a web result, and the [U#] number of a fetched URL. */
+  w_index?: number | null;
+  u_index?: number | null;
+  /** Which stored document a knowledge chunk came from. Absent on citations
+   * saved before these existed; those resolve through `chunk_id`. */
+  document_id?: string | null;
+  knowledge_config_id?: string | null;
+  /** True: the reply references it. False: consulted, not referenced (web
+   * only). Null: no marker exists for that source, or a legacy record. */
+  cited?: boolean | null;
+  /** The sentences of the chunk that back the reply, verbatim. Null when too
+   * little matched, on old citations, and on anything but knowledge. */
+  passage?: string | null;
+};
+
+export type KnowledgeDocumentViewMode = "pdf" | "image" | "text";
+
+export type KnowledgeDocumentNotice =
+  | "original_missing"
+  | "conversion_unavailable"
+  | "conversion_failed"
+  | "privacy_restricted";
+
+/** Where a citation points inside a document. `exact` is false when the page
+ * is a best guess. */
+export type KnowledgeDocumentTarget = {
+  page: number | null;
+  page_end: number | null;
+  locator: string | null;
+  excerpt: string;
+  chunk_id: string | null;
+  exact: boolean;
+};
+
+export type KnowledgeDocumentSegment = {
+  id: string;
+  page: number | null;
+  locator: string | null;
+  text: string;
+};
+
+/** GET /api/knowledge/{config}/documents/{document}/view */
+export type KnowledgeDocumentView = {
+  document_id: string;
+  knowledge_config_id: string;
+  name: string;
+  content_type: string;
+  mode: KnowledgeDocumentViewMode;
+  /** Set when the server has bytes to render; the client never fetches this
+   * value, it builds the route from the ids. */
+  file_url: string | null;
+  original_available: boolean;
+  page_count: number | null;
+  target: KnowledgeDocumentTarget | null;
+  segments: KnowledgeDocumentSegment[];
+  notice: KnowledgeDocumentNotice | null;
+};
+
+export type KnowledgeChunkLocation = {
+  knowledge_config_id: string;
+  document_id: string;
 };
 
 export type ChatActivityTraceStep = {

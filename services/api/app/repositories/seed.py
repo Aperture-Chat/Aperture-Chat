@@ -47,6 +47,8 @@ from app.core.mfa import (
     provisioning_uri,
 )
 from app.core.personal_data import conceal_text
+from app.core.document_rendition import clear_scratch
+from app.core.knowledge_originals import ROOT_DIRECTORY, DocumentRef, KnowledgeOriginalStore
 from app.core.knowledge_walls import (
     document_wall_overrides,
     resolve_document_wall,
@@ -518,6 +520,11 @@ class SeedStore:
             embedding_cache_dir=embedding_cache_dir,
             embedding_threads=embedding_threads,
             background_dense=dense_background,
+        )
+        self.knowledge_originals = (
+            KnowledgeOriginalStore(self._runtime_state_path.parent / ROOT_DIRECTORY)
+            if self._runtime_state_path is not None
+            else KnowledgeOriginalStore.ephemeral()
         )
         self.openrouter_api_key = (openrouter_api_key or "").strip()
         self.openrouter_base_url = (openrouter_base_url or OPENROUTER_DEFAULT_BASE_URL).strip()
@@ -2018,6 +2025,7 @@ class SeedStore:
                     )
                 self._run_identity_cleanup_job(job, startup_reclaim=True)
                 completed += 1
+        self.reconcile_knowledge_files()
         return completed
 
     def _run_identity_cleanup_job(
@@ -2095,8 +2103,10 @@ class SeedStore:
                         counts["removed_vector_rows"] = self.vector_store.delete_tenant(
                             job.tenant_id
                         )
+                        self.knowledge_originals.delete_tenant(job.tenant_id)
                     else:
                         self.vector_store.delete_config(job.resource_id)
+                        self.knowledge_originals.delete_config(job.tenant_id, job.resource_id)
                 elif stage == "m9":
                     if job.resource_kind == "tenant":
                         counts.update(self.matter_draft_repository.purge_tenant(job.tenant_id))
@@ -2324,6 +2334,7 @@ class SeedStore:
             and self._identity_config_staged_metadata is None
         ):
             self.vector_store.clear_all()
+            self.knowledge_originals.clear()
 
     def ensure_default_user_group(self) -> None:
         if not self.tenants:
@@ -4805,6 +4816,36 @@ class SeedStore:
             return [deepcopy(chunk) for chunk in chunks]
         return [deepcopy(chunk) for chunk in self.knowledge_chunks.get(config_id, [])]
 
+    def reconcile_knowledge_files(self) -> None:
+        """Once cleanup jobs have run at startup, with nothing in flight: clear what
+        a crash left on disk, which no later delete would ever find."""
+        if self._runtime_state_path is None:
+            return
+        self.knowledge_originals.reconcile(
+            {(config.tenant_id, config.id) for config in self.knowledge_configs.values()}
+        )
+        clear_scratch()
+
+    def knowledge_document_chunks(self, config_id: str, document_id: str) -> list[KnowledgeChunk]:
+        chunks = self.vector_store.chunks_for_document(config_id, document_id)
+        if chunks:
+            return chunks
+        return [
+            deepcopy(chunk)
+            for chunk in self.knowledge_chunks.get(config_id, [])
+            if chunk.document_id == document_id
+        ]
+
+    def knowledge_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
+        chunk = self.vector_store.chunk(chunk_id)
+        if chunk is not None:
+            return chunk
+        for chunks in self.knowledge_chunks.values():
+            for candidate in chunks:
+                if candidate.id == chunk_id:
+                    return deepcopy(candidate)
+        return None
+
     def delete_knowledge_config(self, config_id: str) -> None:
         with self._store_lock:
             config = self.knowledge_configs.get(config_id)
@@ -4881,6 +4922,9 @@ class SeedStore:
             chunk for chunk in self.knowledge_chunks.get(config.id, []) if chunk.document_id != document_id
         ]
         self.vector_store.delete_document(config.id, document_id)
+        self.knowledge_originals.delete_document(
+            DocumentRef(config.tenant_id, config.id, document_id)
+        )
         persisted_chunks = self.vector_store.chunks_for(config.id)
         if persisted_chunks:
             self.knowledge_chunks[config.id] = persisted_chunks
@@ -5099,6 +5143,10 @@ class SeedStore:
         config.settings = settings
         self._apply_knowledge_walls(config, current_documents, self.knowledge_chunks.get(config_id, []))
         self.vector_store.replace_config(config_id, current_documents, self.knowledge_chunks.get(config_id, []))
+        if documents is not None:
+            self.knowledge_originals.retain_only(
+                config.tenant_id, config_id, {document.id for document in current_documents}
+            )
         self.save_runtime_state()
         return config, self.knowledge_documents_for(config_id), synced_at
 

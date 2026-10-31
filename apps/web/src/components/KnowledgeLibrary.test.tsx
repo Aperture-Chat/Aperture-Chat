@@ -567,6 +567,50 @@ test("knowledge authors without the API grant see API sources locked, not missin
   expect(screen.queryByRole("button", { name: /Fetch and add/ })).not.toBeInTheDocument();
 });
 
+test("a document's name opens it as a document and its details stay on the expander", async () => {
+  stubFetch((url, init) => {
+    if (url.includes("/documents/doc-brief/view")) {
+      return json({
+        document_id: "doc-brief",
+        knowledge_config_id: "kb-synthetic",
+        name: "brief.pdf",
+        content_type: "application/pdf",
+        mode: "text",
+        file_url: null,
+        original_available: false,
+        page_count: null,
+        target: null,
+        segments: [{ id: "chunk-1", page: 1, locator: "Page 1", text: "Synthetic brief text." }],
+        notice: null,
+      });
+    }
+    return url.includes("/documents") && (init?.method ?? "GET") === "GET" ? json([document()]) : undefined;
+  });
+  renderLibrary([knowledgeBase()]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+  const name = await screen.findByRole("button", { name: "Open brief.pdf" });
+  fireEvent.click(name);
+  const viewer = await screen.findByRole("dialog", { name: "brief.pdf" });
+  expect(within(viewer).getByText("Synthetic brief text.")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "brief.pdf properties" })).toBeNull();
+
+  fireEvent.keyDown(window.document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "brief.pdf" })).toBeNull());
+  expect(name).toHaveFocus();
+
+  const preview = screen.getByRole("button", { name: "Preview brief.pdf" });
+  fireEvent.click(preview);
+  const reopened = await screen.findByRole("dialog", { name: "brief.pdf" });
+  expect(within(reopened).getByText("Synthetic brief text.")).toBeInTheDocument();
+  fireEvent.keyDown(window.document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "brief.pdf" })).toBeNull());
+  expect(preview).toHaveFocus();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show details for brief.pdf" }));
+  expect(screen.getByRole("region", { name: "brief.pdf properties" })).toBeInTheDocument();
+});
+
 test("a document's details show its preserved properties and its ethical wall", async () => {
   const group = sampleData.groups[0];
   const walled = document({

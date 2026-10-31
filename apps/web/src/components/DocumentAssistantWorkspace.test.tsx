@@ -476,13 +476,11 @@ test("keeps workspace knowledge and templates off while web search defaults on f
   expect(imageFigures.length).toBeGreaterThan(5);
   expect(documentBody().querySelector("img")?.getAttribute("src")).toContain("artemis-ii-mission");
   expect(documentText()).not.toContain("Star Wars");
-  expect(
-    screen.getByRole("region", { name: "Aperture Chat document work trace" }),
-  ).toBeInTheDocument();
   const assistantEvents = screen.getByLabelText("Assistant events");
-  expect(
-    within(assistantEvents).getByRole("region", { name: "Aperture Chat document work trace" }),
-  ).toBeInTheDocument();
+  const trace = within(assistantEvents).getByRole("region", { name: "Aperture Chat activity trace" });
+  // Under the request and above the reply, as in the chat.
+  const request = within(assistantEvents).getAllByText(/Artemis/i)[0]!;
+  expect(request.compareDocumentPosition(trace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expectDraftContext({ sources: "Off", web: "On", templates: "Off" });
   expect(screen.getByText(/drafted with provider-hosted web search/)).toBeInTheDocument();
 });
@@ -550,8 +548,10 @@ test("runs long-horizon document drafting with trace steps and image slots", asy
   expect(payload.max_completion_tokens).toBe(24000);
   expect(payload.messages[0].content).toContain("Do not claim live web research");
   expect(documentBody().querySelectorAll(".document-image-figure").length).toBeGreaterThan(4);
-  const trace = screen.getByRole("region", { name: "Aperture Chat document work trace" });
-  fireEvent.click(within(trace).getByRole("button", { name: "Expand work trace" }));
+  const trace = screen.getByRole("region", { name: "Aperture Chat activity trace" });
+  expect(trace).toHaveClass("work-trace");
+  // The steps play in one at a time, as they do in the chat.
+  await waitFor(() => expect(within(trace).getByText("Finalizing response")).toBeInTheDocument(), { timeout: 8000 });
   expect(within(trace).getByText("Sizing long-form deliverable")).toBeInTheDocument();
   expect(within(trace).getByText("Preparing visual evidence")).toBeInTheDocument();
   expect(within(trace).getByText("Generating long-form answer")).toBeInTheDocument();
@@ -956,18 +956,13 @@ test("clears revision instructions immediately and keeps a durable working lifec
   expect(sendButton).toBeDisabled();
   expect(documentBody()).toHaveClass("is-ai-editing");
   expect(documentBody()).toHaveAttribute("aria-busy", "true");
-  const workingTrace = screen.getByRole("status", {
-    name: "Aperture Chat document work trace",
-  });
-  expect(workingTrace).toHaveTextContent("Revising current document");
-  expect(within(workingTrace).getByRole("button", { name: "Expand work trace" })).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
-  expect(within(workingTrace).queryByText("Preserving document structure")).not.toBeInTheDocument();
-  fireEvent.click(within(workingTrace).getByRole("button", { name: "Expand work trace" }));
-  expect(within(workingTrace).getByText("Preserving document structure")).toBeInTheDocument();
-  expect(within(workingTrace).getByText("Finalizing revised version")).toBeInTheDocument();
+  const workingTrace = screen.getByRole("status", { name: "Aperture Chat activity trace" });
+  expect(workingTrace).toHaveClass("work-trace");
+  expect(workingTrace).toHaveTextContent("Aperture Chat is working");
+  await waitFor(() => expect(workingTrace).toHaveTextContent("Revising current document"));
+  // What comes next is named; steps not reached yet stay out of the timeline.
+  expect(workingTrace).toHaveTextContent("Preserving document structure");
+  expect(within(workingTrace).queryByText("Finalizing revised version")).not.toBeInTheDocument();
   expect(screen.getByText(/Revising the current document through/)).toBeInTheDocument();
   expect(deferredRevision.requests).toHaveLength(1);
   fireEvent.click(sendButton);
@@ -989,12 +984,11 @@ test("clears revision instructions immediately and keeps a durable working lifec
   expect(instructionBox).toBeEnabled();
   expect(documentBody()).not.toHaveClass("is-ai-editing");
   expect(documentBody()).toHaveAttribute("aria-busy", "false");
-  const completedTrace = screen.getByRole("region", {
-    name: "Aperture Chat document work trace",
-  });
+  const completedTrace = screen.getByRole("region", { name: "Aperture Chat activity trace" });
+  expect(completedTrace).toHaveTextContent(/Worked for \d+s/);
   fireEvent.click(within(completedTrace).getByRole("button", { name: "Collapse work trace" }));
   expect(within(completedTrace).queryByText("Revising current document")).not.toBeInTheDocument();
-  expect(within(completedTrace).getByText("complete · 3 steps")).toBeInTheDocument();
+  expect(within(completedTrace).getByText("3 steps")).toBeInTheDocument();
   expect(storedDraftHistory()[0]).toMatchObject({
     status: "complete",
     events: expect.arrayContaining([

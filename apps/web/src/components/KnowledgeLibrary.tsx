@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Cloud,
+  Eye,
   FileText,
   Globe,
   KeyRound,
@@ -21,7 +22,9 @@ import {
   X,
 } from "lucide-react";
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useMemo,
@@ -30,9 +33,11 @@ import {
   type DragEvent,
   type FormEvent,
   type ReactNode,
+  type MouseEvent,
 } from "react";
 import { OverflowMenu } from "./AgentWorkspaceConsole";
 import { KnowledgeDocumentDetails, WallBadge } from "./KnowledgeDocumentDetails";
+import { useKnowledgeDocumentViewer } from "./KnowledgeDocumentViewerHost";
 import { RailSwitch, type RailSwitchOption } from "./RailSwitch";
 import { StableLabel, Toggle } from "./Primitives";
 import { SelectControl } from "./SelectControl";
@@ -126,6 +131,9 @@ const PARALLEL_UPLOADS = 2;
 const INDEX_POLL_MS = 3000;
 
 /** Library > Knowledge: knowledge bases as cards, each with a focused detail view. */
+/** Opens a listed document in the viewer, however deep its row sits. */
+const OpenDocumentContext = createContext<(document: KnowledgeDocument) => void>(() => {});
+
 export function KnowledgeLibrary({
   data,
   onDataChange,
@@ -134,6 +142,12 @@ export function KnowledgeLibrary({
   onDataChange: (updater: (current: BootstrapData) => BootstrapData) => void;
 }) {
   const userId = data.me.id;
+  const { openDocument, documentViewerLayer } = useKnowledgeDocumentViewer(userId);
+  const openListedDocument = useCallback(
+    (document: KnowledgeDocument) =>
+      openDocument({ kind: "document", configId: document.knowledge_config_id, documentId: document.id, chunkId: null }),
+    [openDocument],
+  );
   const canConfigure = data.me.role === "TENANT_ADMIN" || data.me.role === "PLATFORM_OWNER";
   // Tenant policy grants let standard users author private, self-owned
   // knowledge bases; the server enforces the same grants and ownership.
@@ -694,6 +708,7 @@ export function KnowledgeLibrary({
     return (
       <>
         {noticeView}
+        <OpenDocumentContext.Provider value={openListedDocument}>
         <KnowledgeDetail
           item={openBase}
           data={data}
@@ -726,6 +741,8 @@ export function KnowledgeLibrary({
           onAuthorize={() => void authorizeApi(openBase)}
           onSaveSettings={(patch) => void saveSettings(openBase, patch)}
         />
+        </OpenDocumentContext.Provider>
+        {documentViewerLayer}
         {createDialog}
       </>
     );
@@ -1649,18 +1666,43 @@ function DocumentRow({
 }) {
   const unreadable = document.status === "metadata-only";
   const detailsId = `knowledge-document-details-${document.id}`;
+  const openListedDocument = useContext(OpenDocumentContext);
+  const openThisDocument = (event: MouseEvent<HTMLButtonElement>) => {
+    // Safari leaves focus behind on click, and closing returns it here.
+    event.currentTarget.focus();
+    openListedDocument(document);
+  };
   return (
     <li className={`knowledge-document-row-item ${expanded ? "is-expanded" : ""}`}>
       <span className="knowledge-row-icon" aria-hidden="true">
         <DocumentKindIcon sourceType={document.source_type} />
       </span>
       <span className="knowledge-row-main">
-        <strong title={document.name}>{document.name}</strong>
+        <strong>
+          <button
+            className="knowledge-document-open"
+            type="button"
+            title={document.name}
+            aria-label={`Open ${document.name}`}
+            onClick={openThisDocument}
+          >
+            {document.name}
+          </button>
+        </strong>
         <small title={document.source_uri}>{documentSummary(document, label, waiting, describe)}</small>
       </span>
       <span className="knowledge-row-actions">
         {unreadable && <span className="ws-badge is-warn">Not readable</span>}
         <WallBadge document={document} groups={access.groups} />
+        <button
+          className="icon-button"
+          type="button"
+          aria-label={`Preview ${document.name}`}
+          data-tooltip="See this file as it opens from a citation"
+          onClick={openThisDocument}
+        >
+          <Eye size={15} />
+        </button>
         <button
           className="icon-button knowledge-details-toggle"
           type="button"

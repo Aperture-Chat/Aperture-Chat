@@ -1,0 +1,396 @@
+/* The desktop rail's collapse.
+ *
+ * Every difference between the open and collapsed rail is a length or an
+ * opacity, so the parts glide together on one clock. Nothing here switches
+ * display, flex-direction, or centering, because those jump. The rows also keep
+ * one vertical order in both states; only the utility stack grows upward. */
+
+:root {
+  --rail-glide-time: 320ms;
+  /* A soft start, so the edge is seen setting off instead of already gone. */
+  --rail-ease: cubic-bezier(0.32, 0, 0.12, 1);
+  --rail-glide: var(--rail-glide-time) var(--rail-ease);
+  /* Words leave first and return last, so they never crowd the moving edge. */
+  --rail-leave: calc(var(--rail-glide-time) * 0.35) var(--ease);
+  --rail-return: calc(var(--rail-glide-time) * 0.5) var(--ease) calc(var(--rail-glide-time) * 0.45);
+  /* The logo arriving shows before the one leaving goes, so the mark never blinks. */
+  --rail-logo-in: calc(var(--rail-glide-time) * 0.3) var(--ease);
+  --rail-logo-out: calc(var(--rail-glide-time) * 0.35) var(--ease) calc(var(--rail-glide-time) * 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --rail-glide-time: 0ms;
+  }
+}
+
+.app {
+  transition: grid-template-columns var(--rail-glide);
+}
+
+body.is-resizing-rail .app,
+body.is-resizing-rail .rail-seam {
+  transition: none;
+}
+
+.app:not(.is-drawer) .sidebar {
+  transition:
+    background var(--speed) var(--ease),
+    padding var(--rail-glide);
+}
+
+/* ---------- The seam: the rail's edge is the control ---------- */
+.rail-seam {
+  --seam-fold: 0deg;
+  position: fixed;
+  /* Level with the logo, at one height whether the rail is open or not. */
+  top: 41px;
+  left: var(--app-content-left);
+  /* Above the workspace header, below every popover, drawer, and backdrop. */
+  z-index: 25;
+  box-sizing: border-box;
+  width: 30px;
+  height: 56px;
+  margin: -28px 0 0 -15.5px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  appearance: none;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--muted) 78%, var(--teal));
+  cursor: pointer;
+  animation: rail-seam-arrive var(--rail-glide-time) linear;
+  transition:
+    left var(--rail-glide),
+    color var(--speed) var(--ease);
+}
+
+/* Returning from Drafts, the seam waits for the opening rail to reach it. */
+@keyframes rail-seam-arrive {
+  0%,
+  70% {
+    opacity: 0;
+  }
+}
+
+.rail-seam-bar {
+  position: absolute;
+  left: calc(50% - 1.5px);
+  width: 3px;
+  height: 15px;
+  border-radius: 999px;
+  background: currentColor;
+  transition: transform calc(var(--rail-glide-time) * 0.7) var(--ease);
+}
+
+/* Two bars meet at a shared round joint and rotate about it, so one line folds
+ * into a chevron and, on a click, back through straight to face the other way. */
+.rail-seam-bar:first-child {
+  bottom: calc(50% - 1.5px);
+  transform-origin: 50% calc(100% - 1.5px);
+  transform: rotate(var(--seam-fold));
+}
+
+.rail-seam-bar:last-child {
+  top: calc(50% - 1.5px);
+  transform-origin: 50% 1.5px;
+  transform: rotate(calc(var(--seam-fold) * -1));
+}
+
+.rail-seam:hover,
+.rail-seam:focus-visible {
+  --seam-fold: 24deg;
+  color: var(--teal);
+}
+
+.rail-collapsed .rail-seam:hover,
+.rail-collapsed .rail-seam:focus-visible {
+  --seam-fold: -24deg;
+}
+
+.theme-dark .rail-seam:hover,
+.theme-dark .rail-seam:focus-visible {
+  color: var(--teal-2);
+}
+
+/* With no hover to reveal it, the direction shows all the time. */
+@media (hover: none) {
+  .rail-seam {
+    --seam-fold: 24deg;
+  }
+
+  .rail-collapsed .rail-seam {
+    --seam-fold: -24deg;
+  }
+}
+
+.rail-seam:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 55%, var(--teal-2));
+  outline-offset: -2px;
+}
+
+@media (max-height: 760px) {
+  .rail-seam {
+    top: 29px;
+  }
+}
+
+@media (max-height: 660px) {
+  .rail-seam {
+    top: 27px;
+  }
+}
+
+/* ---------- Logo: the wordmark's mark settles into the icon ---------- */
+.rail-brand {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+}
+
+.rail-brand > .logo {
+  grid-area: 1 / 1;
+  transform-origin: 15px 50%;
+  transition:
+    opacity var(--rail-logo-in),
+    transform var(--rail-glide);
+}
+
+/* The wordmark keeps its size and the closing rail passes over it. */
+.app:not(.is-drawer) .rail-brand > .logo:not(.logo-compact) {
+  width: calc(var(--rail-open-width) - 25px);
+  max-width: none;
+}
+
+.rail-brand > .logo-compact {
+  justify-self: start;
+  margin-left: 15.5px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-13px) scale(1.25);
+  transform-origin: 50% 50%;
+  transition:
+    opacity var(--rail-logo-out),
+    transform var(--rail-glide);
+}
+
+.app.rail-collapsed .rail-brand > .logo:not(.logo-compact) {
+  opacity: 0;
+  transform: translateX(13px) scale(0.8);
+  transition:
+    opacity var(--rail-logo-out),
+    transform var(--rail-glide);
+}
+
+.app.rail-collapsed .rail-brand > .logo-compact {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity var(--rail-logo-in),
+    transform var(--rail-glide);
+}
+
+/* ---------- Primary navigation ---------- */
+.primary-nav {
+  grid-template-columns: minmax(0, 1fr);
+  transition:
+    margin-left var(--rail-glide),
+    padding-left var(--rail-glide);
+}
+
+.primary-nav::before,
+.primary-nav .nav-item::before {
+  transition: opacity var(--rail-return);
+}
+
+.app.rail-collapsed .primary-nav {
+  padding-left: 0;
+  margin-left: 0;
+}
+
+.app.rail-collapsed .primary-nav::before,
+.app.rail-collapsed .primary-nav .nav-item::before {
+  opacity: 0;
+  transition: opacity var(--rail-leave);
+}
+
+.primary-nav .nav-item,
+.utility-rows .minor-row {
+  transition:
+    background var(--speed) var(--ease),
+    color var(--speed) var(--ease),
+    padding var(--rail-glide),
+    margin-left var(--rail-glide),
+    width var(--rail-glide),
+    min-height var(--rail-glide),
+    border-radius var(--rail-glide);
+}
+
+.primary-nav .nav-item > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Rows keep their left alignment and inset the icon to the rail's center,
+ * because padding can glide where justify-content cannot. */
+.app.rail-collapsed .primary-nav .nav-item {
+  padding-inline: calc(50% - 9px) 0;
+}
+
+.app.rail-collapsed .nav-item.is-active,
+.app.rail-collapsed .minor-row.is-selected {
+  box-shadow: none;
+}
+
+/* ---------- Words ---------- */
+.primary-nav .nav-item > span,
+.primary-nav .nav-shortcut,
+.utility-rows .minor-row > span,
+.account-card > div:not(.avatar),
+.account-card > svg {
+  transition: opacity var(--rail-return);
+}
+
+.app.rail-collapsed .primary-nav .nav-item > span,
+.app.rail-collapsed .primary-nav .nav-shortcut,
+.app.rail-collapsed .utility-rows .minor-row > span:not(.console-link-count),
+.app.rail-collapsed .account-card > div:not(.avatar),
+.app.rail-collapsed .account-card > svg {
+  opacity: 0;
+  transition: opacity var(--rail-leave);
+}
+
+.app.rail-collapsed .minor-row .console-link-count {
+  display: inline-flex;
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+/* ---------- Chat list: the rail closes over it ---------- */
+.app:not(.is-drawer) .sidebar-main {
+  width: calc(var(--rail-open-width) - 25px);
+  transition: opacity var(--rail-return);
+}
+
+.app.rail-collapsed .sidebar-main {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--rail-leave),
+    visibility 0s linear calc(var(--rail-glide-time) * 0.35);
+}
+
+/* ---------- Utility stack ---------- */
+.app:not(.is-drawer) .utility-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  transition:
+    gap var(--rail-glide),
+    padding-top var(--rail-glide),
+    border-color var(--rail-glide);
+}
+
+.app.rail-collapsed .utility-rows {
+  gap: 6px;
+  padding-top: 0;
+  border-top-color: transparent;
+}
+
+.app.rail-collapsed .utility-rows > .minor-row {
+  width: 44px;
+  margin-left: calc(50% - 22px);
+}
+
+/* Help keeps its row. Dark mode and the schedule step down below it, so they
+ * are placed by offsets that can glide instead of by a change of direction. */
+.app:not(.is-drawer) .theme-mode-row {
+  --theme-row-height: max(var(--sidebar-minor-row-height), 32px);
+  position: relative;
+  align-items: flex-start;
+  height: var(--theme-row-height);
+  padding-right: 72px;
+  transition:
+    height var(--rail-glide),
+    padding var(--rail-glide);
+}
+
+.app:not(.is-drawer) .theme-mode-row > .minor-row {
+  min-height: var(--theme-row-height);
+}
+
+.app:not(.is-drawer) .theme-mode-row > .theme-schedule-button {
+  position: absolute;
+  top: calc((var(--theme-row-height) - 32px) / 2);
+  right: 0;
+  transition:
+    background var(--speed) var(--ease),
+    color var(--speed) var(--ease),
+    top var(--rail-glide),
+    right var(--rail-glide);
+}
+
+.app:not(.is-drawer) .theme-mode-row > .theme-schedule-button:nth-child(2) {
+  right: 36px;
+}
+
+.app.rail-collapsed .theme-mode-row {
+  height: 116px;
+  padding-inline: calc(50% - 22px);
+}
+
+.app.rail-collapsed .theme-mode-row > .theme-schedule-button {
+  top: 84px;
+  right: calc(50% - 16px);
+}
+
+.app.rail-collapsed .theme-mode-row > .theme-schedule-button:nth-child(2) {
+  top: 48px;
+  right: calc(50% - 16px);
+}
+
+.app.rail-collapsed :is(.utility-rows > .minor-row, .theme-mode-row > .minor-row) {
+  min-height: 44px;
+  padding-inline: 14px 0;
+  border-radius: 12px;
+}
+
+/* ---------- Account ---------- */
+.app:not(.is-drawer) .account-card {
+  transition:
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    background var(--speed) var(--ease),
+    width var(--rail-glide),
+    margin var(--rail-glide),
+    padding var(--rail-glide),
+    border-radius var(--rail-glide);
+}
+
+.app:not(.is-drawer) .account-card .avatar {
+  transition:
+    width var(--rail-glide),
+    height var(--rail-glide);
+}
+
+.app.rail-collapsed .account-card {
+  overflow: hidden;
+  width: 46px;
+  margin: 8px 0 0 calc(50% - 23px);
+  padding: 4px 0 4px 4px;
+  border-radius: 999px;
+}
+
+.app.rail-collapsed .account-card .avatar {
+  width: 36px;
+  height: 36px;
+}

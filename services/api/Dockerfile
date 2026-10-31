@@ -43,6 +43,35 @@ RUN pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}" \
     && python -m playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/*
 
+# Headless LibreOffice turns Office, RTF, and OpenDocument knowledge files into
+# PDFs for the document viewer (app/core/document_rendition.py), and the fonts
+# installed above keep their line breaks. The -nogui packages leave out GTK and,
+# with --no-install-recommends, Java. This is a layer of its own, about 340 MB,
+# so code changes never reinstall it. Every package is a hard dependency, so the
+# trim removes what only the interface uses: the gallery, new-document templates,
+# wizards, and the Basic libraries behind them.
+# The shared extension cache is created here because LibreOffice otherwise builds
+# it on first use: one run as root under the API's umask leaves it 0700, and every
+# conversion as aperture-render then aborts.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libreoffice-writer-nogui \
+        libreoffice-calc-nogui \
+        libreoffice-impress-nogui \
+    && rm -rf /var/lib/apt/lists/* \
+        /usr/lib/libreoffice/share/gallery \
+        /usr/lib/libreoffice/share/template \
+        /usr/lib/libreoffice/share/wizards \
+        /usr/lib/libreoffice/share/basic \
+    && install -d -m 755 /var/spool/libreoffice/uno_packages/cache/uno_packages
+
+# LibreOffice and the scan worker run as this account, never as the API's root:
+# it owns nothing, belongs to no other group, and cannot enter the 0700 data
+# directory or read the API's environment. Numeric ids stay stable across images.
+RUN groupadd --gid 10001 aperture-render \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent \
+        --shell /usr/sbin/nologin aperture-render
+
 # Runtime dependencies only; dev extras (pytest, ruff) stay out of the image.
 COPY services/api/pyproject.toml ./pyproject.toml
 COPY services/api/app ./app
@@ -68,8 +97,8 @@ RUN pip install --no-cache-dir "paper-search-mcp==0.1.4" "mcp[cli]>=1.6.0,<2" \
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='/opt/aperture-models')"
 
 # Persisted state: runtime_state.json, aperture.sqlite3,
-# knowledge_vectors.sqlite3, and the auto-generated local signing secret all
-# live here.
+# knowledge_vectors.sqlite3, knowledge_originals/, and the auto-generated local
+# signing secret all live here.
 RUN mkdir -p data
 
 EXPOSE 8000

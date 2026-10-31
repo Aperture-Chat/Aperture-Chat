@@ -803,7 +803,7 @@ test("session details panel reports provider token usage and gathered sources", 
   expect(within(conversation).queryByText("Python release listing.")).not.toBeInTheDocument();
   expect(within(conversation).queryByText("1 citation available")).not.toBeInTheDocument();
   expect(conversation.querySelector(".source-chip")).toBeNull();
-  fireEvent.click(within(conversation).getByRole("button", { name: /View 1 citation/i }));
+  fireEvent.click(within(conversation).getByRole("button", { name: /View 1 source/i }));
   expect(within(panel).getByText("Sources gathered")).toBeInTheDocument();
   expect(within(panel).getByText("Selected response · 1")).toBeInTheDocument();
   const sourceLink = within(panel).getByRole("link", {
@@ -842,7 +842,7 @@ test("citation controls prioritize the clicked response and expand hidden source
 
   const conversation = document.querySelector(".message-list") as HTMLElement;
   const citationButtons = within(conversation).getAllByRole("button", {
-    name: /View \d+ citations/i,
+    name: /View \d+ sources/i,
   });
   expect(citationButtons).toHaveLength(2);
   fireEvent.click(citationButtons[1]);
@@ -853,7 +853,7 @@ test("citation controls prioritize the clicked response and expand hidden source
   expect(within(panel).queryByText("second source 10")).not.toBeInTheDocument();
   fireEvent.click(
     within(panel).getByRole("button", {
-      name: "Show 4 more cited in this response",
+      name: "Show 4 more sources in this response",
     }),
   );
   expect(within(panel).getByText("second source 10")).toBeInTheDocument();
@@ -1440,7 +1440,7 @@ test("attaching a file shows a removable chip and rides along in the sent messag
   expect(
     within(conversation).queryByText("Uploaded PDF file (11 B) available to this chat turn."),
   ).not.toBeInTheDocument();
-  fireEvent.click(within(conversation).getByRole("button", { name: /View 1 citation/i }));
+  fireEvent.click(within(conversation).getByRole("button", { name: /View 1 source/i }));
   const panel = document.querySelector(".session-panel") as HTMLElement;
   expect(within(panel).getByText("Sources gathered")).toBeInTheDocument();
   expect(within(panel).getByText("Selected response · 1")).toBeInTheDocument();
@@ -2390,7 +2390,7 @@ test("cached archived chats are filtered to the signed-in owner", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Account: Alex Morgan, Admin" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "View (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "View archived chats" }));
 
   expect(screen.getByText("My archived matter")).toBeInTheDocument();
   expect(screen.queryByText("Another owner's archived matter")).not.toBeInTheDocument();
@@ -2444,7 +2444,7 @@ test("citations panel shows K labels and page or locator pills only when reporte
   expect(await screen.findByText(CANNED)).toBeInTheDocument();
 
   const conversation = document.querySelector(".message-list") as HTMLElement;
-  fireEvent.click(within(conversation).getByRole("button", { name: /View 3 citations/i }));
+  fireEvent.click(within(conversation).getByRole("button", { name: /View 3 sources/i }));
   const panel = document.querySelector(".session-panel") as HTMLElement;
   expect(within(panel).getByText("Selected response · 3")).toBeInTheDocument();
 
@@ -2456,14 +2456,13 @@ test("citations panel shows K labels and page or locator pills only when reporte
   // K labels plus page/locator pills come straight from the reported fields.
   expect(within(panel).getByText("K1")).toBeInTheDocument();
   expect(within(panel).getByText("K2")).toBeInTheDocument();
-  expect(within(panel).getByText("p. 3–5")).toBeInTheDocument();
-  expect(within(panel).getByText("p. 7")).toBeInTheDocument();
+  expect(within(panel).getByText("Pages 3–5")).toBeInTheDocument();
   expect(within(panel).getByText("Sheet: Q3")).toBeInTheDocument();
 
   // Legacy citations render exactly as before: no K label, no fabricated page.
   const legacyItem = within(panel).getByText("Legacy memo").closest("li") as HTMLElement;
-  expect(legacyItem.querySelector(".pill")).toBeNull();
-  expect(legacyItem.textContent).not.toMatch(/p\.\s?\d/);
+  expect(legacyItem.querySelector(".session-source-location")).toBeNull();
+  expect(legacyItem.textContent).not.toMatch(/page/i);
 });
 
 test("editing a user message truncates the thread and resends through the normal send path", async () => {
@@ -2559,7 +2558,7 @@ test("composer web links ride as fetch_urls and surface returned web citations",
   expect(screen.queryByRole("button", { name: "Remove link https://example.com/page" })).not.toBeInTheDocument();
 
   const conversation = document.querySelector(".message-list") as HTMLElement;
-  fireEvent.click(within(conversation).getByRole("button", { name: /View 1 citation/i }));
+  fireEvent.click(within(conversation).getByRole("button", { name: /View 1 source/i }));
   const panel = document.querySelector(".session-panel") as HTMLElement;
   const sourceLink = within(panel).getByRole("link", { name: "example.com/page" });
   expect(sourceLink).toHaveAttribute("href", "https://example.com/page");

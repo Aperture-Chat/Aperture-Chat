@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { revokeSession, ssoRedirectUri, updateAccountPassword } from "./auth";
+import { createAccountApiKey, revokeSession, ssoRedirectUri, updateAccountPassword } from "./auth";
 import { authHeaders, setSessionToken } from "./http";
 
 afterEach(() => {
@@ -65,4 +65,18 @@ test("the SSO redirect URI is absolute in a same-origin deployment", async () =>
     vi.stubEnv("VITE_API_BASE_URL", "http://localhost:8000");
     vi.resetModules();
   }
+});
+
+test("creating an API key only asks to replace when told to", async () => {
+  const bodies: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ enabled: true, has_key: true, secret_value: "sk" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+
+  await createAccountApiKey("user-jane");
+  await createAccountApiKey("user-jane", { replace: true });
+
+  expect(bodies).toEqual([{ replace: false }, { replace: true }]);
+  vi.unstubAllGlobals();
 });

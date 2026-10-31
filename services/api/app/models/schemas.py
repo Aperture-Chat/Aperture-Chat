@@ -456,6 +456,12 @@ class UserApiKeyStatus(BaseModel):
     last_used_at: str | None = None
 
 
+class UserApiKeyCreateRequest(BaseModel):
+    """``replace`` must be explicit: a create never silently kills a live key."""
+
+    replace: bool = False
+
+
 class UserApiKeyCreateResponse(UserApiKeyStatus):
     secret_value: str
 
@@ -1798,6 +1804,23 @@ class MyUsageBudgetResponse(BaseModel):
     usage_date: date
 
 
+class MyUsageSummaryResponse(BaseModel):
+    """The requesting user's usage for the current UTC calendar month.
+
+    Built from the same bounded usage ledger as the admin consoles, so the
+    numbers reconcile. ``total_tokens`` is provider-reported and ``None`` (never
+    zero) when no provider reported any.
+    """
+
+    period_start: date
+    period_end: date
+    resets_at: datetime
+    requests: int = Field(ge=0)
+    chats: int = Field(ge=0)
+    total_tokens: int | None = None
+    tokens_reported_requests: int = Field(ge=0)
+
+
 class TenantUsagePermit(BaseModel):
     """Privacy-minimal admission state for one tenant-scoped request."""
 
@@ -2985,6 +3008,23 @@ class ChatCitation(BaseModel):
     locator: str | None = None
     chunk_id: str | None = None
     k_index: int | None = Field(default=None, ge=1)
+    # The prompt labels of the other numbered sources: [W#] platform web
+    # results and [U#] URLs fetched for the turn.
+    w_index: int | None = Field(default=None, ge=1)
+    u_index: int | None = Field(default=None, ge=1)
+    # Where a knowledge chunk lives, so the source can be opened. Identifies the
+    # location only: never authorize from these, because the thread PUT stores
+    # citations as the client sent them.
+    document_id: str | None = None
+    knowledge_config_id: str | None = None
+    # The sentences of the chunk that best match the reply sentences citing it,
+    # verbatim, so the viewer can find them. None when nothing matched well or
+    # when concealment changed them.
+    passage: str | None = None
+    # True: the reply references this source. False: consulted, not referenced
+    # (web sources only). None: no marker exists for it (attachments, MCP) or
+    # the record predates this field.
+    cited: bool | None = None
 
 
 class ChatActivityTraceStep(BaseModel):
@@ -3355,3 +3395,48 @@ class PlatformUpdateStatus(BaseModel):
 
 class PlatformUpdateApplyRequest(BaseModel):
     target_version: str = Field(min_length=1, max_length=32)
+
+
+KnowledgeDocumentViewMode = Literal["pdf", "image", "text"]
+KnowledgeDocumentViewNotice = Literal[
+    "original_missing", "conversion_unavailable", "conversion_failed", "privacy_restricted"
+]
+
+
+class KnowledgeDocumentViewTarget(BaseModel):
+    """Where a cited passage is. ``exact`` is False when the page is a best guess."""
+
+    page: int | None = None
+    page_end: int | None = None
+    locator: str | None = None
+    excerpt: str
+    chunk_id: str
+    exact: bool
+
+
+class KnowledgeDocumentViewSegment(BaseModel):
+    id: str
+    page: int | None = None
+    locator: str | None = None
+    text: str
+
+
+class KnowledgeDocumentView(BaseModel):
+    """How to present one knowledge document. ``segments`` is set only for text."""
+
+    document_id: str
+    knowledge_config_id: str
+    name: str
+    content_type: str
+    mode: KnowledgeDocumentViewMode
+    file_url: str | None = None
+    original_available: bool
+    page_count: int | None = None
+    target: KnowledgeDocumentViewTarget | None = None
+    segments: list[KnowledgeDocumentViewSegment] | None = None
+    notice: KnowledgeDocumentViewNotice | None = None
+
+
+class KnowledgeChunkLocation(BaseModel):
+    knowledge_config_id: str
+    document_id: str

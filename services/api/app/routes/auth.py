@@ -49,6 +49,7 @@ from app.models.schemas import (
     SsoConfig,
     Tenant,
     User,
+    UserApiKeyCreateRequest,
     UserApiKeyCreateResponse,
     UserApiKeyStatus,
     now_utc,
@@ -63,8 +64,9 @@ from app.repositories.seed import (
 )
 from app.routes.bootstrap import bootstrap_payload
 from app.core import clock as clock  # noqa: PLC0414 — shared UTC clock
-from app.core.usage_budget import utc_usage_date
-from app.models.schemas import MyUsageBudgetCap, MyUsageBudgetResponse
+from app.core.usage_analytics import build_personal_usage
+from app.core.usage_budget import usage_period_bounds, utc_usage_date
+from app.models.schemas import MyUsageBudgetCap, MyUsageBudgetResponse, MyUsageSummaryResponse
 from app.repositories.deps import get_usage_budget_repository
 from app.repositories.usage_budgets import TenantUsageBudgetRepository
 from app.routes.dependencies import (
@@ -1082,6 +1084,7 @@ def api_key_status(
 
 @router.post("/api-key", response_model=UserApiKeyCreateResponse)
 def create_api_key(
+    payload: UserApiKeyCreateRequest | None = None,
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> UserApiKeyCreateResponse:
@@ -1095,8 +1098,15 @@ def create_api_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=detail,
         )
-    replacing = actor.id in store.user_api_keys
-    record, secret_value = store.create_user_api_key(actor)
+    with store._store_lock:
+        replacing = actor.id in store.user_api_keys
+        # A stale tab or a retried request must not silently kill a live key.
+        if replacing and not (payload and payload.replace):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You already have an API key. Rotate it to replace it.",
+            )
+        record, secret_value = store.create_user_api_key(actor)
     store.record_audit(
         actor,
         "auth.api_key_rotated" if replacing else "auth.api_key_created",
@@ -1894,6 +1904,34 @@ def _assert_profile_image_size(value: str) -> None:
 def _string_setting(config: SsoConfig, key: str) -> str | None:
     value = config.settings.get(key)
     return value if isinstance(value, str) and value.strip() else None
+
+
+@router.get("/me/usage-summary", response_model=MyUsageSummaryResponse)
+def my_usage_summary(
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> MyUsageSummaryResponse:
+    """What the requesting user consumed this UTC month, from the usage ledger.
+
+    Months follow the same UTC calendar as budget periods. Archiving or deleting
+    a chat never changes these numbers. The ledger is bounded, though: it keeps
+    the newest ``USAGE_RECORDS_MAX`` rows across all tenants and honors
+    ``usage_retention_days``, so a very busy instance can trim rows from earlier
+    in the month. Budgets use separate counters and are not affected.
+    """
+
+    period_start, period_end, resets_at = usage_period_bounds("month", clock.now())
+    records = store.usage_records_filtered(
+        user_id=actor.id,
+        from_date=period_start.isoformat(),
+        through_date=period_end.isoformat(),
+    )
+    return MyUsageSummaryResponse(
+        period_start=period_start,
+        period_end=period_end,
+        resets_at=resets_at,
+        **build_personal_usage(records),
+    )
 
 
 @router.get("/me/usage-budget")

@@ -7,8 +7,10 @@ import type { ChatCitation } from "./types";
  * full URLs — instead of bare numbered markers. */
 export function appendChatCitationsForDraft(content: string, citations: ChatCitation[] = []) {
   const trimmed = content.trim();
-  const entries = citations.length
-    ? citations.map((citation, index) => {
+  // A web result the reply only consulted is not one of the draft's sources.
+  const sources = citations.filter((citation) => citation.cited !== false);
+  const entries = sources.length
+    ? sources.map((citation, index) => {
         const label = citation.source_name || citation.source_uri || `Source ${index + 1}`;
         const location = citation.source_uri
           ? ` **${label}** — [${citation.source_uri}](${citation.source_uri})`
