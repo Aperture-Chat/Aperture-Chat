@@ -257,6 +257,8 @@ traffic.
   environment defaults to `local`, where that refusal does not apply, so do not
   rely on it outside a laptop. `scripts/prove-rendition-image.sh` builds the image
   and proves the conversion sandbox inside it, on the LibreOffice it ships.
+  A relative `APERTURE_APPLICATION_DB_PATH`, as `.env.example` ships it, is checked
+  at the directory the database really uses.
 - **Citations list only what the reply used.** A knowledge document appears as a
   source only when the reply cites it, and web results the reply did not cite
   are marked as consulted. Citations gain new stored fields. No migration, but

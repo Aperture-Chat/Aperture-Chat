@@ -344,7 +344,7 @@ class Settings(BaseSettings):
         """Where the databases and stored documents live. Nothing but the API's own
         user may enter these; conversions refuse to run if something else can."""
         paths = (self.application_db_path, self.runtime_state_path, self.vector_db_path)
-        return tuple(dict.fromkeys(Path(path).expanduser().parent for path in paths))
+        return tuple(dict.fromkeys(resolve_repo_path(path).parent for path in paths))
 
     @property
     def knowledge_upload_max_bytes(self) -> int:

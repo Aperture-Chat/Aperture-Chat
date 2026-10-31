@@ -23,6 +23,7 @@ from PIL import Image
 
 from app.core import document_rendition as rendition
 from app.core import scan_worker
+from app.core.config import Settings, resolve_repo_path
 from app.core.document_rendition import (
     ConversionError,
     RenditionOptions,
@@ -2053,3 +2054,15 @@ def test_page_index_is_built_once_per_version(
     assert rendition.page_index(originals, REF, pdf) == ["pageone", "pagetwo"]
     assert rendition.page_index(originals, REF, pdf) == ["pageone", "pagetwo"]
     assert len(calls) == 1
+
+
+def test_a_relative_database_path_guards_the_directory_the_database_really_uses() -> None:
+    """.env.example ships repository-relative paths, so a fresh install must not
+    look for its data directory relative to wherever the process started."""
+    settings = Settings(
+        application_db_path="services/api/data/aperture.sqlite3",
+        runtime_state_path="services/api/data/runtime_state.json",
+        vector_db_path="services/api/data/knowledge_vectors.sqlite3",
+    )
+
+    assert settings.private_data_directories == (resolve_repo_path("services/api/data"),)
