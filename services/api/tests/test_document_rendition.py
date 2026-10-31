@@ -2060,6 +2060,7 @@ def test_a_relative_database_path_guards_the_directory_the_database_really_uses(
     """.env.example ships repository-relative paths, so a fresh install must not
     look for its data directory relative to wherever the process started."""
     settings = Settings(
+        secret_key="test-only-secret",
         application_db_path="services/api/data/aperture.sqlite3",
         runtime_state_path="services/api/data/runtime_state.json",
         vector_db_path="services/api/data/knowledge_vectors.sqlite3",
