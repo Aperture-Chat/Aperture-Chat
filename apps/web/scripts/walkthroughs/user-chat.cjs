@@ -2,9 +2,10 @@
  * real as the synthetic standard user against the local training model.
  *
  * user-chat fills a starter, sends a message, stops the reply while it runs,
- * edits and resends the prompt, copies the reply, rates it
- * with a note, expands the work trace, branches the reply into a new chat,
- * and transfers it to Drafts. Every reply is the model's real output.
+ * edits and resends the prompt, folds the running work trace, copies the reply,
+ * rates it with a note, expands the finished trace, branches the reply into a
+ * new chat, and transfers it to Drafts through the format chooser, as a Word
+ * document and then as a slide deck. Every reply is the model's real output.
  */
 const { helpers } = require("./user-common.cjs");
 const { scrollTo, composer, sendChat, waitForReply } = helpers;
@@ -14,12 +15,12 @@ const EDITED = "List three agenda items for a 20-minute kickoff meeting for a sy
 
 const userChat = {
   role: "user",
-  description: "Send, stop, edit and resend, copy, rate, branch, and transfer a real reply.",
+  description: "Send, stop, edit and resend, read the trace, copy, rate, branch, and transfer a real reply.",
   externalOrigins: () => [],
   frames: [
     "user/chat-starter", "user/chat-typed", "user/chat-running", "user/chat-stopped",
-    "user/chat-edit", "user/chat-edited", "user/chat-copied", "user/chat-feedback", "user/chat-feedback-sent",
-    "user/trace-expanded", "user/chat-branched", "user/chat-transferred",
+    "user/chat-edit", "user/trace-running-folded", "user/chat-edited", "user/chat-copied", "user/chat-feedback", "user/chat-feedback-sent",
+    "user/trace-expanded", "user/chat-branched", "user/transfer-menu", "user/chat-transferred", "user/chat-transferred-deck",
   ],
   async run(kit) {
     const { shot } = kit;
@@ -40,10 +41,12 @@ const userChat = {
     // 2. Send, and stop while the reply is running.
     let before = await sendChat(page, PROMPT);
     const running = page.locator("article.assistant-message").nth(before);
-    await running.locator(".pending-trace-stop").waitFor();
-    await page.waitForTimeout(900);
+    await running.locator(".work-trace-stop").waitFor();
+    // Steps land one at a time, so wait for them before the frame.
+    await running.locator(".work-trace-step.is-next").waitFor();
+    await page.waitForTimeout(1800);
     await shot("chat-running");
-    await running.locator(".pending-trace-stop").click();
+    await running.locator(".work-trace-stop").click();
     await running.getByText(/You stopped this response before it finished/).waitFor();
     await page.waitForTimeout(600);
     await shot("chat-stopped");
@@ -57,8 +60,14 @@ const userChat = {
     await shot("chat-edit", { keepFocus: true });
     await page.getByRole("button", { name: "Send edited message" }).click();
     const edited = page.locator("article.assistant-message").first();
-    await page.waitForTimeout(1500);
-    await edited.locator(".message-quick-actions").waitFor({ timeout: 900000 });
+
+    // 4. The running trace folds to one line; the choice carries over when the reply lands.
+    await edited.locator(".work-trace-stop").waitFor();
+    await page.waitForTimeout(2200);
+    await edited.locator(".work-trace-toggle").click();
+    await edited.locator(".work-trace-next").waitFor();
+    await shot("trace-running-folded");
+    await edited.locator(".message-quick-actions").waitFor({ timeout: 2400000 });
     await page.waitForTimeout(1000);
     await shot("chat-edited");
 
@@ -80,11 +89,11 @@ const userChat = {
 
     // 6. The work trace behind the reply.
     await page.waitForTimeout(2500);
-    await edited.locator(".pending-trace-toggle").click();
-    await edited.locator(".pending-trace.is-expanded").waitFor();
-    await scrollTo(page, edited.locator(".pending-trace"), "center");
+    await edited.locator(".work-trace-toggle").click();
+    await edited.locator(".work-trace.is-expanded").waitFor();
+    await scrollTo(page, edited.locator(".work-trace"), "center");
     await shot("trace-expanded");
-    await edited.locator(".pending-trace-toggle").click();
+    await edited.locator(".work-trace-toggle").click();
 
     // 7. Branch the reply into a new chat.
     const origin = page.url();
@@ -95,14 +104,29 @@ const userChat = {
     await page.waitForTimeout(1500);
     await shot("chat-branched");
 
-    // 8. Transfer the reply to Drafts.
+    // 8. Transfer to Drafts: the chooser, then a Word document.
+    const branched = page.url();
     const reply = page.locator("article.assistant-message").first();
     await reply.locator(".transfer-draft-button").click();
+    await page.locator(".transfer-draft-menu").waitFor();
+    await scrollTo(page, page.locator(".transfer-draft-menu"), "center");
+    await shot("transfer-menu");
+    await page.locator(".transfer-draft-option").filter({ hasText: "Word document" }).click();
     await page.waitForURL(/\/drafts/);
     await page.locator("[aria-label='Document body']").waitFor();
     await page.getByText("Transferred from chat into Drafts.").first().waitFor().catch(() => {});
     await page.waitForTimeout(2000);
     await shot("chat-transferred");
+
+    // 9. The same reply again, as a slide deck.
+    await page.goto(branched);
+    const again = page.locator("article.assistant-message").first();
+    await again.locator(".transfer-draft-button").click();
+    await page.locator(".transfer-draft-option").filter({ hasText: "Slide deck" }).click();
+    await page.waitForURL(/\/drafts/);
+    await page.locator(".deck-filmstrip").waitFor();
+    await page.waitForTimeout(2500);
+    await shot("chat-transferred-deck");
   },
 };
 

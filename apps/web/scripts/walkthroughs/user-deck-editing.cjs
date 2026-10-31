@@ -10,7 +10,9 @@
  * text up until it no longer fits (the toolbar's fit note), fixes it with
  * "Edit slide with AI" reviewed in the left panel, opens "Edit slide text with AI" and the slide background menu, and
  * has the deck assistant revise every slide so its fit check runs, then saves
- * a version. The picture is the repository's synthetic deck-background.jpg.
+ * a version. It finishes with the layouts that carry one point: a Statement, a
+ * Big number, and a Picture + bullets slide, typed in and saved. The picture is
+ * the repository's synthetic deck-background.jpg.
  */
 const path = require("node:path");
 
@@ -36,11 +38,11 @@ const thumbs = (page) => page.locator(".deck-filmstrip button.deck-slide-thumb")
 async function saveVersion(page) {
   const save = page.getByRole("button", { name: "Save version", exact: true });
   if (await save.isEnabled()) await save.click();
-  await page.locator(".document-server-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
+  await page.locator(".document-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
   await page.waitForTimeout(1200);
   if (await save.isEnabled()) {
     await save.click();
-    await page.locator(".document-server-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
+    await page.locator(".document-save-state").filter({ hasText: "Saved" }).waitFor({ timeout: 60000 });
     await page.waitForTimeout(700);
   }
 }
@@ -71,6 +73,31 @@ async function selectInBlock(page, block, text) {
   await page.waitForTimeout(700);
 }
 
+/** Add a slide after the selected one, jumping to its group in Add a slide. */
+async function addSlide(page, group, layout, whileOpen) {
+  await page.locator("button.deck-add-slide").click();
+  const menu = page.getByRole("menu", { name: "Add a slide" });
+  await page.locator(".deck-blade-jumps").getByRole("button", { name: group, exact: true }).click();
+  if (whileOpen) await whileOpen(menu);
+  await menu.getByRole("menuitem", { name: layout, exact: true }).click();
+  await page.waitForTimeout(900);
+}
+
+/** Type over the new slide's text boxes in order; a line break starts a bullet. */
+async function fillBlocks(page, texts) {
+  const blocks = stageBlocks(page);
+  for (const [index, text] of texts.entries()) {
+    await blocks.nth(index).click();
+    await page.keyboard.press("ControlOrMeta+a");
+    for (const [line, words] of text.split("\n").entries()) {
+      if (line) await page.keyboard.press("Enter");
+      await page.keyboard.type(words, { delay: 15 });
+    }
+  }
+  await page.locator(".deck-stage").click({ position: { x: 4, y: 4 } }).catch(() => {});
+  await page.waitForTimeout(800);
+}
+
 async function selectSlide(page, number) {
   await thumbs(page).nth(number - 1).click();
   await page.waitForTimeout(700);
@@ -84,6 +111,7 @@ const userDeckEditing = {
     "user/deck-add-panel", "user/deck-slide-added", "user/deck-change-layout", "user/deck-picture-panel",
     "user/deck-picture-added", "user/deck-web-images", "user/deck-text-toolbar", "user/deck-text-colors",
     "user/deck-text-fit", "user/deck-ai-review", "user/deck-ai-text", "user/deck-background", "user/deck-fit-check",
+    "user/deck-add-highlights", "user/deck-statement", "user/deck-big-number", "user/deck-picture-bullets",
   ],
   async run(kit) {
     const { shot } = kit;
@@ -196,7 +224,7 @@ const userDeckEditing = {
     const ai = page.locator(".ai-composer.is-embedded");
     await ai.waitFor();
     await ai.getByRole("option", { name: "Cut the text in half" }).click();
-    await page.locator(".ai-composer.is-review .slide-ai-preview").waitFor({ timeout: 600000 });
+    await page.locator(".ai-composer.is-review .slide-ai-preview").waitFor({ timeout: 3600000 });
     await page.waitForTimeout(900);
     await shot("deck-ai-review");
     await page.getByRole("button", { name: "Accept AI suggestion" }).click();
@@ -223,12 +251,38 @@ const userDeckEditing = {
     await page.getByRole("button", { name: "Apply instruction" }).click();
     const busy = page.locator(".draft-assistant-title small.is-working");
     await busy.waitFor({ timeout: 30000 });
-    await busy.waitFor({ state: "detached", timeout: 1800000 });
+    await busy.waitFor({ state: "detached", timeout: 3600000 });
     await page.locator(".draft-event").filter({ hasText: /Fit check/ }).last().waitFor({ timeout: 60000 });
     await saveVersion(page);
     await page.locator(".draft-event").filter({ hasText: /Fit check/ }).last().evaluate((node) => node.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(800);
     await shot("deck-fit-check");
+
+    // 10. Layouts that carry one point. Highlights jumps to them in Add a slide.
+    await selectSlide(page, await thumbs(page).count());
+    await addSlide(page, "Highlights", "Statement", async (menu) => {
+      await menu.waitFor();
+      await page.waitForTimeout(700);
+      await shot("deck-add-highlights");
+    });
+    await fillBlocks(page, ["Every vendor gets the same review", "One checklist, one owner, and one record for each supplier"]);
+    await shot("deck-statement");
+    await addSlide(page, "Highlights", "Big number");
+    await fillBlocks(page, ["30 days", "to finish each synthetic vendor review"]);
+    await shot("deck-big-number");
+    await addSlide(page, "Pictures", "Picture + bullets");
+    await page.getByRole("button", { name: "Slide pictures" }).click();
+    await page.locator("button.deck-image-upload").waitFor();
+    const pictureChooser = page.waitForEvent("filechooser");
+    await page.locator("button.deck-image-upload").click();
+    await (await pictureChooser).setFiles(PICTURE);
+    await page.locator(".deck-stage img.deck-media-image").first().waitFor({ timeout: 30000 });
+    await page.getByLabel("Picture alt text").fill("Abstract teal pattern (synthetic image)");
+    await blade(page).getByRole("button", { name: "Done" }).click();
+    await page.waitForTimeout(700);
+    await fillBlocks(page, ["What we check", "Security questionnaire\nData received and approved\nFollow-up after ninety days"]);
+    await saveVersion(page);
+    await shot("deck-picture-bullets");
   },
 };
 

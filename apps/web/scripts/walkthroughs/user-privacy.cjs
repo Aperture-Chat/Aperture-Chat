@@ -11,7 +11,7 @@
  */
 const { helpers } = require("./user-common.cjs");
 
-const { scrollTo } = helpers;
+const { scrollTo, foldTrace } = helpers;
 const MODEL = /Qwen3\.5 9B/;
 const ALL_CATEGORIES = ["identity", "contact", "financial", "health", "credentials", "network"];
 
@@ -27,8 +27,8 @@ async function ask(page, text) {
   await page.locator(".composer textarea").fill(text);
   await page.getByRole("button", { name: "Send message" }).click();
   const reply = page.locator("article.assistant-message").nth(before);
-  await reply.getByRole("button", { name: "Send positive feedback" }).waitFor({ timeout: 300000 });
-  await page.waitForTimeout(2500);
+  await reply.getByRole("button", { name: "Send positive feedback" }).waitFor({ timeout: 2400000 });
+  await foldTrace(page, reply);
   return reply;
 }
 
@@ -49,7 +49,7 @@ const userPersonalData = {
       await shot("privacy-footer");
 
       // 2. Send a message with a synthetic SSN and email.
-      const reply = await ask(page, "Draft a two-sentence note to the benefits team: update the payroll record for employee SSN 123-45-6789 and confirm by email to jordan.lee@example.com.");
+      const reply = await ask(page, "Write a two-sentence note to the benefits team: update the payroll record for employee SSN 123-45-6789 and confirm by email to jordan.lee@example.com.");
       await page.locator(".user-message .concealed-token").first().waitFor();
       if (await page.locator(".user-message").filter({ hasText: "123-45-6789" }).count()) throw new Error("The sent SSN is still shown.");
       await shot("privacy-sent");

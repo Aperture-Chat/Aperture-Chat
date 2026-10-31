@@ -2,8 +2,8 @@
  * standard user against the local training model.
  *
  * user-send-options opens Send options, grounds a question in a knowledge base
- * (real retrieval and citations from the seeded synthetic playbook), opens the
- * citations in Session details, shows the Web toggle as the workspace ships it
+ * (real retrieval and sources from the seeded synthetic playbook), reads that
+ * reply's work trace, opens its sources in Session details, shows the Web toggle as the workspace ships it
  * (off for this model), then, as the administrator's setup through the admin
  * API, connects the workspace's web search to the model and shows Web on (a
  * connected model turns Web on in every new chat, so the module disconnects it
@@ -14,7 +14,7 @@
  * chip, and records Session details after the knowledge reply.
  */
 const { helpers } = require("./user-common.cjs");
-const { scrollTo, composer, sendChat, waitForReply, ensureSharedAgent, SHARED_AGENT, setWebSearchForModel } = helpers;
+const { scrollTo, scrollBelowHeader, composer, sendChat, waitForReply, ensureSharedAgent, SHARED_AGENT, setWebSearchForModel } = helpers;
 
 async function openMenu(page) {
   const menu = page.locator(".send-options-menu");
@@ -39,7 +39,7 @@ const userSendOptions = {
   description: "Knowledge, Web, Agent, reasoning, streaming, Resources, and Session details with real replies.",
   externalOrigins: () => [],
   frames: [
-    "user/send-menu", "user/send-knowledge", "user/send-tools-chip", "user/send-knowledge-reply",
+    "user/send-menu", "user/send-knowledge", "user/send-tools-chip", "user/send-knowledge-trace", "user/send-knowledge-reply",
     "user/session-summary", "user/session-sources", "user/session-context", "user/session-shortcuts",
     "user/send-web-on", "user/send-agent", "user/send-resources", "user/send-resource-inserted",
   ],
@@ -75,11 +75,17 @@ async function capture(kit, shot, model) {
   await page.waitForTimeout(400);
   await shot("send-knowledge", { keepFocus: true });
   await menu.getByRole("button", { name: "Close send options" }).click();
-  await composer(page).fill("According to our litigation playbook, what should a responsive pleading preserve? Answer in two sentences.");
+  await composer(page).fill("According to our litigation playbook, what should a responsive pleading preserve? Answer in two sentences and cite the playbook after each sentence.");
   await shot("send-tools-chip", { keepFocus: true });
   let before = await sendChat(page, await composer(page).inputValue());
-  let reply = await waitForReply(page, before, { timeout: 900000 });
+  let reply = await waitForReply(page, before, { timeout: 2400000 });
   if (!(await reply.locator(".message-citation-action").count())) throw new Error("The knowledge reply has no citations.");
+  // A trace the reader watched stays open when the reply lands; let it finish playing in.
+  await page.waitForTimeout(5000);
+  await scrollBelowHeader(page, reply.locator(".work-trace"), 80);
+  await shot("send-knowledge-trace");
+  await reply.locator(".work-trace-toggle").click();
+  await page.waitForTimeout(400);
   await scrollTo(page, reply.locator(".message-actions"), "end");
   await shot("send-knowledge-reply");
 
@@ -137,4 +143,24 @@ async function capture(kit, shot, model) {
   await shot("send-resource-inserted", { keepFocus: true });
 }
 
-module.exports = { "user-send-options": userSendOptions };
+/* A real amber flag, and a correct one: the request asks for sources, no
+ * knowledge is on, and what the reply lists has no link or marker behind it. */
+const userTraceFlag = {
+  role: "user",
+  description: "A reply the requirement check rightly flags, with its trace open.",
+  externalOrigins: () => [],
+  frames: ["user/trace-flag"],
+  async run(kit) {
+    const { shot } = kit;
+    const page = await kit.app("user", "/chat");
+    await composer(page).waitFor();
+    const before = await sendChat(page, "Define a vendor risk assessment in one sentence and cite your sources.");
+    const reply = await waitForReply(page, before, { timeout: 300000 });
+    await reply.locator(".work-trace-step[data-kind='flag']").filter({ hasText: "Not met: Cite sources" }).waitFor({ timeout: 30000 });
+    await page.waitForTimeout(5000);
+    await scrollBelowHeader(page, reply.locator(".work-trace"), 80);
+    await shot("trace-flag");
+  },
+};
+
+module.exports = { "user-send-options": userSendOptions, "user-trace-flag": userTraceFlag };

@@ -205,20 +205,39 @@ export type AdminFocus =
   | "dsConcealedExample"
   | "dsApproved"
   | "dsDownload"
-  | "dsAudit";
+  | "dsAudit"
+  | "wallsBefore"
+  | "wallsDetails"
+  | "wallsLimit"
+  | "wallsSaved"
+  | "wallsUserList"
+  | "wallsUserChat"
+  | "wallsUserDenied"
+  | "wallsAdminChat"
+  | "wallsAdminDenied"
+  | "wallsMember"
+  | "wallsAudit"
+  | "wallsMetadata"
+  | "wallsHidden"
+  | "wallsFields"
+  | "wallsFieldsApplied"
+  | "wallsLift"
+  | "wallsUserOld"
+  | "wallsAuditDenied"
+  | "wallsAuditReply";
 
 export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   accessRequestForm: { frame: "training/admin/access-request-form.png", rect: { x: 101, y: 368, w: 405, h: 298 } },
   accessRequestSent: { frame: "training/admin/access-request-sent.png", rect: { x: 101, y: 193, w: 405, h: 557 } },
-  accessRequestsQueue: { frame: "training/admin/access-queue.png", rect: { x: 262, y: 267, w: 887, h: 328 } },
-  accessApproveAs: { frame: "training/admin/access-queue.png", rect: { x: 567, y: 350, w: 548, h: 92 } },
+  accessRequestsQueue: { frame: "training/admin/access-queue.png", rect: { x: 262, y: 263, w: 887, h: 328 } },
+  accessApproveAs: { frame: "training/admin/access-queue.png", rect: { x: 567, y: 346, w: 548, h: 92 } },
   accessSignInHandoff: { frame: "training/admin/access-handoff.png", rect: { x: 262, y: 325, w: 887, h: 205 } },
   accessTemporaryPassword: { frame: "training/admin/access-temp-password.png", rect: { x: 359, y: 262, w: 467, h: 331 } },
   accessPasswordSet: { frame: "training/admin/access-password-set.png", rect: { x: 262, y: 747, w: 887, h: 61 } },
   accessDeclined: { frame: "training/admin/access-declined.png", rect: { x: 500, y: 15, w: 647, h: 50 } },
   accessForcedPassword: { frame: "training/admin/access-forced-password.png", rect: { x: 390, y: 357, w: 405, h: 288 } },
   accessFirstWelcome: { frame: "training/admin/access-first-welcome.png", rect: { x: 258, y: 21, w: 895, h: 259 } },
-  accessFirstReply: { frame: "training/admin/access-reply.png", rect: { x: 315, y: 311, w: 839, h: 70 } },
+  accessFirstReply: { frame: "training/admin/access-reply.png", rect: { x: 315, y: 455, w: 839, h: 49 } },
   accessDeclinedSignin: { frame: "training/admin/access-declined-signin.png", rect: { x: 101, y: 308, w: 405, h: 346 } },
   accessSsoHandoff: { frame: "training/admin/access-sso-approved.png", rect: { x: 262, y: 325, w: 887, h: 205 } },
   accessSsoSignin: { frame: "training/admin/access-sso-signin.png", rect: { x: 101, y: 339, w: 405, h: 354 } },
@@ -296,7 +315,7 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   toolsGroups: { frame: "training/admin/tools-builder-filled.png", rect: { x: 146, y: 556, w: 893, h: 90 } },
   toolsTestResult: { frame: "training/admin/tools-test-run.png", rect: { x: 146, y: 567, w: 893, h: 219 } },
   toolsSavedRow: { frame: "training/admin/tools-saved.png", rect: { x: 262, y: 741, w: 887, h: 87 } },
-  toolsUserButton: { frame: "training/admin/tools-user-button.png", rect: { x: 405, y: 504, w: 34, h: 35 } },
+  toolsUserButton: { frame: "training/admin/tools-user-button.png", rect: { x: 405, y: 485, w: 34, h: 35 } },
   toolsUserResult: { frame: "training/admin/tools-user-result.png", rect: { x: 269, y: 272, w: 647, h: 311 } },
   toolsEdit: { frame: "training/admin/tools-edit.png", rect: { x: 129, y: 34, w: 927, h: 787 } },
   toolsDraftRow: { frame: "training/admin/tools-draft.png", rect: { x: 262, y: 741, w: 887, h: 87 } },
@@ -338,7 +357,7 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   alRuleForm: { frame: "training/admin/al-template.png", rect: { x: 262, y: 0, w: 887, h: 642 } },
   alRuleDetections: { frame: "training/admin/al-detections.png", rect: { x: 283, y: 330, w: 845, h: 194 } },
   alRuleRow: { frame: "training/admin/al-rule-saved.png", rect: { x: 282, y: 459, w: 847, h: 82 } },
-  alFlaggedChat: { frame: "training/admin/al-flagged-chat.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
+  alFlaggedChat: { frame: "training/admin/al-flagged-chat.png", rect: { x: 257, y: 41, w: 897, h: 105 } },
   alDeliverySent: { frame: "training/admin/al-delivery-sent.png", rect: { x: 283, y: 601, w: 845, h: 107 } },
   alArchived: { frame: "training/admin/al-archived.png", rect: { x: 283, y: 601, w: 845, h: 107 } },
   alSupportTemplate: { frame: "training/admin/al-support-template.png", rect: { x: 262, y: 146, w: 887, h: 646 } },
@@ -352,11 +371,11 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   retHold: { frame: "training/admin/ret-hold.png", rect: { x: 301, y: 0, w: 809, h: 296 } },
   retPreview: { frame: "training/admin/ret-preview.png", rect: { x: 282, y: 370, w: 847, h: 173 } },
   retDeleteConfirm: { frame: "training/admin/ret-delete-confirm.png", rect: { x: 282, y: 357, w: 847, h: 140 } },
-  fbUserRate: { frame: "training/admin/fb-user-rate.png", rect: { x: 315, y: 360, w: 839, h: 165 } },
+  fbUserRate: { frame: "training/admin/fb-user-rate.png", rect: { x: 315, y: 357, w: 839, h: 165 } },
   fbUserReport: { frame: "training/admin/fb-user-report.png", rect: { x: 777, y: 139, w: 382, h: 707 } },
   fbOverview: { frame: "training/admin/fb-overview.png", rect: { x: 262, y: 98, w: 887, h: 309 } },
   feedbackConversation: { frame: "training/admin/fb-conversation.png", rect: { x: 179, y: 123, w: 827, h: 609 } },
-  fbIssues: { frame: "training/admin/fb-issues.png", rect: { x: 262, y: 307, w: 887, h: 240 } },
+  fbIssues: { frame: "training/admin/fb-issues.png", rect: { x: 262, y: 359, w: 887, h: 136 } },
   feedbackIssueReport: { frame: "training/admin/fb-issue-detail.png", rect: { x: 209, y: 302, w: 767, h: 251 } },
   fbReports: { frame: "training/admin/fb-reports.png", rect: { x: 261, y: 271, w: 501, h: 311 } },
   rpUserHelp: { frame: "training/admin/rp-user-help.png", rect: { x: 777, y: 118, w: 382, h: 136 } },
@@ -379,21 +398,21 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   pdpCategories: { frame: "training/admin/pdp-categories.png", rect: { x: 262, y: 273, w: 887, h: 308 } },
   pdpPreview: { frame: "training/admin/pdp-preview.png", rect: { x: 282, y: 281, w: 847, h: 292 } },
   pdpCoverage: { frame: "training/admin/pdp-coverage.png", rect: { x: 262, y: 351, w: 887, h: 269 } },
-  pdpChatPrompt: { frame: "training/admin/pdp-chat.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
-  pdpChatReply: { frame: "training/admin/pdp-chat.png", rect: { x: 315, y: 312, w: 839, h: 53 } },
+  pdpChatPrompt: { frame: "training/admin/pdp-chat.png", rect: { x: 257, y: 49, w: 897, h: 126 } },
+  pdpChatReply: { frame: "training/admin/pdp-chat.png", rect: { x: 315, y: 509, w: 839, h: 54 } },
   pdpActivity: { frame: "training/admin/pdp-activity.png", rect: { x: 283, y: 383, w: 845, h: 89 } },
-  pdpAuditTrail: { frame: "training/admin/pdp-audit.png", rect: { x: 283, y: 601, w: 845, h: 207 } },
+  pdpAuditTrail: { frame: "training/admin/pdp-audit.png", rect: { x: 283, y: 385, w: 845, h: 423 } },
   pdpModelRow: { frame: "training/admin/pdp-model-off.png", rect: { x: 282, y: 176, w: 847, h: 51 } },
-  pdpOutput: { frame: "training/admin/pdp-output.png", rect: { x: 315, y: 312, w: 839, h: 27 } },
+  pdpOutput: { frame: "training/admin/pdp-output.png", rect: { x: 315, y: 533, w: 839, h: 27 } },
   pdpOffRow: { frame: "training/admin/pdp-off.png", rect: { x: 282, y: 124, w: 847, h: 51 } },
-  pdpStillConcealed: { frame: "training/admin/pdp-after-off.png", rect: { x: 257, y: 93, w: 897, h: 105 } },
+  pdpStillConcealed: { frame: "training/admin/pdp-after-off.png", rect: { x: 257, y: 93, w: 897, h: 126 } },
   dsCapture: { frame: "training/admin/ds-off.png", rect: { x: 262, y: 272, w: 887, h: 178 } },
   dsSignals: { frame: "training/admin/ds-on.png", rect: { x: 282, y: 399, w: 847, h: 139 } },
   dsSafeguards: { frame: "training/admin/ds-safeguards.png", rect: { x: 282, y: 0, w: 847, h: 151 } },
   dsExcluded: { frame: "training/admin/ds-safeguards.png", rect: { x: 282, y: 152, w: 847, h: 87 } },
   dsScan: { frame: "training/admin/ds-scanned.png", rect: { x: 282, y: 0, w: 847, h: 649 } },
-  dsUserCorrection: { frame: "training/admin/ds-user-correction.png", rect: { x: 257, y: 87, w: 897, h: 105 } },
-  dsUserNote: { frame: "training/admin/ds-user-note.png", rect: { x: 315, y: 371, w: 839, h: 154 } },
+  dsUserCorrection: { frame: "training/admin/ds-user-correction.png", rect: { x: 257, y: 86, w: 897, h: 106 } },
+  dsUserNote: { frame: "training/admin/ds-user-note.png", rect: { x: 315, y: 369, w: 839, h: 154 } },
   dsOverview: { frame: "training/admin/ds-overview.png", rect: { x: 262, y: 85, w: 887, h: 141 } },
   dsMix: { frame: "training/admin/ds-mix.png", rect: { x: 262, y: 306, w: 887, h: 244 } },
   dsSuggestions: { frame: "training/admin/ds-suggestions.png", rect: { x: 262, y: 291, w: 887, h: 273 } },
@@ -401,10 +420,29 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   dsEditorRules: { frame: "training/admin/ds-editor-rules.png", rect: { x: 230, y: 88, w: 725, h: 540 } },
   dsCard: { frame: "training/admin/ds-created.png", rect: { x: 282, y: 305, w: 421, h: 246 } },
   dsExample: { frame: "training/admin/ds-review.png", rect: { x: 282, y: 0, w: 847, h: 777 } },
-  dsConcealedExample: { frame: "training/admin/ds-concealed.png", rect: { x: 282, y: 171, w: 847, h: 637 } },
+  dsConcealedExample: { frame: "training/admin/ds-concealed.png", rect: { x: 282, y: 0, w: 847, h: 634 } },
   dsApproved: { frame: "training/admin/ds-approved.png", rect: { x: 297, y: 451, w: 391, h: 26 } },
   dsDownload: { frame: "training/admin/ds-download.png", rect: { x: 319, y: 284, w: 547, h: 287 } },
   dsAudit: { frame: "training/admin/ds-audit.png", rect: { x: 283, y: 322, w: 845, h: 506 } },
+  wallsBefore: { frame: "training/admin/walls-before.png", rect: { x: 881, y: 317, w: 289, h: 203 } },
+  wallsDetails: { frame: "training/admin/walls-details.png", rect: { x: 296, y: 475, w: 819, h: 263 } },
+  wallsLimit: { frame: "training/admin/walls-limit.png", rect: { x: 711, y: 393, w: 389, h: 356 } },
+  wallsSaved: { frame: "training/admin/walls-saved.png", rect: { x: 711, y: 293, w: 389, h: 475 } },
+  wallsUserList: { frame: "training/admin/walls-user-list.png", rect: { x: 283, y: 334, w: 845, h: 89 } },
+  wallsUserChat: { frame: "training/admin/walls-user-chat.png", rect: { x: 315, y: 270, w: 518, h: 249 } },
+  wallsUserDenied: { frame: "training/admin/walls-user-denied.png", rect: { x: 370, y: 419, w: 588, h: 60 } },
+  wallsAdminChat: { frame: "training/admin/walls-admin-chat.png", rect: { x: 315, y: 313, w: 518, h: 142 } },
+  wallsAdminDenied: { frame: "training/admin/walls-admin-denied.png", rect: { x: 370, y: 419, w: 588, h: 60 } },
+  wallsMember: { frame: "training/admin/walls-member.png", rect: { x: 257, y: 219, w: 897, h: 235 } },
+  wallsAudit: { frame: "training/admin/walls-audit.png", rect: { x: 283, y: 700, w: 845, h: 107 } },
+  wallsMetadata: { frame: "training/admin/walls-metadata.png", rect: { x: 296, y: 369, w: 819, h: 310 } },
+  wallsHidden: { frame: "training/admin/walls-hidden.png", rect: { x: 296, y: 412, w: 819, h: 325 } },
+  wallsFields: { frame: "training/admin/walls-fields.png", rect: { x: 283, y: 511, w: 845, h: 156 } },
+  wallsFieldsApplied: { frame: "training/admin/walls-fields-applied.png", rect: { x: 296, y: 510, w: 819, h: 286 } },
+  wallsLift: { frame: "training/admin/walls-lift.png", rect: { x: 296, y: 369, w: 819, h: 310 } },
+  wallsUserOld: { frame: "training/admin/walls-user-old.png", rect: { x: 315, y: 292, w: 839, h: 168 } },
+  wallsAuditDenied: { frame: "training/admin/walls-audit-denied.png", rect: { x: 283, y: 700, w: 845, h: 155 } },
+  wallsAuditReply: { frame: "training/admin/walls-audit-reply.png", rect: { x: 179, y: 142, w: 827, h: 571 } },
 };
 
 type AdminGuideIcon = "users" | "groups" | "models" | "tools" | "connectors" | "sso" | "analytics" | "reports" | "policies" | "audit" | "alerts" | "retention" | "privacy" | "datasets";
@@ -2216,7 +2254,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         label: "Keep values from the model (default, shown)",
         steps: [
           "Hide values from the model too: on.",
-          "The model receives placeholders such as ⟦SSN⟧ instead of the value, so its reply refers to the placeholder, for example [SSN].",
+          "The model receives placeholders such as ⟦SSN⟧ instead of the value, so its reply refers to the placeholder, which shows as a locked chip.",
           "Use this when the model does not need the value to do the work, such as drafting a note or summarizing a record.",
         ],
       },
@@ -2252,6 +2290,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "The Audit Trail lists PROMPT_CONCEALED for the message and POLICY_UPDATED for your change.",
     ],
     troubleshooting: [
+      { symptom: "The work trace says \"The model saw placeholders\" with Hide values from the model too off", fix: "That line is wrong in this mode: the model read the original values for that turn. The PROMPT_CONCEALED row in the Audit Trail shows what really happened, as concealed_from_model=false. The reply is still concealed before it is shown or saved." },
       { symptom: "A kind of personal data cannot be switched off", fix: "At least one stays selected. Switch another one on first, or switch off Conceal personal data." },
       { symptom: "Hide values from the model too is dimmed", fix: "It applies only while Conceal personal data is on." },
       { symptom: "\"Nothing detected\"", fix: "The sample has no value the selected kinds recognize. Detection checks formats and checksums, so a look-alike such as a card number that fails its check digit is left alone." },
@@ -2316,11 +2355,12 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "The model received placeholders",
-        caption: "The model saw placeholders, so its draft says [SSN] and [EMAIL].",
+        caption: "The work trace confirms the model saw placeholders, and the reply shows locked chips.",
         narration:
-          "The model never saw the values. It received placeholders, so its draft says S S N and EMAIL in brackets where the values belong.",
-        durationSeconds: 10,
+          "The model never saw the values. The work trace says so: Concealed personal data in your message. The model saw placeholders, so its reply shows locked chips where the values belong.",
+        durationSeconds: 13,
         focus: "pdpChatReply",
+        calloutPlacement: "upper-right",
       },
       {
         title: "Concealed in User Prompt Activity",
@@ -2354,8 +2394,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Replies are concealed too",
         caption: "Values the model writes appear as locked chips.",
         narration:
-          "Now the model reads a test phone number and email and writes them into a signature. The reply is concealed before it reaches the browser and before it is saved, so both show as chips.",
-        durationSeconds: 13,
+          "With this setting off, the model reads a test phone number and email and writes them into a signature. The reply is concealed before it reaches the browser and before it is saved, so both show as chips. Ignore the trace line that says the model saw placeholders. It is wrong in this mode.",
+        durationSeconds: 20,
         focus: "pdpOutput",
       },
       {
@@ -2633,6 +2673,238 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         calloutPlacement: "left-rail",
         captionPlacement: "top",
         focus: "dsAudit",
+      },
+    ],
+  },
+  {
+    id: "admin-ethical-walls",
+    audioSrc: "training/admin/admin-ethical-walls.mp3",
+    title: "Wall off documents and read file properties",
+    description: "Limit a document to chosen groups, prove that people outside them and administrators cannot find or open it, find the audit entries, and honor walls named in file metadata.",
+    icon: "privacy",
+    track: "Privacy and training data",
+    outcomes: [
+      "Document limited to a group",
+      "Proved closed to people outside the group and to administrators",
+      "Wall change and refused attempts found in Audit",
+      "Walls from file metadata read and lifted",
+    ],
+    prerequisites: [
+      "An Admin account, or ownership of the knowledge base with Can build knowledge bases. Limit and Follow file are open to anyone who manages the base; Open, which lifts any wall, and More wall fields are for administrators.",
+      "A knowledge base with the file in it. Upload files as Knowledge bases shows.",
+      "A group that holds everyone who may see the file. Groups and permissions shows how to build one. Walls admit members of groups, never single people.",
+      "Someone in that group to confirm the file still works for them, because you may be outside the wall yourself.",
+    ],
+    setupSteps: [
+      "Choose Library in the sidebar; Knowledge opens. Open the knowledge base.",
+      "On Files, choose the arrow beside the file (Show details). Read Properties and Who can find it.",
+      "Under Who can find it, choose Limit.",
+      "Tick each group that may find the file.",
+      "Choose Save access. The notice reads Only members of … can now find …, and the file shows Walled.",
+      "Sign in as someone outside the group, or ask them to check: the file is gone from the list, chat cannot find it, and an old citation says This document is no longer available.",
+      "Ask someone in the group to confirm they still get a cited answer.",
+      "In the Admin console, open Audit, expand Audit Trail, choose Refresh, and search document_wall for DOCUMENT_WALL_CHANGED, then view_denied for DOCUMENT_VIEW_DENIED.",
+    ],
+    paths: [
+      {
+        label: "A wall named in the file",
+        steps: [
+          "In the program or document system that holds the file, set a property named Ethical wall or Information barrier to the group's name or ID.",
+          "Upload or sync the file. It shows Walled, and Who can find it names the property and the group.",
+          "A name that matches no group shows Hidden, and nobody can find the file. Choose Limit, tick the right group, and choose Save access. Creating the group is not enough: the file stays Hidden until the base's walls are checked again, as Sync now does.",
+        ],
+      },
+      {
+        label: "Read another field as a wall",
+        steps: [
+          "Open the knowledge base, then Settings.",
+          "Under Ethical walls, type the field name in More wall fields. Separate several with commas. Only administrators see More wall fields.",
+          "Choose Save changes. Files already in the base are checked again at once.",
+        ],
+      },
+      {
+        label: "Lift a wall or go back to the file",
+        steps: [
+          "Show the file's details, then under Who can find it choose Open or Follow file.",
+          "Open lifts any wall: everyone who can use this base can find it. Only administrators can choose it. Knowledge base owners still have Limit and Follow file, so they can change a wall or remove a Limit wall.",
+          "Follow file uses the wall named in the file's own metadata, if any.",
+          "Choose Save access. Your choice is kept through later re-indexing.",
+        ],
+      },
+    ],
+    verify: [
+      "The file shows Walled, and Who can find it names only the groups you chose.",
+      "A person outside the group who does not manage the base does not see the file, chat returns no source from it, and an old citation says This document is no longer available.",
+      "You, as an administrator outside the group, get the same refusal from Preview.",
+      "A member of the group still gets a cited answer.",
+      "The Audit Trail shows DOCUMENT_WALL_CHANGED, and DOCUMENT_VIEW_DENIED for each refused attempt.",
+    ],
+    troubleshooting: [
+      { symptom: "You cannot open a file you walled, and it says \"This document is no longer available\"", fix: "That is the wall working: it screens administrators too. Ask a member of the group to check the file. If you need it yourself, someone who can edit your account must add you to the group. Under the default service policy, administrators cannot edit their own account: \"You cannot modify this account under the current service policy.\"" },
+      { symptom: "A file shows Hidden, with \"It names no group in this workspace, so nobody can find it until the group exists.\"", fix: "The file's wall names a group that does not exist here, and Who can find it quotes the name it read. Choose Limit, tick the right group, and choose Save access. Creating the group is not enough: the file stays Hidden until the base's walls are checked again, as Sync now does. Files-only bases have no Sync now." },
+      { symptom: "\"Limited to groups that no longer exist, so nobody can find it.\"", fix: "A group the wall named was deleted. Choose Limit again with a group that exists, then Save access." },
+      { symptom: "A member of the group cannot find the walled file", fix: "A wall only narrows access and never adds to it. The group must also be able to use the knowledge base: check Who can search it under Settings." },
+      { symptom: "\"Create a group first; walls admit members of groups.\"", fix: "Walls admit groups, so create one in Admin console › Groups." },
+      { symptom: "\"Only administrators can lift an ethical wall.\"", fix: "Knowledge base owners cannot choose Open. Ask an administrator. Owners still have Limit and Follow file." },
+      { symptom: "Save access stays unavailable", fix: "Change the option first. With Limit chosen, tick at least one group." },
+      { symptom: "A saved reply still shows text from a walled file", fix: "A wall stops new searches and opening the file. Replies saved before it went up keep their text, so set walls before sharing a file. Your retention settings govern saved chats." },
+      { symptom: "An administrator can read a walled figure in Audit", fix: "Walls cover the document, not chats. User Prompt Activity shows each prompt and its reply, including a reply from someone inside the wall. Keep that in mind when you choose who is an administrator." },
+      { symptom: "A file is not walled even though its property names a group", fix: "Check the property's name. Ethical wall, Information barrier, their plurals, Wall groups, and names in More wall fields are read. Add the field under Settings › Ethical walls." },
+    ],
+    scenes: [
+      {
+        title: "Before you begin",
+        caption: "A knowledge base shared with more than one group, and the group the wall admits.",
+        narration: "An ethical wall limits a document to the members of chosen groups, even inside a knowledge base many people share. Have a knowledge base ready, and decide which group may see the file. Everyone outside that group loses it, including you.",
+        durationSeconds: 16,
+        card: {
+          label: "Checklist",
+          where: "Have these ready",
+          steps: [
+            "A knowledge base shared with the people who should keep using it",
+            "The file to wall off, already uploaded",
+            "A group that holds everyone who may see the file",
+            "Someone in that group to confirm the file still works for them",
+          ],
+        },
+      },
+      {
+        title: "Before the wall",
+        caption: "Jane is in Litigation, and the base is shared with her group, so she finds the memo.",
+        narration: "First, the problem. This knowledge base is shared with Litigation and Corporate, and Jane is in Litigation. She asks about the deal and gets the price, cited to the deal memo. Anyone the base is shared with can do the same.",
+        durationSeconds: 15,
+        focus: "wallsBefore",
+      },
+      {
+        title: "Read the file's properties",
+        caption: "Library › Knowledge: open the base, then the arrow beside the file.",
+        narration: "Open Library, Knowledge, and the knowledge base. Choose the arrow beside the file. Properties lists what the file carries about itself, and Who can find it says that everyone who can use this knowledge base can find it.",
+        durationSeconds: 15,
+        focus: "wallsDetails",
+      },
+      {
+        title: "Limit it to a group",
+        caption: "Choose Limit, tick the group, and choose Save access.",
+        narration: "To build the wall, choose Limit and tick the groups that may find the file. Here, Corporate. Alex, the administrator doing this, is not in Corporate, and that matters in a moment. Choose Save access.",
+        durationSeconds: 14,
+        focus: "wallsLimit",
+      },
+      {
+        title: "The wall is up",
+        caption: "The file shows Walled, and the note names who can find it, administrators included.",
+        narration: "The file now shows Walled. The note reads: limited to Corporate by an administrator, nobody else can find it, administrators included.",
+        durationSeconds: 10,
+        focus: "wallsSaved",
+      },
+      {
+        title: "It leaves everyone else's list",
+        caption: "Signed in as Jane, the list no longer shows the memo.",
+        narration: "Now prove it. Signed in as Jane, the knowledge base's file list shows only the checklist. The memo is gone from her list and its name appears nowhere, though the header still counts two documents, so she can tell something is hidden.",
+        durationSeconds: 16,
+        focus: "wallsUserList",
+      },
+      {
+        title: "Chat cannot find it",
+        caption: "Jane asks the same question. There is no price, and only the checklist is cited.",
+        narration: "Jane asks the same question in a new chat. The search no longer reaches the memo, so the reply has no price. Its only sources are the files she can still find.",
+        durationSeconds: 12,
+        focus: "wallsUserChat",
+      },
+      {
+        title: "Saved replies keep their text",
+        caption: "A wall stops finding and opening. Replies saved before it went up keep their words.",
+        narration: "Open Jane's earlier chat. The reply she got before the wall still shows the price. A wall stops people finding and opening a document from then on. It does not rewrite replies already saved. So set the wall before you share a file, and treat anything already answered as already seen.",
+        durationSeconds: 20,
+        focus: "wallsUserOld",
+      },
+      {
+        title: "A saved citation stops opening",
+        caption: "Her earlier citation now says This document is no longer available.",
+        narration: "Choosing that citation now says This document is no longer available. She cannot open the memo, however she got there.",
+        durationSeconds: 9,
+        focus: "wallsUserDenied",
+      },
+      {
+        title: "Administrators are screened too",
+        caption: "Alex is an administrator, not in Corporate, so chat cannot find it for him.",
+        narration: "Walls apply to every role. Alex is an administrator, but he is not in Corporate. He asks the same question, and the memo is out of his reach too. To open it, the wall must change or he must be added to the group, and both are recorded.",
+        durationSeconds: 16,
+        focus: "wallsAdminChat",
+      },
+      {
+        title: "Managing is not reading",
+        caption: "Preview refuses too. Administrators see the file listed, but cannot open it.",
+        narration: "People who manage the base still see the file listed, so they can look after its wall or remove it. But Preview gets the same refusal. They can see that it exists, who may find it, and its file properties, but they cannot open it. So keep sensitive words out of file names and properties.",
+        durationSeconds: 19,
+        focus: "wallsAdminDenied",
+      },
+      {
+        title: "The group still has it",
+        caption: "A member of Corporate asks the same question and gets the cited answer.",
+        narration: "Always check the other side of the wall. Priya is in Corporate. She asks the same question and gets the cited answer, so the wall admits the group it names.",
+        durationSeconds: 11,
+        focus: "wallsMember",
+      },
+      {
+        title: "Recorded in the Audit Trail",
+        caption: "Search document_wall: DOCUMENT_WALL_CHANGED names the file and the groups.",
+        narration: "In the Admin console, open Audit, then Audit Trail. Choose Refresh and search document underscore wall. DOCUMENT WALL CHANGED records who changed the wall, on which file, and the groups it set.",
+        durationSeconds: 15,
+        focus: "wallsAudit",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+      },
+      {
+        title: "Refused attempts are recorded too",
+        caption: "Search view_denied: each refused attempt records the person, the time, and the document's ID.",
+        narration: "Search view underscore denied. DOCUMENT VIEW DENIED records each attempt to open a walled file, including Jane's and Alex's here. Review these regularly, because the attempts are the signal. Only attempts to open a file are recorded. A chat question that finds nothing behind a wall records no denial.",
+        durationSeconds: 22,
+        focus: "wallsAuditDenied",
+        calloutPlacement: "left-rail",
+        captionPlacement: "top",
+      },
+      {
+        title: "Audit still shows replies",
+        caption: "User Prompt Activity shows each prompt and its reply, even a reply quoting a walled file.",
+        narration: "A wall covers the document, not the chats of the people inside it. In User Prompt Activity, Preview shows each prompt and the reply it got. Alex cannot open the memo, yet he can read the price here in Priya's reply. Keep that in mind when you choose who is an administrator.",
+        durationSeconds: 19,
+        focus: "wallsAuditReply",
+        calloutPlacement: "left-rail",
+      },
+      {
+        title: "Walls named in the file",
+        caption: "A file's Ethical wall property sets its wall as soon as it is indexed.",
+        narration: "A wall can also travel with the file. This Word file has a custom property named Ethical wall, set to Corporate. It was walled the moment it was indexed, with no setting changed here. Ethical wall and Information barrier are always read, from Office and P D F properties, Box metadata, SharePoint columns, and Google Drive properties.",
+        durationSeconds: 23,
+        focus: "wallsMetadata",
+      },
+      {
+        title: "A name that matches nothing hides the file",
+        caption: "If the named group does not exist, the file shows Hidden, and nobody can find it.",
+        narration: "Walls fail closed. This file names a group that does not exist here, so it shows Hidden, and nobody can find it. A typing mistake hides a file; it never opens one. To fix it, choose Limit and tick the right group. Creating the group is not enough until walls are rechecked, as Sync now does.",
+        durationSeconds: 20,
+        focus: "wallsHidden",
+      },
+      {
+        title: "Read your own field",
+        caption: "Settings › Ethical walls: More wall fields adds a field name for this base.",
+        narration: "If your document system uses another field, add it. On Settings, under Ethical walls, type its name in More wall fields. Separate several with commas. Here, Matter team. Choose Save changes. Only administrators see More wall fields.",
+        durationSeconds: 17,
+        focus: "wallsFields",
+      },
+      {
+        title: "The new field takes effect at once",
+        caption: "Files already indexed are checked again. Reopen the base to see this one walled.",
+        narration: "Files already in the base are checked again straight away, with no upload needed. Reopen the knowledge base to see the result. This note carries a Matter team property naming Corporate, and it is now walled.",
+        durationSeconds: 14,
+        focus: "wallsFieldsApplied",
+      },
+      {
+        title: "Lift a wall",
+        caption: "Open lifts a wall, and only administrators have it. Owners keep Limit and Follow file.",
+        narration: "To lift a wall, choose Open and Save access. Only administrators have Open. Knowledge base owners keep Follow file and Limit, so an owner can remove a Limit wall, or replace a wall named in the file with any group, including their own. Every change is recorded and survives re-indexing.",
+        durationSeconds: 20,
+        focus: "wallsLift",
       },
     ],
   },

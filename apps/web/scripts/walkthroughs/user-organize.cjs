@@ -7,10 +7,15 @@
  * chats. user-search uses the Search palette, Recent, and a > command.
  * user-memory adds, edits, and pins a memory, shows the real refusal of a
  * credential, saves one by asking in chat, and recalls it in a new chat.
- * user-account edits the profile, switches the appearance, sets the theme
- * schedule, records the install instructions the app shows to an iPad and an
- * Android tablet browser (user-agent emulation in a 1185 x 855 window), and
- * opens Help (reporting a problem is its own module, user-reports).
+ * user-account reads the rebuilt Account drawer, edits the profile, creates,
+ * rotates, and revokes a personal API key (each key is proved against the
+ * instance's own /v1 API, and a screen showing a key is never captured),
+ * archives a chat and deletes it from Archived chats, shows an administrator's
+ * Workspace section, switches the appearance, sets the theme schedule, records
+ * the install instructions the app shows to an iPad and an Android tablet
+ * browser (user-agent emulation in a 1185 x 855 window), and opens Help
+ * (reporting a problem is its own module, user-reports). Run it after
+ * user-memory on the same instance, so Usage this month reflects real chats.
  */
 const { helpers } = require("./user-common.cjs");
 const { scrollTo, composer, sendChat, waitForReply } = helpers;
@@ -19,6 +24,7 @@ const FILED = "Show the stages of a vendor onboarding process";
 const PINNED = "Draft a synthetic kickoff agenda";
 const ARCHIVED = "Weekly vendor review digest";
 const RENAMED = "Weekly vendor digest (synthetic)";
+const ARCHIVE_THEN_DELETE = PINNED; // Stays in view: real chats push older ones out of Recent.
 
 const row = (page, title) => page.locator(".chat-row").filter({ hasText: title }).first();
 
@@ -84,15 +90,13 @@ const userOrganize = {
     await menu.getByRole("menuitem", { name: "Archive" }).click();
     await row(page, ARCHIVED).waitFor({ state: "detached" });
     const drawer = await openAccount(page);
-    const archive = drawer.locator(".settings-card, section, div").filter({ hasText: /^Archived chats/ }).first();
-    await drawer.getByRole("button", { name: /^View/ }).last().click();
+    await drawer.getByRole("button", { name: "View archived chats" }).click();
     await drawer.getByRole("button", { name: `Restore ${ARCHIVED}` }).waitFor();
     await scrollTo(page, drawer.getByRole("button", { name: `Restore ${ARCHIVED}` }), "center");
     await shot("organize-archived");
     await drawer.getByRole("button", { name: `Restore ${ARCHIVED}` }).click();
     await page.keyboard.press("Escape");
     await row(page, ARCHIVED).waitFor();
-    void archive;
 
     // 4. Rename the open chat from its header. (A chat inside a folder is not
     //    used here: renaming currently takes it out of its folder, which the
@@ -234,6 +238,9 @@ const userMemory = {
     reply = await waitForReply(page, before, { timeout: 900000 });
     const text = await reply.innerText();
     if (!/Monday/i.test(text)) throw new Error(`The reply did not recall the saved memory: ${text.slice(0, 200)}`);
+    const trace = reply.locator(".work-trace-toggle");
+    if ((await trace.getAttribute("aria-expanded")) !== "true") await trace.click();
+    await reply.getByText(/^Recalled \d+ memor/).waitFor();
     await scrollTo(page, reply, "start");
     await shot("memory-recalled");
   },
@@ -266,13 +273,58 @@ async function tabletPage(kit, userAgent) {
   return { browser, page };
 }
 
+/** Setup only: an administrator's decisions, not the person's own UI. Standard
+ * users need Downstream API access on and Can use API on one of their groups. */
+async function setApiAccess(kit, allowed) {
+  await kit.api("owner", "PATCH", "/api/platform/settings", { downstream_api_enabled: allowed });
+  const groups = await kit.api("admin", "GET", "/api/admin/groups");
+  const litigation = groups.find((group) => group.id === "group-litigation");
+  await kit.api("admin", "PATCH", "/api/admin/groups/group-litigation", { permissions: { ...litigation.permissions, api_access: allowed } });
+}
+
+/** The status a key really gets from the instance's OpenAI-compatible API. */
+async function keyStatus(kit, key) {
+  const response = await fetch(`${kit.API}/v1/models`, { headers: { authorization: `Bearer ${key}` } });
+  return response.status;
+}
+
+async function expectKeyStatus(kit, key, status, label) {
+  const actual = await keyStatus(kit, key);
+  if (actual !== status) throw new Error(`${label}: /v1/models returned ${actual}, expected ${status}.`);
+}
+
+/** Read a show-once key without logging it. Frames are never taken while it shows. */
+async function readNewKey(drawer) {
+  const shown = drawer.locator(".account-api-secret");
+  await shown.waitFor();
+  return shown.getByLabel("New API key").inputValue();
+}
+
+async function closeDrawer(page, drawer) {
+  await drawer.getByRole("button", { name: "Close", exact: true }).click();
+  await drawer.waitFor({ state: "hidden" });
+}
+
+/** Open Account with API access expanded. Reopening the drawer clears a shown key. */
+async function openApiAccess(page) {
+  const drawer = await openAccount(page);
+  const panel = drawer.locator("details.account-disclosure");
+  await panel.locator("summary").click();
+  await panel.getByRole("button", { name: /Create key|Rotate key/ }).waitFor();
+  if (await drawer.locator(".account-api-secret").count()) throw new Error("A new API key is still on screen.");
+  await scrollTo(page, panel, "center");
+  return { drawer, panel };
+}
+
 const userAccount = {
   role: "user",
-  description: "Profile, appearance, theme schedule, tablet install instructions, and Help.",
+  description: "The Account drawer: profile, usage, API keys, archived chats, Workspace, plus appearance, tablet install instructions, and Help.",
   externalOrigins: () => [],
   frames: [
-    "user/chat-home", "user/account-profile-edit", "user/account-profile-saved", "user/appearance-dark", "user/theme-schedule-set",
-    "user/install-ipad", "user/install-android", "user/help-drawer",
+    "user/chat-home", "user/account-overview", "user/account-profile-edit", "user/account-profile-saved",
+    "user/account-api-empty", "user/account-api-active", "user/account-api-rotate", "user/account-api-revoke", "user/account-api-revoked",
+    "user/account-archived", "user/account-archived-delete", "user/account-workspace",
+    "user/appearance-dark", "user/theme-schedule-set", "user/install-ipad", "user/install-android", "user/help-drawer",
   ],
   async run(kit) {
     const { shot } = kit;
@@ -283,21 +335,91 @@ const userAccount = {
     await page.waitForTimeout(800);
     await shot("chat-home");
 
-    // 1. Profile.
+    // 1. The drawer as it opens: profile, preferences and security, usage, data.
     let drawer = await openAccount(page);
+    await drawer.locator(".account-usage-stats").waitFor();
+    await shot("account-overview");
+
+    // 2. Profile: Edit opens the form in place.
     await drawer.getByRole("button", { name: /^Edit account profile for/ }).click();
-    const form = drawer.locator(".account-profile-form");
+    const form = drawer.locator(".account-identity .account-form");
     await form.waitFor();
     await form.getByLabel("Firm or organization").fill("Example Corporation");
     await form.getByLabel("Phone number").fill("+1 555 0100");
+    await scrollTo(page, form.getByRole("button", { name: "Save profile" }), "end");
     await shot("account-profile-edit", { keepFocus: true });
     await form.getByRole("button", { name: "Save profile" }).click();
-    await drawer.getByText("Profile saved.").waitFor();
-    await page.waitForTimeout(500);
+    await drawer.locator(".account-identity .drawer-success").waitFor();
     await shot("account-profile-saved");
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(400);
-    if (await drawer.isVisible()) await drawer.getByRole("button", { name: /Close/ }).first().click().catch(() => {});
+    await closeDrawer(page, drawer);
+
+    // 3. API access: a key is created, proved, rotated, proved, revoked, proved.
+    await setApiAccess(kit, true);
+    try {
+      await page.reload();
+      await page.getByRole("navigation", { name: "Primary" }).waitFor();
+      let api = await openApiAccess(page);
+      await shot("account-api-empty");
+
+      await api.panel.getByRole("button", { name: "Create key" }).click();
+      const firstKey = await readNewKey(api.drawer);
+      await expectKeyStatus(kit, firstKey, 200, "The new key");
+      await closeDrawer(page, api.drawer);
+
+      api = await openApiAccess(page);
+      await api.panel.locator(".account-api-existing").waitFor();
+      await shot("account-api-active");
+
+      await api.panel.getByRole("button", { name: "Rotate key" }).click();
+      await api.panel.locator(".account-confirm").waitFor();
+      await shot("account-api-rotate", { keepFocus: true });
+      await api.panel.getByRole("button", { name: "Replace key" }).click();
+      const secondKey = await readNewKey(api.drawer);
+      await expectKeyStatus(kit, firstKey, 401, "The replaced key");
+      await expectKeyStatus(kit, secondKey, 200, "The rotated key");
+      await closeDrawer(page, api.drawer);
+
+      api = await openApiAccess(page);
+      await api.panel.getByRole("button", { name: "Revoke", exact: true }).click();
+      await api.panel.locator(".account-confirm").waitFor();
+      await shot("account-api-revoke", { keepFocus: true });
+      await api.panel.getByRole("button", { name: "Revoke key" }).click();
+      await api.panel.getByRole("button", { name: "Create key" }).waitFor();
+      await expectKeyStatus(kit, secondKey, 401, "The revoked key");
+      await shot("account-api-revoked");
+      await closeDrawer(page, api.drawer);
+    } finally {
+      await setApiAccess(kit, false);
+    }
+    await page.reload();
+    await page.getByRole("navigation", { name: "Primary" }).waitFor();
+    await page.waitForTimeout(800);
+
+    // 4. Archived chats: archive one, then delete it forever from Data.
+    const menu = await rowMenu(page, ARCHIVE_THEN_DELETE);
+    await menu.getByRole("menuitem", { name: "Archive" }).click();
+    await row(page, ARCHIVE_THEN_DELETE).waitFor({ state: "detached" });
+    drawer = await openAccount(page);
+    await drawer.getByRole("button", { name: "View archived chats" }).click();
+    const archived = drawer.locator(".account-archived-row").filter({ hasText: ARCHIVE_THEN_DELETE });
+    await archived.waitFor();
+    await scrollTo(page, archived, "center");
+    await shot("account-archived");
+    await archived.getByRole("button", { name: `Permanently delete ${ARCHIVE_THEN_DELETE}` }).click();
+    await drawer.locator(".account-archived-row .account-confirm").waitFor();
+    await scrollTo(page, drawer.locator(".account-archived-row .account-confirm"), "center");
+    await shot("account-archived-delete", { keepFocus: true });
+    await drawer.getByRole("button", { name: `Delete ${ARCHIVE_THEN_DELETE} forever` }).click();
+    await drawer.locator(".account-archived-empty").waitFor();
+    await closeDrawer(page, drawer);
+
+    // 5. What an administrator sees: the Workspace section with View as.
+    const admin = await kit.app("admin", "/chat");
+    const adminDrawer = await openAccount(admin);
+    await adminDrawer.locator(".account-usage-stats").waitFor();
+    await shot("account-workspace");
+    await admin.context().close();
+    page = kit.use(page);
 
     // 2. Appearance and the theme schedule.
     await page.locator(".theme-schedule-button").first().click();

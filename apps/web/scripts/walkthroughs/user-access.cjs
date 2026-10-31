@@ -161,6 +161,9 @@ async function openSecurity(page) {
   return drawer;
 }
 
+/** The Security row's one-line status, such as "On · 10 recovery codes left". */
+const securitySummary = (drawer, text) => drawer.locator(".account-security-section .account-row small").filter({ hasText: text });
+
 async function passwordSignIn(kit, password) {
   const page = kit.use(await signedOut(kit));
   const local = page.locator(".auth-method-switch").getByRole("button", { name: /Email & password/ });
@@ -211,25 +214,13 @@ const userSecurity = {
     if (codes.length < 2) throw new Error("No recovery codes were issued.");
     await drawer.getByLabel("I stored these recovery codes somewhere safe.").check();
     await drawer.getByRole("button", { name: "Done" }).click();
-    await drawer.getByText(/recovery codes remain/).waitFor();
+    await securitySummary(drawer, /^On · 10 recovery codes left$/).waitFor();
     await scrollTo(page, drawer.locator(".account-security"), "center");
     await shot("security-enabled");
 
-    // 3. Replace recovery codes with a current authenticator code.
-    await drawer.getByRole("button", { name: "Replace recovery codes" }).click();
-    await drawer.getByText("Replace your recovery codes?").waitFor();
-    await scrollTo(page, drawer.locator(".account-security"), "center");
-    await shot("security-replace");
-    await drawer.locator('.account-security input[autocomplete="one-time-code"]').fill(await freshTotp(secret, page));
-    await drawer.getByRole("button", { name: "Create new recovery codes" }).click();
-    await drawer.locator(".account-security-codes").waitFor();
-    codes.splice(0, codes.length, ...(await drawer.locator(".account-security-codes li").allInnerTexts()).map((code) => code.trim()));
-    await drawer.getByLabel("I stored these recovery codes somewhere safe.").check();
-    await drawer.getByRole("button", { name: "Done" }).click();
-    await drawer.getByText(/recovery codes remain/).waitFor();
     await page.context().close();
 
-    // 4. Sign in again: the authenticator challenge, then a recovery code.
+    // 3. Sign in again: the authenticator challenge, then a recovery code.
     page = await passwordSignIn(kit, password);
     await page.getByRole("heading", { name: "Two-step verification" }).waitFor();
     await shot("security-sign-in-code");
@@ -241,24 +232,37 @@ const userSecurity = {
     await page.getByRole("navigation", { name: "Primary" }).waitFor();
     await page.waitForTimeout(1200);
     drawer = await openSecurity(page);
-    if (!(await drawer.getByText(`${codes.length - 1} recovery codes remain`).count())) throw new Error("The recovery code was not consumed.");
+    await securitySummary(drawer, new RegExp(`^On · ${codes.length - 1} recovery codes? left$`)).waitFor();
     await scrollTo(page, drawer.locator(".account-security"), "center");
     await shot("security-codes-remaining");
 
-    // 5. Change the password from the Password card.
-    const card = drawer.locator(".account-password-card");
-    await card.getByRole("button", { name: "Edit" }).click();
-    await card.getByLabel("Current password").waitFor();
-    await scrollTo(page, card, "center");
+    // 4. Replace the remaining recovery codes with a current authenticator code.
+    await drawer.getByRole("button", { name: "Replace recovery codes" }).click();
+    await drawer.getByText("Replace your recovery codes?").waitFor();
+    await scrollTo(page, drawer.locator(".account-security"), "center");
+    await shot("security-replace");
+    await drawer.locator('.account-security input[autocomplete="one-time-code"]').fill(await freshTotp(secret, page));
+    await drawer.getByRole("button", { name: "Create new recovery codes" }).click();
+    await drawer.locator(".account-security-codes").waitFor();
+    await drawer.getByLabel("I stored these recovery codes somewhere safe.").check();
+    await drawer.getByRole("button", { name: "Done" }).click();
+    await securitySummary(drawer, /^On · 10 recovery codes left$/).waitFor();
+
+    // 5. Change the password from the Password row.
+    await drawer.getByRole("button", { name: "Change password" }).click();
+    const form = drawer.locator("form.account-form");
+    await form.getByLabel("Current password").waitFor();
+    await scrollTo(page, form, "center");
     await shot("security-password-form");
     const next = syntheticPassword();
-    await card.getByLabel("Current password").fill(password);
-    await card.getByLabel("New password", { exact: true }).fill(next);
-    await card.getByLabel("Confirm new password").fill(next);
-    await card.getByRole("button", { name: "Update password" }).click();
-    await drawer.getByText("Password updated.").waitFor();
+    await form.getByLabel("Current password").fill(password);
+    await form.getByLabel("New password", { exact: true }).fill(next);
+    await form.getByLabel("Confirm new password").fill(next);
+    await form.getByRole("button", { name: "Update password" }).click();
+    const updated = drawer.locator(".account-row small").filter({ hasText: "Password updated." });
+    await updated.waitFor();
     password = next;
-    await scrollTo(page, drawer.getByText("Password updated."), "center");
+    await scrollTo(page, updated, "center");
     await shot("security-password-updated");
   },
 };
