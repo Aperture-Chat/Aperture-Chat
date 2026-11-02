@@ -216,13 +216,13 @@ const UI_LABELS = [
   "Clear list", "Hide this reminder", "Import to my account", "Commands",
   /* chat */
   "Ask anything...", "Shift+Enter", "Web search", "Tools", "Knowledge", "Web", "Agent", "Chat", "Send now",
-  "Reasoning", "Fast", "Smart", "Copy", "Branch", "Regenerate response", "Stop this response", "Edit message",
+  "Reasoning", "Fast", "Balanced", "Smart", "Copy", "Branch", "Regenerate response", "Stop this response", "Edit message",
   "Load prompt in new chat", "Transfer to Drafts", "Download", "PNG", "SVG", "Code", "Upload from computer",
   "Web page by link", "Attach from source", "Messages and model", "Token usage", "Sources gathered",
   "Context window", "Tokens used", "Current chat", "Agent profile",
   "Models in your organization", "Usable now", "Not available to you", "Provider offline", "Locked",
   "Request access", "Withdraw request", "Refresh model access", "Why isn't a model listed?",
-  "MCP connections and resources", "Find a resource", "Stream replies", "Type shortcuts in chat",
+  "Typing shortcuts", "All resources", "Knowledge files", "Reply style", "Use in this chat", "Stream replies",
   "Send options", "Reply settings", "Resources", "Interactive platform guide", "Admin documentation", "Chat help",
   /* drafts and decks */
   "Draft format", "Document", "Deck", "Text size", "Superscript", "Subscript", "Highlight", "Clear formatting",
