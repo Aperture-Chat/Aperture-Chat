@@ -63,12 +63,12 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.18](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.18)**:
-> Citations open the real document at the cited passage, and only documents a
-> reply cited are listed; the Account drawer is rebuilt; Drafts keeps its page
-> navigator and status bar in view; and training covers every recent feature in
-> 71 lessons. v0.5.17 added Excel-style spreadsheets and server-built PDF/A files.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0517) and
+> **Current release: [v0.5.19](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.19)**:
+> Files attached to a chat are kept, indexed, and opened in the document viewer;
+> `#` brings a real document into the message; the Drafts assistant matches chat;
+> Send options is redesigned; and the consoles open from your Account panel.
+> v0.5.18 added the document viewer and used-only citations.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0518) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -81,7 +81,7 @@ policies appropriate for your organization's data.
 | ![A structure diagram of the vendor approval workflow with its Copy, PNG, SVG, Code, Style, and Edit toolbar](docs/images/chat-diagram-light.png) | ![The same structure diagram in dark mode](docs/images/chat-diagram-dark.png) |
 
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
-- **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer.
+- **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
 - **Work traces.** Review the steps, sources, and provider-reported usage behind each reply, live while it streams. Availability depends on the provider.
 - **Response actions.** Copy, share, regenerate, rate, and transfer an answer to Drafts.
@@ -170,7 +170,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.18
+#   APERTURE_IMAGE_TAG=v0.5.19
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -191,7 +191,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.18 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.19 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -226,10 +226,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.18` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.19` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.18-dev`, `v0.5.18-test`, `v0.5.18-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.19-dev`, `v0.5.19-test`, `v0.5.19-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

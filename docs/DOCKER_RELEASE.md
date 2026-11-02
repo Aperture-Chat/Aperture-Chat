@@ -236,6 +236,53 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.18
+
+- **Attached files are kept and read like knowledge documents.** A file attached
+  to a chat used to leave only a short preview behind, so the model saw its
+  opening. The original now stays on the data volume
+  (`chat_attachment_documents/`), so plan for that growth, and its text is indexed.
+  A turn sends as much of a file as fits, up to a third of the model's context
+  window or 200,000 characters, and every passage sent is screened by the input
+  filters. File chips and sources open in the document viewer, and only the person
+  who attached a file can open it. Kept files go with their chat, including under
+  retention. No migration. Files attached before this release open as text and
+  must be attached again before they can go to Drafts.
+- **Edit an attached document in Drafts.** Asking for a change to an attached file
+  offers **Edit in Drafts**, which opens it with its formatting. Whole-document
+  edits come back block by block, so untouched text keeps its formatting. A Word
+  blank drawn as a line stays a blank.
+- **`#` brings the real document in.** Choosing a file or a knowledge base after
+  `#` adds a block you can open before you send. A block holds only a pointer, so
+  an ethical wall or a deletion reaches blocks already in chats, and access is
+  checked on every turn. A base that fits the turn is read whole; a larger one is
+  searched. The `#` menu now fits the room above the message box and folds into it
+  when there is none.
+- **The Drafts assistant matches chat.** Document, Deck, and Spreadsheet share
+  chat's `#` picks, file blocks, and viewer, and citations reach the page as plain
+  text such as `(Lease, p. 3)`, never as `[K1]`. Only `#` came over; `/ @ $ >` and
+  Send options stay in chat.
+- **Send options is redesigned and smaller.** On and Off switches, Fast, Balanced,
+  and Smart for Reasoning, category tiles under Resources, and a Send now button
+  that stays in place. Drafts keeps its Reasoning slider.
+- **Consoles open from your Account panel.** Admin console and Platform owner
+  console left the sidebar so more chats fit. Waiting model access requests now
+  show as a count on the account card. That count never reached the page before
+  this release, because the client dropped it, so administrators may see a backlog
+  for the first time.
+- **Carved panels.** The Help blade, both documentation panels, and the account
+  button use the carved look: the panel stands still and its contents scroll
+  beneath a fixed rim. Code and diagram toolbars wrap to the reply's width.
+- **Fixes.** Chats on a retired model save again, so unpinning one sticks. Capture
+  screen in a report takes a real picture of the page instead of a grey blur, and
+  says so when no picture was taken. Guide PDFs are checked before they are saved,
+  so a slow download can no longer leave a file that will not open. Rail switch
+  thumbs sit centered on their labels.
+- **Training follows the changes that alter a lesson's steps.** The Send options
+  and message symbol lessons are recaptured, four admin and owner lessons are
+  re-narrated, and the three PDF guides are rebuilt. Other lessons teach the right
+  steps but may still picture the earlier sidebar, Help blade, and account button.
+
 ## New Since v0.5.17
 
 - **Document viewer for knowledge sources.** Citations and Knowledge Library
