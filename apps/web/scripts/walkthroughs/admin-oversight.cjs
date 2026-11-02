@@ -23,6 +23,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { helpers } = require("./admin-shared.cjs");
+const { pickFilterUsers, tickFilterUsers } = require("./user-filter.cjs");
 
 const { tidyFixture, scrollTo, toast, dismissToast, openTab, expandPanel, continueInChat } = helpers;
 const MODEL = "Qwen3.5 9B";
@@ -64,25 +65,29 @@ const adminAnalytics = {
     const page = kit.use(await analyticsTab(kit));
     await shot("an-sections");
 
-    // 1. Runtime Clock Metadata with its own person and date filter.
+    // 1. Runtime Clock Metadata with its own date and person filter, shot with
+    //    the checkbox panel open and Jane ticked.
     const runtime = await expandPanel(page, "Runtime Clock Metadata");
     const filter = page.locator("[aria-label='Runtime events filter']");
-    await filter.getByLabel("Runtime events filter user").selectOption({ label: "Jane Smith" });
     await filter.locator(".date-range-filter-presets").getByRole("button", { name: "30 days" }).click();
     await page.waitForTimeout(600);
     await scrollTo(page, runtime, "start");
+    const people = await tickFilterUsers(page, filter, "Runtime events filter user", "Jane Smith");
+    await page.waitForTimeout(600);
     await shot("an-runtime");
+    await people.getByRole("button", { name: "Done" }).click();
 
-    // 2. CSV: the popover picks a range, then a real download.
-    await runtime.locator(".panel-header").getByRole("button", { name: "CSV" }).click();
-    const popover = page.locator(".csv-export-popover");
+    // 2. Export: the popover picks a file type and range, then a real download.
+    await runtime.locator(".panel-header").getByRole("button", { name: "Export admin runtime analytics" }).click();
+    const popover = page.locator(".data-export-popover");
     await popover.waitFor();
+    await popover.getByRole("radio", { name: "CSV file" }).click();
     await shot("an-csv");
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       popover.getByRole("button", { name: /^Download \d+ rows?$/ }).click(),
     ]);
-    if (!/^aperture-admin-runtime-analytics-user-jane-.+\.csv$/.test(download.suggestedFilename())) {
+    if (!/^aperture-admin-runtime-analytics-jane-smith-.+\.csv$/.test(download.suggestedFilename())) {
       throw new Error(`Unexpected CSV filename ${download.suggestedFilename()}`);
     }
     await page.keyboard.press("Escape");
@@ -172,7 +177,7 @@ const adminFeedback = {
     const page = kit.use(await analyticsTab(kit));
     const feedback = await expandPanel(page, "Chat Feedback");
     const filter = page.locator("[aria-label='Chat feedback filter']");
-    await filter.getByLabel("Chat feedback filter user").selectOption({ label: "Jane Smith" });
+    await pickFilterUsers(page, filter, "Chat feedback filter user", "Jane Smith");
     await filter.locator(".date-range-filter-presets").getByRole("button", { name: "Today" }).click();
     await page.waitForTimeout(700);
     await scrollTo(page, feedback, "start");

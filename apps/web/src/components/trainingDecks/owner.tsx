@@ -256,13 +256,13 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   policyFloor: { frame: "training/owner/pc-policy-toggles.png", rect: { x: 282, y: 104, w: 847, h: 51 } },
   policyToggles: { frame: "training/owner/pc-policy-toggles.png", rect: { x: 262, y: 84, w: 887, h: 515 } },
   budgetControls: { frame: "training/owner/pc-budget-panel.png", rect: { x: 283, y: 502, w: 845, h: 94 } },
-  analyticsFilters: { frame: "training/owner/an-runtime-scoped.png", rect: { x: 262, y: 98, w: 887, h: 309 } },
-  runtimeScorecards: { frame: "training/owner/an-runtime.png", rect: { x: 262, y: 251, w: 887, h: 604 } },
-  activityCharts: { frame: "training/owner/an-activity.png", rect: { x: 262, y: 391, w: 887, h: 277 } },
-  usageScorecards: { frame: "training/owner/an-usage.png", rect: { x: 262, y: 292, w: 887, h: 156 } },
-  usageByUser: { frame: "training/owner/an-usage-user.png", rect: { x: 262, y: 41, w: 887, h: 788 } },
+  analyticsFilters: { frame: "training/owner/an-runtime-scoped.png", rect: { x: 262, y: 118, w: 887, h: 309 } },
+  runtimeScorecards: { frame: "training/owner/an-runtime.png", rect: { x: 262, y: 271, w: 887, h: 584 } },
+  activityCharts: { frame: "training/owner/an-activity.png", rect: { x: 262, y: 311, w: 887, h: 277 } },
+  usageScorecards: { frame: "training/owner/an-usage.png", rect: { x: 262, y: 291, w: 887, h: 156 } },
+  usageByUser: { frame: "training/owner/an-usage-user.png", rect: { x: 262, y: 10, w: 887, h: 819 } },
   auditSignalBoard: { frame: "training/owner/au-summary.png", rect: { x: 262, y: 321, w: 887, h: 534 } },
-  auditInsightsTrends: { frame: "training/owner/au-insights.png", rect: { x: 282, y: 56, w: 847, h: 306 } },
+  auditInsightsTrends: { frame: "training/owner/au-insights.png", rect: { x: 282, y: 465, w: 847, h: 306 } },
   auditInsightsPeople: { frame: "training/owner/au-insights-people.png", rect: { x: 282, y: 17, w: 847, h: 658 } },
   auditInvestigation: { frame: "training/owner/au-signal-records.png", rect: { x: 229, y: 69, w: 727, h: 717 } },
   auditSecurityAlerts: { frame: "training/owner/au-alerts.png", rect: { x: 262, y: 98, w: 887, h: 752 } },
@@ -348,13 +348,13 @@ export const OWNER_FOCUS_REGIONS: Record<OwnerFocus, FocusRegion> = {
   kibanaImport: { frame: "training/owner/kb-import.png", rect: { x: 885, y: 93, w: 300, h: 762 } },
   kibanaImported: { frame: "training/owner/kb-imported.png", rect: { x: 885, y: 93, w: 300, h: 762 } },
   kibanaDiscover: { frame: "training/owner/kb-discover.png", rect: { x: 300, y: 384, w: 885, h: 471 } },
-  analyticsOverview: { frame: "training/owner/an-overview.png", rect: { x: 261, y: 233, w: 889, h: 447 } },
-  runtimeCsv: { frame: "training/owner/an-runtime-csv.png", rect: { x: 774, y: 67, w: 307, h: 252 } },
+  analyticsOverview: { frame: "training/owner/an-overview.png", rect: { x: 261, y: 233, w: 889, h: 467 } },
+  runtimeCsv: { frame: "training/owner/an-runtime-csv.png", rect: { x: 774, y: 77, w: 307, h: 306 } },
   feedbackEvents: { frame: "training/owner/an-feedback.png", rect: { x: 262, y: 414, w: 887, h: 441 } },
   feedbackRecord: { frame: "training/owner/an-feedback-record.png", rect: { x: 179, y: 57, w: 827, h: 741 } },
-  auditChartRecords: { frame: "training/owner/au-chart-records.png", rect: { x: 229, y: 52, w: 727, h: 751 } },
+  auditChartRecords: { frame: "training/owner/au-chart-records.png", rect: { x: 229, y: 17, w: 727, h: 821 } },
   auditAlertAcknowledged: { frame: "training/owner/au-alert-acknowledged.png", rect: { x: 262, y: 323, w: 887, h: 527 } },
-  trailExport: { frame: "training/owner/au-trail-export.png", rect: { x: 669, y: 451, w: 307, h: 252 } },
+  trailExport: { frame: "training/owner/au-trail-export.png", rect: { x: 669, y: 451, w: 307, h: 306 } },
   retentionEntry: { frame: "training/owner/rt-navigation.png", rect: { x: 261, y: 422, w: 889, h: 95 } },
   retentionSchedule: { frame: "training/owner/rt-schedule.png", rect: { x: 282, y: 154, w: 849, h: 221 } },
   retentionSource: { frame: "training/owner/rt-source.png", rect: { x: 282, y: 0, w: 847, h: 855 } },
@@ -429,7 +429,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     ],
     setupSteps: [
       "Open your instance's address. On the Create the first platform owner screen, enter Email, Display name, Create password, and Confirm password, then choose Create platform owner.",
-      "On the Getting started card, choose Set up models. The Platform console opens on Providers with Connect your first model provider.",
+      "On the Getting started card, choose Set up models. The Platform owner console opens on Providers with Connect your first model provider.",
       "Choose Add Provider. Enter a Name, pick the Kind, enter the Region and Base URL, and give the key a Key name.",
       "Paste the provider key into API key or secret. A local server that ignores keys still needs a placeholder value here, because Sync Models only runs with an active key on file.",
       "Choose Save Provider. Wait for the card to show Connected and the message Runtime test passed with the model's name.",
@@ -524,10 +524,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Providers, still empty",
-        caption: "Platform console › Providers. Choose Add Provider.",
+        caption: "Platform owner console › Providers. Choose Add Provider.",
         narration:
-          "The Platform console opens on Providers, with a short checklist: add the connection, validate it and sync its models, then enable models for the right groups. Choose Add Provider.",
-        durationSeconds: 13,
+          "The Platform owner console opens on Providers, with a short checklist: add the connection, validate it and sync its models, then enable models for the right groups. Choose Add Provider.",
+        durationSeconds: 14,
         calloutPlacement: "lower-left",
         focus: "firstProvidersEmpty",
       },
@@ -715,7 +715,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     verify: [
       "The card shows Connected, and its message ends with Runtime test passed and the name of the model that answered.",
       "The card's Models line counts the synced models (for example 0 of 1 before you enable any).",
-      "Platform console › Audit records platform.provider_models_synced for the provider.",
+      "Platform owner console › Audit records platform.provider_models_synced for the provider.",
     ],
     troubleshooting: [
       { symptom: "\"Provider model sync failed: ConnectError.\"", fix: "Nothing answered at the Base URL. Check the host and port, that the server is running, and that it listens on the network rather than only on its own machine." },
@@ -747,7 +747,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "The Providers tab",
-        caption: "Platform console › Providers. Each card shows its status: Connected, Needs key, or Needs validation.",
+        caption: "Platform owner console › Providers. Each card shows its status: Connected, Needs key, or Needs validation.",
         narration:
           "Select your name at the bottom of the sidebar, choose Platform owner console, then open Providers. Each card is one connection, with its kind, region, model count, and status. Connected means a real test chat passed. Needs key means no working key is on file. Needs validation means a key is saved but the last check did not pass.",
         durationSeconds: 23,
@@ -1028,11 +1028,11 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     ],
     prerequisites: [
       "A platform owner account.",
-      "A provider already added in Platform console › Providers.",
+      "A provider already added in Platform owner console › Providers.",
       "A new key created in the vendor's console (see Providers and connections for where).",
     ],
     setupSteps: [
-      "Open Platform console › Providers and choose API Keys on the provider's card. The number on the button is how many keys are stored.",
+      "Open Platform owner console › Providers and choose API Keys on the provider's card. The number on the button is how many keys are stored.",
       "Read the API Key Vault table: Key Name with the masked value (first three and last four characters), Environment, Status, Last Rotated, and Expires.",
       "To add a key, choose Add Key. Enter a Key name, the Environment, and Expires (the date the vendor key stops working, or Not set).",
       "Paste the key into API key or secret and choose Save Key. Aperture Chat stores it encrypted, then syncs the models and sends a test chat with it.",
@@ -1068,7 +1068,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     verify: [
       "The new row shows Active, and the card shows Connected with Runtime test passed.",
       "The deleted key no longer appears, and the API Keys count on the card went down by one.",
-      "Platform console › Audit lists platform.provider_key_created and, for a reveal, platform.provider_key_revealed.",
+      "Platform owner console › Audit lists platform.provider_key_created and, for a reveal, platform.provider_key_revealed.",
     ],
     troubleshooting: [
       { symptom: "Save Key stays greyed out.", fix: "Paste the key into API key or secret; a key value is required." },
@@ -1082,7 +1082,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Open the vault",
         caption: "Providers › API Keys on a card opens that provider's API Key Vault.",
         narration:
-          "Each provider keeps its own keys. Open Platform console, then Providers, and choose A P I Keys on the card. The vault shows each key's name with a masked value, only the first three and last four characters, plus its environment, status, last rotation, and expiry date.",
+          "Each provider keeps its own keys. Open Platform owner console, then Providers, and choose A P I Keys on the card. The vault shows each key's name with a masked value, only the first three and last four characters, plus its environment, status, last rotation, and expiry date.",
         durationSeconds: 19,
         calloutPlacement: "left-rail",
         focus: "kvVaultOpen",
@@ -1164,7 +1164,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "For the user check: a person who can sign in, or a second browser signed in as one.",
     ],
     setupSteps: [
-      "Open Platform console › Models. The All, Enabled, and Disabled counters and Search models work on the whole catalog.",
+      "Open Platform owner console › Models. The All, Enabled, and Disabled counters and Search models work on the whole catalog.",
       "Narrow the list with the funnel beside Provider, Model, or Runtime route. Tick values, or type text for Runtime route; Clear filter removes it.",
       "Turn a model on or off with its Org status switch. Off removes it for everyone, whatever their groups; newly synced models start off.",
       "Choose Edit details to set a Display name people will recognise, the Context window, Notes, and optional System prompt and Meta prompt, then choose Save details.",
@@ -1204,9 +1204,9 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     scenes: [
       {
         title: "The model catalog",
-        caption: "Platform console › Models: All, Enabled, and Disabled counters, plus Search models.",
+        caption: "Platform owner console › Models: All, Enabled, and Disabled counters, plus Search models.",
         narration:
-          "Open Platform console, then Models. Every model synced from your providers is listed here. The All, Enabled, and Disabled counters filter the list, and Search models finds a model by name.",
+          "Open Platform owner console, then Models. Every model synced from your providers is listed here. The All, Enabled, and Disabled counters filter the list, and Search models finds a model by name.",
         durationSeconds: 14,
         calloutPlacement: "left-rail",
         focus: "mdOverview",
@@ -1294,7 +1294,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "A safe channel (not the same email thread) for sharing temporary passwords.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings and expand Role Boundary.",
+      "Open Platform owner console › Org Settings and expand Role Boundary.",
       "Enter the person's Display name and Email, choose the Role (User, Admin, or Platform owner), and choose Create account.",
       "On the new row, choose the key button (Set a password). Choose Generate, keep Temporary password on, and choose Set password.",
       "Copy the password from the confirmation; it is shown only once. Share it and the workspace address over a safe channel. Nothing is emailed.",
@@ -1314,13 +1314,13 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         label: "Admin",
         steps: [
           "Everything a user can do, plus the Admin console for the organization: Users, Groups, Model Access, Connections, SSO, Analytics, Reports, Policies, Datasets, Audit, and Alerts.",
-          "No Platform console: providers, keys, branding, and platform policies stay with owners.",
+          "No Platform owner console: providers, keys, branding, and platform policies stay with owners.",
         ],
       },
       {
         label: "Platform owner",
         steps: [
-          "Everything, including the Platform console. Only an owner can create or promote another owner.",
+          "Everything, including the Platform owner console. Only an owner can create or promote another owner.",
           "Owners sign in with their own local password; Set a password is unavailable on an owner who already has one.",
           "Keep at least two owners, so one can recover the other.",
         ],
@@ -1336,7 +1336,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "The confirmation reads … account created through the admin API, and the row shows the chosen role.",
       "At first sign-in the person sees Set a new password, then the workspace.",
       "A new admin sees Admin console in their account panel but not Platform owner console.",
-      "Platform console › Audit records each account creation, role change, password reset, and deletion.",
+      "Platform owner console › Audit records each account creation, role change, password reset, and deletion.",
     ],
     troubleshooting: [
       { symptom: "\"… account was not created. User already exists.\"", fix: "That email already has an account. Find the row in the list and change its role or password instead." },
@@ -1351,7 +1351,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Role Boundary",
         caption: "Org Settings › Role Boundary: a create form above every account and its role.",
         narration:
-          "Open Platform console, then Org Settings, and expand Role Boundary. The form at the top creates accounts, and every account below has a role menu, a key button for passwords, and a bin button. Your own row is greyed out: accounts cannot remove themselves, and at least one active platform owner must always remain.",
+          "Open Platform owner console, then Org Settings, and expand Role Boundary. The form at the top creates accounts, and every account below has a role menu, a key button for passwords, and a bin button. Your own row is greyed out: accounts cannot remove themselves, and at least one active platform owner must always remain.",
         durationSeconds: 22,
         calloutPlacement: "left-rail",
         focus: "rolesDisclosure",
@@ -1413,9 +1413,9 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Check what the admin sees",
-        caption: "The new admin replaced the temporary password and sees Admin console, but not Platform console.",
+        caption: "The new admin replaced the temporary password and sees Admin console, but not Platform owner console.",
         narration:
-          "Finally, the new admin signs in with the temporary password and chooses their own. They land in the workspace with Admin console in their account panel, and no Platform console. That boundary is the point of roles.",
+          "Finally, the new admin signs in with the temporary password and chooses their own. They land in the workspace with Admin console in their account panel, and no Platform owner console. That boundary is the point of roles.",
         durationSeconds: 15,
         calloutPlacement: "left-rail",
         focus: "rolesAdminSignedIn",
@@ -1438,7 +1438,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Your instance's public address. The redirect URI is that address followed by /api/auth/sso/callback, and the server's APERTURE_API_BASE_URL must be the same address.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings, expand Single Sign-On, and choose Copy beside the redirect URI.",
+      "Open Platform owner console › Org Settings, expand Single Sign-On, and choose Copy beside the redirect URI.",
       "At your identity provider, create a confidential web application that uses OpenID Connect and the authorization code flow. Paste the redirect URI exactly: scheme, host, port, and path must match.",
       "Copy the application's client ID and client secret, and note when the secret expires.",
       "Make sure the ID token carries the person's email (the email scope). If you will map groups, add a groups claim to the ID token.",
@@ -1532,10 +1532,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Open Single Sign-On",
-        caption: "Platform console › Org Settings › Single Sign-On. Start by copying one value the identity provider needs.",
+        caption: "Platform owner console › Org Settings › Single Sign-On. Start by copying one value the identity provider needs.",
         narration:
-          "In the Platform console, open Org Settings and expand Single Sign-On. With nothing configured yet, the form shows starter values. You will fill it in once the identity provider is ready, so start by copying one value from it.",
-        durationSeconds: 16,
+          "In the Platform owner console, open Org Settings and expand Single Sign-On. With nothing configured yet, the form shows starter values. You will fill it in once the identity provider is ready, so start by copying one value from it.",
+        durationSeconds: 17,
         calloutPlacement: "left-rail",
         focus: "ssoPanelOpen",
       },
@@ -1704,7 +1704,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "An Entra account with at least the Application Developer role. Token configuration and assignment need Cloud Application Administrator.",
       "Your Directory (tenant) ID, shown on the Entra overview page.",
       "Microsoft Entra ID P1 or P2 if you will assign groups to the app or use Conditional Access.",
-      "The redirect URI copied from Platform console › Org Settings › Single Sign-On.",
+      "The redirect URI copied from Platform owner console › Org Settings › Single Sign-On.",
       "A test account whose email or user principal name is on an allowed domain.",
     ],
     setupSteps: [
@@ -1759,8 +1759,8 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Copy the redirect URI",
         caption: "Org Settings › Single Sign-On › Copy. Entra needs this exact value.",
         narration:
-          "In the Platform console, open Single Sign-On and copy the redirect URI. Entra needs this exact value.",
-        durationSeconds: 9,
+          "In the Platform owner console, open Single Sign-On and copy the redirect URI. Entra needs this exact value.",
+        durationSeconds: 10,
         focus: "ssoRedirectCopied",
       },
       {
@@ -1859,7 +1859,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "An Okta administrator account that can create app integrations.",
       "Your Okta domain, such as your-org.okta.com.",
       "API Access Management, if you will use the default custom authorization server in production (needed for a groups claim without an extra scope).",
-      "The redirect URI copied from Platform console › Org Settings › Single Sign-On.",
+      "The redirect URI copied from Platform owner console › Org Settings › Single Sign-On.",
       "A test account assigned to the app, on an allowed email domain.",
     ],
     setupSteps: [
@@ -1910,8 +1910,8 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Copy the redirect URI",
         caption: "Org Settings › Single Sign-On › Copy. Okta needs this exact value.",
         narration:
-          "In the Platform console, open Single Sign-On and copy the redirect URI. Okta needs this exact value.",
-        durationSeconds: 9,
+          "In the Platform owner console, open Single Sign-On and copy the redirect URI. Okta needs this exact value.",
+        durationSeconds: 10,
         focus: "ssoRedirectCopied",
       },
       {
@@ -2009,7 +2009,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     prerequisites: [
       "A Google Cloud project that belongs to your Workspace or Cloud Identity organization (required for an Internal audience).",
       "Permission to configure Google Auth Platform in that project.",
-      "The redirect URI copied from Platform console › Org Settings › Single Sign-On. Google requires HTTPS for production redirect URIs.",
+      "The redirect URI copied from Platform owner console › Org Settings › Single Sign-On. Google requires HTTPS for production redirect URIs.",
       "A Workspace test account on an allowed email domain.",
     ],
     setupSteps: [
@@ -2135,7 +2135,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "A platform owner account that signs in with a local password on a domain you will not enforce. It is your way back in.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings and expand Single Sign-On.",
+      "Open Platform owner console › Org Settings and expand Single Sign-On.",
       "Set Protocol to WorkOS AuthKit (your WorkOS account). The issuer field disappears, because WorkOS has one fixed API address.",
       "Choose Copy beside the redirect URI.",
       "WorkOS dashboard › Redirects: add the redirect URI. Production environments accept only HTTPS.",
@@ -2150,7 +2150,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     ],
     paths: [
       {
-        label: "Platform console (shown in the video)",
+        label: "Platform owner console (shown in the video)",
         steps: [
           "Org Settings › Single Sign-On › Protocol: WorkOS AuthKit (your WorkOS account).",
           "WorkOS client ID, WorkOS API key, optional WorkOS organization ID, and Allowed email domains, then Save SSO and Test connection.",
@@ -2235,7 +2235,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Choose WorkOS AuthKit",
         caption: "Org Settings › Single Sign-On › Protocol: WorkOS AuthKit. There is no issuer to enter.",
         narration:
-          "Open Platform console, Org Settings, and expand Single Sign-On. Set Protocol to WorkOS AuthKit. The form changes: there is no issuer to enter, because WorkOS has one fixed address, and the note explains that WorkOS runs the sign-in page with your own account.",
+          "Open Platform owner console, Org Settings, and expand Single Sign-On. Set Protocol to WorkOS AuthKit. The form changes: there is no issuer to enter, because WorkOS has one fixed address, and the note explains that WorkOS runs the sign-in page with your own account.",
         durationSeconds: 20,
         focus: "workosProtocol",
       },
@@ -2375,7 +2375,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Sign in again as the test account, then check Admin console › Users: the mapped group appears.",
       "Decide on Require the platform authenticator after SSO. Off trusts the provider's MFA; on adds the Aperture Chat authenticator after every SSO sign-in.",
       "Tell people on the domain that password sign-in is ending, and confirm everyone can sign in through the provider.",
-      "Platform console › Org Settings › Single Sign-On: turn on Enforce SSO for these domains and choose Save SSO.",
+      "Platform owner console › Org Settings › Single Sign-On: turn on Enforce SSO for these domains and choose Save SSO.",
       "Confirm that a local password on the domain is now refused, and that your owner recovery account still signs in.",
     ],
     verify: [
@@ -2479,7 +2479,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "The connectors your organization does not allow in any workspace. Setting a connector up (credentials, Test connection, Hide) is an administrator task taught in the Admin documentation's connectors lesson.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings. Each area is a collapsed panel; expand only the one you need.",
+      "Open Platform owner console › Org Settings. Each area is a collapsed panel; expand only the one you need.",
       "Expand Policy Controls. Read each switch's description, which states what is true right now, then turn on or off the switches you need. Each change saves immediately and shows a confirmation.",
       "Expand Workspace Usage Budget. Choose the Budget measure (Token allowance or Dollar amount (USD)), the Reset period (Every day, Every week, or Every month, in UTC), and the limit. 0 means unlimited.",
       "Choose Save budget policy and read the confirmation, for example Workspace ceiling saved at 1,000 tokens daily.",
@@ -2569,7 +2569,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Org Settings panels",
         caption: "Org Settings groups each area into a collapsed panel. Connectors now live in Admin console › Connections.",
         narration:
-          "Open Platform console, then Org Settings. Below the search index, each area is a collapsed panel: Role Boundary, Single Sign-On, Platform Branding, Policy Controls, Workspace Usage Budget, and Elastic Analytics. Expand only the one you need. Connectors are not here; they live in the Admin console's Connections tab, which comes later in this lesson.",
+          "Open Platform owner console, then Org Settings. Below the search index, each area is a collapsed panel: Role Boundary, Single Sign-On, Platform Branding, Policy Controls, Workspace Usage Budget, and Elastic Analytics. Expand only the one you need. Connectors are not here; they live in the Admin console's Connections tab, which comes later in this lesson.",
         durationSeconds: 24,
         calloutPlacement: "left-rail",
         focus: "policyCollapsed",
@@ -2712,7 +2712,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Your colors as 6-digit hex values, such as #2f5d8a. Pick dark sidebar colors so the light sidebar text stays readable.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings and expand Platform Branding. The preview at the top has three tiles: Light sidebar, Dark sidebar and dark mode, and Browser tab and compact icon.",
+      "Open Platform owner console › Org Settings and expand Platform Branding. The preview at the top has three tiles: Light sidebar, Dark sidebar and dark mode, and Browser tab and compact icon.",
       "Decide on the Platform name. It is optional with a logo: leave it blank when your logo already spells the name, so the logo stands alone (browser tabs and the installed app then show Aperture Chat), or type a name to show it beside the logo and in browser tabs.",
       "Enter the Platform domain people use. It is recorded for administrators and the API; it does not change DNS, TLS, or routing.",
       "In the Logo card, choose Upload (or drop a file on the card) and pick your full logo. The Light sidebar and Dark sidebar tiles show it straight away.",
@@ -2772,8 +2772,8 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Open Platform Branding",
         caption: "Org Settings › Platform Branding: three preview tiles, then the name, domain, Logo and Icon cards, and colors.",
         narration:
-          "Open Platform console, then Org Settings, and expand Platform Branding. Three tiles preview the brand as people will see it: the light sidebar, the dark sidebar and dark mode, and a browser tab with the compact icon. Out of the box, that is the Aperture Chat wordmark and the teal icon. The tiles follow your edits, but nothing changes for anyone else until you choose Apply branding.",
-        durationSeconds: 25,
+          "Open Platform owner console, then Org Settings, and expand Platform Branding. Three tiles preview the brand as people will see it: the light sidebar, the dark sidebar and dark mode, and a browser tab with the compact icon. Out of the box, that is the Aperture Chat wordmark and the teal icon. The tiles follow your edits, but nothing changes for anyone else until you choose Apply branding.",
+        durationSeconds: 26,
         calloutPlacement: "left-rail",
         focus: "brandPreview",
       },
@@ -2887,7 +2887,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "A person's account to check search from, or a second browser signed in as one.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings. Search index is the first panel.",
+      "Open Platform owner console › Org Settings. Search index is the first panel.",
       "Read each organization's line: Ready or Backfilling, Indexed items, and Last rebuilt.",
       "If saved content is missing from search results, choose Rebuild index and wait for Rebuilt … index entries from live records.",
       "Ask a person to press Ctrl + K (⌘ + K on a Mac), or choose Search in the sidebar, and search for a word from one of their chats.",
@@ -2956,11 +2956,11 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     id: "runtime-analytics",
     audioSrc: "training/owner/runtime-analytics.mp3",
     title: "Analytics: runtime, activity, and usage",
-    description: "Scope each analytics section to a person and a date range, export it as CSV, open the conversation behind a feedback record, and read the activity and usage charts.",
+    description: "Scope each analytics section to people and a date range, export it to Excel or CSV, open the conversation behind a run or a feedback record, and read the activity and usage charts.",
     icon: "clock",
     track: "Monitoring and compliance",
     outcomes: [
-      "Runtime events are scoped to one person and period, and exported as CSV",
+      "Runtime events are scoped to one person and period, and exported to Excel or CSV",
       "A feedback rating is traced back to its conversation",
       "Model activity and per-person usage are read from the charts",
     ],
@@ -2969,77 +2969,77 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Some real activity in the workspace: chats, drafts, feedback, or API calls.",
     ],
     setupSteps: [
-      "Open Platform console › Analytics. Four sections start collapsed: Runtime Clock Metadata, Chat Feedback, Model Activity, and User Usage.",
-      "Expand a section. Each has its own filter: a person picker, From and Through dates, and the presets All, Today, Week, and 30 days. A filter changes only its own section.",
-      "Runtime Clock Metadata: read the Runtime events, Chat, and Drafts totals, and the list of executions with who, which provider, and when.",
-      "Choose CSV on a section, set the CSV date range (or All dates), and choose Download. The file name records the person and range.",
+      "Open Platform owner console › Analytics. Four sections start collapsed: Runtime Clock Metadata, Chat Feedback, Model Activity, and User Usage.",
+      "Expand a section. Each has its own filter: user checkboxes for one person or several, From and Through dates, and the presets All, Today, Week, and 30 days. A filter changes only its own section.",
+      "Runtime Clock Metadata: read the Runtime events, Chat, and Drafts totals, and the list of runs with who, which model and provider, and when. Open a chat run to read its conversation.",
+      "Choose Export on a section, pick Excel workbook or CSV file, set the dates (or All dates), and choose Download. The file name records the person and range.",
       "Chat Feedback: read the totals, then choose Preview on a rating or issue report to open the conversation or report behind it. Manage in Reports opens reported problems in the Reports tab, where they are worked as tickets.",
       "Model Activity: Prompts by model, Prompt trend, and Users by prompt activity, for the section's filter.",
-      "User Usage: Messages, Prompt tokens, Completion tokens, Total tokens, and Models used, then Messages by model, Message trend, and Usage by user. Pick a person in Usage by user to focus the section.",
+      "User Usage: Messages, Prompt tokens, Completion tokens, Total tokens, and Models used, then Messages by model, Message trend, and Usage by user. Tick people in Usage by user to focus the section.",
     ],
     paths: [
       {
-        label: "Export a section as CSV",
+        label: "Export a section",
         steps: [
-          "Runtime Clock Metadata, Chat Feedback, and User Usage each have CSV. The export uses its own date range, separate from the section's filter.",
+          "Runtime Clock Metadata, Chat Feedback, and User Usage each have Export. Excel workbook gives a filterable table; CSV file gives plain text. The export uses its own date range, separate from the section's filter.",
           "Choose All dates or set From and Through, then Download. The button counts the rows it will export.",
           "Columns include the actor id and name, so the file can be filtered by person.",
         ],
       },
       {
-        label: "Focus on one person",
+        label: "Focus on one person or several",
         steps: [
-          "Pick the person in the section's filter, or in User Usage › Usage by user.",
+          "Tick people in the section's filter, or in User Usage › Usage by user.",
           "Totals, charts, and lists in that section all follow the choice; other sections do not change.",
         ],
       },
     ],
     verify: [
-      "The filter line reads, for example, 49 of 119 records, and the totals change to match.",
-      "The CSV downloads with one row per record and a header row (the runtime file starts id, actor_id, actor_name, surface…).",
+      "The filter line reads, for example, 44 of 99 records, and the totals change to match.",
+      "The file downloads with one row per record under a header row. Excel opens it as a table; the runtime CSV starts id, actor_id, actor_name, surface….",
       "Preview opens the rated conversation with the person's prompt and the saved model output.",
     ],
     troubleshooting: [
       { symptom: "A section shows fewer records than expected.", fix: "Check that section's own filter: person, dates, and preset. Choose All to clear it." },
       { symptom: "Token counts are blank.", fix: "Token counts are provider-reported only; a provider that reports none leaves them blank rather than guessed." },
-      { symptom: "The CSV has a different number of rows from the list.", fix: "The CSV uses its own date range. Set it to match, or choose All dates." },
+      { symptom: "The export has a different number of rows from the list.", fix: "Export uses its own date range. Set it to match, or choose All dates." },
       { symptom: "Chat Feedback says ratings are recorded in this browser.", fix: "The platform API is not connected for feedback; server-side feedback loads when it is." },
     ],
     scenes: [
       {
         title: "Four sections",
-        caption: "Platform console › Analytics: Runtime Clock Metadata, Chat Feedback, Model Activity, and User Usage.",
+        caption: "Platform owner console › Analytics: Runtime Clock Metadata, Chat Feedback, Model Activity, and User Usage.",
         narration:
-          "Open Platform console, then Analytics. Four sections start collapsed: runtime clock metadata, chat feedback, model activity, and user usage. Expand only what you need.",
-        durationSeconds: 13,
+          "Open Platform owner console, then Analytics. Four sections start collapsed: runtime clock metadata, chat feedback, model activity, and user usage. Expand only what you need.",
+        durationSeconds: 14,
         calloutPlacement: "left-rail",
         focus: "analyticsOverview",
       },
       {
         title: "Runtime Clock Metadata",
-        caption: "Totals for runtime events, chat, and drafts, then each execution with who, which provider, and when.",
+        caption: "Totals for runtime events, chat, and drafts, then each run with who, which model and provider, and when.",
         narration:
-          "Runtime Clock Metadata counts every chat and draft execution, using the time the server recorded. Below the totals, each row shows who ran it, which provider answered, and exactly when.",
-        durationSeconds: 14,
+          "Runtime Clock Metadata counts every chat and draft run, using the time the server recorded. Below the totals, each row shows who ran it, which model and provider answered, and exactly when. Where a row offers Open chat, choose it to read that conversation.",
+        durationSeconds: 19,
         calloutPlacement: "left-rail",
         captionPlacement: "top",
         focus: "runtimeScorecards",
       },
       {
         title: "Scope it to one person",
-        caption: "Each section has its own filter: a person, From and Through, and All, Today, Week, or 30 days.",
+        caption: "Each section has its own filter: people, From and Through, and All, Today, Week, or 30 days.",
         narration:
-          "Every section has its own filter. Here it is set to Jane Smith and the last thirty days, so the line reads forty nine of one hundred nineteen records, and the totals follow. Other sections keep their own filters.",
+          "Every section has its own filter. Here Jane Smith is ticked and the last thirty days are chosen, so the line reads forty four of ninety nine records, and the totals follow. Other sections keep their own filters.",
         durationSeconds: 15,
         calloutPlacement: "left-rail",
         focus: "analyticsFilters",
       },
       {
-        title: "Export as CSV",
-        caption: "CSV opens its own date range. Download exports the rows, with actor id and name on each.",
+        title: "Export the section",
+        caption: "Export offers Excel or CSV with its own date range. Download writes the rows, with actor id and name on each.",
         narration:
-          "Choose C S V. The export has its own date range, so choose All dates or set From and Through, then Download. The file carries the actor's I D and name on every row, and its name records the person and range.",
-        durationSeconds: 16,
+          "Choose Export, and pick Excel workbook or C S V file. The export has its own date range, so choose All dates or set From and Through, then Download. The file carries the actor's I D and name on every row, and its name records the person and range.",
+        durationSeconds: 18,
         calloutPlacement: "left-rail",
         focus: "runtimeCsv",
       },
@@ -3082,10 +3082,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Focus on one person",
-        caption: "Pick a person in Usage by user, and the whole section follows.",
+        caption: "Tick people in Usage by user, and the whole section follows.",
         narration:
-          "Pick a person in Usage by user, and the whole section focuses on them: their totals, their models, and their trend.",
-        durationSeconds: 9,
+          "Tick one person or several in Usage by user, then choose Done. The whole section focuses on them: their totals, their models, and their trend.",
+        durationSeconds: 11,
         calloutPlacement: "left-rail",
         focus: "usageByUser",
       },
@@ -3110,7 +3110,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Your organization's rule for sending redacted text outside the deployment. Nothing is sent until an owner chooses it.",
     ],
     setupSteps: [
-      "Open Platform console › Reports. Tickets lists every organization's reports; use Needs reply, Open, Closed, and All, the search box, and the status and type filters.",
+      "Open Platform owner console › Reports. Tickets lists every organization's reports; use Needs reply, Open, Closed, and All, the search box, and the status and type filters.",
       "Choose Settings. Under Sharing with the Aperture Chat maintainers, keep Review each report (the default), or choose Share automatically or Off.",
       "Optional: under Support assistant, choose a Model. It rewrites reports for sharing and only ever sees text that was already redacted.",
       "Under Updates for the people who report, keep Email reporters when support replies or changes the status on (it emails only once SMTP is set up in Alerts).",
@@ -3163,7 +3163,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     verify: [
       "The ticket's card reads With the maintainers, Shared … by you, and the activity shows Shared with the Aperture Chat maintainers. You'll see their progress here.",
       "In Help › My reports, the reporter's ticket shows With the maintainers and Shared with the Aperture Chat maintainers.",
-      "Platform console › Audit records support.issue_shared_upstream for the ticket.",
+      "Platform owner console › Audit records support.issue_shared_upstream for the ticket.",
       "Once the maintainers file the issue, the card reads Tracked on GitHub · #N open (#N fixed when it is closed as completed), and the reporter sees The maintainers are tracking this as GitHub issue #N.",
     ],
     troubleshooting: [
@@ -3195,9 +3195,9 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "The Reports tab",
-        caption: "Platform console › Reports: Tickets, Community hub, and Settings, with Needs reply, Open, Closed, and All.",
+        caption: "Platform owner console › Reports: Tickets, Community hub, and Settings, with Needs reply, Open, Closed, and All.",
         narration:
-          "Open Platform console, then Reports. Tickets lists every organization's reports, newest first. Filter by Needs reply, Open, Closed, or All, search by subject, person, or number, and narrow by status or type. Jane Smith has just sent an idea.",
+          "Open Platform owner console, then Reports. Tickets lists every organization's reports, newest first. Filter by Needs reply, Open, Closed, or All, search by subject, person, or number, and narrow by status or type. Jane Smith has just sent an idea.",
         durationSeconds: 19,
         calloutPlacement: "left-rail",
         focus: "rpTickets",
@@ -3358,17 +3358,17 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     outcomes: [
       "Signals that need attention are opened and their records read",
       "A security alert is reviewed and acknowledged",
-      "The audit trail is filtered and exported as CSV",
+      "The audit trail is filtered and exported to Excel or CSV",
     ],
     prerequisites: ["A platform owner account."],
     setupSteps: [
-      "Open Platform console › Audit. Owner Audit opens first, with a banner counting the signals that need attention.",
+      "Open Platform owner console › Audit. Owner Audit opens first, with a banner counting the signals that need attention.",
       "Read the four groups: Security signals, Identity & access, Providers & secrets, and Models, connectors & automations. Red rows need attention.",
       "Select any row to open an Audit investigation listing the exact records behind the number. Use Filter investigation records, then press Escape to close.",
       "In Audit Insights, choose 7 days, 14 days, or 30 days. Select any bar or point to open its records the same way.",
       "Expand Security Alerts. Review each redacted snippet and choose Acknowledge once it is handled, or Reopen to bring it back.",
       "Expand Audit Trail. Filter by severity and category, or search actions, people, and targets.",
-      "Choose CSV, set the CSV date range (or All dates), and choose Download. The file contains exactly the rows that match your filters.",
+      "Choose Export, pick Excel workbook or CSV file, set the dates (or All dates), and choose Download. The file contains exactly the rows that match your filters.",
     ],
     paths: [
       {
@@ -3390,19 +3390,19 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     verify: [
       "Each investigation's count matches the number on the signal or bar you selected.",
       "The acknowledged alert shows Acknowledged with a Reopen button, and the active count goes down by one.",
-      "The audit CSV downloads with a header row (id, created_at, tenant_id, actor_id, actor_name, actor_role, action…) and one row per filtered event.",
+      "The file downloads with a header row and one row per filtered event; the audit CSV starts id, created_at, tenant_id, actor_id, actor_name, actor_role, action….",
     ],
     troubleshooting: [
       { symptom: "An investigation lists fewer records than expected.", fix: "It reflects the currently loaded audit range. Widen the Audit Insights range, or open the Audit Trail with its own dates." },
-      { symptom: "The CSV is missing events you can see elsewhere.", fix: "The export follows the trail's filters and its own date range. Clear the severity or category filter, or choose All dates." },
+      { symptom: "The export is missing events you can see elsewhere.", fix: "The export follows the trail's filters and its own date range. Clear the severity or category filter, or choose All dates." },
       { symptom: "A security alert keeps reappearing.", fix: "Acknowledge marks one alert as handled; new prompts that trip the same detector raise new alerts. Use an alert rule to be emailed about them." },
     ],
     scenes: [
       {
         title: "What needs attention",
-        caption: "Platform console › Audit: the banner counts signals that need attention, in four groups.",
+        caption: "Platform owner console › Audit: the banner counts signals that need attention, in four groups.",
         narration:
-          "Open Platform console, then Audit. Owner Audit opens with a banner counting the signals that need attention, here eight of twenty four. Signals are grouped into security, identity and access, providers and secrets, and models, connectors, and automations. Red rows need a look.",
+          "Open Platform owner console, then Audit. Owner Audit opens with a banner counting the signals that need attention, here eight of twenty four. Signals are grouped into security, identity and access, providers and secrets, and models, connectors, and automations. Red rows need a look.",
         durationSeconds: 20,
         calloutPlacement: "left-rail",
         captionPlacement: "top",
@@ -3474,10 +3474,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Export what you see",
-        caption: "CSV › Download exports exactly the filtered rows, with actor id, name, and role on each.",
+        caption: "Export › Download writes exactly the filtered rows, with actor id, name, and role on each.",
         narration:
-          "Choose C S V, set the date range or keep all dates, and choose Download. The file contains exactly the rows that match your filters, with the actor's I D, name, and role on every event.",
-        durationSeconds: 14,
+          "Choose Export, pick Excel workbook or C S V file, set the date range or keep all dates, and choose Download. The file contains exactly the rows that match your filters, with the actor's I D, name, and role on every event.",
+        durationSeconds: 17,
         calloutPlacement: "left-rail",
         focus: "trailExport",
       },
@@ -3501,7 +3501,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "A from address the relay allows you to send as, and a mailbox that receives the alerts (for example a security team list).",
     ],
     setupSteps: [
-      "Open Platform console › Alerts. Email Delivery is at the top.",
+      "Open Platform owner console › Alerts. Email Delivery is at the top.",
       "Enter the SMTP host, Port, and Security (STARTTLS on 587, or SSL/TLS on 465), the Username, the Password, and the From address.",
       "Choose Save Email Settings and wait for SMTP settings saved. The password is stored in the encrypted vault and never shown again.",
       "Enter a recipient beside Send test email and choose it. Read the result: Test email sent to … or the relay's exact error.",
@@ -3593,9 +3593,9 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       },
       {
         title: "Email Delivery",
-        caption: "Platform console › Alerts › Email Delivery: host, port, security, username, password, and from address.",
+        caption: "Platform owner console › Alerts › Email Delivery: host, port, security, username, password, and from address.",
         narration:
-          "Open Platform console, then Alerts. Email Delivery holds the relay settings. Until it is filled in, alerts are only logged inside Aperture Chat.",
+          "Open Platform owner console, then Alerts. Email Delivery holds the relay settings. Until it is filled in, alerts are only logged inside Aperture Chat.",
         durationSeconds: 12,
         calloutPlacement: "left-rail",
         focus: "alertSmtp",
@@ -3702,7 +3702,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
             "Subject: the rule name and the detection.",
             "What happened, the event and severity, who, and when.",
             "The flagged text is not included.",
-            "Review it in Platform console › Audit › Security Alerts, then acknowledge it there.",
+            "Review it in Platform owner console › Audit › Security Alerts, then acknowledge it there.",
           ],
           values: [
             { label: "From", value: "alerts@example.test" },
@@ -3731,7 +3731,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Kibana access with permission to import saved objects.",
     ],
     setupSteps: [
-      "Open Platform console › Org Settings and expand Elastic Analytics. Read the status line at the top.",
+      "Open Platform owner console › Org Settings and expand Elastic Analytics. Read the status line at the top.",
       "Paste the Elasticsearch endpoint (for example https://your-cluster.example:9200) or your Elastic Cloud deployment's Cloud ID.",
       "Open How do I create an API key?, choose Copy request, and run it in Kibana Dev Tools. Copy the response's encoded value.",
       "Paste the key into API key, and keep or change the Index prefix (aperture by default).",
@@ -3925,7 +3925,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Approval from whoever owns records policy before you save any time limit.",
     ],
     setupSteps: [
-      "Open Platform console › Audit and expand Data Retention, below Recent Governance Activity.",
+      "Open Platform owner console › Audit and expand Data Retention, below Recent Governance Activity.",
       "Schedule and rules: Keep chats for starts at Forever, and Automatic deletion off. Forever never deletes anything.",
       "Under Clients, matters, and regulated records, choose the Source type, enter the Name or reference and its Aliases, separated by commas, and choose Add source to policy.",
       "To consider a time limit, choose 1, 5, 7, or 10 years and choose Preview effect. Read how many chats are old enough, on legal hold, or without a deadline. Do not save until it is approved.",
@@ -3974,10 +3974,10 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     scenes: [
       {
         title: "Find Data Retention",
-        caption: "Platform console › Audit › Data Retention, below Recent Governance Activity.",
+        caption: "Platform owner console › Audit › Data Retention, below Recent Governance Activity.",
         narration:
-          "Retention lives with the audit tools. Open Platform console, then Audit, and expand Data Retention, below Recent Governance Activity.",
-        durationSeconds: 11,
+          "Retention lives with the audit tools. Open Platform owner console, then Audit, and expand Data Retention, below Recent Governance Activity.",
+        durationSeconds: 12,
         calloutPlacement: "left-rail",
         focus: "retentionEntry",
       },

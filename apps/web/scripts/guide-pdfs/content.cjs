@@ -176,7 +176,7 @@ const SECTIONS = [
       p("Use Tab and Shift+Tab to move between controls and Enter or Space to activate the focused control. In a dialog, keyboard focus stays with that dialog. Use its Close or Cancel button, or Escape when available, to return to the control that opened it. Confirmations explain when an action is permanent before you commit it."),
       sub("The bottom of the sidebar"),
       list([
-        "Admin console and Platform console — links shown only to administrators and platform owners (see “Where the consoles live”). Platform owners may also see a Release available notice here.",
+        "Consoles — administrators and platform owners open Admin console and Platform owner console from the account card, not from a sidebar link (see “Where the consoles live”). Platform owners may also see a Release available notice here.",
         "Help — opens the guided walkthrough videos and this downloadable guide.",
         "Dark mode / Light mode and Theme schedule — two small buttons beside Help: the moon or sun switches the appearance instantly, and the clock sets a schedule (see “Light and dark mode” later in this guide).",
         "Install app — appears on phones and tablets, and adds the workspace to your home screen (see “Install the app on your phone”).",
@@ -1292,19 +1292,19 @@ const SECTIONS = [
     summary: "Runtime metadata, feedback, per-user usage, and token budgets for this tenant.",
     blocks: [
       p(
-        "The Analytics tab measures how the organization actually uses the platform. Sections start collapsed behind descriptive headers — click a header to expand one — and each section carries its own filter row pairing a person picker (defaulting to All admins and users) with a date range and its presets (All, Today, Week, 30 days). Scoping one section never narrows another.",
+        "The Analytics tab measures how the organization actually uses the platform. Sections start collapsed behind descriptive headers — click a header to expand one — and each section carries its own filter row pairing user checkboxes (defaulting to All admins and users) with a date range and its presets (All, Today, Week, 30 days). Scoping one section never narrows another.",
       ),
       list([
-        "Runtime Clock Metadata — organization-scoped execution timestamps captured from admin and user Chat and Draft completion events. The cards total runtime events, chat completions, and draft calls. Its CSV includes actor_id and actor_name columns, and when one user is selected the filename gains that user's suffix so exports stay unambiguous.",
+        "Runtime Clock Metadata — organization-scoped execution timestamps captured from admin and user Chat and Draft completion events. The cards total runtime events, chat completions, and draft calls. Its Export includes actor_id and actor_name columns, and when one user is ticked the filename gains that user's name so exports stay unambiguous.",
         "Chat Feedback Analytics — response-level thumbs up and thumbs down signals submitted by tenant admins and users, with totals for overall, positive, and negative feedback.",
         "Model Activity — saved prompt volume by model, date, and person for the selected range, drawn as “Prompts by model”, “Prompt trend”, and “Users by prompt activity”.",
-        "User Usage — durable per-user usage for this organization's admins and users across chat, drafts, agents, automations, and the API gateway. Token counts are provider-reported only and stay blank when a provider reported none. The panel has its own Filter usage by user selector for drilling into one person.",
+        "User Usage — durable per-user usage for this organization's admins and users across chat, drafts, agents, automations, and the API gateway. Token counts are provider-reported only and stay blank when a provider reported none. Tick people in the section's filter, or click a row under Usage by user, to focus the panel on them.",
         "Workspace Usage Budget — a read-only view of the organization's service-managed ceiling and its current UTC accounting period. This panel shows where usage stands without exposing service-level configuration.",
         "Token Allocations — per-user and per-group token caps beneath the workspace ceiling, with Per day, Per week, or Per month UTC resets. The most restrictive applicable cap wins. Choose a user or group, enter a cap, pick the period, and click Set cap. Until you add one, the table says “No allocations yet. Everyone shares the workspace ceiling.”",
       ]),
       note(
         "info",
-        "Every number here comes from saved audit and usage events, and each CSV export button opens its own small date-range popover so a file contains exactly the rows you chose. If a panel has nothing to show, it says so plainly instead of showing sample data.",
+        "Every number here comes from saved audit and usage events, and each Export button opens its own small popover for the file type, Excel workbook or CSV file, and the date range, so a file contains exactly the rows you chose. If a panel has nothing to show, it says so plainly instead of showing sample data.",
       ),
       lesson("admin", "admin-analytics"),
     ],
@@ -1515,7 +1515,7 @@ const SECTIONS = [
     summary: "Grouped signals, Audit Insights trends, prompt monitoring, security alerts, and the tenant trail.",
     blocks: [
       p(
-        "The Audit tab is the tenant's governance station. It opens on Admin Audit and Audit Insights, while the sections below start collapsed; click a section header to expand it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing a person picker with a date range, so one section's scope never narrows another. The CSV export buttons produce files of exactly the filtered rows, including actor_id and actor_name columns, so every exported row names who acted.",
+        "The Audit tab is the tenant's governance station. It opens on Admin Audit and Audit Insights, while the sections below start collapsed; click a section header to expand it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing user checkboxes with a date range, so one section's scope never narrows another. The Export buttons produce Excel or CSV files of exactly the filtered rows, including actor_id and actor_name columns, so every exported row names who acted.",
       ),
       sub("Admin Audit signals"),
       list([
@@ -1537,7 +1537,7 @@ const SECTIONS = [
         "Recent Governance Activity: the current tenant snapshot for identity, user, model, and connector posture: how many SSO configurations are enforced, how many users are active, and how many connectors are enabled.",
         "User Prompt Activity: drill into saved prompts from this organization's admins and users and their model responses by person, thread, model, and timestamp, scoped by the section's own user and date filter.",
         "Security Alerts: DLP and malicious-behavior flags raised from admin and user prompts, shown with redacted snippets for review. Click Acknowledge once an alert is handled, or Reopen if it needs another look.",
-        "Audit Trail: the tenant's append-only transaction log, newest first. Its toolbar has a severity select, an action-category select, and a search box (Search actions, people, targets…) that narrow the rows together; the trail's CSV exports exactly the rows you are looking at. Click Refresh to reload it straight from the admin audit API.",
+        "Audit Trail: the tenant's append-only transaction log, newest first. Its toolbar has a severity select, an action-category select, and a search box (Search actions, people, targets…) that narrow the rows together; the trail's Export writes exactly the rows you are looking at. Click Refresh to reload it straight from the admin audit API.",
       ]),
       note(
         "info",
@@ -1570,7 +1570,7 @@ const SECTIONS = [
       ]),
       sub("Alert Deliveries"),
       p(
-        "Every alert trigger is listed with its real delivery status: sent, queued, failed with the actual SMTP error, email not configured, or logged in-app. The log exports to CSV, archived deliveries included. Click Archive on a delivery to clear it from the default view — its history is kept, and Show archived reveals archived deliveries so you can review or Restore them. Tenant admins can archive their tenant's deliveries only.",
+        "Every alert trigger is listed with its real delivery status: sent, queued, failed with the actual SMTP error, email not configured, or logged in-app. Export downloads the log as an Excel workbook or a CSV file, archived deliveries included. Click Archive on a delivery to clear it from the default view — its history is kept, and Show archived reveals archived deliveries so you can review or Restore them. Tenant admins can archive their tenant's deliveries only.",
       ),
       lesson("admin", "admin-alerts"),
     ],
@@ -1705,7 +1705,7 @@ const SECTIONS = [
       table(
         ["Where", "Who", "Use it for"],
         [
-          ["Platform console › Org Settings › Single Sign-On", "Platform owners", "The organization's main provider: issuer, client, domains, provisioning, the platform authenticator rule, and enforcement."],
+          ["Platform owner console › Org Settings › Single Sign-On", "Platform owners", "The organization's main provider: issuer, client, domains, provisioning, the platform authenticator rule, and enforcement."],
           ["Admin console › SSO", "Owners, and admins when Policy Controls allows", "Every provider for the tenant as a card: Test connection, IdP group mapping, enforcement, and extra providers for other domains."],
         ],
       ),
@@ -1759,7 +1759,7 @@ const SECTIONS = [
           ["WorkOS dashboard › API Keys", "The client ID and an API key. Staging and production environments have separate keys."],
           ["WorkOS dashboard › Redirects", "The redirect URI from Single Sign-On, and after saving, the Initiate login URI. Production requires HTTPS."],
           ["WorkOS dashboard › Organizations", "Each organization, its verified domain, and its SSO connection (or an Admin Portal invitation for its IT team)."],
-          ["Platform console › Org Settings › Single Sign-On", "Protocol WorkOS AuthKit, the client ID, the API key, an optional organization ID, allowed domains, provisioning, and enforcement."],
+          ["Platform owner console › Org Settings › Single Sign-On", "Protocol WorkOS AuthKit, the client ID, the API key, an optional organization ID, allowed domains, provisioning, and enforcement."],
           ["Admin console › SSO", "The same configuration as a card (Identity provider › WorkOS (AuthKit)), Test connection, and WorkOS role mapping."],
         ],
       ),
@@ -1926,13 +1926,13 @@ const SECTIONS = [
     summary: "Authoritative execution timestamps, feedback, prompt volume, and per-user usage.",
     blocks: [
       p(
-        "The Analytics tab carries four panels, and each panel scopes itself: a filter row at the top of every section pairs a user picker with a date range and its presets (All, Today, Week, 30 days), so narrowing one section never hides data in another. The filter's counter reads how many records the scope selected — for example “65 of 65 records”. Three panels carry their own CSV export controls, and each CSV button opens an independent date-range popover so a file contains exactly the rows you chose.",
+        "The Analytics tab carries four panels, and each panel scopes itself: a filter row at the top of every section pairs user checkboxes with a date range and its presets (All, Today, Week, 30 days), so narrowing one section never hides data in another. The filter's counter reads how many records the scope selected — for example “99 of 99 records”. Three panels carry their own Export button, and each one opens an independent popover for the file type and date range, so a file contains exactly the rows you chose.",
       ),
       list([
         "Runtime Clock Metadata — authoritative execution timestamps captured from chat and draft completion audit events, not client guesses. The scorecards total the runtime events, split between main chat completions and draft generation and revision calls, and each event lists who ran it, which provider served it, how many messages were involved, and the exact client start time.",
         "Chat Feedback Analytics — response-level thumbs up and thumbs down signals submitted from chat actions, totaled by sentiment.",
         "Model Activity — saved prompt volume by model, date, and user for its filter's scope, drawn as “Prompts by model”, “Prompt trend”, and “Users by prompt activity”.",
-        "User Usage — durable per-user usage from real completions across chat, drafts, agents, automations, and the API gateway, with provider-reported token counts only. The owner view is the complete one: its user picker reads All owners, admins, and users — unlike the admin console's version, which excludes platform-owner usage. The Usage by user section at the bottom ranks everyone in a contained, scrollable list; pick a person from its selector — or click their row — to focus the whole panel on them.",
+        "User Usage — durable per-user usage from real completions across chat, drafts, agents, automations, and the API gateway, with provider-reported token counts only. The owner view is the complete one: its user filter reads All owners, admins, and users — unlike the admin console's version, which excludes platform-owner usage. The Usage by user section at the bottom ranks everyone in a contained, scrollable list; tick people in its filter — or click a row to add or remove them — to focus the whole panel on them.",
       ]),
       lesson("owner", "runtime-analytics"),
     ],
@@ -1944,7 +1944,7 @@ const SECTIONS = [
     title: "Reports: share tickets with the Aperture Chat maintainers",
     summary: "Work tickets across the platform and send redacted copies to the maintainers' community hub.",
     blocks: [
-      p("Platform console → Reports has Tickets, Community hub, and Settings. Tickets works like the administrators' Reports tab (see “Reports: work support tickets”), across every workspace, and adds a card for sharing a ticket with the Aperture Chat maintainers so it can be tracked as a GitHub issue — without a GitHub account on this platform."),
+      p("Platform owner console → Reports has Tickets, Community hub, and Settings. Tickets works like the administrators' Reports tab (see “Reports: work support tickets”), across every workspace, and adds a card for sharing a ticket with the Aperture Chat maintainers so it can be tracked as a GitHub issue — without a GitHub account on this platform."),
       sub("Choose how sharing works"),
       list([
         "In Settings → Sharing with the Aperture Chat maintainers, choose Review each report (recommended: nothing leaves until an owner reviews the redacted text and sends it), Share automatically (every new report except security concerns is redacted and sent), or Off (reports stay on this platform).",
@@ -1992,7 +1992,7 @@ const SECTIONS = [
     summary: "Grouped signals, Audit Insights trends, prompt monitoring, security alerts, and the platform trail.",
     blocks: [
       p(
-        "The Audit tab opens on Owner Audit and Audit Insights; the sections below start collapsed, and clicking a section header expands it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing a user picker with a date range, so one section's scope never narrows another. The CSV export buttons produce files of exactly the filtered rows, with actor columns, so every exported row names who acted.",
+        "The Audit tab opens on Owner Audit and Audit Insights; the sections below start collapsed, and clicking a section header expands it. User Prompt Activity, Security Alerts, and the Audit Trail each carry their own filter row pairing user checkboxes with a date range, so one section's scope never narrows another. The Export buttons produce Excel or CSV files of exactly the filtered rows, with actor columns, so every exported row names who acted.",
       ),
       sub("Owner Audit signals"),
       p(
@@ -2050,7 +2050,7 @@ const SECTIONS = [
       ]),
       sub("Alert Deliveries"),
       p(
-        "Every alert trigger is listed with its real delivery status — sent, queued, failed with the actual SMTP error, email not configured, or logged in-app — and the log exports to CSV, archived deliveries included. Click Archive on a delivery to clear it from the default view without deleting its history; Show archived reveals archived deliveries for review or Restore. Owners can archive any delivery, platform-scope ones included.",
+        "Every alert trigger is listed with its real delivery status — sent, queued, failed with the actual SMTP error, email not configured, or logged in-app — and Export downloads the log as an Excel workbook or a CSV file, archived deliveries included. Click Archive on a delivery to clear it from the default view without deleting its history; Show archived reveals archived deliveries for review or Restore. Owners can archive any delivery, platform-scope ones included.",
       ),
       lesson("owner", "owner-alerts"),
     ],

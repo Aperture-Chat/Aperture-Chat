@@ -52,6 +52,19 @@ const AdminDocumentationModal = lazyWithReload("admin-documentation", () =>
   import("./AdminTrainingVideos").then((module) => ({ default: module.AdminDocumentationModal })),
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
+import {
+  AUDIT_TRAIL_EXPORT_COLUMNS,
+  CHAT_FEEDBACK_EXPORT_COLUMNS,
+  PROMPT_ACTIVITY_EXPORT_COLUMNS,
+  RUNTIME_ANALYTICS_EXPORT_COLUMNS,
+  USAGE_RECORD_EXPORT_COLUMNS,
+  type FeedbackDisplayItem,
+} from "../lib/consoleExportColumns";
+import { runtimeRecordsFromAudit, runtimeThreadIds } from "../lib/runtimeRecords";
+import { useThreadTitles } from "../lib/threadTitles";
+import { ActivityPersonCard } from "./ActivityPersonCard";
+import { DataExportControl } from "./DataExportControl";
+import { RuntimeRecordList } from "./RuntimeRecordList";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
 import { renderConcealed } from "./ConcealedText";
 import { IssueReportPreview } from "./IssueReportPreview";
@@ -143,6 +156,8 @@ import { UserAvatar } from "./UserAvatar";
 import {
   EMPTY_SECTION_SCOPE,
   SectionScopeFilter,
+  scopeFilenamePart,
+  toggleScopeUser,
   sectionScopeMatch,
   timestampInDateRange,
   type SectionScope,
@@ -325,182 +340,12 @@ type AdminMutationOptions<T> = {
   failureMessage: string;
 };
 
-type RuntimeAuditRow = {
-  id: string;
-  surface: "chat" | "draft";
-  title: string;
-  detail: string;
-  metadata: string;
-  executedAt: string;
-  actorRole: string;
-  actorId: string;
-  actorName: string;
-};
-
-type CsvValue = string | number | boolean | null | undefined;
-type CsvColumn<T> = {
-  header: string;
-  value: (item: T) => CsvValue;
-};
-
 const ACTION_TONE_LABELS: Record<ActionTone, string> = {
   info: "Syncing",
   success: "Synced",
   warning: "Local",
   danger: "Error",
 };
-
-const RUNTIME_ANALYTICS_CSV_COLUMNS: Array<CsvColumn<RuntimeAuditRow>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "actor_id", value: (item) => item.actorId },
-  { header: "actor_name", value: (item) => item.actorName },
-  { header: "surface", value: (item) => item.surface },
-  { header: "title", value: (item) => item.title },
-  { header: "detail", value: (item) => item.detail },
-  { header: "metadata", value: (item) => item.metadata },
-  { header: "executed_at", value: (item) => item.executedAt },
-];
-
-type FeedbackDisplayItem = ChatFeedbackEvent & { comment?: string };
-
-const CHAT_FEEDBACK_CSV_COLUMNS: Array<CsvColumn<FeedbackDisplayItem>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
-  { header: "rating", value: (item) => item.rating },
-  { header: "comment", value: (item) => item.comment ?? "" },
-  { header: "thread_id", value: (item) => item.thread_id },
-  { header: "thread_title", value: (item) => item.thread_title },
-  { header: "message_id", value: (item) => item.message_id },
-  { header: "model_id", value: (item) => item.model_id },
-  { header: "user_id", value: (item) => item.user_id },
-  { header: "user_name", value: (item) => item.user_name },
-  { header: "message_preview", value: (item) => item.message_preview },
-];
-
-const AUDIT_TRAIL_CSV_COLUMNS: Array<CsvColumn<AuditEvent>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
-  { header: "tenant_id", value: (item) => item.tenant_id ?? "" },
-  { header: "actor_id", value: (item) => item.actor_id },
-  { header: "actor_name", value: (item) => item.actor_name },
-  { header: "actor_role", value: (item) => item.actor_role },
-  { header: "action", value: (item) => item.action },
-  { header: "action_type", value: (item) => item.action_type },
-  { header: "target", value: (item) => item.target },
-  { header: "target_type", value: (item) => item.target_type },
-  { header: "target_name", value: (item) => item.target_name },
-  { header: "detail", value: (item) => item.detail },
-  { header: "severity", value: (item) => item.severity ?? "" },
-  { header: "severity_reason", value: (item) => item.severity_reason ?? "" },
-  { header: "redacted", value: (item) => item.redacted },
-  { header: "metadata_json", value: (item) => JSON.stringify(item.metadata ?? {}) },
-];
-
-const USAGE_RECORD_CSV_COLUMNS: Array<CsvColumn<UsageRecord>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
-  { header: "user_id", value: (item) => item.user_id },
-  { header: "user_name", value: (item) => item.user_name },
-  { header: "user_role", value: (item) => item.user_role },
-  { header: "model_id", value: (item) => item.model_id },
-  { header: "provider_name", value: (item) => item.provider_name },
-  { header: "surface", value: (item) => item.surface },
-  { header: "message_count", value: (item) => item.message_count },
-  { header: "prompt_tokens", value: (item) => item.prompt_tokens ?? "" },
-  { header: "completion_tokens", value: (item) => item.completion_tokens ?? "" },
-  { header: "total_tokens", value: (item) => item.total_tokens ?? "" },
-  { header: "thread_id", value: (item) => item.thread_id ?? "" },
-  { header: "source", value: (item) => item.source },
-];
-
-const PROMPT_ACTIVITY_CSV_COLUMNS: Array<CsvColumn<UserPromptRecord>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at_iso || item.created_at },
-  { header: "user_id", value: (item) => item.user_id },
-  { header: "user_name", value: (item) => item.user_name },
-  { header: "user_email", value: (item) => item.user_email },
-  { header: "user_role", value: (item) => item.user_role ?? "" },
-  { header: "thread_id", value: (item) => item.thread_id },
-  { header: "thread_title", value: (item) => item.thread_title },
-  { header: "model_id", value: (item) => item.model_id },
-  { header: "active_alert_count", value: (item) => item.alert_count },
-  { header: "prompt", value: (item) => item.content },
-  { header: "response", value: (item) => item.response_content ?? "" },
-  { header: "response_status", value: (item) => item.response_status ?? "" },
-  { header: "response_truncated", value: (item) => item.response_truncated ?? false },
-];
-
-function CsvExportControl<T>({
-  label,
-  filenameBase,
-  items,
-  getTimestamp,
-  columns,
-}: {
-  label: string;
-  filenameBase: string;
-  items: T[];
-  getTimestamp: (item: T) => string;
-  columns: Array<CsvColumn<T>>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [fromDate, setFromDate] = useState("");
-  const [throughDate, setThroughDate] = useState("");
-  const filteredItems = useMemo(
-    () => items.filter((item) => timestampInDateRange(getTimestamp(item), fromDate, throughDate)),
-    [fromDate, getTimestamp, items, throughDate],
-  );
-  const rangeLabel = csvRangeLabel(fromDate, throughDate);
-
-  function download() {
-    downloadCsvFile(`${filenameBase}-${rangeLabel}.csv`, rowsToCsv(filteredItems, columns));
-    setOpen(false);
-  }
-
-  return (
-    <div className="csv-export-control">
-      <button
-        className="secondary-button compact"
-        type="button"
-        data-tooltip={`Choose a date range and download ${label} as CSV`}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Download size={14} /> CSV
-      </button>
-      {open && (
-        <div className="csv-export-popover" role="dialog" aria-label={`${label} CSV date range`}>
-          <strong>Export {label}</strong>
-          <label>
-            From
-            <input
-              type="date"
-              aria-label={`${label} start date`}
-              value={fromDate}
-              onChange={(event) => setFromDate(event.target.value)}
-            />
-          </label>
-          <label>
-            Through
-            <input
-              type="date"
-              aria-label={`${label} end date`}
-              value={throughDate}
-              onChange={(event) => setThroughDate(event.target.value)}
-            />
-          </label>
-          <div className="csv-export-actions">
-            <button className="secondary-button compact" type="button" onClick={() => { setFromDate(""); setThroughDate(""); }}>
-              All dates
-            </button>
-            <button className="primary-button compact" type="button" onClick={download}>
-              Download {filteredItems.length.toLocaleString()} row{filteredItems.length === 1 ? "" : "s"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export type AdminConsoleApi = {
   listAuditEvents?: (actorUserId: string, context: AdminMutationContext) => Promise<AuditEvent[] | void>;
@@ -511,6 +356,11 @@ export type AdminConsoleApi = {
   ) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
   /** Loads every saved exchange of one chat thread so the audit preview can
    * show the full conversation, not just the clicked record. */
+  listThreadTitles?: (
+    actorUserId: string,
+    threadIds: string[],
+    context: AdminMutationContext,
+  ) => Promise<Record<string, string> | void> | Record<string, string> | void;
   listThreadPromptActivity?: (
     actorUserId: string,
     threadId: string,
@@ -529,12 +379,12 @@ export type AdminConsoleApi = {
   ) => Promise<SecurityAlert | void> | SecurityAlert | void;
   getUsageSummary?: (
     actorUserId: string,
-    options: { targetUserId?: string; fromDate?: string; throughDate?: string },
+    options: { targetUserIds?: string[]; fromDate?: string; throughDate?: string },
     context: AdminMutationContext,
   ) => Promise<UsageSummary | void> | UsageSummary | void;
   listUsageRecords?: (
     actorUserId: string,
-    targetUserId: string | undefined,
+    targetUserIds: string[] | undefined,
     context: AdminMutationContext,
   ) => Promise<UsageRecord[] | void> | UsageRecord[] | void;
   listAlertRules?: (actorUserId: string, context: AdminMutationContext) => Promise<AlertRule[] | void>;
@@ -1016,20 +866,37 @@ export function AdminConsole({
     () => adminAuditUsers.map((user) => ({ id: user.id, label: user.display_name || user.email })),
     [adminAuditUsers],
   );
-  const promptScopeUser = promptScope.userId === "all"
-    ? null
-    : adminAuditUsers.find((user) => user.id === promptScope.userId) ?? null;
-  const usageScopeUser = usageScope.userId === "all"
-    ? null
-    : adminAuditUsers.find((user) => user.id === usageScope.userId) ?? null;
-  const selectedUsageUserParam = usageScope.userId === "all" ? undefined : usageScope.userId;
+  const promptScopeUser =
+    promptScope.userIds.length === 1
+      ? (adminAuditUsers.find((user) => user.id === promptScope.userIds[0]) ?? null)
+      : null;
+  const usageScopeUser =
+    usageScope.userIds.length === 1
+      ? (adminAuditUsers.find((user) => user.id === usageScope.userIds[0]) ?? null)
+      : null;
+  const selectedUsageUserIds = usageScope.userIds;
   const adminVisibleAuditTrailRows = useMemo(
     () => (auditTrail ?? []).filter((item) => item.actor_role !== "PLATFORM_OWNER"),
     [auditTrail],
   );
+  const runtimeThreadList = useMemo(
+    () => (activeSection === "analytics" ? runtimeThreadIds(adminVisibleAuditTrailRows) : []),
+    [activeSection, adminVisibleAuditTrailRows],
+  );
+  const listRuntimeThreadTitles = useMemo(() => {
+    const listThreadTitles = adminApi?.listThreadTitles;
+    if (!listThreadTitles) return undefined;
+    return (threadIds: string[]) => listThreadTitles(data.me.id, threadIds, mutationContext);
+  }, [adminApi?.listThreadTitles, data.me.id, mutationContext]);
+  const runtimeThreadTitles = useThreadTitles(runtimeThreadList, listRuntimeThreadTitles);
   const runtimeAuditRows = useMemo(
-    () => adminRuntimeAuditRows(adminVisibleAuditTrailRows),
-    [adminVisibleAuditTrailRows],
+    () =>
+      runtimeRecordsFromAudit(adminVisibleAuditTrailRows, {
+        threadTitles: runtimeThreadTitles,
+        modelName: (modelId) => data.models.find((model) => model.id === modelId)?.name ?? modelId,
+        formatTime: formatAdminAuditTimestamp,
+      }),
+    [adminVisibleAuditTrailRows, data.models, runtimeThreadTitles],
   );
   const filteredRuntimeAuditRows = useMemo(
     () => runtimeAuditRows.filter((item) => sectionScopeMatch(runtimeScope, item.executedAt, item.actorId)),
@@ -1158,9 +1025,11 @@ export function AdminConsole({
   }, [usageSummary]);
   const promptActivityExportLabel = promptScopeUser
     ? `${promptScopeUser.display_name} prompt activity`
+    : promptScope.userIds.length > 1
+      ? "selected users prompt activity"
     : "all admin and user prompt activity";
   const promptActivityFilename = `aperture-admin-prompt-activity-${
-    promptScopeUser ? csvFilenamePart(promptScopeUser.display_name || promptScopeUser.id) : "all-admin-users"
+    scopeFilenamePart(promptScope, adminAuditUserOptions) || "all-admin-users"
   }`;
   const modelActivityRows = useMemo(() => buildPromptModelActivityRows(analyticsPromptActivityRows), [analyticsPromptActivityRows]);
   const promptUsageTrendRows = useMemo(() => buildPromptUsageTrendRows(analyticsPromptActivityRows), [analyticsPromptActivityRows]);
@@ -1286,7 +1155,7 @@ export function AdminConsole({
       getUsageSummary(
         data.me.id,
         {
-          targetUserId: selectedUsageUserParam,
+          targetUserIds: selectedUsageUserIds,
           fromDate: usageScope.fromDate || undefined,
           throughDate: usageScope.throughDate || undefined,
         },
@@ -1310,7 +1179,7 @@ export function AdminConsole({
     auditTrailRefreshToken,
     data.me,
     mutationContext,
-    selectedUsageUserParam,
+    selectedUsageUserIds,
     usageScope,
   ]);
 
@@ -1318,7 +1187,7 @@ export function AdminConsole({
     const listUsageRecords = adminApi?.listUsageRecords;
     if (!listUsageRecords) return;
     let active = true;
-    Promise.resolve(listUsageRecords(data.me.id, selectedUsageUserParam, mutationContext))
+    Promise.resolve(listUsageRecords(data.me.id, selectedUsageUserIds, mutationContext))
       .then((records) => {
         if (!active || !records) return;
         setUsageRecords(records);
@@ -1330,7 +1199,7 @@ export function AdminConsole({
     return () => {
       active = false;
     };
-  }, [adminApi?.listUsageRecords, auditTrailRefreshToken, data.me, mutationContext, selectedUsageUserParam]);
+  }, [adminApi?.listUsageRecords, auditTrailRefreshToken, data.me, mutationContext, selectedUsageUserIds]);
 
   useEffect(() => {
     if (!memoryTabVisible) return;
@@ -2764,12 +2633,12 @@ export function AdminConsole({
               </div>
             )}
 
+            <div className="console-table-fit">
             <div className="table-scroll user-table-scroll">
               <table className="data-table user-table user-management-table">
                 <colgroup>
                   <col className="user-table-select-col" />
                   <col className="user-table-name-col" />
-                  <col className="user-table-email-col" />
                   <col className="user-table-role-col" />
                   <col className="user-table-groups-col" />
                   <col className="user-table-auth-col" />
@@ -2781,7 +2650,6 @@ export function AdminConsole({
                   <tr>
                     <th />
                     <th>Name</th>
-                    <th>Email</th>
                     <th>Role</th>
                     <th>Groups</th>
                     <th>Auth</th>
@@ -2823,12 +2691,10 @@ export function AdminConsole({
                             <UserAvatar user={user} className="mini-avatar" />
                             <span>
                               <strong>{user.display_name}</strong>
+                              <small className="table-email">{user.email}</small>
                               {user.firm_name && <small>{user.firm_name}</small>}
                             </span>
                           </span>
-                        </td>
-                        <td data-label="Email">
-                          <span className="table-email">{user.email}</span>
                         </td>
                         <td data-label="Role">
                           <SelectControl
@@ -2947,6 +2813,7 @@ export function AdminConsole({
                   })}
                 </tbody>
               </table>
+            </div>
             </div>
           </Panel>
         </Tabs.Content>
@@ -3067,6 +2934,7 @@ export function AdminConsole({
               </div>
             )}
 
+            <div className="console-table-fit">
             <div className="table-scroll">
               <table className="data-table model-access-table">
                 <thead>
@@ -3280,6 +3148,7 @@ export function AdminConsole({
                 </tbody>
               </table>
             </div>
+            </div>
           </Panel>
         </Tabs.Content>
 
@@ -3453,18 +3322,16 @@ export function AdminConsole({
                   <Clock3 size={18} /> Runtime Clock Metadata
                 </>
               }
-              subtitle="Organization-scoped execution timestamps captured from admin and user Chat and Draft completion events."
+              subtitle="The server's own record of every AI run in this organization: who ran it, which model answered, and exactly when. Use it to confirm activity at a given time. Open a chat run to read that conversation. Draft text stays with its author."
               actions={
-                <CsvExportControl
+                <DataExportControl
                   label="admin runtime analytics"
-                  filenameBase={
-                    runtimeScope.userId === "all"
-                      ? "aperture-admin-runtime-analytics"
-                      : `aperture-admin-runtime-analytics-${runtimeScope.userId}`
-                  }
+                  filenameBase={["aperture-admin-runtime-analytics", scopeFilenamePart(runtimeScope, adminAuditUserOptions)]
+                    .filter(Boolean)
+                    .join("-")}
                   items={filteredRuntimeAuditRows}
                   getTimestamp={(item) => item.executedAt}
-                  columns={RUNTIME_ANALYTICS_CSV_COLUMNS}
+                  columns={RUNTIME_ANALYTICS_EXPORT_COLUMNS}
                 />
               }
               defaultCollapsed
@@ -3505,21 +3372,16 @@ export function AdminConsole({
                   </span>
                 </div>
               ) : filteredRuntimeAuditRows.length > 0 ? (
-                <div className="feedback-event-list scrollable-log-list" aria-label="Admin runtime clock events">
-                  {filteredRuntimeAuditRows.map((item) => (
-                    <div className="feedback-event-row" key={item.id}>
-                      <span className="feedback-icon is-positive">
-                        <Clock3 size={15} />
-                      </span>
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>{item.detail}</small>
-                        <p>{item.metadata}</p>
-                      </span>
-                      <time dateTime={item.executedAt}>{formatAdminAuditTimestamp(item.executedAt)}</time>
-                    </div>
-                  ))}
-                </div>
+                <RuntimeRecordList
+                  records={filteredRuntimeAuditRows}
+                  ariaLabel="Admin runtime clock events"
+                  formatTime={formatAdminAuditTimestamp}
+                  loadThreadRecords={
+                    listThreadPromptActivity
+                      ? (threadId) => listThreadPromptActivity(data.me.id, threadId, mutationContext)
+                      : undefined
+                  }
+                />
               ) : (
                 <div className="audit-empty-state">
                   <Clock3 size={20} />
@@ -3544,12 +3406,12 @@ export function AdminConsole({
                   : "Thumbs ratings recorded in this browser. Server-side feedback and issue reports load when the admin API is connected."
               }
               actions={
-                <CsvExportControl
+                <DataExportControl
                   label="admin chat feedback analytics"
                   filenameBase="aperture-admin-chat-feedback"
                   items={filteredChatFeedback}
                   getTimestamp={(item) => item.created_at}
-                  columns={CHAT_FEEDBACK_CSV_COLUMNS}
+                  columns={CHAT_FEEDBACK_EXPORT_COLUMNS}
                 />
               }
               defaultCollapsed
@@ -3858,17 +3720,15 @@ export function AdminConsole({
                         {promptUserRows.length} active user{promptUserRows.length === 1 ? "" : "s"}
                       </small>
                     </div>
-                    <div className="model-user-activity-list">
+                    <div className="model-user-activity-list" role="list">
                       {promptUserRows.map((row) => (
-                        <div className="model-user-activity-row" key={row.userId}>
-                          <span>
-                            <strong>{row.userName}</strong>
-                            <small>
-                              {row.modelCount} model{row.modelCount === 1 ? "" : "s"} used
-                            </small>
-                          </span>
-                          <b>{row.promptCount}</b>
-                        </div>
+                        <ActivityPersonCard
+                          key={row.userId}
+                          name={row.userName}
+                          detail={`${row.modelCount} model${row.modelCount === 1 ? "" : "s"} used`}
+                          count={row.promptCount}
+                          countLabel={row.promptCount === 1 ? "prompt" : "prompts"}
+                        />
                       ))}
                     </div>
                   </section>
@@ -3886,12 +3746,12 @@ export function AdminConsole({
               subtitle="Durable usage for this organization's admins and users across chat, drafts, agents, automations, and the API gateway. Token counts are provider-reported only and stay blank when a provider reported none."
               actions={
                 <>
-                  <CsvExportControl
+                  <DataExportControl
                     label="usage records"
                     filenameBase="aperture-admin-usage-records"
                     items={usageRecords}
                     getTimestamp={(item) => item.created_at}
-                    columns={USAGE_RECORD_CSV_COLUMNS}
+                    columns={USAGE_RECORD_EXPORT_COLUMNS}
                   />
                   <button
                     className="secondary-button compact"
@@ -4063,35 +3923,24 @@ export function AdminConsole({
                           </span>
                           <small>
                             {usageSummary.by_user.length.toLocaleString()} user
-                            {usageSummary.by_user.length === 1 ? "" : "s"} · click a row to drill down
+                            {usageSummary.by_user.length === 1 ? "" : "s"} · click a row to add or remove that person
                           </small>
                         </div>
                         <div className="model-user-activity-list scrollable-log-list usage-user-list" role="list">
                           {usageSummary.by_user.map((row) => (
-                            <button
-                              className="model-user-activity-row usage-user-row"
+                            <ActivityPersonCard
                               key={row.user_id}
-                              type="button"
-                              role="listitem"
-                              onClick={() =>
-                                setUsageScope((scope) => ({
-                                  ...scope,
-                                  userId: scope.userId === row.user_id ? "all" : row.user_id,
-                                }))
-                              }
-                              data-tooltip={`Show only ${row.user_name || row.user_id}'s usage`}
-                            >
-                              <span>
-                                <strong>{row.user_name || row.user_id}</strong>
-                                <small>
-                                  {formatAdminAuditRole(row.user_role)} · {row.model_count} model
-                                  {row.model_count === 1 ? "" : "s"} · {row.surfaces.join(", ")} · last active{" "}
-                                  {formatAdminAuditTimestamp(row.last_active_at)}
-                                </small>
-                              </span>
-                              <span className="usage-user-tokens">{formatTokenCount(row.total_tokens)} tokens</span>
-                              <b>{row.message_count}</b>
-                            </button>
+                              name={row.user_name || row.user_id}
+                              detail={`${formatAdminAuditRole(row.user_role)} · ${row.model_count} model${
+                                row.model_count === 1 ? "" : "s"
+                              } · ${row.surfaces.join(", ")} · last active ${formatAdminAuditTimestamp(row.last_active_at)}`}
+                              count={row.message_count}
+                              countLabel={row.message_count === 1 ? "message" : "messages"}
+                              tokensLabel={`${formatTokenCount(row.total_tokens)} tokens`}
+                              onSelect={() => setUsageScope((scope) => toggleScopeUser(scope, row.user_id))}
+                              selected={usageScope.userIds.includes(row.user_id)}
+                              tooltip={`Add or remove ${row.user_name || row.user_id} from the filter`}
+                            />
                           ))}
                         </div>
                       </section>
@@ -4262,12 +4111,12 @@ export function AdminConsole({
               subtitle="Drill into saved prompts from this organization's admins and users by person, thread, model, and timestamp."
               actions={
                 <>
-                  <CsvExportControl
+                  <DataExportControl
                     label={promptActivityExportLabel}
                     filenameBase={promptActivityFilename}
                     items={auditPromptActivityRows}
                     getTimestamp={(item) => item.created_at_iso || item.created_at}
-                    columns={PROMPT_ACTIVITY_CSV_COLUMNS}
+                    columns={PROMPT_ACTIVITY_EXPORT_COLUMNS}
                   />
                   <button
                     className="secondary-button compact"
@@ -4450,12 +4299,12 @@ export function AdminConsole({
               defaultCollapsed
               actions={
                 <>
-                  <CsvExportControl
+                  <DataExportControl
                     label="admin audit trail"
                     filenameBase="aperture-admin-audit-trail"
                     items={visibleAuditTrailRows}
                     getTimestamp={(item) => item.created_at}
-                    columns={AUDIT_TRAIL_CSV_COLUMNS}
+                    columns={AUDIT_TRAIL_EXPORT_COLUMNS}
                   />
                   <button
                     className="secondary-button compact"
@@ -4561,7 +4410,7 @@ export function AdminConsole({
                       {visibleAuditTrailRows.map((event) => {
                         const severity = auditEventSeverity(event);
                         return (
-                          <div className="audit-row" role="listitem" key={event.id}>
+                          <div className="audit-row audit-event-row" role="listitem" key={event.id}>
                             <ListChecks size={17} />
                             <span>
                               <strong>{event.action_type || event.action}</strong>
@@ -5092,43 +4941,6 @@ function canDeleteUser(actor: User, target: User) {
   return canModifyUser(actor, target);
 }
 
-function adminRuntimeAuditRows(events: AuditEvent[]): RuntimeAuditRow[] {
-  return events
-    .map((event) => {
-      const metadata = asRecord(event.metadata);
-      const runtimeContext = asRecord(metadata.runtime_context);
-      const action = event.action || "";
-      const surfaceValue = stringValue(metadata.surface) || stringValue(runtimeContext.surface);
-      const isChatCompletion = action === "chat.completion" || action === "gateway.chat_completion" || action === "gateway.responses";
-      if (!isChatCompletion && !surfaceValue) return null;
-      const surface: "chat" | "draft" = surfaceValue === "draft" ? "draft" : "chat";
-      const executedAt =
-        stringValue(metadata.execution_started_at) ||
-        stringValue(runtimeContext.execution_started_at) ||
-        event.created_at;
-      const clientStartedAt = stringValue(metadata.client_started_at) || stringValue(runtimeContext.client_started_at);
-      const provider = stringValue(metadata.provider) || stringValue(metadata.provider_name) || stringValue(metadata.provider_kind) || "provider";
-      const draftTitle = stringValue(metadata.draft_title) || stringValue(runtimeContext.draft_title);
-      const threadId = stringValue(metadata.thread_id) || stringValue(runtimeContext.thread_id);
-      const messageCount = numberValue(metadata.message_count) ?? numberValue(runtimeContext.message_count);
-      const target = surface === "draft" ? draftTitle || "Draft execution" : threadId || "Chat completion";
-      return {
-        id: event.id,
-        surface,
-        title: surface === "draft" ? "Draft execution" : "Chat completion",
-        detail: `${event.actor_name || event.actor_id} · ${provider}${
-          messageCount ? ` · ${messageCount} message${messageCount === 1 ? "" : "s"}` : ""
-        }`,
-        metadata: `${target}${clientStartedAt ? ` · client started ${formatAdminAuditTimestamp(clientStartedAt)}` : ""}`,
-        executedAt,
-        actorRole: event.actor_role,
-        actorId: event.actor_id,
-        actorName: event.actor_name || event.actor_id,
-      };
-    })
-    .filter((item): item is RuntimeAuditRow => item !== null);
-}
-
 const ADMIN_AUDIT_GROUPS: AuditSummaryGroup[] = [
   { id: "security", label: "Security signals" },
   { id: "identity", label: "Identity & access" },
@@ -5518,16 +5330,6 @@ function formatPromptTrendDate(dateKey: string) {
   }).format(date);
 }
 
-function csvFilenamePart(value: string) {
-  return (
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "selected-user"
-  );
-}
-
 function ModelColumnFilter({
   column,
   tooltip,
@@ -5616,46 +5418,6 @@ function formatFeedbackTimestamp(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-}
-
-function csvRangeLabel(fromDate: string, throughDate: string) {
-  if (fromDate && throughDate) return `${fromDate}_to_${throughDate}`;
-  if (fromDate) return `from_${fromDate}`;
-  if (throughDate) return `through_${throughDate}`;
-  return "all-dates";
-}
-
-function rowsToCsv<T>(items: T[], columns: Array<CsvColumn<T>>) {
-  const header = columns.map((column) => csvEscape(column.header)).join(",");
-  const rows = items.map((item) => columns.map((column) => csvEscape(column.value(item))).join(","));
-  return [header, ...rows].join("\r\n");
-}
-
-function csvEscape(value: CsvValue) {
-  const text = value === null || typeof value === "undefined" ? "" : String(value);
-  if (!/[",\r\n]/.test(text)) return text;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function downloadCsvFile(filename: string, csv: string) {
-  const anchor = document.createElement("a");
-  anchor.download = filename;
-  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
-  if (typeof URL.createObjectURL === "function") {
-    const href = URL.createObjectURL(blob);
-    anchor.href = href;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => {
-      if (typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(href);
-    }, 0);
-    return;
-  }
-  anchor.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
 }
 
 function formatAdminAuditTimestamp(value: string) {

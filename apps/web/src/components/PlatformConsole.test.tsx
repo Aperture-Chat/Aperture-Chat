@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { useState, type ForwardedRef } from "react";
 import { sampleData } from "../data/sampleData";
 import { CHAT_FEEDBACK_STORAGE_KEY, type ChatFeedbackEvent } from "../lib/chatFeedback";
+import { importXlsxWorkbook } from "../lib/sheet/xlsxImport";
 import type {
   AdminSsoConfigUpdateRequest,
   BootstrapData,
@@ -124,6 +125,15 @@ function installCsvDownloadSpy() {
       }
     },
   };
+}
+
+async function readBlobAsBytes(blob: Blob) {
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
 }
 
 async function readBlobAsText(blob: Blob) {
@@ -939,11 +949,12 @@ test("audit tab drills into user prompts and acknowledges security alerts", asyn
   // Data loads once for every user; the per-section pickers narrow client-side.
   await waitFor(() => expect(listPromptActivity).toHaveBeenCalledWith(undefined));
   await waitFor(() => expect(listSecurityAlerts).toHaveBeenCalledWith(undefined));
-  fireEvent.change(screen.getByLabelText("Prompt activity filter user"), { target: { value: "user-jane" } });
   // Owners audit each other: peer platform owners appear in the pickers
   // alongside the signed-in owner, admins, and users.
-  expect(screen.getAllByRole("option", { name: /Second Platform Owner/ }).length).toBeGreaterThan(0);
-  expect(screen.getAllByRole("option", { name: /Aperture Platform Owner/ }).length).toBeGreaterThan(0);
+  const promptFilterNames = filterUserNames("Prompt activity filter user");
+  expect(promptFilterNames).toContain("Second Platform Owner");
+  expect(promptFilterNames).toContain("Aperture Platform Owner");
+  pickFilterUsers("Prompt activity filter user", "Jane Smith");
 
   const promptList = await screen.findByRole("list", { name: "User prompt activity" });
   expect(within(promptList).getByText("Review DLP boundaries")).toBeInTheDocument();
@@ -1111,7 +1122,7 @@ test("audit issue cards, prompt CSV export, and model activity charts follow pro
     expect(within(watchlistDialog).getByText(/Jane Smith.*gpt-4o.*high dlp/i)).toBeInTheDocument();
     fireEvent.click(within(watchlistDialog).getByRole("button", { name: "Close Prompt watchlist investigation" }));
 
-    fireEvent.change(screen.getByLabelText("Prompt activity filter user"), { target: { value: "user-jane" } });
+    pickFilterUsers("Prompt activity filter user", "Jane Smith");
     fireEvent.change(screen.getByLabelText("Prompt activity filter start date"), {
       target: { value: "2026-07-06" },
     });
@@ -1122,13 +1133,14 @@ test("audit issue cards, prompt CSV export, and model activity charts follow pro
     expect(screen.queryByText("Old DLP review")).not.toBeInTheDocument();
     expect(screen.queryByText("Owner model check")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Export Jane Smith prompt activity CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export Jane Smith prompt activity" }));
     fireEvent.change(screen.getByLabelText("Jane Smith prompt activity start date"), {
       target: { value: "2026-07-06" },
     });
     fireEvent.change(screen.getByLabelText("Jane Smith prompt activity end date"), {
       target: { value: "2026-07-06" },
     });
+    fireEvent.click(screen.getByRole("radio", { name: "CSV file" }));
     fireEvent.click(screen.getByRole("button", { name: "Download 1 row" }));
 
     expect(downloadSpy.downloads[0]).toMatchObject({
@@ -1149,7 +1161,7 @@ test("audit issue cards, prompt CSV export, and model activity charts follow pro
     expect(screen.getByLabelText("Users by prompt activity")).toBeInTheDocument();
     expect(screen.getByText("gpt-4o")).toBeInTheDocument();
     // The Model Activity section has its own user + date scope.
-    fireEvent.change(screen.getByLabelText("Model activity filter user"), { target: { value: "user-jane" } });
+    pickFilterUsers("Model activity filter user", "Jane Smith");
     expect(screen.getByText("2 total prompts")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Model activity filter start date"), {
       target: { value: "2026-07-06" },
@@ -1163,7 +1175,7 @@ test("audit issue cards, prompt CSV export, and model activity charts follow pro
   }
 });
 
-test("analytics and audit exports download date-range CSV files and keep long logs scrollable", async () => {
+test("analytics and audit exports download a date range as CSV or Excel and keep long logs scrollable", async () => {
   const feedbackEvents: ChatFeedbackEvent[] = [
     {
       id: "feedback-current",
@@ -1235,13 +1247,14 @@ test("analytics and audit exports download date-range CSV files and keep long lo
     expandPanel("Chat Feedback");
     const feedbackList = await screen.findByLabelText("Chat feedback events");
     expect(feedbackList).toHaveClass("scrollable-log-list");
-    fireEvent.click(screen.getByRole("button", { name: "Export chat feedback analytics CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export chat feedback analytics" }));
     fireEvent.change(screen.getByLabelText("chat feedback analytics start date"), {
       target: { value: "2026-07-01" },
     });
     fireEvent.change(screen.getByLabelText("chat feedback analytics end date"), {
       target: { value: "2026-07-01" },
     });
+    fireEvent.click(screen.getByRole("radio", { name: "CSV file" }));
     fireEvent.click(screen.getByRole("button", { name: "Download 1 row" }));
 
     expect(downloadSpy.downloads[0]).toMatchObject({
@@ -1255,7 +1268,7 @@ test("analytics and audit exports download date-range CSV files and keep long lo
     expandPanel("Audit Trail");
     const trail = await screen.findByRole("list", { name: "Audit events" });
     expect(trail).toHaveClass("scrollable-log-list");
-    fireEvent.click(screen.getByRole("button", { name: "Export audit trail CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export audit trail" }));
     fireEvent.change(screen.getByLabelText("audit trail start date"), {
       target: { value: "2026-07-01" },
     });
@@ -1264,12 +1277,14 @@ test("analytics and audit exports download date-range CSV files and keep long lo
     });
     fireEvent.click(screen.getByRole("button", { name: "Download 1 row" }));
 
+    await waitFor(() => expect(downloadSpy.downloads).toHaveLength(2));
     expect(downloadSpy.downloads[1]).toMatchObject({
-      filename: "aperture-audit-trail-2026-07-01_to_2026-07-01.csv",
+      filename: "aperture-audit-trail-2026-07-01_to_2026-07-01.xlsx",
     });
-    const auditCsv = await readBlobAsText(downloadSpy.downloads[1].blob);
-    expect(auditCsv).toContain("MODEL_DISABLED");
-    expect(auditCsv).not.toContain("PROVIDER_KEY_REVEALED");
+    const { workbook } = await importXlsxWorkbook(await readBlobAsBytes(downloadSpy.downloads[1].blob));
+    const auditCells = JSON.stringify(workbook.sheets[0].cells);
+    expect(auditCells).toContain("MODEL_DISABLED");
+    expect(auditCells).not.toContain("PROVIDER_KEY_REVEALED");
   } finally {
     downloadSpy.restore();
   }
@@ -1881,6 +1896,25 @@ function renderPlatform(
   return render(<Harness />);
 }
 
+/** Ticks people in a section's user filter, then closes it. */
+function pickFilterUsers(filter: string, ...names: string[]) {
+  fireEvent.click(screen.getByRole("button", { name: filter }));
+  const panel = screen.getByRole("dialog", { name: filter });
+  for (const name of names) fireEvent.click(within(panel).getByRole("checkbox", { name }));
+  fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+}
+
+/** The names a section's user filter offers. */
+function filterUserNames(filter: string) {
+  fireEvent.click(screen.getByRole("button", { name: filter }));
+  const panel = screen.getByRole("dialog", { name: filter });
+  const names = within(panel)
+    .getAllByRole("checkbox")
+    .map((box) => box.closest("label")?.textContent ?? "");
+  fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+  return names;
+}
+
 function selectTab(name: string) {
   const tab = screen.getByRole("tab", { name });
   fireEvent.keyDown(tab, { key: "Enter" });
@@ -2236,10 +2270,9 @@ test("owner usage picker includes platform owners", async () => {
 
   // Both the section header picker and the panel filter list the owner.
   expandPanel("User Usage");
-  const usagePicker = await screen.findByLabelText("Focus usage on one user");
-  expect(within(usagePicker).getByText(owner.display_name)).toBeInTheDocument();
-  const usageFilterPicker = screen.getByLabelText("Usage filter user");
-  expect(within(usageFilterPicker).getByText(owner.display_name)).toBeInTheDocument();
+  await screen.findByRole("button", { name: "Focus usage on selected users" });
+  expect(filterUserNames("Focus usage on selected users")).toContain(owner.display_name);
+  expect(filterUserNames("Usage filter user")).toContain(owner.display_name);
 });
 
 // --- Tenant lifecycle, SCIM tokens, and usage budgets -----------------------
@@ -2477,8 +2510,8 @@ test("every analytics and audit section carries its own user and date filter", a
   expandPanel("User Prompt Activity");
   expandPanel("Security Alerts");
   expandPanel("Audit Trail");
-  const promptFilter = await screen.findByLabelText("Prompt activity filter user");
-  expect(within(promptFilter).getByRole("option", { name: "All users" })).toBeInTheDocument();
+  await screen.findByLabelText("Prompt activity filter user");
+  expect(filterUserNames("Prompt activity filter user")).toContain("All users");
   expect(
     document.querySelector('[aria-label="Prompt activity filter"] [aria-label="Prompt activity filter user"]'),
   ).not.toBeNull();

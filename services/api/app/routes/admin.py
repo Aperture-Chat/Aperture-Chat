@@ -143,6 +143,7 @@ from app.models.schemas import (
 from app.repositories.deps import get_store, get_usage_budget_repository
 from app.repositories.application_state import MfaStateConflictError
 from app.repositories.seed import (
+    THREAD_TITLE_LOOKUP_LIMIT,
     LastActiveAdministrativeAccountError,
     SeedStore,
     SessionUserStateError,
@@ -2995,9 +2996,23 @@ def tenant_audit_events(
     return decorate_audit_events(events)
 
 
+def _usage_filter_user_ids(selected: list[str] | None, visible: set[str]) -> set[str]:
+    """The people a usage query covers: everyone visible, or the selection.
+
+    One person outside the viewer's scope refuses the whole query, the same
+    answer a single unknown id gets, so the filter cannot probe for accounts.
+    """
+
+    if not selected:
+        return visible
+    if not set(selected) <= visible:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user.")
+    return set(selected)
+
+
 @router.get("/usage-summary")
 def tenant_usage_summary(
-    user_id: str | None = Query(default=None),
+    user_id: list[str] | None = Query(default=None),
     from_date: str | None = Query(default=None),
     through_date: str | None = Query(default=None),
     actor: User = Depends(current_user),
@@ -3005,13 +3020,10 @@ def tenant_usage_summary(
 ) -> dict[str, object]:
     require_admin_or_owner(actor)
     tenant_id = _admin_tenant_id(actor)
-    visible_user_ids = _admin_visible_user_ids(actor, store)
-    if user_id is not None and user_id not in visible_user_ids:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user.")
+    visible_user_ids = _usage_filter_user_ids(user_id, _admin_visible_user_ids(actor, store))
     records = store.usage_records_filtered(
         tenant_id=tenant_id,
         visible_user_ids=visible_user_ids,
-        user_id=user_id,
         from_date=from_date,
         through_date=through_date,
     )
@@ -3020,20 +3032,17 @@ def tenant_usage_summary(
 
 @router.get("/usage-records")
 def tenant_usage_records(
-    user_id: str | None = Query(default=None),
+    user_id: list[str] | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=2000),
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[UsageRecord]:
     require_admin_or_owner(actor)
     tenant_id = _admin_tenant_id(actor)
-    visible_user_ids = _admin_visible_user_ids(actor, store)
-    if user_id is not None and user_id not in visible_user_ids:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user.")
+    visible_user_ids = _usage_filter_user_ids(user_id, _admin_visible_user_ids(actor, store))
     records = store.usage_records_filtered(
         tenant_id=tenant_id,
         visible_user_ids=visible_user_ids,
-        user_id=user_id,
         newest_first=True,
         limit=limit,
     )
@@ -3531,6 +3540,20 @@ def tenant_prompt_activity(
         tenant_id, user_id=user_id, thread_id=thread_id, limit=None
     )
     return [record for record in records if record.user_id in visible_user_ids][:limit]
+
+
+@router.get("/thread-titles")
+def tenant_thread_titles(
+    thread_id: list[str] = Query(default_factory=list, max_length=THREAD_TITLE_LOOKUP_LIMIT),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, str]:
+    require_admin_or_owner(actor)
+    return store.chat_thread_titles(
+        thread_id,
+        tenant_id=_admin_tenant_id(actor),
+        visible_user_ids=_admin_visible_user_ids(actor, store),
+    )
 
 
 @router.get("/security-alerts")

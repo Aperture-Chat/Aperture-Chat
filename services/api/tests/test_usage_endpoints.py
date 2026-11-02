@@ -251,3 +251,66 @@ def test_personal_summary_matches_the_admin_console_for_the_same_user() -> None:
 
 def test_personal_summary_requires_a_signed_in_user() -> None:
     assert client.get("/api/auth/me/usage-summary").status_code == 401
+
+
+def _usage_user_ids(payload: dict) -> set[str]:
+    return {row["user_id"] for row in payload["by_user"]}
+
+
+def test_usage_summary_filters_to_several_people() -> None:
+    _seed_usage()
+
+    admin_view = client.get(
+        "/api/admin/usage-summary",
+        params={"user_id": ["user-jane", "user-admin"]},
+        headers=headers(),
+    )
+    assert admin_view.status_code == 200
+    assert _usage_user_ids(admin_view.json()) == {"user-jane", "user-admin"}
+
+    owner_view = client.get(
+        "/api/platform/usage-summary",
+        params={"user_id": ["user-jane", "user-owner"]},
+        headers=headers("user-owner"),
+    )
+    assert owner_view.status_code == 200
+    assert _usage_user_ids(owner_view.json()) == {"user-jane", "user-owner"}
+
+
+def test_usage_records_filter_to_several_people() -> None:
+    _seed_usage()
+
+    admin_rows = client.get(
+        "/api/admin/usage-records",
+        params={"user_id": ["user-jane", "user-admin"]},
+        headers=headers(),
+    ).json()
+    assert {row["user_id"] for row in admin_rows} == {"user-jane", "user-admin"}
+
+    owner_rows = client.get(
+        "/api/platform/usage-records",
+        params={"user_id": ["user-jane", "user-owner"]},
+        headers=headers("user-owner"),
+    ).json()
+    assert {row["user_id"] for row in owner_rows} == {"user-jane", "user-owner"}
+
+
+def test_one_person_the_admin_cannot_see_refuses_the_whole_filter() -> None:
+    _seed_usage()
+
+    for path in ("/api/admin/usage-summary", "/api/admin/usage-records"):
+        response = client.get(path, params={"user_id": ["user-jane", "user-owner"]}, headers=headers())
+        assert response.status_code == 404, path
+
+
+def test_no_user_filter_still_covers_everyone_the_viewer_can_see() -> None:
+    _seed_usage()
+
+    admin_ids = _usage_user_ids(client.get("/api/admin/usage-summary", headers=headers()).json())
+    assert "user-jane" in admin_ids
+    assert "user-owner" not in admin_ids
+
+    owner_ids = _usage_user_ids(
+        client.get("/api/platform/usage-summary", headers=headers("user-owner")).json()
+    )
+    assert {"user-jane", "user-owner"} <= owner_ids

@@ -332,6 +332,11 @@ export function listAdminAuditEvents(
   });
 }
 
+export function listAdminThreadTitles(userId: string, threadIds: string[]): Promise<Record<string, string>> {
+  const params = new URLSearchParams(threadIds.map((threadId) => ["thread_id", threadId]));
+  return apiRequest<Record<string, string>>(userId, `/api/admin/thread-titles?${params.toString()}`);
+}
+
 export function listAdminPromptActivity(
   userId: string,
   options: ApiMutationOptions & { targetUserId?: string; threadId?: string; limit?: number } = {},
@@ -381,10 +386,10 @@ export function updateAdminSecurityAlert(
 
 export function getAdminUsageSummary(
   userId: string,
-  options: ApiMutationOptions & { targetUserId?: string; fromDate?: string; throughDate?: string } = {},
+  options: ApiMutationOptions & { targetUserIds?: string[]; fromDate?: string; throughDate?: string } = {},
 ): Promise<UsageSummary> {
   const params = new URLSearchParams();
-  if (options.targetUserId) params.set("user_id", options.targetUserId);
+  for (const targetUserId of options.targetUserIds ?? []) params.append("user_id", targetUserId);
   if (options.fromDate) params.set("from_date", options.fromDate);
   if (options.throughDate) params.set("through_date", options.throughDate);
   const query = params.toString() ? `?${params.toString()}` : "";
@@ -395,10 +400,10 @@ export function getAdminUsageSummary(
 
 export function listAdminUsageRecords(
   userId: string,
-  options: ApiMutationOptions & { targetUserId?: string; limit?: number } = {},
+  options: ApiMutationOptions & { targetUserIds?: string[]; limit?: number } = {},
 ): Promise<UsageRecord[]> {
   const params = new URLSearchParams();
-  if (options.targetUserId) params.set("user_id", options.targetUserId);
+  for (const targetUserId of options.targetUserIds ?? []) params.append("user_id", targetUserId);
   if (options.limit) params.set("limit", String(options.limit));
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiRequest<UsageRecord[]>(userId, `/api/admin/usage-records${query}`, {
