@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { sampleData } from "../../data/sampleData";
 import type { KnowledgeConfigRecord, SsoConfigRecord } from "../types";
-import { mapKnowledgeConfigRecordToKnowledgeBase, mapSsoConfigRecordToDisplay } from "./bootstrap";
+import { mapKnowledgeConfigRecordToKnowledgeBase, mapSsoConfigRecordToDisplay, normalizeBootstrap } from "./bootstrap";
 
 test("knowledge security label follows authoritative group ACL instead of stale user text", () => {
   const record: KnowledgeConfigRecord = {
@@ -76,4 +76,11 @@ test("WorkOS SSO records keep their protocol, display name, and organization", (
   expect(display.workos_organization_id).toBe("org_01JSYNTHETIC");
   expect(mapSsoConfigRecordToDisplay({ ...record, settings: { domains: ["example.com"] } }).protocol).toBe("WORKOS");
   expect(mapSsoConfigRecordToDisplay({ ...record, settings: {} }).name).toBe("WorkOS");
+});
+
+test("the waiting model access request count reaches the workspace", () => {
+  expect(normalizeBootstrap({ modelAccessRequestCount: 3 }).modelAccessRequestCount).toBe(3);
+  // The server sends null when it could not count, and nothing to regular users.
+  expect(normalizeBootstrap({ modelAccessRequestCount: null }).modelAccessRequestCount).toBeNull();
+  expect(normalizeBootstrap({}).modelAccessRequestCount).toBeUndefined();
 });

@@ -1724,6 +1724,8 @@ export type ChatCitation = {
    * saved before these existed; those resolve through `chunk_id`. */
   document_id?: string | null;
   knowledge_config_id?: string | null;
+  /** The attached file it came from. Only opens what the server allows its owner. */
+  attachment_id?: string | null;
   /** True: the reply references it. False: consulted, not referenced (web
    * only). Null: no marker exists for that source, or a legacy record. */
   cited?: boolean | null;
@@ -1758,10 +1760,14 @@ export type KnowledgeDocumentSegment = {
   text: string;
 };
 
-/** GET /api/knowledge/{config}/documents/{document}/view */
+export type KnowledgeDocumentProperty = { label: string; value: string };
+
+/** GET /api/knowledge/{config}/documents/{document}/view, and
+ * GET /api/chat/attachments/{attachment}/view, which sets `attachment_id`. */
 export type KnowledgeDocumentView = {
   document_id: string;
   knowledge_config_id: string;
+  attachment_id?: string | null;
   name: string;
   content_type: string;
   mode: KnowledgeDocumentViewMode;
@@ -1773,6 +1779,9 @@ export type KnowledgeDocumentView = {
   target: KnowledgeDocumentTarget | null;
   segments: KnowledgeDocumentSegment[];
   notice: KnowledgeDocumentNotice | null;
+  /** What the file says about itself, most useful first. */
+  properties?: KnowledgeDocumentProperty[];
+  passage_count?: number | null;
 };
 
 export type KnowledgeChunkLocation = {

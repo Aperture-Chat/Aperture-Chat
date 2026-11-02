@@ -473,7 +473,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     setupSteps: [
       "The person opens your workspace address, chooses Request access, enters First name, Last name, and Work email, and chooses Submit access request. They see Request received.",
-      "Choose Admin console at the bottom of the sidebar. Users opens with an Access requests panel that lists each person's name, email, and request time.",
+      "Select your name at the bottom of the sidebar, then choose Admin console. Users opens with an Access requests panel that lists each person's name, email, and request time.",
       "Check that you recognize the person and the email address.",
       "In Approve as, keep User, then choose Approve. The status reads \"… was approved as User.\"",
       "In Finish sign-in setup, choose Set temporary password.",
@@ -566,8 +566,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
         title: "Review the queue",
         caption: "Admin console › Users › Access requests: name, email, and when they asked.",
         narration:
-          "Choose Admin console at the bottom of the sidebar. Users opens with an Access requests panel. Each card shows the name, the email address, and when they asked. Check that you recognize the person and the address.",
-        durationSeconds: 15,
+          "Select your name at the bottom of the sidebar, then choose Admin console. Users opens with an Access requests panel. Each card shows the name, the email address, and when they asked. Check that you recognize the person and the address.",
+        durationSeconds: 17,
         focus: "accessRequestsQueue",
       },
       {
@@ -699,7 +699,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "For password accounts: a safe way to share a temporary password.",
     ],
     setupSteps: [
-      "Choose Admin console at the bottom of the sidebar. Users is the first tab.",
+      "Select your name at the bottom of the sidebar, then choose Admin console. Users is the first tab.",
       "Choose Add User. Enter Name and Email, then choose a Role and a Starting group.",
       "Choose Create Account. The status reads \"… was created through the admin API.\" The new row shows sso under Auth.",
       "For someone who signs in with a password, choose Password in the row's Actions, then Generate, keep Temporary password on, and choose Set password. Auth changes to local.",
@@ -759,10 +759,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     scenes: [
       {
         title: "Open Users",
-        caption: "Admin console from the sidebar. Users lists every account you manage.",
+        caption: "Admin console from your account panel. Users lists every account you manage.",
         narration:
-          "Choose Admin console at the bottom of the sidebar. Eleven tabs cover your organization, and Users comes first. Each row shows the name, email, role, groups, sign-in method under Auth, status, and last activity.",
-        durationSeconds: 16,
+          "Select your name at the bottom of the sidebar, then choose Admin console. Eleven tabs cover your organization, and Users comes first. Each row shows the name, email, role, groups, sign-in method under Auth, status, and last activity.",
+        durationSeconds: 17,
         focus: "usersTabs",
       },
       {

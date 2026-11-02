@@ -48,6 +48,7 @@ from app.core.mfa import (
 )
 from app.core.personal_data import conceal_text
 from app.core.document_rendition import clear_scratch
+from app.core.attachment_documents import ROOT_DIRECTORY as ATTACHMENT_DOCUMENTS_DIRECTORY
 from app.core.knowledge_originals import ROOT_DIRECTORY, DocumentRef, KnowledgeOriginalStore
 from app.core.knowledge_walls import (
     document_wall_overrides,
@@ -526,6 +527,12 @@ class SeedStore:
             if self._runtime_state_path is not None
             else KnowledgeOriginalStore.ephemeral()
         )
+        self.attachment_documents = (
+            KnowledgeOriginalStore(self._runtime_state_path.parent / ATTACHMENT_DOCUMENTS_DIRECTORY)
+            if self._runtime_state_path is not None
+            else KnowledgeOriginalStore.ephemeral()
+        )
+        self.application_state_repository.attachment_documents = self.attachment_documents
         self.openrouter_api_key = (openrouter_api_key or "").strip()
         self.openrouter_base_url = (openrouter_base_url or OPENROUTER_DEFAULT_BASE_URL).strip()
         if not self.openrouter_base_url:
@@ -2335,6 +2342,7 @@ class SeedStore:
         ):
             self.vector_store.clear_all()
             self.knowledge_originals.clear()
+            self.attachment_documents.clear()
 
     def ensure_default_user_group(self) -> None:
         if not self.tenants:

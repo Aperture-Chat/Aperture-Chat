@@ -142,7 +142,7 @@ async function main() {
     await shot("appearance-control", { appearanceControl: page.locator(".help-row") });
 
     await page.getByRole("button", { name: "Send options", exact: true }).click();
-    await page.getByRole("button", { name: "Resources", exact: true }).click();
+    await page.getByRole("radio", { name: "Resources", exact: true }).click();
     const resources = page.getByRole("dialog", { name: "Send options", exact: true });
     await resources.waitFor();
     await shot("composer-shortcuts-help", { composerShortcuts: resources });

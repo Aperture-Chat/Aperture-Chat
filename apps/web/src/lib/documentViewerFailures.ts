@@ -10,7 +10,7 @@ export type ViewerFailure = {
   calm: boolean;
 };
 
-export type OpeningKind = "document" | "chunk";
+export type OpeningKind = "document" | "chunk" | "attachment";
 export type ShownThing = "pages" | "image";
 
 const SESSION_ENDED: ViewerFailure = {
@@ -30,6 +30,13 @@ const NO_ACCESS: ViewerFailure = {
 };
 
 const GONE: Record<OpeningKind, ViewerFailure> = {
+  attachment: {
+    title: "This file is no longer available",
+    detail: "It may have been removed with its chat, or you may no longer have access to it.",
+    retry: false,
+    download: false,
+    calm: true,
+  },
   document: {
     title: "This document is no longer available",
     detail: "It may have been removed from the knowledge base, or you may no longer have access to it.",

@@ -18,6 +18,7 @@ const SHORT_KIND_LABELS: Record<IssueReportKind, string> = {
   security: "Security",
 };
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const CAPTURE_NOT_TAKEN = "No screenshot was taken. You can take one yourself and paste it here.";
 const DRAFT_KEY = "aperture.issue-report-draft";
 
 const COPY: Record<IssueReportKind, { subject: string; body: string; intro: string }> = {
@@ -83,6 +84,12 @@ function screenshotProblem(file: File): string | null {
   if (!ACCEPTED_TYPES.includes(file.type)) return "Choose a PNG, JPEG, GIF, or WebP image.";
   if (file.size > MAX_SCREENSHOT_BYTES) return "Choose a screenshot that is 10 MB or smaller.";
   return null;
+}
+
+/** A cancelled picker and a browser that refuses outright arrive looking alike. */
+function captureProblem(failure: unknown): string {
+  if (failure instanceof DOMException) return CAPTURE_NOT_TAKEN;
+  return failure instanceof Error ? failure.message : "The screen could not be captured.";
 }
 
 async function captureVisibleTab(): Promise<File> {
@@ -193,8 +200,7 @@ export function IssueReportForm({
     try {
       acceptScreenshot(await captureVisibleTab());
     } catch (captureError) {
-      if (captureError instanceof DOMException && captureError.name === "NotAllowedError") return;
-      setError(captureError instanceof Error ? captureError.message : "The screen could not be captured.");
+      setError(captureProblem(captureError));
     } finally {
       setCapturing(false);
     }
@@ -365,6 +371,7 @@ export function IssueReportForm({
                 </button>
               )}
             </div>
+            {canCapture && <small>This panel hides for the picture. Your browser will ask what to share, so choose this tab.</small>}
             <small>Or paste or drop an image here. PNG, JPEG, GIF, or WebP up to 10 MB.</small>
           </>
         )}

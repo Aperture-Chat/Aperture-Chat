@@ -72,8 +72,10 @@ const userSymbols = {
     menu = await openSymbol(page, "#");
     await shot("symbols-hash", { keepFocus: true });
     await choose(page, menu, "Litigation Playbook");
-    await page.locator(".composer-tools-status").waitFor();
+    await page.locator(".attach-chip").filter({ hasText: "Litigation Playbook" }).waitFor();
     await shot("symbols-hash-inserted", { keepFocus: true });
+    // A # pick is an attachment block, so the tools clear leaves it in the tray.
+    await page.getByRole("button", { name: "Remove Litigation Playbook" }).click();
     await clearTools();
 
     // $ skill files.

@@ -2981,6 +2981,12 @@ export function AdminConsole({
             actorUserId={data.me.id}
             groups={data.groups}
             tenantSlug={data.me.role === "PLATFORM_OWNER" ? data.currentTenant.slug : undefined}
+            onResolved={() =>
+              onDataChange((current) => ({
+                ...current,
+                modelAccessRequestCount: Math.max(0, (current.modelAccessRequestCount ?? 0) - 1),
+              }))
+            }
           />
           <Panel
             className="model-access-panel"

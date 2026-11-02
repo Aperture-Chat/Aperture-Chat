@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { BookOpen, CheckCircle2, ChevronLeft, FileVideo, ListChecks, Maximize2, Minimize2, Volume2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { CarvedTray, sendScrollKeysToTray } from "./CarvedTray";
 import {
   GuidePdfDownload,
   TRAINING_FPS,
@@ -369,9 +370,10 @@ function TrainingVideoGridLibrary({
   onClose: () => void;
   onOpenVideo: (video: TrainingDeckVideo) => void;
 }) {
+  const tray = useRef<HTMLDivElement>(null);
   return (
     <>
-      <div className="modal-head">
+      <div className="modal-head" onKeyDown={(event) => sendScrollKeysToTray(event, tray.current)}>
         <span className="modal-icon">
           <BookOpen size={22} />
         </span>
@@ -390,42 +392,44 @@ function TrainingVideoGridLibrary({
           <X size={17} />
         </button>
       </div>
-      <GuidePdfDownload
-        href={deck.pdf.href}
-        title={deck.pdf.title}
-        description={deck.pdf.description}
-        tooltip={deck.pdf.tooltip}
-      />
-      <div className="owner-doc-grid owner-video-grid">
-        {groupByTrack(deck.videos).map((group) => (
-          <Fragment key={group.track ?? "untracked"}>
-            {group.track ? <h3 className="training-track-heading">{group.track}</h3> : null}
-            {group.videos.map((video) => {
-              const Icon = deck.icons[video.icon];
-              return (
-                <button
-                  className="owner-doc-card owner-video-card"
-                  type="button"
-                  key={video.id}
-                  aria-label={`Watch ${video.title}`}
-                  data-tooltip={`Play the ${video.title} walkthrough with narration, captions, and callouts`}
-                  onClick={() => onOpenVideo(video)}
-                >
-                  <Icon size={20} />
-                  <span className="owner-video-card-copy">
-                    <strong>{video.title}</strong>
-                    <span>{video.description}</span>
-                    <span className="owner-video-meta">
-                      <FileVideo size={14} />
-                      {formatDuration(getVideoDuration(video))} guided video
+      <CarvedTray ref={tray}>
+        <GuidePdfDownload
+          href={deck.pdf.href}
+          title={deck.pdf.title}
+          description={deck.pdf.description}
+          tooltip={deck.pdf.tooltip}
+        />
+        <div className="owner-doc-grid owner-video-grid">
+          {groupByTrack(deck.videos).map((group) => (
+            <Fragment key={group.track ?? "untracked"}>
+              {group.track ? <h3 className="training-track-heading">{group.track}</h3> : null}
+              {group.videos.map((video) => {
+                const Icon = deck.icons[video.icon];
+                return (
+                  <button
+                    className="owner-doc-card owner-video-card"
+                    type="button"
+                    key={video.id}
+                    aria-label={`Watch ${video.title}`}
+                    data-tooltip={`Play the ${video.title} walkthrough with narration, captions, and callouts`}
+                    onClick={() => onOpenVideo(video)}
+                  >
+                    <Icon size={20} />
+                    <span className="owner-video-card-copy">
+                      <strong>{video.title}</strong>
+                      <span>{video.description}</span>
+                      <span className="owner-video-meta">
+                        <FileVideo size={14} />
+                        {formatDuration(getVideoDuration(video))} guided video
+                      </span>
                     </span>
-                  </span>
-                </button>
-              );
-            })}
-          </Fragment>
-        ))}
-      </div>
+                  </button>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
+      </CarvedTray>
       <div className="modal-foot">
         <ListChecks size={15} />
         <span>Walkthroughs use current platform screens, voiceover, synchronized captions, and UI callouts.</span>

@@ -96,7 +96,7 @@ function DocumentSourceRow({
         type="button"
         className="session-source-open"
         aria-label={`Open ${citation.source_name}${location ? `, ${location}` : ""}`}
-        data-tooltip="Open the document at this passage"
+        data-tooltip={request.chunkId ? "Open the document at this passage" : "Open this document"}
         onClick={(event) => {
           // Safari leaves focus behind on click, and closing returns it here.
           event.currentTarget.focus();

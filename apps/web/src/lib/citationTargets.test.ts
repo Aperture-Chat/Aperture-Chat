@@ -109,6 +109,23 @@ describe("citationDestination", () => {
     ).toBe("link");
   });
 
+  it("opens an attached file by its id, at the passage when it has one", () => {
+    expect(
+      citationDestination(citation({ attachment_id: "upload-1", chunk_id: "upload-1:4", passage: "The fee.", page_start: 3 })),
+    ).toEqual({
+      kind: "viewer",
+      request: { kind: "attachment", attachmentId: "upload-1", chunkId: "upload-1:4", passage: "The fee.", pageHint: 3 },
+    });
+  });
+
+  it("opens a file cited before citations carried its id", () => {
+    const destination = citationDestination(citation({ source_uri: "upload://upload-1234" }));
+    expect(destination).toEqual({
+      kind: "viewer",
+      request: { kind: "attachment", attachmentId: "upload-1234", chunkId: null, passage: null, pageHint: null },
+    });
+  });
+
   it("gives a plain upload nowhere to go", () => {
     expect(citationDestination(citation())).toEqual({ kind: "none" });
   });

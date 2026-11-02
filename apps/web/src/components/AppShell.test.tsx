@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -494,7 +496,7 @@ test("regular users do not see admin or platform entry points", () => {
   expect(within(accountDrawer).queryByRole("button", { name: /console/ })).not.toBeInTheDocument();
 });
 
-test("admins can also reach their console from the account drawer, outside the primary navigation", () => {
+test("admins reach their console from the account drawer, outside the primary navigation", () => {
   const adminData = cloneData();
   const adminViewChange = vi.fn();
   renderShell(adminData, adminViewChange);
@@ -631,31 +633,102 @@ test("Move to folder lists folders in the same floating menu", () => {
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 });
 
-test("management consoles appear in the sidebar only for roles that can open them", () => {
+test("management consoles open only from the account panel, for the roles that can use them", () => {
+  const railConsoleLinks = () =>
+    within(document.querySelector(".sidebar") as HTMLElement).queryAllByRole("link", { name: /console/i });
+  const openAccount = () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Account:/ }));
+    return screen.getByRole("dialog", { name: "Account" });
+  };
+
   const ownerViewChange = vi.fn();
   const owner = cloneData();
   owner.me = { ...owner.me, role: "PLATFORM_OWNER" };
-  const { unmount } = renderShell(owner, ownerViewChange);
-  const sidebar = document.querySelector(".sidebar") as HTMLElement;
-  expect(within(sidebar).getByRole("link", { name: "Admin console" })).toHaveAttribute("href", "/admin/users");
-  fireEvent.click(within(sidebar).getByRole("link", { name: "Platform console" }));
+  const ownerRender = renderShell(owner, ownerViewChange);
+  expect(railConsoleLinks()).toEqual([]);
+  const ownerAccount = openAccount();
+  expect(within(ownerAccount).getByRole("button", { name: /Admin console/ })).toBeInTheDocument();
+  fireEvent.click(within(ownerAccount).getByRole("button", { name: /Platform owner console/ }));
   expect(ownerViewChange).toHaveBeenCalledWith("platform");
-  unmount();
+  ownerRender.unmount();
 
   const admin = cloneData();
   admin.me = { ...admin.me, role: "TENANT_ADMIN" };
   const adminRender = renderShell(admin);
-  const adminSidebar = document.querySelector(".sidebar") as HTMLElement;
-  expect(within(adminSidebar).getByRole("link", { name: "Admin console" })).toBeInTheDocument();
-  expect(within(adminSidebar).queryByRole("link", { name: "Platform console" })).not.toBeInTheDocument();
+  expect(railConsoleLinks()).toEqual([]);
+  const adminAccount = openAccount();
+  expect(within(adminAccount).getByRole("button", { name: /Admin console/ })).toBeInTheDocument();
+  expect(within(adminAccount).queryByRole("button", { name: /Platform owner console/ })).not.toBeInTheDocument();
   adminRender.unmount();
 
   const user = cloneData();
   user.me = { ...user.me, role: "USER" };
   renderShell(user);
-  const userSidebar = document.querySelector(".sidebar") as HTMLElement;
-  expect(within(userSidebar).queryByRole("link", { name: "Admin console" })).not.toBeInTheDocument();
-  expect(within(userSidebar).queryByRole("link", { name: "Platform console" })).not.toBeInTheDocument();
+  expect(railConsoleLinks()).toEqual([]);
+  const userAccount = openAccount();
+  expect(within(userAccount).queryByRole("button", { name: /Admin console/ })).not.toBeInTheDocument();
+  expect(within(userAccount).queryByRole("button", { name: /Platform owner console/ })).not.toBeInTheDocument();
+});
+
+test("the account card tells admins how many model access requests are waiting", () => {
+  const accountButton = () => screen.getByRole("button", { name: /^Account:/ });
+  const withWaiting = (role: Role, count: number | null) => {
+    const data = cloneData();
+    data.me = { ...data.me, role };
+    data.modelAccessRequestCount = count;
+    return renderShell(data);
+  };
+
+  const several = withWaiting("TENANT_ADMIN", 3);
+  expect(accountButton()).toHaveAccessibleName(expect.stringMatching(/, 3 pending model access requests$/));
+  expect(accountButton()).toHaveTextContent("3");
+  expect(accountButton()).toHaveAttribute("data-tooltip", expect.stringContaining("3 pending model access requests"));
+  several.unmount();
+
+  const one = withWaiting("PLATFORM_OWNER", 1);
+  expect(accountButton()).toHaveAccessibleName(expect.stringMatching(/, 1 pending model access request$/));
+  expect(accountButton()).toHaveTextContent("1");
+  expect(accountButton()).toHaveAttribute("data-tooltip", expect.stringContaining("1 pending model access request."));
+  one.unmount();
+
+  const none = withWaiting("TENANT_ADMIN", 0);
+  expect(accountButton()).not.toHaveAccessibleName(expect.stringMatching(/pending/));
+  expect(accountButton().querySelector(".account-card-count")).toBeNull();
+  expect(accountButton()).toHaveAttribute("data-tooltip", "Open your account to edit your profile, password, and usage");
+  none.unmount();
+
+  const unknown = withWaiting("TENANT_ADMIN", null);
+  expect(accountButton().querySelector(".account-card-count")).toBeNull();
+  unknown.unmount();
+
+  // A person who cannot open the Admin console, or an admin previewing one,
+  // has nothing to act on.
+  withWaiting("USER", 2);
+  expect(accountButton()).not.toHaveAccessibleName(expect.stringMatching(/pending/));
+  expect(accountButton().querySelector(".account-card-count")).toBeNull();
+});
+
+test("a screen capture lifts the report panel and the dimming behind it off the page", () => {
+  const sheet = document.createElement("style");
+  // Vitest empties `.css?raw` imports, so the real rules come from disk.
+  sheet.textContent = readFileSync(resolve(process.cwd(), "src/support-tickets.css"), "utf8");
+  document.head.append(sheet);
+  try {
+    renderShell(cloneData());
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    fireEvent.click(screen.getByRole("button", { name: /Report a problem/ }));
+    const panel = screen.getByRole("dialog", { name: "Report a problem" });
+    const dimming = document.querySelector(".utility-backdrop");
+    expect(panel).not.toHaveStyle({ visibility: "hidden" });
+    expect(dimming).not.toHaveStyle({ visibility: "hidden" });
+
+    document.documentElement.classList.add("is-capturing-report");
+    expect(panel).toHaveStyle({ visibility: "hidden" });
+    expect(dimming).toHaveStyle({ visibility: "hidden" });
+  } finally {
+    document.documentElement.classList.remove("is-capturing-report");
+    sheet.remove();
+  }
 });
 
 test("draft mode hides the disabled sidebar expand control", () => {

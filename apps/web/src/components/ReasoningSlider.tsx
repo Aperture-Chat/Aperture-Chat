@@ -1,3 +1,5 @@
+import { RailSwitch, type RailSwitchOption } from "./RailSwitch";
+
 /** Composer reasoning positions: fast = minimal effort, smart = deeper thinking. */
 export type ReasoningLevel = "fast" | "balanced" | "smart";
 
@@ -31,6 +33,44 @@ export function storeReasoningLevel(userId: string, level: ReasoningLevel) {
   } catch {
     // Private-mode storage failures only lose the sticky preference.
   }
+}
+
+const REASONING_STOPS: RailSwitchOption<ReasoningLevel>[] = [
+  { value: "fast", label: "Fast" },
+  { value: "balanced", label: "Balanced" },
+  { value: "smart", label: "Smart" },
+];
+
+const REASONING_HELP: Record<ReasoningLevel, string> = {
+  fast: "Quicker answers, less time thinking.",
+  balanced: "The model's usual pace.",
+  smart: "Takes longer and thinks it through.",
+};
+
+export function reasoningHelp(level: ReasoningLevel, supported: boolean, modelName: string) {
+  return supported ? REASONING_HELP[level] : `${modelName} does not support reasoning levels.`;
+}
+
+/** Every level named on its own stop, for the chat composer's Send options. */
+export function ReasoningRail({
+  level,
+  supported,
+  onChange,
+}: {
+  level: ReasoningLevel;
+  supported: boolean;
+  onChange: (level: ReasoningLevel) => void;
+}) {
+  return (
+    <RailSwitch
+      block
+      ariaLabel="Model reasoning level"
+      options={REASONING_STOPS}
+      value={supported ? level : "balanced"}
+      disabled={!supported}
+      onChange={onChange}
+    />
+  );
 }
 
 export function ReasoningSlider({

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
-import { loadKnowledgeDocumentBytes } from "../lib/api/knowledge";
+import { loadKnowledgeDocumentBytes, viewAddress } from "../lib/api/knowledge";
 import {
   layerPieces,
   locatePassage,
@@ -67,7 +67,7 @@ function usePdfDocument(userId: string, view: ViewerPaneProps["view"], attempt: 
     const { signal } = controller;
     let task: ReturnType<PdfEngine["open"]> | null = null;
     const open = async () => {
-      const blob = await loadKnowledgeDocumentBytes(userId, view.knowledge_config_id, view.document_id, { signal });
+      const blob = await loadKnowledgeDocumentBytes(userId, viewAddress(view), { signal });
       const [bytes, engine] = await Promise.all([blob.arrayBuffer(), loadPdfEngine()]);
       if (signal.aborted) return;
       task = engine.open(bytes);

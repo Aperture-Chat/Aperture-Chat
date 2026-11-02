@@ -3626,3 +3626,10 @@ figure.document-media-align-right {
     animation: none;
   }
 }
+
+/* The toolbar centers its buttons' contents, which floated each trail row's
+   text away from its left edge. */
+.document-toolbar .document-ai-trail-popover .document-ai-trail-list > li > button {
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+}

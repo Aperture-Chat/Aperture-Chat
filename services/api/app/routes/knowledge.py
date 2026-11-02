@@ -40,17 +40,17 @@ from app.core.knowledge_walls import (
     document_wall_overrides,
     wall_group_ids,
 )
-from app.core.document_rendition import (
-    PreparedDocument,
-    RenditionOptions,
-    page_index,
-    prepare_document,
+from app.core.document_presentation import (
+    PRIVATE_FILE_HEADERS,
+    cited_target,
+    prepared_document,
+    view_media_type,
+    view_properties,
 )
-from app.core.document_view import locate_passage, recorded_span, target_for, text_segments
+from app.core.document_rendition import PreparedDocument
+from app.core.document_view import text_segments
 from app.core.document_metadata import (
-    PROPERTIES_LOCATOR,
     bounded_metadata,
-    descriptive_properties,
     metadata_summary,
 )
 from app.core.knowledge_ingestion import (
@@ -59,6 +59,7 @@ from app.core.knowledge_ingestion import (
     PageReader,
     chunk_segments,
     extract_document,
+    properties_passages,
 )
 from app.core.knowledge_ingestion import _limit_segments as limit_extracted_segments
 from app.core.media_transcription import (
@@ -111,7 +112,6 @@ from app.models.schemas import (
     KnowledgeDocumentAccessRequest,
     KnowledgeDocumentView,
     KnowledgeDocumentViewSegment,
-    KnowledgeDocumentViewTarget,
     KnowledgeIndexStatus,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
@@ -706,7 +706,7 @@ def chunk_location(
     if chunk is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CHUNK)
     try:
-        config, document = _viewable_document(
+        config, document = viewable_document(
             chunk.knowledge_config_id, chunk.document_id, actor, store, access="location"
         )
     except HTTPException as exc:
@@ -724,7 +724,7 @@ def document_view(
     store: SeedStore = Depends(get_store),
 ) -> KnowledgeDocumentView:
     """How to present a document, and where its cited passage is."""
-    config, document = _viewable_document(config_id, document_id, actor, store, access="view")
+    config, document = viewable_document(config_id, document_id, actor, store, access="view")
     # The excerpt and segments are the document's own text.
     response.headers["Cache-Control"] = "private, no-store"
     prepared = _prepared_document(config, document, store)
@@ -739,9 +739,13 @@ def document_view(
         file_url=_view_file_url(config.id, document.id) if prepared.file_path else None,
         original_available=prepared.original_available,
         page_count=prepared.page_count,
-        target=_cited_target(cited, chunks, prepared, _document_ref(config, document), store),
+        target=cited_target(
+            cited, chunks, prepared, _document_ref(config, document), store.knowledge_originals
+        ),
         segments=_view_segments(document, chunks) if prepared.mode == "text" else None,
         notice=prepared.notice,
+        properties=view_properties(document.metadata),
+        passage_count=document.chunk_count,
     )
 
 
@@ -753,14 +757,14 @@ def document_view_file(
     store: SeedStore = Depends(get_store),
 ) -> FileResponse:
     """The bytes the viewer renders: a PDF or an image, never anything active."""
-    config, document = _viewable_document(config_id, document_id, actor, store, access="file")
+    config, document = viewable_document(config_id, document_id, actor, store, access="file")
     prepared = _prepared_document(config, document, store)
     if prepared.file_path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NO_STORED_FILE)
     return FileResponse(
         prepared.file_path,
-        media_type=_view_media_type(prepared),
-        headers={**_PRIVATE_FILE_HEADERS, "Content-Disposition": "inline"},
+        media_type=view_media_type(prepared),
+        headers={**PRIVATE_FILE_HEADERS, "Content-Disposition": "inline"},
     )
 
 
@@ -772,7 +776,7 @@ def document_original(
     store: SeedStore = Depends(get_store),
 ) -> FileResponse:
     """The file as it was stored, as a download the browser cannot render."""
-    config, document = _viewable_document(config_id, document_id, actor, store, access="original")
+    config, document = viewable_document(config_id, document_id, actor, store, access="original")
     path = store.knowledge_originals.path(_document_ref(config, document))
     if path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NO_STORED_FILE)
@@ -780,7 +784,7 @@ def document_original(
         path,
         media_type="application/octet-stream",
         filename=_safe_source_name(document.name, fallback="document"),
-        headers=_PRIVATE_FILE_HEADERS,
+        headers=PRIVATE_FILE_HEADERS,
     )
 
 
@@ -788,13 +792,61 @@ _UNKNOWN_CONFIGURATION = "Unknown knowledge configuration."
 _UNKNOWN_DOCUMENT = "Unknown knowledge document."
 _UNKNOWN_CHUNK = "Unknown knowledge passage."
 _NO_STORED_FILE = "No stored file for this document."
-_PRIVATE_FILE_HEADERS = {
-    "Cache-Control": "private, no-store",
-    "X-Content-Type-Options": "nosniff",
-}
 
 
-def _viewable_document(
+def readable_base(config_id: str, actor: User, store: SeedStore) -> KnowledgeConfig:
+    """A base the actor cannot read answers like a missing base, so no id proves
+    anything."""
+    assert_group_permission(actor, store.groups, "knowledge_access", "Knowledge access")
+    try:
+        return _get_readable_config(config_id, actor, store)
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CONFIGURATION
+        ) from exc
+
+
+def visible_documents(
+    config: KnowledgeConfig, actor: User, store: SeedStore
+) -> list[KnowledgeDocument]:
+    """The base's files this actor is not walled off from."""
+    return [
+        document
+        for document in store.knowledge_documents_for(config.id)
+        if knowledge_wall_allows(actor, wall_group_ids(document.wall))
+    ]
+
+
+def base_contents_view(
+    config_id: str, attachment_id: str, actor: User, store: SeedStore
+) -> KnowledgeDocumentView:
+    """A base has no one file to show, so it opens as the files it brings."""
+    config = readable_base(config_id, actor, store)
+    documents = visible_documents(config, actor, store)
+    return KnowledgeDocumentView(
+        document_id=attachment_id,
+        knowledge_config_id="",
+        attachment_id=attachment_id,
+        name=config.name,
+        content_type="text/plain",
+        mode="text",
+        original_available=False,
+        segments=[
+            KnowledgeDocumentViewSegment(id=document.id, text=document.name)
+            for document in documents
+        ],
+        passage_count=sum(document.chunk_count for document in documents),
+    )
+
+
+def stored_document_size(
+    config: KnowledgeConfig, document: KnowledgeDocument, store: SeedStore
+) -> int | None:
+    path = store.knowledge_originals.path(_document_ref(config, document))
+    return path.stat().st_size if path is not None else None
+
+
+def viewable_document(
     config_id: str,
     document_id: str,
     actor: User,
@@ -806,17 +858,10 @@ def _viewable_document(
 
     Unlike ``_get_viewable_config`` this admits nobody to a disabled base, and
     unlike ``documents()`` it has no operator bypass: an ethical wall screens
-    every role. A base the actor cannot read answers like a missing base, and a
-    walled document like a missing document, so neither id proves anything. The
-    wall refusal is still audited: in a wall product, the attempts are the signal.
+    every role. A walled document answers like a missing document. The wall
+    refusal is still audited: in a wall product, the attempts are the signal.
     """
-    assert_group_permission(actor, store.groups, "knowledge_access", "Knowledge access")
-    try:
-        config = _get_readable_config(config_id, actor, store)
-    except HTTPException as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=_UNKNOWN_CONFIGURATION
-        ) from exc
+    config = readable_base(config_id, actor, store)
     document = _knowledge_document_or_404(config, document_id, store)
     details = {"document_id": document.id, "access": access}
     if not knowledge_wall_allows(actor, wall_group_ids(document.wall)):
@@ -878,18 +923,8 @@ def _original_retainer(config: KnowledgeConfig, store: SeedStore) -> RetainOrigi
 def _prepared_document(
     config: KnowledgeConfig, document: KnowledgeDocument, store: SeedStore
 ) -> PreparedDocument:
-    settings = get_settings()
-    return prepare_document(
-        store.knowledge_originals,
-        _document_ref(config, document),
-        name=document.name,
-        options=RenditionOptions(
-            soffice=settings.knowledge_rendition_soffice_path,
-            timeout_seconds=settings.knowledge_rendition_timeout_seconds,
-            memory_mb=settings.knowledge_rendition_memory_mb,
-            require_isolation=settings.environment.strip().lower() != "local",
-            private_directories=settings.private_data_directories,
-        ),
+    return prepared_document(
+        store.knowledge_originals, _document_ref(config, document), document.name
     )
 
 
@@ -900,28 +935,8 @@ def _view_segments(
     return [] if document.status == "metadata-only" else text_segments(chunks)
 
 
-def _cited_target(
-    cited: KnowledgeChunk | None,
-    chunks: list[KnowledgeChunk],
-    prepared: PreparedDocument,
-    ref: DocumentRef,
-    store: SeedStore,
-) -> KnowledgeDocumentViewTarget | None:
-    if cited is None:
-        return None
-    pdf = prepared.file_path
-    if prepared.mode != "pdf" or pdf is None:
-        return target_for(cited, recorded_span(cited))
-    span = locate_passage(cited, chunks, lambda: page_index(store.knowledge_originals, ref, pdf))
-    return target_for(cited, span)
-
-
 def _view_file_url(config_id: str, document_id: str) -> str:
     return f"/api/knowledge/{quote(config_id, safe='')}/documents/{quote(document_id, safe='')}/view/file"
-
-
-def _view_media_type(prepared: PreparedDocument) -> str:
-    return "application/pdf" if prepared.mode == "pdf" else prepared.content_type
 
 
 def _knowledge_document_or_404(
@@ -2637,9 +2652,8 @@ def _knowledge_chunks_from_segments(
     "Document properties" passage so questions about authors, dates, labels, or
     custom fields can find the file itself."""
     chunked = chunk_segments(segments)
-    properties = descriptive_properties(document.metadata)
-    if chunked and properties:
-        chunked += chunk_segments([_properties_segment(properties)])
+    if chunked:
+        chunked += properties_passages(document.metadata)
     details = metadata_summary(document.metadata)
     return [
         KnowledgeChunk(
@@ -2661,11 +2675,6 @@ def _knowledge_chunks_from_segments(
         )
         for index, segment in enumerate(chunked)
     ]
-
-
-def _properties_segment(properties: list[tuple[str, str]]) -> ExtractedSegment:
-    lines = "\n\n".join(f"{key}: {value}" for key, value in properties)
-    return ExtractedSegment(text=f"Document properties:\n\n{lines}", locator=PROPERTIES_LOCATOR)
 
 
 def _append_indexed_sources(
