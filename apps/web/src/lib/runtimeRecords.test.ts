@@ -81,6 +81,46 @@ test("events that are not AI runs are left out", () => {
   expect(runtimeRecordsFromAudit([event({ action: "auth.login" })], OPTIONS)).toEqual([]);
 });
 
+test("a flagged prompt is not a run, however its event is stamped", () => {
+  const flagged = event({ action: "security.prompt_flagged", target: "user-jane" }, { surface: "chat" });
+  expect(runtimeRecordsFromAudit([flagged], OPTIONS)).toEqual([]);
+});
+
+test("setting up or failing an automation is not a completed run", () => {
+  const created = event({ action: "automation.created", target: "automation-1" }, { surface: "chat" });
+  const failed = event({ action: "automation.run_failed", target: "automation-1" }, { surface: "chat" });
+  expect(runtimeRecordsFromAudit([created, failed], OPTIONS)).toEqual([]);
+  expect(runtimeThreadIds([created, failed])).toEqual([]);
+});
+
+test("an automation run names its conversation and never shows the automation's id", () => {
+  const [record] = runtimeRecordsFromAudit(
+    [event({ action: "automation.run", target: "automation-6e07e91e" }, { surface: "chat", thread_id: "thread-1" })],
+    OPTIONS,
+  );
+  expect(record.title).toBe("Lease amendment review");
+  expect(record.threadId).toBe("thread-1");
+  expect(record.model).toBe("Automation");
+  expect(record.detail).toBe("Jordan Lee · Automation · Provider not recorded");
+});
+
+test("an automation run that wrote a draft counts as a draft", () => {
+  const [record] = runtimeRecordsFromAudit(
+    [event({ action: "automation.run", target: "automation-1" }, { surface: "draft", draft_id: "draft-1" })],
+    OPTIONS,
+  );
+  expect(record.surface).toBe("draft");
+  expect(record.threadId).toBeNull();
+});
+
+test("generating an image is a run on its model", () => {
+  const records = runtimeRecordsFromAudit(
+    [event({ action: "chat.image_generation" }), event({ action: "gateway.image_generation", id: "audit-2" })],
+    OPTIONS,
+  );
+  expect(records.map((record) => record.model)).toEqual(["GPT X", "GPT X"]);
+});
+
 test("gateway runs count as chat runs", () => {
   const records = runtimeRecordsFromAudit(
     [event({ action: "gateway.chat_completion" }), event({ id: "audit-2", action: "gateway.responses" })],

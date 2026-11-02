@@ -1,4 +1,4 @@
-/** One AI run as the consoles show it, read from the completion audit event.
+/** One AI run as the consoles show it, read from the audit event it finished with.
  * The server stamps these events itself, so they stand as the record of who
  * ran what and when, whatever the person's own device clock said. */
 
@@ -25,7 +25,16 @@ export type RuntimeRecord = {
   threadId: string | null;
 };
 
-const COMPLETION_ACTIONS = new Set(["chat.completion", "gateway.chat_completion", "gateway.responses"]);
+/** Runs on one model. Their audit event's target is that model. */
+const MODEL_RUN_ACTIONS = new Set([
+  "chat.completion",
+  "chat.image_generation",
+  "gateway.chat_completion",
+  "gateway.image_generation",
+  "gateway.responses",
+]);
+/** A finished automation. Its target is the automation, which can use several models. */
+const AUTOMATION_RUN_ACTION = "automation.run";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -53,13 +62,19 @@ export type RuntimeRecordOptions = {
 
 /** Reads an audit event's run fields, or null when the event is not an AI run. */
 function runFields(event: AuditEvent) {
+  const isModelRun = MODEL_RUN_ACTIONS.has(event.action);
+  if (!isModelRun && event.action !== AUTOMATION_RUN_ACTION) return null;
   const metadata = asRecord(event.metadata);
   const context = asRecord(metadata.runtime_context);
   const field = (key: string) => metadata[key] ?? context[key];
-  const surfaceValue = text(field("surface"));
-  if (!COMPLETION_ACTIONS.has(event.action) && !surfaceValue) return null;
-  const surface: RuntimeRecord["surface"] = surfaceValue === "draft" ? "draft" : "chat";
-  return { metadata, field, surface, threadId: surface === "chat" ? text(field("thread_id")) : null };
+  const surface: RuntimeRecord["surface"] = text(field("surface")) === "draft" ? "draft" : "chat";
+  return {
+    metadata,
+    field,
+    surface,
+    threadId: surface === "chat" ? text(field("thread_id")) : null,
+    modelId: isModelRun ? event.target : null,
+  };
 }
 
 /** The saved conversations behind these events, each once. */
@@ -80,11 +95,11 @@ function runTitle(surface: RuntimeRecord["surface"], draftTitle: unknown, thread
 function runtimeRecord(event: AuditEvent, options: RuntimeRecordOptions): RuntimeRecord | null {
   const run = runFields(event);
   if (!run) return null;
-  const { metadata, field, surface, threadId } = run;
+  const { metadata, field, surface, threadId, modelId } = run;
   const clientStartedAt = text(field("client_started_at"));
   const provider = runProvider(metadata);
   const messageCount = count(field("message_count"));
-  const model = options.modelName(event.target);
+  const model = modelId ? options.modelName(modelId) : "Automation";
   const actorName = event.actor_name || event.actor_id;
   const kindLabel = surface === "draft" ? "Draft" : "Chat";
   const messages = messageCount ? plural(messageCount, "message") : null;
