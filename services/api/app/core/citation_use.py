@@ -9,9 +9,10 @@ turn. This module is the one place that reads those markers.
 Knowledge fails closed: an excerpt the reply does not cite is never listed, and
 a reply with no markers lists none. Web results stay listed as consulted until
 the reply cites one, then only the cited ones remain. URLs the person asked to
-read stay, marked by whether the reply cited them. Attachments and MCP results
-have no marker, so they stay and claim nothing. Numbers are per turn and only
-mean something against the citations of that same turn.
+read stay, marked by whether the reply cited them. An attached file itself and
+MCP results have no marker, so they stay and claim nothing. A file's passages are
+numbered with the knowledge excerpts and fail closed the same way. Numbers are
+per turn and only mean something against the citations of that same turn.
 """
 
 from __future__ import annotations
@@ -266,7 +267,7 @@ def _is_text_field(annotation: object) -> bool:
 # identifiers the server minted stay out: they hold no source text, and the
 # viewer needs them to open the document.
 _CITATION_IDENTIFIERS = frozenset(
-    {"id", "source_type", "chunk_id", "document_id", "knowledge_config_id"}
+    {"id", "source_type", "chunk_id", "document_id", "knowledge_config_id", "attachment_id"}
 )
 CITATION_TEXT_FIELDS = tuple(
     name

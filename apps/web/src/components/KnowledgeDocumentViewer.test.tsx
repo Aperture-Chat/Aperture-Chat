@@ -319,6 +319,148 @@ describe("a PDF citation", () => {
   });
 });
 
+describe("an attached file", () => {
+  const FILE: DocumentRequest = { kind: "attachment", attachmentId: "upload-1", chunkId: null };
+  const attached = (fields: Partial<KnowledgeDocumentView> = {}) =>
+    pdfView({
+      attachment_id: "upload-1",
+      document_id: "upload-1",
+      knowledge_config_id: "",
+      name: "HOA PMA.docx",
+      target: null,
+      file_url: "/api/chat/attachments/upload-1/view/file",
+      ...fields,
+    });
+
+  it("opens from its own routes, never a knowledge base's", async () => {
+    fakePdf();
+    const requested = serveApi({ view: { body: attached() } });
+    openViewer(FILE);
+
+    await screen.findByRole("textbox", { name: "Go to page" });
+
+    expect(requested.some((url) => url.includes("/api/chat/attachments/upload-1/view"))).toBe(true);
+    expect(requested.some((url) => url.includes("/api/chat/attachments/upload-1/view/file"))).toBe(true);
+    expect(requested.some((url) => url.includes("/api/knowledge"))).toBe(false);
+  });
+
+  it("downloads the file that was attached", async () => {
+    fakePdf();
+    const requested = serveApi({
+      view: { body: attached() },
+      original: { blob: new Blob(["bytes"]), headers: { "Content-Disposition": 'attachment; filename="HOA PMA.docx"' } },
+    });
+    URL.createObjectURL = vi.fn(() => "blob:original");
+    openViewer(FILE);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download original" }));
+
+    await waitFor(() => expect(requested.some((url) => url.endsWith("/api/chat/attachments/upload-1/original"))).toBe(true));
+  });
+
+  it("says plainly when the file is gone", async () => {
+    serveApi({ view: { status: 404 } });
+    openViewer(FILE);
+
+    expect(await within(await screen.findByRole("dialog")).findByText("This file is no longer available")).toBeVisible();
+  });
+});
+
+describe("what a file says about itself", () => {
+  const detailed = (fields: Partial<KnowledgeDocumentView> = {}) =>
+    pdfView({
+      target: null,
+      page_count: 12,
+      passage_count: 34,
+      properties: [
+        { label: "Title", value: "Harbor Agreement" },
+        { label: "Author", value: "Dana Reyes" },
+      ],
+      ...fields,
+    });
+
+  /** The toolbar is replaced when the pages arrive, and a click on the one it
+   * replaced lands on nothing, so this waits for the toolbar that stays. */
+  async function detailsKey() {
+    await screen.findByRole("textbox", { name: "Go to page" });
+    return screen.getByRole("button", { name: "Document details" });
+  }
+
+  it("opens from the toolbar and lists the properties and the index", async () => {
+    fakePdf();
+    serveApi({ view: { body: detailed() } });
+    openViewer({ ...REQUEST, chunkId: null });
+
+    const key = await detailsKey();
+    expect(key).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(key);
+
+    expect(key).toHaveAttribute("aria-expanded", "true");
+    const details = screen.getByRole("region", { name: "Document details" });
+    expect(within(details).getByText("Harbor Agreement")).toBeVisible();
+    expect(within(details).getByText("Dana Reyes")).toBeVisible();
+    expect(within(details).getByText("12 pages")).toBeVisible();
+    expect(within(details).getByText("34 passages indexed")).toBeVisible();
+  });
+
+  it("stays open when the pages arrive", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fakePdf();
+    serveApi({
+      view: { body: detailed() },
+      file: () => ({ blob: new Blob(["%PDF"]) }),
+    });
+    const loaded = vi.mocked(loadPdfEngine).getMockImplementation();
+    vi.mocked(loadPdfEngine).mockImplementation(async () => {
+      await held;
+      return (loaded as () => Promise<PdfEngine>)();
+    });
+    openViewer({ ...REQUEST, chunkId: null });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Document details" }));
+    release();
+
+    await screen.findByRole("textbox", { name: "Go to page" });
+    expect(screen.getByRole("region", { name: "Document details" })).toBeVisible();
+  });
+
+  it("closes again from the same key", async () => {
+    fakePdf();
+    serveApi({ view: { body: detailed() } });
+    openViewer({ ...REQUEST, chunkId: null });
+
+    const key = await detailsKey();
+    fireEvent.click(key);
+    fireEvent.click(key);
+
+    expect(screen.queryByRole("region", { name: "Document details" })).toBeNull();
+  });
+
+  it("says so when a file carried no properties", async () => {
+    fakePdf();
+    serveApi({ view: { body: detailed({ properties: [] }) } });
+    openViewer({ ...REQUEST, chunkId: null });
+
+    fireEvent.click(await detailsKey());
+
+    expect(screen.getByText("This file carried no properties beyond its name.")).toBeVisible();
+  });
+
+  it("offers nothing when there is nothing to tell", async () => {
+    fakePdf();
+    serveApi({ view: { body: pdfView({ target: null, page_count: null }) } });
+    openViewer({ ...REQUEST, chunkId: null });
+
+    await screen.findByRole("button", { name: "Close document" });
+    await waitFor(() => expect(screen.queryByRole("status", { name: /opening/i })).toBeNull());
+
+    expect(screen.queryByRole("button", { name: "Document details" })).toBeNull();
+  });
+});
+
 describe("moving through a PDF", () => {
   async function openAtPage40() {
     const pdf = fakePdf({ text: { 40: [PASSAGE] } });

@@ -459,6 +459,7 @@ def test_openrouter_web_search_sends_web_plugin_and_returns_web_citations(monkey
         "u_index": None,
         "document_id": None,
         "knowledge_config_id": None,
+        "attachment_id": None,
         "passage": None,
         "cited": True,
     }
@@ -774,6 +775,7 @@ def test_non_openrouter_models_use_platform_web_search(monkeypatch) -> None:
             "u_index": None,
             "document_id": None,
             "knowledge_config_id": None,
+            "attachment_id": None,
             "passage": None,
             "cited": True,
         }
@@ -2069,6 +2071,7 @@ def test_agent_profile_invokes_configured_mcp_tool_for_chat_runtime(monkeypatch)
         "u_index": None,
         "document_id": None,
         "knowledge_config_id": None,
+        "attachment_id": None,
         "passage": None,
         "cited": None,
     }
@@ -2287,7 +2290,7 @@ def test_uploaded_attachment_ids_feed_runtime_prompt_citations_and_audit(monkeyp
             "source_name": "notice.txt",
             "source_type": "upload",
             "source_uri": f"upload://{attachment['id']}",
-            "snippet": f"Uploaded Text file ({len(payload)} B) available to this chat turn.",
+            "snippet": f"Uploaded Text file ({len(payload)} B), read in full.",
             "page_start": None,
             "page_end": None,
             "locator": None,
@@ -2297,6 +2300,7 @@ def test_uploaded_attachment_ids_feed_runtime_prompt_citations_and_audit(monkeyp
             "u_index": None,
             "document_id": None,
             "knowledge_config_id": None,
+            "attachment_id": attachment["id"],
             "passage": None,
             "cited": None,
         }
@@ -2305,7 +2309,8 @@ def test_uploaded_attachment_ids_feed_runtime_prompt_citations_and_audit(monkeyp
     sent = json.loads(captured["body"])
     system_message = sent["messages"][0]["content"]
     assert "User attachments: notice.txt" in system_message
-    assert "Notice period: 30 days Governing law: Missouri" in system_message
+    assert "Notice period: 30 days" in system_message
+    assert "Governing law: Missouri" in system_message
 
     latest = get_store().audit_events[-1]
     runtime_context = latest.metadata["runtime_context"]
@@ -2373,7 +2378,7 @@ def test_uploaded_docx_attachment_extracts_text_for_runtime_prompt(monkeypatch) 
     sent = json.loads(captured["body"])
     system_message = sent["messages"][0]["content"]
     assert "User attachments: spacex-scenario-matrix.docx" in system_message
-    assert "Attachment text previews:" in system_message
+    assert "Files attached to this chat" in system_message
     assert "Base case revenue grows through Starlink and launch services." in system_message
 
 

@@ -94,7 +94,7 @@
      reached under the sticky header and their first rows were hidden. Lift
      the composer over the header while a list is open (as the attach menu
      already does) and cap the list to the screen. */
-  .composer:has(.composer-command-menu) {
+  .composer:not(.is-expanded):has(.composer-command-menu) {
     position: relative;
     z-index: 7;
   }
@@ -105,7 +105,7 @@
   }
 
   .composer-command-menu {
-    max-height: min(340px, 46dvh);
+    max-height: min(var(--command-menu-room, 340px), 46dvh);
   }
 
   /* ---------- Tables scroll sideways instead of splitting words ----------
@@ -167,6 +167,12 @@
     -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
     pointer-events: none;
+  }
+
+  /* A panel opened from the page stacks inside .console-page, so z-index cannot
+     lift it over this bar, which would cover the panel's title and Close. */
+  .main-surface:has(> .console-page .modal-backdrop)::before {
+    display: none;
   }
 
   .main-surface > .console-page {

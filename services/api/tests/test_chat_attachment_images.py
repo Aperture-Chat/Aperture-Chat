@@ -1,7 +1,7 @@
 """Uploaded images must reach image-capable models as real vision content.
 
-The sanitized WebP preview is the only stored copy of an upload, so it is
-also the payload forwarded to providers: OpenAI-compatible routes receive
+The sanitized WebP preview is the payload forwarded to providers, so metadata
+in the original stays out of the request: OpenAI-compatible routes receive
 ``image_url`` data-URL parts and the Anthropic dialect translates them to
 image source blocks.
 """

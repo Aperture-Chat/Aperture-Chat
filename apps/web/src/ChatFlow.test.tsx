@@ -716,7 +716,7 @@ test("a long-form prompt stays on the user-selected model", async () => {
   expect(modelSelector).toHaveTextContent("Client Update Agent");
 });
 
-test("the composer tucks the reasoning slider inside the send options menu", async () => {
+test("the composer tucks the reasoning rail inside the send options menu", async () => {
   await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
 
@@ -725,15 +725,41 @@ test("the composer tucks the reasoning slider inside the send options menu", asy
   expect(screen.queryByLabelText("Model reasoning level")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Send options" }));
-  const slider = await screen.findByLabelText("Model reasoning level");
+  const rail = await screen.findByRole("radiogroup", { name: "Model reasoning level" });
   // Honest state: this persona's default model has no reasoning control, so
-  // the slider stays disabled instead of pretending to work.
-  expect(slider).toBeDisabled();
+  // the rail stays disabled and says why instead of pretending to work.
+  for (const stop of within(rail).getAllByRole("radio")) expect(stop).toBeDisabled();
+  expect(within(rail).getByRole("radio", { name: "Balanced" })).toBeChecked();
+  expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent("does not support reasoning levels");
 
   fireEvent.keyDown(document, { key: "Escape" });
   await waitFor(() => {
     expect(screen.queryByLabelText("Model reasoning level")).not.toBeInTheDocument();
   });
+});
+
+test("a reasoning stop chosen in send options reaches the chat request", async () => {
+  const model = sampleData.models.find((item) => item.id === "agent-client-update")!;
+  const capabilities = model.capabilities;
+  model.capabilities = { ...capabilities, supported_parameters: ["reasoning_effort"] };
+  try {
+    await renderApp();
+    const textarea = await screen.findByLabelText("Message");
+    fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+    const rail = await screen.findByRole("radiogroup", { name: "Model reasoning level" });
+    expect(within(rail).getByRole("radio", { name: "Balanced" })).toBeChecked();
+    fireEvent.click(within(rail).getByRole("radio", { name: "Smart" }));
+    expect(within(rail).getByRole("radio", { name: "Smart" })).toBeChecked();
+    expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent("Takes longer and thinks it through.");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.change(textarea, { target: { value: "Think this through." } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(chatRequests).toHaveLength(1));
+    expect(chatRequests[0].reasoning_effort).toBe("high");
+  } finally {
+    model.capabilities = capabilities;
+  }
 });
 
 test("composer grows with the draft, caps its height, and shrinks when cleared", async () => {
@@ -1087,7 +1113,7 @@ test("session summary tools row reflects the chat's active tools", async () => {
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Agent Use enabled tools for this reply.",
+      name: "Agent Let a specialized assistant answer.",
     }),
   );
   fireEvent.keyDown(document, { key: "Escape" });
@@ -1682,7 +1708,7 @@ test("denying approval-required MCP tools prevents the chat API call", async () 
   fireEvent.click(within(composerShell).getByRole("button", { name: "Send options" }));
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Agent Use enabled tools for this reply.",
+      name: "Agent Let a specialized assistant answer.",
     }),
   );
 
@@ -1710,18 +1736,18 @@ test("composer runtime toggles are sent to the chat API", async () => {
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Knowledge Use connected workspace sources.",
+      name: "Knowledge Answer from your knowledge bases.",
     }),
   );
   // Web search defaults on for OpenRouter-backed models that support it.
   const webOption = screen.getByRole("menuitemcheckbox", {
-    name: "Web Use public web search for this reply.",
+    name: "Web Look up current information online.",
   });
   expect(webOption).toBeEnabled();
   expect(webOption).toHaveAttribute("aria-checked", "true");
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Agent Use enabled tools for this reply.",
+      name: "Agent Let a specialized assistant answer.",
     }),
   );
 
@@ -1758,7 +1784,7 @@ test("turning web search off lasts only for the current chat", async () => {
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   expect(
     screen.getByRole("menuitemcheckbox", {
-      name: "Web Search current public web sources.",
+      name: "Web Look up current information online.",
     }),
   ).toHaveAttribute("aria-checked", "false");
   fireEvent.keyDown(document, { key: "Escape" });
@@ -1769,7 +1795,7 @@ test("turning web search off lasts only for the current chat", async () => {
   fireEvent.click(within(freshComposer).getByRole("button", { name: "Send options" }));
   expect(
     screen.getByRole("menuitemcheckbox", {
-      name: "Web Use public web search for this reply.",
+      name: "Web Look up current information online.",
     }),
   ).toHaveAttribute("aria-checked", "true");
 });
@@ -1788,13 +1814,13 @@ test("pending assistant response shows an activity trace for enabled tools", asy
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Knowledge Use connected workspace sources.",
+      name: "Knowledge Answer from your knowledge bases.",
     }),
   );
   // Web search is already on by default for this OpenRouter-backed model.
   expect(
     screen.getByRole("menuitemcheckbox", {
-      name: "Web Use public web search for this reply.",
+      name: "Web Look up current information online.",
     }),
   ).toHaveAttribute("aria-checked", "true");
 
@@ -1913,7 +1939,7 @@ test("send options dropdown can toggle runtime tools and send", async () => {
   fireEvent.click(within(composer).getByRole("button", { name: "Send options" }));
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Knowledge Use connected workspace sources.",
+      name: "Knowledge Answer from your knowledge bases.",
     }),
   );
   expect(screen.getByRole("group", { name: "Knowledge source" })).toBeInTheDocument();
@@ -1928,13 +1954,11 @@ test("send options dropdown can toggle runtime tools and send", async () => {
   expect(composer.querySelector(".composer-tools-status")).not.toBeInTheDocument();
   fireEvent.click(
     screen.getByRole("menuitemcheckbox", {
-      name: "Web Search current public web sources.",
+      name: "Web Look up current information online.",
     }),
   );
   fireEvent.click(
-    screen.getByRole("menuitem", {
-      name: "Send now Use the current composer settings.",
-    }),
+    screen.getByRole("button", { name: "Send now" }),
   );
 
   expect(await screen.findByText(CANNED)).toBeInTheDocument();
@@ -2767,7 +2791,7 @@ test("knowledge shortcut loads delayed files through draft rerenders and retries
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   const choices = await screen.findAllByRole("option", { name: /Team handbook.pdf/ });
   fireEvent.click(choices[0]);
-  expect(textarea).toHaveValue("#Team handbook.pdf ");
+  expect(textarea).toHaveValue("");
   expect(screen.queryByText(/Some files could not be loaded/)).not.toBeInTheDocument();
 });
 
@@ -2804,20 +2828,69 @@ test("send options consolidates settings and searchable resources", async () => 
   const panel = screen.getByRole("dialog", { name: "Send options" });
   expect(within(panel).getByRole("checkbox", { name: "Stream replies" })).toBeInTheDocument();
   expect(within(panel).getByRole("group", { name: "Reasoning level" })).toBeInTheDocument();
-  fireEvent.click(within(panel).getByRole("button", { name: "Resources", exact: true }));
+  expect(within(panel).getByRole("button", { name: "Send now" })).toBeDisabled();
+  fireEvent.click(within(panel).getByRole("radio", { name: "Resources" }));
   expect(within(panel).getByRole("textbox", { name: "Find a resource" })).toBeInTheDocument();
-  for (const name of ["MCP connections", "Prompts", "Agents", "Knowledge bases", "Skill files", "Automations"]) {
-    expect(within(panel).getByRole("button", { name, exact: true })).toBeInTheDocument();
-  }
   expect(panel).toHaveTextContent("Shift + Enter adds a line");
   const guide = within(panel).getByRole("group", { name: "Type shortcuts in chat" });
   expect(guide).toHaveTextContent("Type a symbol directly in the chat message box");
+  // The symbol legend is for people who want it, so it starts folded away.
+  expect(guide).not.toHaveAttribute("open");
   for (const [symbol, label] of [["/", "Prompts & MCP connections"], ["@", "Agents"], ["#", "Knowledge bases & files"], ["$", "Skill files"], [">", "Automations"]]) {
     const description = within(guide).getByText(label).closest("div")!;
     expect(description.querySelector("dt")).toHaveTextContent(symbol);
   }
   fireEvent.click(within(panel).getByRole("button", { name: "Close send options" }));
   expect(screen.queryByRole("dialog", { name: "Send options" })).not.toBeInTheDocument();
+});
+
+test("resources open on category tiles and show one category at a time", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
+  const panel = screen.getByRole("dialog", { name: "Send options" });
+  const categories = () => within(panel).getByRole("group", { name: "Resource categories" });
+  expect(within(categories()).getAllByRole("button").map((tile) => tile.querySelector("strong")?.textContent)).toEqual([
+    "Knowledge bases", "Knowledge files", "Connections", "Prompts", "Agents", "Skill files", "Automations", "All resources",
+  ]);
+  expect(within(panel).queryByRole("button", { name: /^Hermes Agent MCP/ })).not.toBeInTheDocument();
+
+  fireEvent.click(within(categories()).getByRole("button", { name: /^Connections/ }));
+  expect(within(panel).queryByRole("group", { name: "Resource categories" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: /^Approval Email/ })).not.toBeInTheDocument();
+  expect(within(panel).getByRole("heading", { name: "Connections" })).toBeInTheDocument();
+  fireEvent.click(within(panel).getByRole("button", { name: /^Hermes Agent MCP/ }));
+
+  fireEvent.click(within(panel).getByRole("button", { name: "Back" }));
+  expect(within(categories()).getByRole("button", { name: /^Connections/ })).toHaveTextContent("1 in use");
+  await waitFor(() => expect(within(categories()).getByRole("button", { name: /^Connections/ })).toHaveFocus());
+
+  fireEvent.click(within(categories()).getByRole("button", { name: /^All resources/ }));
+  expect(within(panel).getByRole("button", { name: /^Hermes Agent MCP/ })).toHaveAttribute("aria-pressed", "true");
+  expect(within(panel).getByRole("button", { name: /^Approval Email/ })).toBeInTheDocument();
+});
+
+test("resource search looks across categories and clearing it returns to the tiles", async () => {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
+  const panel = screen.getByRole("dialog", { name: "Send options" });
+  const search = within(panel).getByRole("textbox", { name: "Find a resource" });
+  fireEvent.change(search, { target: { value: "Approval" } });
+  expect(within(panel).getByRole("heading", { name: "Search results" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("group", { name: "Resource categories" })).not.toBeInTheDocument();
+  // Typing must stay in the search box even though the results view just appeared.
+  search.focus();
+  expect(search).toHaveFocus();
+  expect(within(panel).getByRole("button", { name: /^Approval Email/ })).toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: "" } });
+  expect(within(panel).getByRole("group", { name: "Resource categories" })).toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: "Approval" } });
+  fireEvent.click(within(panel).getByRole("button", { name: "Back" }));
+  expect(search).toHaveValue("");
+  expect(within(panel).getByRole("group", { name: "Resource categories" })).toBeInTheDocument();
 });
 
 test("send options follows the visible viewport when the phone keyboard opens", async () => {
@@ -2845,7 +2918,7 @@ test("resource search inserts a prompt while preserving the existing draft", asy
   fireEvent.change(textarea, { target: { value: "Keep this draft." } });
   textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   fireEvent.click(screen.getByRole("button", { name: "Send options" }));
-  fireEvent.click(screen.getByRole("button", { name: "Resources", exact: true }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
   const search = screen.getByRole("textbox", { name: "Find a resource" });
   fireEvent.change(search, { target: { value: "Approval Email" } });
   fireEvent.keyDown(search, { key: "Enter" });
@@ -2869,8 +2942,9 @@ test("MCP picked through commands and resources has one summary and one request 
   fireEvent.change(textarea, { target: { value: "/Hermes" } });
   fireEvent.click(screen.getByRole("option", { name: /Hermes Agent MCP/ }));
   fireEvent.click(screen.getByRole("button", { name: "Send options" }));
-  fireEvent.click(screen.getByRole("button", { name: "Resources", exact: true }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
   const panel = screen.getByRole("dialog", { name: "Send options" });
+  fireEvent.click(within(panel).getByRole("button", { name: /^Connections/ }));
   const connection = within(panel).getByRole("button", { name: /^Hermes Agent MCP/ });
   expect(connection).toHaveAttribute("aria-pressed", "true");
   fireEvent.click(connection);
@@ -2893,7 +2967,8 @@ test("MCP picked through commands and resources has one summary and one request 
 test("clearing the single summary removes connections selected in resources", async () => {
   await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "Send options" }));
-  fireEvent.click(screen.getByRole("button", { name: "Resources", exact: true }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Connections/ }));
   fireEvent.click(screen.getByRole("button", { name: /^Hermes Agent MCP/ }));
   fireEvent.click(screen.getByRole("button", { name: "Close send options" }));
   fireEvent.click(screen.getByRole("button", { name: "Turn off active tools" }));
@@ -3319,4 +3394,587 @@ test("the Drafts format chooser works from the keyboard and closes without movin
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
   expect(window.location.pathname).not.toBe("/drafts");
+});
+
+/** The attachment routes the viewer and the composer use. */
+function stubAttachmentDocumentRoutes({ name = "brief.pdf", original = "Teh fee is ten percent." } = {}) {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; method: string }> = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const isAttachmentRoute = /\/api\/chat\/attachments\/[^/]+/.test(url) && !url.endsWith("/preview");
+    if (!isAttachmentRoute) return originalFetch(input, init);
+    requests.push({ url, method });
+    if (method === "DELETE") return new Response(JSON.stringify({ status: "deleted" }), { status: 200 });
+    if (url.endsWith("/original")) {
+      return new Response(original, {
+        status: 200,
+        headers: { "Content-Disposition": `attachment; filename="${name}"` },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        document_id: "upload-brief",
+        knowledge_config_id: "",
+        attachment_id: "upload-brief",
+        name,
+        content_type: "text/plain",
+        mode: "text",
+        file_url: null,
+        original_available: true,
+        page_count: null,
+        target: null,
+        segments: [{ id: "upload-brief:0", page: null, locator: null, text: "The whole file." }],
+        notice: null,
+        properties: [],
+        passage_count: 1,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+  return requests;
+}
+
+function stageFile(name: string, type = "application/pdf", content = "dummy-bytes") {
+  const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(fileInput, { target: { files: [new File([content], name, { type })] } });
+}
+
+async function openNewChat() {
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+}
+
+test("a staged file opens before it is sent, and sending does not upload it twice", async () => {
+  stubAttachmentDocumentRoutes();
+  await openNewChat();
+  stageFile("brief.pdf");
+
+  fireEvent.click(await screen.findByRole("button", { name: "Open brief.pdf" }));
+
+  expect(await screen.findByRole("dialog", { name: "brief.pdf" })).toBeInTheDocument();
+  expect(await screen.findByText("The whole file.")).toBeInTheDocument();
+  expect(uploadRequests).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+
+  sendFromComposer("Please review");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(uploadRequests).toHaveLength(1);
+  expect(chatRequests[0].attachment_ids).toEqual(["upload-brief"]);
+});
+
+test("removing a file that was opened takes it back from the server", async () => {
+  const requests = stubAttachmentDocumentRoutes();
+  await openNewChat();
+  stageFile("brief.pdf");
+  fireEvent.click(await screen.findByRole("button", { name: "Open brief.pdf" }));
+  await screen.findByRole("dialog", { name: "brief.pdf" });
+  fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove brief.pdf" }));
+
+  await waitFor(() =>
+    expect(requests).toContainEqual({ url: expect.stringContaining("/api/chat/attachments/upload-brief"), method: "DELETE" }),
+  );
+  expect(screen.queryByRole("button", { name: "Open brief.pdf" })).not.toBeInTheDocument();
+});
+
+test("removing a file that was never uploaded asks the server for nothing", async () => {
+  const requests = stubAttachmentDocumentRoutes();
+  await openNewChat();
+  stageFile("brief.pdf");
+
+  fireEvent.click(await screen.findByRole("button", { name: "Remove brief.pdf" }));
+
+  expect(screen.queryByText("brief.pdf")).not.toBeInTheDocument();
+  expect(requests).toHaveLength(0);
+  expect(uploadRequests).toHaveLength(0);
+});
+
+test("a sent file opens from its message", async () => {
+  stubAttachmentDocumentRoutes();
+  await openNewChat();
+  stageFile("brief.pdf");
+  sendFromComposer("Please review");
+  await screen.findByText(CANNED);
+
+  const conversation = document.querySelector(".message-list") as HTMLElement;
+  fireEvent.click(within(conversation).getByRole("button", { name: "Open brief.pdf" }));
+
+  expect(await screen.findByRole("dialog", { name: "brief.pdf" })).toBeInTheDocument();
+});
+
+test("a later message sends the documents shared earlier, for the server to search", async () => {
+  await openNewChat();
+  stageFile("brief.pdf");
+  sendFromComposer("Please review");
+  await screen.findByText(CANNED);
+
+  sendFromComposer("What does it say about fees?");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(2));
+  expect(chatRequests[1].context_attachment_ids).toEqual(["upload-brief"]);
+});
+
+const WORD_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+test("a request to change an attached document offers Drafts or chat", async () => {
+  await openNewChat();
+  stageFile("HOA PMA.docx", WORD_TYPE);
+
+  sendFromComposer("Fill in the gaps of this document with fake data.");
+
+  const offer = await screen.findByRole("region", { name: "Edit this document in Drafts?" });
+  expect(within(offer).getByRole("button", { name: "Edit in Drafts" })).toBeEnabled();
+  expect(within(offer).getByText(/HOA PMA\.docx/)).toBeInTheDocument();
+  expect(chatRequests).toHaveLength(0);
+
+  fireEvent.click(within(offer).getByRole("button", { name: "Continue in chat" }));
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chatRequests[0].attachment_ids).toEqual(["upload-brief"]);
+});
+
+test("asking about an attached document stays in chat", async () => {
+  await openNewChat();
+  stageFile("HOA PMA.docx", WORD_TYPE);
+
+  sendFromComposer("What does section 3 mean?");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(screen.queryByRole("region", { name: "Edit this document in Drafts?" })).not.toBeInTheDocument();
+});
+
+test("a file Drafts cannot open gets no offer", async () => {
+  await openNewChat();
+  stageFile("clip.mp3", "audio/mpeg");
+
+  sendFromComposer("Fix the typos");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(screen.queryByRole("region", { name: "Edit this document in Drafts?" })).not.toBeInTheDocument();
+});
+
+test("a change to a document shared earlier offers Drafts when the words name it", async () => {
+  await openNewChat();
+  stageFile("agreement.docx", WORD_TYPE);
+  sendFromComposer("Please review");
+  await screen.findByText(CANNED);
+
+  sendFromComposer("Change the fee in the agreement to five percent");
+
+  expect(await screen.findByRole("region", { name: "Edit this document in Drafts?" })).toBeInTheDocument();
+});
+
+test("editing in Drafts opens the file and makes the change there", async () => {
+  stubAttachmentDocumentRoutes({ name: "notes.md", original: "# Notes\n\nTeh fee is ten percent.\n" });
+  await openNewChat();
+  stageFile("notes.md", "text/markdown");
+  sendFromComposer("Fix the typos");
+  const offer = await screen.findByRole("region", { name: "Edit this document in Drafts?" });
+
+  fireEvent.click(within(offer).getByRole("button", { name: "Edit in Drafts" }));
+
+  await waitFor(() => expect(draftRequests()).toHaveLength(1));
+  expect(window.location.pathname).toBe("/drafts");
+  const prompt = requestText(draftRequests()[0]);
+  expect(prompt).toContain("Fix the typos");
+  expect(prompt).toContain("Teh fee is ten percent.");
+  // The file being changed is the document itself, not also a source beside it.
+  expect(draftRequests()[0].attachment_ids ?? []).toEqual([]);
+});
+
+const HASH_FILE = "Harbor lease.pdf";
+const HASH_BASE = "kb-litigation-playbook";
+const HASH_ATTACHMENT = {
+  id: "knowledge-lease",
+  tenant_id: "tenant-example",
+  owner_user_id: "user-1",
+  name: HASH_FILE,
+  size: "2.1 MB",
+  kind: "PDF",
+  mime_type: null,
+  size_bytes: 2_200_000,
+  source_type: "knowledge",
+  source_uri: "knowledge://kb-litigation-playbook/doc-lease",
+  status: "uploaded",
+  uploaded_at: "Now",
+  text_preview: null,
+};
+
+const HASH_BASE_ATTACHMENT = {
+  ...HASH_ATTACHMENT,
+  id: "knowledge-playbook",
+  name: "Litigation Playbook",
+  size: "12 files",
+  kind: "Knowledge",
+  size_bytes: null,
+  source_uri: "knowledge://kb-litigation-playbook",
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/** One knowledge file to find with #, and the route that pulls it in. */
+function stubHashFile(
+  attach: (body: { document_id?: string }) => Promise<Response> | Response = () => jsonResponse(HASH_ATTACHMENT),
+) {
+  const originalFetch = globalThis.fetch;
+  const pulled: unknown[] = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith(`/api/knowledge/${HASH_BASE}/documents`)) {
+      return jsonResponse([{ id: "doc-lease", name: HASH_FILE }]);
+    }
+    if (/\/api\/knowledge\/[^/]+\/documents$/.test(url)) return jsonResponse([]);
+    if (url.endsWith("/api/chat/attachments/knowledge")) {
+      const body = JSON.parse(String(init?.body));
+      pulled.push(body);
+      return attach(body);
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  return pulled;
+}
+
+async function pickHashFile(text: string, caret = text.length) {
+  const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+  fireEvent.change(textarea, { target: { value: text, selectionStart: caret, selectionEnd: caret } });
+  fireEvent.click(await screen.findByRole("option", { name: new RegExp(HASH_FILE) }));
+  return textarea;
+}
+
+test("a file picked with # turns into a file block, and the text goes", async () => {
+  const pulled = stubHashFile();
+  await openNewChat();
+
+  const textarea = await pickHashFile("#Harbor");
+
+  expect(textarea).toHaveValue("");
+  expect(await screen.findByRole("button", { name: `Open ${HASH_FILE}` })).toBeEnabled();
+  expect(pulled).toEqual([{ knowledge_config_id: HASH_BASE, document_id: "doc-lease" }]);
+});
+
+test("the block goes with the message and the base stays unsearched", async () => {
+  stubHashFile();
+  await openNewChat();
+  await pickHashFile("#Harbor");
+  await screen.findByRole("button", { name: `Open ${HASH_FILE}` });
+
+  sendFromComposer("Summarize this");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chatRequests[0].attachment_ids).toEqual(["knowledge-lease"]);
+  expect(chatRequests[0].knowledge_config_ids).toEqual([]);
+  // The sent block opens too.
+  expect(await screen.findByRole("button", { name: `Open ${HASH_FILE}` })).toBeInTheDocument();
+});
+
+test("the block opens the document before and after it is sent", async () => {
+  const requests = stubAttachmentDocumentRoutes({ name: HASH_FILE });
+  stubHashFile();
+  await openNewChat();
+  await pickHashFile("#Harbor");
+
+  fireEvent.click(await screen.findByRole("button", { name: `Open ${HASH_FILE}` }));
+
+  expect(await screen.findByRole("dialog", { name: HASH_FILE })).toBeInTheDocument();
+  expect(requests.map((request) => request.url).join(" ")).toContain("/api/chat/attachments/knowledge-lease/view");
+  fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+
+  sendFromComposer("Summarize this");
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  fireEvent.click(await screen.findByRole("button", { name: `Open ${HASH_FILE}` }));
+
+  expect(await screen.findByRole("dialog", { name: HASH_FILE })).toBeInTheDocument();
+});
+
+test("picking a file mid-sentence leaves the sentence whole", async () => {
+  stubHashFile();
+  await openNewChat();
+
+  const textarea = await pickHashFile("Compare #Harbor with last year", "Compare #Harbor".length);
+
+  expect(textarea).toHaveValue("Compare with last year");
+});
+
+test("picking a file at the start of the message leaves no stray space", async () => {
+  stubHashFile();
+  await openNewChat();
+
+  const textarea = await pickHashFile("#Harbor needs a summary", "#Harbor".length);
+
+  expect(textarea).toHaveValue("needs a summary");
+});
+
+test("a file chosen from Resources attaches and leaves the message as typed", async () => {
+  const pulled = stubHashFile();
+  await openNewChat();
+  const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+  // The caret sits between two spaces, and a pick here has no typed token to replace.
+  fireEvent.change(textarea, { target: { value: "Summarize  this lease", selectionStart: 10, selectionEnd: 10 } });
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
+  const panel = screen.getByRole("dialog", { name: "Send options" });
+  fireEvent.change(within(panel).getByRole("textbox", { name: "Find a resource" }), { target: { value: "Harbor" } });
+
+  fireEvent.click(await within(panel).findByRole("button", { name: new RegExp(HASH_FILE) }));
+
+  expect(await screen.findByRole("button", { name: `Open ${HASH_FILE}` })).toBeInTheDocument();
+  expect(textarea).toHaveValue("Summarize  this lease");
+  expect(pulled).toEqual([{ knowledge_config_id: HASH_BASE, document_id: "doc-lease" }]);
+  expect(screen.queryByRole("dialog", { name: "Send options" })).not.toBeInTheDocument();
+});
+
+test("the same file picked twice is one block", async () => {
+  const pulled = stubHashFile();
+  await openNewChat();
+  await pickHashFile("#Harbor");
+  await screen.findByRole("button", { name: `Open ${HASH_FILE}` });
+  // A pick puts the caret back on the next frame, and nobody types faster.
+  await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+  await pickHashFile("#Harbor");
+
+  expect(screen.getAllByRole("button", { name: `Open ${HASH_FILE}` })).toHaveLength(1);
+  expect(pulled).toHaveLength(1);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+});
+
+test("a file that cannot be pulled in says so and leaves no block", async () => {
+  stubHashFile(() => jsonResponse({ detail: "Unknown knowledge document." }, 404));
+  await openNewChat();
+
+  await pickHashFile("#Harbor");
+
+  expect(await screen.findByText("Unknown knowledge document.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("button", { name: `Open ${HASH_FILE}` })).not.toBeInTheDocument());
+});
+
+test("sending waits for a file still on its way", async () => {
+  let arrive!: (response: Response) => void;
+  stubHashFile(() => new Promise<Response>((resolve) => { arrive = resolve; }));
+  await openNewChat();
+  await pickHashFile("#Harbor");
+  await waitFor(() => expect(arrive).toBeDefined());
+
+  const textarea = screen.getByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "Summarize this" } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+
+  expect(chatRequests).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+  await act(async () => arrive(jsonResponse(HASH_ATTACHMENT)));
+  fireEvent.keyDown(textarea, { key: "Enter" });
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chatRequests[0].attachment_ids).toEqual(["knowledge-lease"]);
+});
+
+test("a block removed while it arrives leaves nothing behind", async () => {
+  const requests = stubAttachmentDocumentRoutes({ name: HASH_FILE });
+  let arrive!: (response: Response) => void;
+  stubHashFile(() => new Promise<Response>((resolve) => { arrive = resolve; }));
+  await openNewChat();
+  await pickHashFile("#Harbor");
+  await waitFor(() => expect(arrive).toBeDefined());
+
+  fireEvent.click(await screen.findByRole("button", { name: `Remove ${HASH_FILE}` }));
+  await act(async () => arrive(jsonResponse(HASH_ATTACHMENT)));
+
+  await waitFor(() => expect(requests).toContainEqual(
+    expect.objectContaining({ method: "DELETE", url: expect.stringContaining("/api/chat/attachments/knowledge-lease") }),
+  ));
+  expect(screen.queryByRole("button", { name: `Open ${HASH_FILE}` })).not.toBeInTheDocument();
+});
+
+test("picking a knowledge base turns it into a block that goes with the message", async () => {
+  const pulled = stubHashFile(() => jsonResponse(HASH_BASE_ATTACHMENT));
+  await openNewChat();
+  const textarea = screen.getByLabelText("Message");
+  fireEvent.change(textarea, { target: { value: "#Litigation" } });
+
+  fireEvent.click((await screen.findAllByRole("option", { name: /^Litigation Playbook/ }))[0]);
+
+  expect(textarea).toHaveValue("");
+  const block = await screen.findByRole("button", { name: "Open Litigation Playbook" });
+  expect(block).toHaveTextContent("12 files · Knowledge");
+  expect(pulled).toEqual([{ knowledge_config_id: HASH_BASE }]);
+  sendFromComposer("What should a pleading preserve?");
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chatRequests[0].attachment_ids).toEqual(["knowledge-playbook"]);
+  // The block is the whole base, so nothing also turns the search on.
+  expect(chatRequests[0].knowledge_config_ids).toEqual([]);
+});
+
+test("a bare # lists knowledge bases and their files together", async () => {
+  stubHashFile();
+  await openNewChat();
+
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "#" } });
+
+  expect(await screen.findByRole("option", { name: new RegExp(HASH_FILE) })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /^Litigation Playbook/ })).toBeInTheDocument();
+  expect(screen.getByText("Choose a file to attach it, or a knowledge base to bring in all of it.")).toBeInTheDocument();
+});
+
+test("typing a file's name also shows the base it lives in, and no others", async () => {
+  stubHashFile();
+  await openNewChat();
+
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "#Harbor" } });
+
+  const file = await screen.findByRole("option", { name: new RegExp(HASH_FILE) });
+  expect(file).toHaveTextContent("In Litigation Playbook");
+  const options = screen.getAllByRole("option").map((option) => option.textContent ?? "");
+  expect(options[0]).toContain("Litigation Playbook");
+  expect(options).toHaveLength(2);
+});
+
+test("a pick that leaves text touches nothing after it", async () => {
+  await openNewChat();
+  const textarea = screen.getByLabelText("Message");
+  const typed = "Ask @Client about this";
+  fireEvent.change(textarea, { target: { value: typed, selectionStart: "Ask @Client".length, selectionEnd: "Ask @Client".length } });
+
+  fireEvent.click(await screen.findByRole("option", { name: /^Client Update Agent/ }));
+
+  expect(textarea).toHaveValue("Ask @Client Update Agent  about this");
+});
+
+test("the Resources tiles count the blocks a pick brought in", async () => {
+  stubHashFile((body) => jsonResponse(body.document_id ? HASH_ATTACHMENT : HASH_BASE_ATTACHMENT));
+  await openNewChat();
+  await pickHashFile("#Harbor");
+  await screen.findByRole("button", { name: `Open ${HASH_FILE}` });
+  await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "#Litigation" } });
+  fireEvent.click((await screen.findAllByRole("option", { name: /^Litigation Playbook/ }))[0]);
+  await screen.findByRole("button", { name: "Open Litigation Playbook" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
+
+  const tiles = within(screen.getByRole("dialog", { name: "Send options" })).getByRole("group", { name: "Resource categories" });
+  expect(within(tiles).getByRole("button", { name: /^Knowledge bases/ })).toHaveTextContent("1 in use");
+  expect(within(tiles).getByRole("button", { name: /^Knowledge files/ })).toHaveTextContent("1 in use");
+});
+
+test("a base block counts beside the Knowledge search when both are on", async () => {
+  stubHashFile(() => jsonResponse(HASH_BASE_ATTACHMENT));
+  await openNewChat();
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "#Litigation" } });
+  fireEvent.click((await screen.findAllByRole("option", { name: /^Litigation Playbook/ }))[0]);
+  await screen.findByRole("button", { name: "Open Litigation Playbook" });
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Knowledge Answer from your knowledge bases." }));
+  fireEvent.click(screen.getByRole("radio", { name: "Resources" }));
+
+  const tiles = within(screen.getByRole("dialog", { name: "Send options" })).getByRole("group", { name: "Resource categories" });
+  expect(within(tiles).getByRole("button", { name: /^Knowledge bases/ })).toHaveTextContent("2 in use");
+  expect(within(tiles).getByRole("button", { name: /^Knowledge files/ })).not.toHaveTextContent("in use");
+});
+
+function placeComposer(rect: { mockImplementation: (next: (this: HTMLElement) => DOMRect) => unknown }, real: () => DOMRect, top: number) {
+  rect.mockImplementation(function (this: HTMLElement) {
+    if (this.matches(".workspace-header")) return { top: 0, bottom: 66 } as DOMRect;
+    if (this.matches("form.composer")) return { top, bottom: 560 } as DOMRect;
+    return real.call(this);
+  });
+}
+
+test("the symbol menu shrinks to the room above the composer", async () => {
+  stubHashFile();
+  await openNewChat();
+  const realRect = HTMLElement.prototype.getBoundingClientRect;
+  const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  placeComposer(rect, realRect, 322);
+
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "#" } });
+
+  const menu = await screen.findByRole("listbox", { name: "Knowledge commands" });
+  expect(menu.style.getPropertyValue("--command-menu-room")).toBe("240px");
+  expect(menu).not.toHaveClass("is-folded");
+
+  placeComposer(rect, realRect, 272);
+  fireEvent(window, new Event("resize"));
+
+  expect(menu.style.getPropertyValue("--command-menu-room")).toBe("190px");
+  rect.mockRestore();
+});
+
+test("the symbol menu folds into the composer when there is no room above it, and opens back out", async () => {
+  stubHashFile();
+  await openNewChat();
+  const realRect = HTMLElement.prototype.getBoundingClientRect;
+  const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  placeComposer(rect, realRect, 120);
+
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: "#" } });
+
+  const menu = await screen.findByRole("listbox", { name: "Knowledge commands" });
+  expect(menu).toHaveClass("is-folded");
+
+  placeComposer(rect, realRect, 400);
+  fireEvent(window, new Event("resize"));
+
+  expect(menu).not.toHaveClass("is-folded");
+  expect(menu.style.getPropertyValue("--command-menu-room")).toBe("318px");
+  rect.mockRestore();
+});
+
+/** jsdom lays nothing out, so the text box is given the size a browser would. */
+function sizeEditor(textarea: HTMLTextAreaElement) {
+  Object.defineProperty(textarea, "clientHeight", { configurable: true, value: 200 });
+  Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 1000 });
+}
+
+test("the line being typed stays in view when the expanded editor gives up room to the menu", async () => {
+  stubHashFile();
+  await openNewChat();
+  const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+  fireEvent.change(textarea, { target: { value: "Some words" } });
+  fireEvent.click(screen.getByRole("button", { name: "Expand prompt editor" }));
+  sizeEditor(textarea);
+
+  const typed = `${"word ".repeat(40)}#`;
+  fireEvent.change(textarea, { target: { value: typed, selectionStart: typed.length, selectionEnd: typed.length } });
+
+  await screen.findByRole("listbox", { name: "Knowledge commands" });
+  expect(textarea.scrollTop).toBe(800);
+});
+
+test("the caret keeps its place when it sits partway through the expanded editor", async () => {
+  stubHashFile();
+  await openNewChat();
+  const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+  fireEvent.change(textarea, { target: { value: "Some words" } });
+  fireEvent.click(screen.getByRole("button", { name: "Expand prompt editor" }));
+  sizeEditor(textarea);
+
+  const opening = `${"a".repeat(248)} #`;
+  const typed = `${opening} ${"b".repeat(749)}`;
+  fireEvent.change(textarea, { target: { value: typed, selectionStart: 250, selectionEnd: 250 } });
+
+  await screen.findByRole("listbox", { name: "Knowledge commands" });
+  // A quarter of the way into 1000px of text puts the caret at 250, past a 200px view.
+  expect(textarea.scrollTop).toBe(50);
+});
+
+test("the normal composer is not scrolled by the menu", async () => {
+  stubHashFile();
+  await openNewChat();
+  const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+  sizeEditor(textarea);
+
+  const typed = `${"word ".repeat(40)}#`;
+  fireEvent.change(textarea, { target: { value: typed, selectionStart: typed.length, selectionEnd: typed.length } });
+
+  await screen.findByRole("listbox", { name: "Knowledge commands" });
+  expect(textarea.scrollTop).toBe(0);
 });

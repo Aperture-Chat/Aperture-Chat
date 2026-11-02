@@ -2992,6 +2992,13 @@ class CloudAttachmentItem(BaseModel):
     modified_at: str | None = None
 
 
+class KnowledgeAttachmentRequest(BaseModel):
+    """One document, or with no ``document_id`` the whole base."""
+
+    knowledge_config_id: str = Field(min_length=1)
+    document_id: str | None = Field(default=None, min_length=1)
+
+
 class CloudAttachmentImportRequest(BaseModel):
     item_ids: list[str] = Field(default_factory=list, max_length=10)
     tenant_id: str | None = None
@@ -3017,6 +3024,9 @@ class ChatCitation(BaseModel):
     # citations as the client sent them.
     document_id: str | None = None
     knowledge_config_id: str | None = None
+    # The attached file this came from, for the same purpose and with the same
+    # caveat: the server authorizes every open against the attachment's owner.
+    attachment_id: str | None = None
     # The sentences of the chunk that best match the reply sentences citing it,
     # verbatim, so the viewer can find them. None when nothing matched well or
     # when concealment changed them.
@@ -3421,8 +3431,15 @@ class KnowledgeDocumentViewSegment(BaseModel):
     text: str
 
 
+class KnowledgeDocumentProperty(BaseModel):
+    label: str
+    value: str
+
+
 class KnowledgeDocumentView(BaseModel):
-    """How to present one knowledge document. ``segments`` is set only for text."""
+    """How to present one document. ``segments`` is set only for text. A chat
+    attachment answers in this shape with ``attachment_id`` set, and its
+    ``knowledge_config_id`` empty."""
 
     document_id: str
     knowledge_config_id: str
@@ -3435,6 +3452,9 @@ class KnowledgeDocumentView(BaseModel):
     target: KnowledgeDocumentViewTarget | None = None
     segments: list[KnowledgeDocumentViewSegment] | None = None
     notice: KnowledgeDocumentViewNotice | None = None
+    attachment_id: str | None = None
+    properties: list[KnowledgeDocumentProperty] = Field(default_factory=list)
+    passage_count: int | None = None
 
 
 class KnowledgeChunkLocation(BaseModel):

@@ -35,7 +35,7 @@ async function webOff(page) {
   const menu = page.locator(".send-options-menu");
   if (!(await menu.isVisible())) await page.locator("form.composer .send-options-button").click();
   await menu.waitFor();
-  const web = menu.locator(".send-option").filter({ has: page.locator("strong:text-is('Web')") });
+  const web = menu.locator(".composer-option-row").filter({ has: page.locator("strong:text-is('Web')") });
   if ((await web.getAttribute("aria-checked")) === "true") await web.click();
   await page.waitForTimeout(300);
   if ((await web.getAttribute("aria-checked")) !== "false") throw new Error("Web did not turn off.");

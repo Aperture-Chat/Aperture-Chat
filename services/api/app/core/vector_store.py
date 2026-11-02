@@ -5,7 +5,7 @@ import json
 import logging
 import sqlite3
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Condition, Lock, RLock, Thread
@@ -1150,6 +1150,44 @@ def _chunk_score(
     score = exact_score + lexical_score + sparse_vector_score + (2.0 * dense_vector_score)
     score *= _passage_weight(chunk)
     return score if score > 0 else 0.1
+
+
+def _telling_terms(
+    query_vector: dict[str, float], searchable: Sequence[str]
+) -> dict[str, float]:
+    """The query's words that tell passages apart. A word in most passages of one
+    file, like "about" or the file's own subject, only adds noise."""
+    limit = max(1, len(searchable) // 2)
+    return {
+        term: weight
+        for term, weight in query_vector.items()
+        if sum(term in text for text in searchable) <= limit
+    }
+
+
+def rank_passages(chunks: Sequence[KnowledgeChunk], query: str) -> list[KnowledgeChunk]:
+    """``chunks`` best first, for passages that are not in the index. Equal scores
+    keep reading order, so a question that names nothing reads from the start."""
+    searchable = [f"{chunk.source_name} {chunk.text}".lower() for chunk in chunks]
+    query_vector = _telling_terms(sparse_text_vector(query), searchable)
+    query_terms = set(query_vector)
+    scored = [
+        chunk.model_copy(
+            update={
+                "score": _chunk_score(
+                    chunk,
+                    query_terms,
+                    query,
+                    query_vector,
+                    sparse_text_vector(chunk.text),
+                    None,
+                    [],
+                )
+            }
+        )
+        for chunk in chunks
+    ]
+    return sorted(scored, key=lambda chunk: (-chunk.score, chunk.ordinal))
 
 
 def _passage_weight(chunk: KnowledgeChunk) -> float:

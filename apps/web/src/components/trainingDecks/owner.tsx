@@ -635,7 +635,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
       "Azure OpenAI: the resource endpoint, KEY 1, and the deployment name from the Azure portal.",
     ],
     setupSteps: [
-      "Choose Platform console at the bottom of the sidebar, then open Providers.",
+      "Select your name at the bottom of the sidebar, choose Platform owner console, then open Providers.",
       "Choose Add Provider. Enter a Name people will recognise, such as OpenAI production.",
       "Choose the Kind. For most kinds, Base URL, Auth type, and Header fill in automatically; keep them unless your vendor tells you otherwise.",
       "Enter the Region if you track it, then a Key name, the Environment, and Expires (the date the vendor key stops working, or Not set).",
@@ -749,8 +749,8 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "The Providers tab",
         caption: "Platform console › Providers. Each card shows its status: Connected, Needs key, or Needs validation.",
         narration:
-          "Choose Platform console, then open Providers. Each card is one connection, with its kind, region, model count, and status. Connected means a real test chat passed. Needs key means no working key is on file. Needs validation means a key is saved but the last check did not pass.",
-        durationSeconds: 20,
+          "Select your name at the bottom of the sidebar, choose Platform owner console, then open Providers. Each card is one connection, with its kind, region, model count, and status. Connected means a real test chat passed. Needs key means no working key is on file. Needs validation means a key is saved but the last check did not pass.",
+        durationSeconds: 23,
         calloutPlacement: "left-rail",
         captionPlacement: "top",
         focus: "pvOverview",
@@ -1335,7 +1335,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
     verify: [
       "The confirmation reads … account created through the admin API, and the row shows the chosen role.",
       "At first sign-in the person sees Set a new password, then the workspace.",
-      "A new admin sees Admin console in the sidebar but not Platform console.",
+      "A new admin sees Admin console in their account panel but not Platform owner console.",
       "Platform console › Audit records each account creation, role change, password reset, and deletion.",
     ],
     troubleshooting: [
@@ -1415,7 +1415,7 @@ export const OWNER_TRAINING_VIDEOS: OwnerTrainingVideo[] = [
         title: "Check what the admin sees",
         caption: "The new admin replaced the temporary password and sees Admin console, but not Platform console.",
         narration:
-          "Finally, the new admin signs in with the temporary password and chooses their own. They land in the workspace with Admin console in the sidebar, and no Platform console. That boundary is the point of roles.",
+          "Finally, the new admin signs in with the temporary password and chooses their own. They land in the workspace with Admin console in their account panel, and no Platform console. That boundary is the point of roles.",
         durationSeconds: 15,
         calloutPlacement: "left-rail",
         focus: "rolesAdminSignedIn",

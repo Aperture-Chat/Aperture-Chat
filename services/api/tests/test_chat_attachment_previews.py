@@ -103,7 +103,7 @@ def test_hard_deleting_a_user_removes_their_preview_files() -> None:
     deleted = client.delete("/api/admin/users/user-jane", headers=headers("user-admin"))
     assert deleted.status_code == 200
 
-    # The preview is the only stored copy of the upload; leaving it on the
-    # data volume after a hard delete would orphan the user's image content.
+    # Leaving it on the data volume after a hard delete would orphan the user's
+    # image content.
     assert not preview_path.exists()
     assert attachment_previews.attachment_preview_file(attachment_id) is None

@@ -160,8 +160,9 @@ const adminUsers = {
     await tidyFixture(kit);
     await removeUsers(kit, [avery.email, robin.email]);
     const page = kit.use(await kit.app("admin", "/"));
-    // Start where people start: the Admin console link in the sidebar.
-    await page.getByRole("link", { name: "Admin console" }).or(page.getByRole("button", { name: "Admin console" })).first().click();
+    // Start where people start: their name opens Account, which holds the console.
+    await page.getByRole("button", { name: /^Account:/ }).click();
+    await page.getByRole("dialog", { name: "Account" }).getByRole("button", { name: /Admin console/ }).click();
     await page.getByRole("tablist", { name: "Admin sections" }).waitFor();
     await usersTable(page);
     await shot("users-list");

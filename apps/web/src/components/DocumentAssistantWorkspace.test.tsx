@@ -6949,3 +6949,133 @@ test("the visual redline marks each change and draws fill-in blanks as lines, ne
   // The untouched signature blank is drawn as a line too, with no change mark.
   expect(within(redline).getByText("________________").className).toBe("redline-blank");
 });
+
+/** The file behind an edit, served the way the attachment route serves it. */
+function installEditFetchMock(reply: string, original: Response | (() => Response)) {
+  const requests = installChatCompletionFetchMock(reply) as Array<Record<string, unknown>>;
+  const chat = globalThis.fetch;
+  const fetched: string[] = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.includes("/api/chat/attachments/")) return chat(input, init);
+    fetched.push(url);
+    return typeof original === "function" ? original() : original;
+  }) as typeof fetch;
+  return { requests, fetched };
+}
+
+function fileResponse(text: string) {
+  return new Response(text, {
+    status: 200,
+    headers: { "Content-Disposition": 'attachment; filename="agreement.md"' },
+  });
+}
+
+function editHandoff(overrides: Partial<DraftHandoffRequest> = {}) {
+  return chatHandoff({
+    kind: "edit",
+    prompt: "Fill in the gaps with fake data",
+    editTarget: { attachmentId: "upload-1", name: "agreement.md" },
+    ...overrides,
+  });
+}
+
+const AGREEMENT = "# Management Agreement\n\nThis agreement is between ____ and the Manager.\n\nThe term is one year.\n";
+
+test("an edit handed over from chat opens the file and changes only what it must", async () => {
+  const { requests, fetched } = installEditFetchMock(
+    "@@ 2\nThis agreement is between Willow Harbor and the Manager.\n@@ end",
+    fileResponse(AGREEMENT),
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini")}
+      brandName="Aperture Chat"
+      initialRequest={editHandoff()}
+    />,
+  );
+
+  await waitFor(() => expect(documentText()).toContain("Willow Harbor"));
+  expect(fetched[0]).toContain("/api/chat/attachments/upload-1/original");
+  expect(requests).toHaveLength(1);
+  const prompt = String((requests[0].messages as Array<{ content: string }>)[0].content);
+  expect(prompt).toContain("[1] Management Agreement");
+  expect(prompt).toContain("[2] This agreement is between ____ and the Manager.");
+  expect(prompt).toContain("Fill in the gaps with fake data");
+  expect(requests[0].surface).toBe("draft");
+  // Untouched blocks stay exactly as they opened.
+  expect(documentBody().querySelector("h1")?.textContent).toBe("Management Agreement");
+  expect(documentText()).toContain("The term is one year.");
+  // The change is a new version, so the opened file stays one click away.
+  expect((await screen.findAllByText(/Version 2 applied/)).length).toBeGreaterThan(0);
+  // Each change stays lit and can be jumped to.
+  const trail = await screen.findByRole("dialog", { name: "AI edit trail" });
+  expect(within(trail).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(trail).getByText(/Willow Harbor/)).toBeInTheDocument();
+});
+
+test("an edit that needs no change says so and leaves the document alone", async () => {
+  installEditFetchMock("@@ end", fileResponse(AGREEMENT));
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini")}
+      brandName="Aperture Chat"
+      initialRequest={editHandoff({ prompt: "Fix the typos" })}
+    />,
+  );
+
+  expect((await screen.findAllByText(/nothing needed to change/i)).length).toBeGreaterThan(0);
+  expect(documentText()).toMatch(/This agreement is between\s+and the Manager\./);
+});
+
+test("a reply cut off partway changes nothing", async () => {
+  installEditFetchMock("@@ 2\nThis agreement is between Willow", fileResponse(AGREEMENT));
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini")}
+      brandName="Aperture Chat"
+      initialRequest={editHandoff()}
+    />,
+  );
+
+  expect((await screen.findAllByText(/stopped before it finished/i)).length).toBeGreaterThan(0);
+  expect(documentText()).toMatch(/This agreement is between\s+and the Manager\./);
+});
+
+test("a file whose original is gone says what to do and keeps the request", async () => {
+  const { requests } = installEditFetchMock(
+    "@@ end",
+    new Response(JSON.stringify({ detail: "No stored file for this attachment." }), { status: 404 }),
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini")}
+      brandName="Aperture Chat"
+      initialRequest={editHandoff()}
+    />,
+  );
+
+  expect((await screen.findAllByText(/Could not open agreement\.md/)).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/Attach it again/).length).toBeGreaterThan(0);
+  expect(requests).toHaveLength(0);
+  expect(screen.getByLabelText("Ask the document assistant")).toHaveValue("Fill in the gaps with fake data");
+});
+
+test("an edit that asks for a new look goes through a full revision", async () => {
+  const { requests } = installEditFetchMock(
+    "# Management Agreement\n\n- The term is one year.\n- This agreement is between ____ and the Manager.",
+    fileResponse(AGREEMENT),
+  );
+  render(
+    <DocumentAssistantWorkspace
+      data={dataWithApprovedDraftModel("openrouter-openai-gpt-4o-mini")}
+      brandName="Aperture Chat"
+      initialRequest={editHandoff({ prompt: "Turn these paragraphs into a bulleted list" })}
+    />,
+  );
+
+  await waitFor(() => expect(requests).toHaveLength(1));
+  const prompt = String((requests[0].messages as Array<{ content: string }>)[0].content);
+  expect(prompt).toContain("Revision request: Turn these paragraphs into a bulleted list");
+  expect(prompt).not.toContain("block by block");
+});

@@ -691,22 +691,28 @@ function wireMessagesFrom(messages: ChatMessage[]): ChatWireMessage[] {
     }));
 }
 
-/** Most recent image uploads carried into follow-up requests so the model can
- * still see them when a later turn asks about an image. Bounded to keep the
- * request payload small; the server skips ids whose uploads no longer exist. */
-const MAX_CONTEXT_IMAGE_ATTACHMENTS = 6;
+/** Most recent uploads carried into follow-up requests, per kind, so the model
+ * can still see an image and the server can search a document when a later turn
+ * asks about one. Bounded to keep the request payload small; the server skips
+ * ids whose uploads no longer exist. */
+const MAX_CONTEXT_ATTACHMENTS = 6;
 
-function contextImageAttachmentIds(messages: ChatMessage[]): string[] {
-  const ids: string[] = [];
-  for (const message of messages) {
-    if (message.role !== "user") continue;
-    for (const attachment of message.attachments ?? []) {
-      const mimeType = attachment.mime_type?.split(";", 1)[0].trim().toLowerCase() ?? "";
-      const isImage = attachment.kind.trim().toLowerCase() === "image" || mimeType.startsWith("image/");
-      if (attachment.id && isImage) ids.push(attachment.id);
-    }
-  }
-  return [...new Set(ids)].slice(-MAX_CONTEXT_IMAGE_ATTACHMENTS);
+function isImageFile(attachment: ChatAttachment) {
+  const mimeType = attachment.mime_type?.split(";", 1)[0].trim().toLowerCase() ?? "";
+  return attachment.kind.trim().toLowerCase() === "image" || mimeType.startsWith("image/");
+}
+
+function contextAttachmentIds(messages: ChatMessage[]): string[] {
+  const shared = messages
+    .filter((message) => message.role === "user")
+    .flatMap((message) => message.attachments ?? [])
+    .filter((attachment) => attachment.id);
+  const newest = (files: ChatAttachment[]) =>
+    [...new Set(files.map((file) => file.id as string))].slice(-MAX_CONTEXT_ATTACHMENTS);
+  return [
+    ...newest(shared.filter(isImageFile)),
+    ...newest(shared.filter((file) => !isImageFile(file))),
+  ];
 }
 
 /** Fired whenever a thread's server-sync state changes; the shell badge listens. */
@@ -1043,7 +1049,7 @@ export function useChatStore(
               clientStartedAt: activePending.executedAt ?? activePending.createdAtIso ?? undefined,
               attachmentIds: files.map((file) => file.id).filter((id): id is string => Boolean(id)),
               attachmentNames: files.map((file) => file.name),
-              contextAttachmentIds: contextImageAttachmentIds(
+              contextAttachmentIds: contextAttachmentIds(
                 thread.messages.slice(0, Math.max(pendingIndex, 0)),
               ),
             },
@@ -1538,7 +1544,7 @@ export function useChatStore(
               clientStartedAt: started.iso,
               attachmentIds: files.map((file) => file.id).filter((id): id is string => Boolean(id)),
               attachmentNames: files.map((file) => file.name),
-              contextAttachmentIds: contextImageAttachmentIds(sourceThread.messages.slice(0, priorUserIndex)),
+              contextAttachmentIds: contextAttachmentIds(sourceThread.messages.slice(0, priorUserIndex)),
             },
           });
           streamRenderer.cancel();
@@ -1841,7 +1847,7 @@ export function useChatStore(
               clientStartedAt: started.iso,
               attachmentIds: files.map((file) => file.id).filter((id): id is string => Boolean(id)),
               attachmentNames: files.map((file) => file.name),
-              contextAttachmentIds: contextImageAttachmentIds(thread.messages),
+              contextAttachmentIds: contextAttachmentIds(thread.messages),
             },
           });
           streamRenderer.cancel();

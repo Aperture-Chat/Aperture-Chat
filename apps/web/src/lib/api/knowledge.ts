@@ -14,6 +14,7 @@ import type {
   KnowledgeChunkLocation,
   KnowledgeDocument,
   KnowledgeDocumentNotice,
+  KnowledgeDocumentProperty,
   KnowledgeDocumentSegment,
   KnowledgeDocumentTarget,
   KnowledgeDocumentView,
@@ -295,6 +296,25 @@ function documentPath(configId: string, documentId: string) {
   return `/api/knowledge/${pathId(configId)}/documents/${pathId(documentId)}`;
 }
 
+/** Which document, wherever it is stored. Routes are built from these ids and
+ * never taken from a server or citation URL, so nothing stored can steer an
+ * authenticated request. */
+export type DocumentAddress = { configId: string; documentId: string } | { attachmentId: string };
+
+function addressPath(address: DocumentAddress) {
+  return "attachmentId" in address
+    ? `/api/chat/attachments/${pathId(address.attachmentId)}`
+    : documentPath(address.configId, address.documentId);
+}
+
+export function viewAddress(
+  view: Pick<KnowledgeDocumentView, "attachment_id" | "knowledge_config_id" | "document_id">,
+): DocumentAddress {
+  return view.attachment_id
+    ? { attachmentId: view.attachment_id }
+    : { configId: view.knowledge_config_id, documentId: view.document_id };
+}
+
 function textOrNull(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
@@ -316,6 +336,15 @@ function parseTarget(raw: unknown): KnowledgeDocumentTarget | null {
   };
 }
 
+function parseProperties(raw: unknown): KnowledgeDocumentProperty[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isRecord).flatMap((item) => {
+    const label = textOrNull(item.label);
+    const value = textOrNull(item.value);
+    return label && value ? [{ label, value }] : [];
+  });
+}
+
 function parseSegments(raw: unknown): KnowledgeDocumentSegment[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(isRecord).map((segment, index) => ({
@@ -334,6 +363,7 @@ export function parseKnowledgeDocumentView(raw: unknown): KnowledgeDocumentView 
   return {
     document_id: String(raw.document_id ?? ""),
     knowledge_config_id: String(raw.knowledge_config_id ?? ""),
+    attachment_id: textOrNull(raw.attachment_id),
     name: textOrNull(raw.name) ?? "Document",
     content_type: textOrNull(raw.content_type) ?? "",
     mode: raw.mode as KnowledgeDocumentViewMode,
@@ -343,32 +373,31 @@ export function parseKnowledgeDocumentView(raw: unknown): KnowledgeDocumentView 
     target: parseTarget(raw.target),
     segments: parseSegments(raw.segments),
     notice: VIEW_NOTICES.includes(String(raw.notice)) ? (raw.notice as KnowledgeDocumentNotice) : null,
+    properties: parseProperties(raw.properties),
+    passage_count: pageOrNull(raw.passage_count),
   };
 }
 
 /** What the viewer shows for a document, aimed at `chunkId` when given. */
 export async function getKnowledgeDocumentView(
   userId: string,
-  configId: string,
-  documentId: string,
+  address: DocumentAddress,
   options: ApiMutationOptions & { chunkId?: string | null } = {},
 ): Promise<KnowledgeDocumentView> {
   const query = options.chunkId ? `?chunk_id=${encodeURIComponent(options.chunkId)}` : "";
-  const raw = await apiRequest<unknown>(userId, `${documentPath(configId, documentId)}/view${query}`, {
+  const raw = await apiRequest<unknown>(userId, `${addressPath(address)}/view${query}`, {
     signal: options.signal,
   });
   return parseKnowledgeDocumentView(raw);
 }
 
-/** The bytes the viewer renders. Built from the ids, never from a server or
- * citation URL, so nothing stored can steer this authenticated request. */
+/** The bytes the viewer renders. */
 export function loadKnowledgeDocumentBytes(
   userId: string,
-  configId: string,
-  documentId: string,
+  address: DocumentAddress,
   options: ApiMutationOptions = {},
 ): Promise<Blob> {
-  return apiBlobRequest(userId, `${documentPath(configId, documentId)}/view/file`, options);
+  return apiBlobRequest(userId, `${addressPath(address)}/view/file`, options);
 }
 
 /** The file name a download response carries, or null. */
@@ -390,11 +419,10 @@ export type OriginalFile = { blob: Blob; filename: string | null };
 /** The stored upload, with the name the server gave it. */
 export async function loadKnowledgeDocumentOriginal(
   userId: string,
-  configId: string,
-  documentId: string,
+  address: DocumentAddress,
   options: ApiMutationOptions = {},
 ): Promise<OriginalFile> {
-  const response = await apiFileRequest(userId, `${documentPath(configId, documentId)}/original`, options);
+  const response = await apiFileRequest(userId, `${addressPath(address)}/original`, options);
   return { blob: await response.blob(), filename: contentDispositionName(response.headers.get("Content-Disposition")) };
 }
 

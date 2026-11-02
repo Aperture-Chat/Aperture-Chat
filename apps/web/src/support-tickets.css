@@ -208,10 +208,9 @@
   grid-column: auto;
 }
 
-/* The drawer hides while "Capture screen" grabs its frame. */
+/* The drawer and its dimming layer hide while "Capture screen" grabs its frame. */
 .is-capturing-report .utility-drawer,
-.is-capturing-report .drawer-backdrop,
-.is-capturing-report .utility-drawer-backdrop {
+.is-capturing-report .utility-backdrop {
   visibility: hidden !important;
 }
 

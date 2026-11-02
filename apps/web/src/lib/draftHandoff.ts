@@ -29,6 +29,8 @@ import { messageWithActiveResponseVersion } from "./chatStore";
 import type { ChatAttachment, ChatMessage } from "./types";
 
 export type DraftHandoffKind = "document" | "deck" | "spreadsheet";
+/** What chat can offer: something new to build, or a change to a file that exists. */
+export type DraftHandoffOffer = DraftHandoffKind | "edit";
 
 export type DraftHandoffAttachment = {
   attachmentId: string;
@@ -41,7 +43,7 @@ export type DraftHandoffAttachment = {
 /** Everything Drafts needs to start a request that began in chat. */
 export type DraftHandoffRequest = {
   id: string;
-  kind: DraftHandoffKind;
+  kind: DraftHandoffOffer;
   prompt: string;
   /** The chat composer's web search switch at send time. */
   webSearch: boolean;
@@ -51,6 +53,8 @@ export type DraftHandoffRequest = {
   attachments: DraftHandoffAttachment[];
   /** Earlier turns of the chat, for requests that refer back to them. */
   chatContext: string | null;
+  /** The file to open and change. Set when `kind` is "edit". */
+  editTarget?: { attachmentId: string; name: string } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -115,6 +119,7 @@ const KNOWN_SLIPS = new Map([
   ["prepair", "prepare"], ["leter", "letter"], ["memmo", "memo"], ["polcy", "policy"], ["eassy", "essay"],
   ["handbok", "handbook"], ["exel", "excel"], ["exell", "excel"], ["excell", "excel"], ["excl", "excel"],
   ["dekc", "deck"], ["pwrpoint", "powerpoint"], ["pich", "pitch"], ["cna", "can"], ["coudl", "could"], ["woudl", "would"],
+  ["chnage", "change"], ["cahnge", "change"], ["udpate", "update"], ["upate", "update"], ["eidt", "edit"], ["edti", "edit"],
   ["yuo", "you"], ["gogle", "google"], ["pleaes", "please"], ["plese", "please"], ["plaese", "please"], ["pleae", "please"],
 ]);
 /** Words worth correcting by one edit, listed rather than derived from the
@@ -1546,6 +1551,168 @@ function saysSomething(words: string[]) {
 function untilComma(words: string[]) {
   const comma = words.indexOf(",");
   return comma < 0 ? words : words.slice(0, comma);
+}
+
+// ---------------------------------------------------------------------------
+// Changing a file that already exists
+// ---------------------------------------------------------------------------
+
+/** Verbs that change a document in place. Reading verbs ("review", "summarize")
+ * are left out: they ask about the file, and chat answers those. */
+const EDIT_VERBS = new Set([
+  "edit", "revise", "update", "modify", "amend", "change", "fix", "correct", "adjust", "tweak", "rewrite", "reword",
+  "rephrase", "redline", "redraft", "rework", "proofread", "polish", "tighten", "shorten", "lengthen", "expand",
+  "condense", "simplify", "improve", "translate", "replace", "swap", "substitute", "remove", "delete", "strike", "cut",
+  "add", "insert", "append", "fill", "complete", "populate", "finish", "customize", "customise", "tailor", "personalize",
+  "personalise", "reformat", "format", "mark", "clean",
+]);
+/** Only with their particle are these about a document: "mark up", "clean this up". */
+const EDIT_PARTICLES = new Map([["mark", ["up"]], ["clean", ["up"]]]);
+/** Far enough for "clean the whole thing up", and no further. */
+const PARTICLE_REACH = 5;
+/** A translation stays in chat unless it names a language to put the file into. */
+const TRANSLATION_CUES = new Set(["into", "to"]);
+/** "Make this formal": qualities that describe a change without comparing. */
+const EDIT_QUALITIES = new Set([
+  "friendlier", "warmer", "softer", "firmer", "stricter", "formal", "casual", "concise", "professional", "friendly",
+  "polite", "readable", "consistent",
+]);
+/** "I need this updated": asked for in the passive, by whoever is speaking. */
+const EDIT_PARTICIPLES = new Set(["updated", "edited", "revised", "fixed", "changed", "corrected", "amended", "proofread", "reworded", "shortened"]);
+/** What follows when the word is a noun or a request for news: "Change of
+ * address", "Update on the deal", "Fill me in". */
+const NOT_AN_EDIT_AFTER = new Set(["of", "on", "about", "me", "us", "history", "log", "request", "requests", "order", "orders", "notice", "notices"]);
+const EDIT_GERUNDS = new Map(
+  [...EDIT_VERBS].map((verb) => [`${verb.replace(/e$/, "")}${verb === "cut" ? "t" : ""}ing`, verb]),
+);
+/** Words that say the thing being changed is a document, not the last reply. */
+const DOCUMENT_PARTS = new Set([...DOC_HEADS, "form", "file", "template", "attachment", "section", "clause", "exhibit", "appendix"]);
+/** "Your last answer", "your reply": the assistant's words, which a follow-up in chat can change. */
+const POINTS_AT_THE_REPLY = "your";
+
+/** How sure chat is that a document is what the message means. A file on the
+ * message is what it is about. A file from earlier in the chat may not be, so
+ * the words have to name a document. */
+export type EditReach = "attached" | "earlier";
+
+/** Whether this message asks to change an existing document. A false offer
+ * costs a click and a miss only leaves the work in chat, so this shares
+ * detectDraftHandoff's rule: it wants positive evidence, and reuses that
+ * grammar for who is doing the work. */
+export function detectDocumentEdit(input: string, reach: EditReach): boolean {
+  const message = input.replace(/```[\s\S]*?(?:```|$)/g, " ").replace(/`[^`\n]*`/g, " ").trim();
+  if (!message) return false;
+  const text = respell(normalize(userWords(message)));
+  if (KEEP_IN_CHAT.test(text) || RETRACTION.test(text)) return false;
+  return (text.match(/[^.!?;:\n]+[.!?;:\n]*/g) ?? []).some((clause) => clauseEdits(clause, reach));
+}
+
+function clauseEdits(rawClause: string, reach: EditReach) {
+  const tokens = withBaseEditVerbs(tokenize(rawClause).filter((token) => !POLITE_WORDS.has(token)));
+  const trimmed = rawClause.trim();
+  const isQuestion = trimmed.endsWith("?");
+  const first = clauseStart(tokens);
+  // "Fix this paragraph:" goes on to paste what it means.
+  if (trimmed.endsWith(":") || asksAbout(tokens, first, isQuestion) || endsAskingElse(tokens, isQuestion)) return false;
+  return tokens.some(
+    (_, index) =>
+      index >= first &&
+      (asksForItDone(tokens, index) || (namesAnEdit(tokens, index) && isAsked(tokens, index))) &&
+      !blockedBefore(tokens, index, first, isQuestion) &&
+      objectFits(tokens.slice(index + 1), reach),
+  );
+}
+
+/** "Would you mind fixing", "help me updating". */
+function withBaseEditVerbs(tokens: string[]) {
+  return tokens.map((token, index) => (GERUND_CUES.has(tokens[index - 1]) ? (EDIT_GERUNDS.get(token) ?? token) : token));
+}
+
+function namesAnEdit(tokens: string[], index: number) {
+  const word = tokens[index];
+  const rest = tokens.slice(index + 1);
+  if (word === "make") return makesExistingWorkDifferent(rest);
+  if (!EDIT_VERBS.has(word) || NOT_AN_EDIT_AFTER.has(rest[0]) || reshapesIntoNewWork(rest)) return false;
+  if (word === "add" && rest.includes("up")) return false;
+  if (word === "translate") return rest.some((token) => TRANSLATION_CUES.has(token));
+  const particles = EDIT_PARTICLES.get(word);
+  return !particles || rest.slice(0, PARTICLE_REACH).some((token) => particles.includes(token));
+}
+
+/** "Rewrite this as a memo" asks for a new document, which the file feeds. */
+function reshapesIntoNewWork(rest: string[]) {
+  return rest.some((token, index) => (token === "as" || token === "into") && ["a", "an"].includes(rest[index + 1]));
+}
+
+/** "Make it shorter", "make the opening more formal". "Make a shorter version" is new work. */
+function makesExistingWorkDifferent(rest: string[]) {
+  return !["a", "an"].includes(rest[0]) && rest.some((word) => EDIT_COMPLEMENTS.has(word) || EDIT_QUALITIES.has(word));
+}
+
+/** "I need this document updated", "we want the dates fixed". The speaker asks,
+ * and something stands between the wish and the participle, so a plain "I need
+ * the updated figures" stays out. */
+function asksForItDone(tokens: string[], index: number) {
+  if (!EDIT_PARTICIPLES.has(tokens[index])) return false;
+  const wish = tokens.findIndex((token) => token === "need" || token === "want");
+  return wish > 0 && FIRST_PERSON.has(tokens[wish - 1]) && index > wish + 2;
+}
+
+function objectFits(object: string[], reach: EditReach) {
+  if (object.some((word) => CODE_WORDS.has(word))) return false;
+  if (reach === "attached") return true;
+  return !object.includes(POINTS_AT_THE_REPLY) && object.some((word) => DOCUMENT_PARTS.has(word));
+}
+
+/** What Drafts can open as an editable document. */
+export const OPEN_IN_EDITOR_EXTENSIONS = new Set(["docx", "dotx", "pdf", "doc", "md", "markdown", "txt", "html", "htm"]);
+
+function canOpenInEditor(attachment: Pick<ChatAttachment, "name">) {
+  return OPEN_IN_EDITOR_EXTENSIONS.has(attachment.name.split(".").pop()?.toLowerCase() ?? "");
+}
+
+/** The file a message means to change: the one it names, or else the first
+ * Drafts can open. Attachments it cannot open stay with the request as sources. */
+export function editableAttachment<File extends ChatAttachment>(files: readonly File[], text = ""): File | null {
+  const editable = files.filter(canOpenInEditor);
+  const named = editable.find((file) => text.toLowerCase().includes(file.name.toLowerCase()));
+  return named ?? editable[0] ?? null;
+}
+
+/** The newest document shared earlier in the chat that can still be fetched. */
+export function threadEditableAttachment(messages: readonly ChatMessage[]): ChatAttachment | null {
+  const shared = [...messages]
+    .reverse()
+    .filter((message) => message.role === "user")
+    .flatMap((message) => message.attachments ?? []);
+  return editableAttachment(shared.filter((file) => file.id));
+}
+
+/** What chat should offer for this message, or null to answer it. Asking for a
+ * deck or a workbook means new work whatever else the message says. */
+export function draftHandoffOffer(
+  text: string,
+  attachments: readonly ChatAttachment[],
+  messages: readonly ChatMessage[],
+): DraftHandoffOffer | null {
+  const built = detectDraftHandoff(text);
+  if (built === "deck" || built === "spreadsheet") return built;
+  return editsADocument(text, attachments, messages) ? "edit" : built;
+}
+
+function editsADocument(text: string, attachments: readonly ChatAttachment[], messages: readonly ChatMessage[]) {
+  if (editableAttachment(attachments)) return detectDocumentEdit(text, "attached");
+  return Boolean(threadEditableAttachment(messages)) && detectDocumentEdit(text, "earlier");
+}
+
+/** The uploaded file an edit opens: on the message, or else the newest in the chat. */
+export function draftHandoffEditTarget(
+  text: string,
+  uploaded: readonly ChatAttachment[],
+  messages: readonly ChatMessage[],
+): DraftHandoffRequest["editTarget"] {
+  const target = editableAttachment(uploaded.filter((file) => file.id), text) ?? threadEditableAttachment(messages);
+  return target?.id ? { attachmentId: target.id, name: target.name } : null;
 }
 
 // ---------------------------------------------------------------------------

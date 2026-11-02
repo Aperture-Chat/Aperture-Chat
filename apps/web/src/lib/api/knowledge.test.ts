@@ -4,6 +4,7 @@ import {
   getKnowledgeDocumentView,
   loadKnowledgeDocumentBytes,
   loadKnowledgeDocumentOriginal,
+  viewAddress,
   locateKnowledgeChunk,
   parseKnowledgeDocumentView,
 } from "./knowledge";
@@ -40,11 +41,61 @@ afterEach(() => {
   setSessionToken(null);
 });
 
+const KB_DOC = { configId: "kb-1", documentId: "doc-1" };
+
+describe("an attached file's routes", () => {
+  const FILE = { attachmentId: "upload/1" };
+
+  it("reads its view from the attachment, not a knowledge base", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          document_id: "upload-1",
+          knowledge_config_id: "",
+          attachment_id: "upload-1",
+          name: "lease.docx",
+          mode: "pdf",
+          properties: [{ label: "Author", value: "Dana Reyes" }, { label: 7 }],
+          passage_count: 34,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const view = await getKnowledgeDocumentView("user-1", FILE, { chunkId: "c&1" });
+
+    expect(String(fetchMock.mock.calls[0]?.[0 as never])).toContain("/api/chat/attachments/upload%2F1/view?chunk_id=c%261");
+    expect(view.attachment_id).toBe("upload-1");
+    expect(view.properties).toEqual([{ label: "Author", value: "Dana Reyes" }]);
+    expect(view.passage_count).toBe(34);
+  });
+
+  it("fetches its bytes and its original from the same place", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Blob(["%PDF"]), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await loadKnowledgeDocumentBytes("user-1", FILE);
+    await loadKnowledgeDocumentOriginal("user-1", FILE);
+
+    const urls = fetchMock.mock.calls.map((call) => String(call[0 as never]));
+    expect(urls[0]).toContain("/api/chat/attachments/upload%2F1/view/file");
+    expect(urls[1]).toContain("/api/chat/attachments/upload%2F1/original");
+  });
+
+  it("names a view by what it is", () => {
+    expect(viewAddress({ attachment_id: "upload-1", knowledge_config_id: "", document_id: "upload-1" })).toEqual({
+      attachmentId: "upload-1",
+    });
+    expect(viewAddress({ attachment_id: null, knowledge_config_id: "kb-1", document_id: "doc-1" })).toEqual(KB_DOC);
+  });
+});
+
 describe("getKnowledgeDocumentView", () => {
   it("asks for the document with the session header and the chunk", async () => {
     setSessionToken("session-token");
     respondWith(JSON.stringify(VIEW));
-    const view = await getKnowledgeDocumentView("user-1", "kb-1", "doc-1", { chunkId: "chunk-1" });
+    const view = await getKnowledgeDocumentView("user-1", KB_DOC, { chunkId: "chunk-1" });
     expect(requested().url).toMatch(/\/api\/knowledge\/kb-1\/documents\/doc-1\/view\?chunk_id=chunk-1$/);
     expect(requested().headers["x-aperture-session"]).toBe("session-token");
     expect(view.target?.page).toBe(40);
@@ -52,25 +103,25 @@ describe("getKnowledgeDocumentView", () => {
 
   it("leaves the query off without a chunk", async () => {
     respondWith(JSON.stringify(VIEW));
-    await getKnowledgeDocumentView("user-1", "kb-1", "doc-1");
+    await getKnowledgeDocumentView("user-1", KB_DOC);
     expect(requested().url).toMatch(/\/view$/);
   });
 
   it("encodes ids so a stored citation cannot walk the path", async () => {
     respondWith(JSON.stringify(VIEW));
-    await getKnowledgeDocumentView("user-1", "../admin", "a/b", { chunkId: "x&y=1" });
+    await getKnowledgeDocumentView("user-1", { configId: "../admin", documentId: "a/b" }, { chunkId: "x&y=1" });
     expect(requested().url).toContain("/api/knowledge/..%2Fadmin/documents/a%2Fb/view?chunk_id=x%26y%3D1");
   });
 
   it("reports a missing document with its status", async () => {
     respondWith(JSON.stringify({ detail: "Not found" }), { status: 404 });
-    await expect(getKnowledgeDocumentView("user-1", "kb-1", "doc-1")).rejects.toMatchObject({ status: 404 });
+    await expect(getKnowledgeDocumentView("user-1", KB_DOC)).rejects.toMatchObject({ status: 404 });
   });
 });
 
 describe("parseKnowledgeDocumentView", () => {
   it("passes a well-formed view through", () => {
-    expect(parseKnowledgeDocumentView(VIEW)).toEqual(VIEW);
+    expect(parseKnowledgeDocumentView(VIEW)).toEqual({ ...VIEW, attachment_id: null, properties: [], passage_count: null });
   });
 
   it("rejects an unknown mode and a non-object", () => {
@@ -139,7 +190,7 @@ describe("file routes", () => {
   it("fetches view bytes from the route built from the ids", async () => {
     setSessionToken("session-token");
     respondWith(new Uint8Array([37, 80, 68, 70]));
-    const blob = await loadKnowledgeDocumentBytes("user-1", "kb-1", "doc-1");
+    const blob = await loadKnowledgeDocumentBytes("user-1", KB_DOC);
     expect(requested().url).toMatch(/\/api\/knowledge\/kb-1\/documents\/doc-1\/view\/file$/);
     expect(requested().headers["x-aperture-session"]).toBe("session-token");
     expect(blob.size).toBe(4);
@@ -147,7 +198,7 @@ describe("file routes", () => {
 
   it("fetches the original with the name the server gave it", async () => {
     respondWith(new Uint8Array([1]), { headers: { "Content-Disposition": 'attachment; filename="Lease.docx"' } });
-    const original = await loadKnowledgeDocumentOriginal("user-1", "kb-1", "doc-1");
+    const original = await loadKnowledgeDocumentOriginal("user-1", KB_DOC);
     expect(requested().url).toMatch(/\/api\/knowledge\/kb-1\/documents\/doc-1\/original$/);
     expect(original.filename).toBe("Lease.docx");
     expect(original.blob.size).toBe(1);
@@ -155,24 +206,24 @@ describe("file routes", () => {
 
   it("has no name when the server gave none", async () => {
     respondWith(new Uint8Array([1]));
-    expect((await loadKnowledgeDocumentOriginal("user-1", "kb-1", "doc-1")).filename).toBeNull();
+    expect((await loadKnowledgeDocumentOriginal("user-1", KB_DOC)).filename).toBeNull();
   });
 
   it("carries the status of a refused download", async () => {
     respondWith("gone", { status: 404 });
-    await expect(loadKnowledgeDocumentBytes("user-1", "kb-1", "doc-1")).rejects.toMatchObject({ status: 404 });
+    await expect(loadKnowledgeDocumentBytes("user-1", KB_DOC)).rejects.toMatchObject({ status: 404 });
   });
 
   it("says when the API cannot be reached", async () => {
     fetchMock.mockRejectedValue(new TypeError("offline"));
     globalThis.fetch = fetchMock;
-    await expect(loadKnowledgeDocumentBytes("user-1", "kb-1", "doc-1")).rejects.toThrow("Could not reach the API");
+    await expect(loadKnowledgeDocumentBytes("user-1", KB_DOC)).rejects.toThrow("Could not reach the API");
   });
 
   it("says when the request was cancelled", async () => {
     fetchMock.mockRejectedValue(new DOMException("stopped", "AbortError"));
     globalThis.fetch = fetchMock;
-    await expect(loadKnowledgeDocumentBytes("user-1", "kb-1", "doc-1")).rejects.toThrow("cancelled");
+    await expect(loadKnowledgeDocumentBytes("user-1", KB_DOC)).rejects.toThrow("cancelled");
   });
 });
 

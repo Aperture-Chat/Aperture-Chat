@@ -302,9 +302,9 @@ async function runMore(){
     sendWeb:page.getByRole('menuitemcheckbox',{name:/^Web/}),
     sendAgent:page.getByRole('menuitemcheckbox',{name:/^Agent/}),
     sendReasoning:page.getByRole('group',{name:'Reasoning level'}),
-    sendStreaming:page.locator('.send-menu-stream'),
+    sendStreaming:page.locator('label.composer-option-row'),
   });
-  await page.getByRole('button',{name:'Resources',exact:true}).click();
+  await page.getByRole('radio',{name:'Resources',exact:true}).click();
   await shot("composer-shortcuts-help",{composerShortcuts:page.getByRole('dialog',{name:'Send options'})});
   await page.getByRole('button',{name:'Close send options'}).click();
   await page.getByRole('button',{name:'Search',exact:true}).click();

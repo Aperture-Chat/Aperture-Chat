@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { detectDraftHandoff, draftHandoffAttachments, draftHandoffChatContext } from "./draftHandoff";
-import type { ChatMessage } from "./types";
+import {
+  detectDocumentEdit,
+  detectDraftHandoff,
+  draftHandoffAttachments,
+  draftHandoffOffer,
+  draftHandoffChatContext,
+  editableAttachment,
+  threadEditableAttachment,
+} from "./draftHandoff";
+import type { ChatAttachment, ChatMessage } from "./types";
 
 describe("detectDraftHandoff", () => {
   it.each([
@@ -1992,5 +2000,194 @@ describe("draftHandoffAttachments", () => {
       kind: "Text",
     }));
     expect(draftHandoffAttachments(current, [])).toHaveLength(8);
+  });
+});
+
+describe("detectDocumentEdit", () => {
+  describe("with a file on the message", () => {
+    it.each([
+      "Fill in the gaps of this document with fake data.",
+      "Fill in the blanks",
+      "fill out this form with sample data",
+      "Fill the placeholders with fictional names",
+      "Complete this form using made-up details",
+      "Edit this document",
+      "Please edit the attached contract",
+      "Revise the second paragraph",
+      "Can you update section 3 to reflect the new fee?",
+      "Change the effective date to July 1, 2027",
+      "Change the owner's name to Willow Harbor",
+      "Replace every mention of Owner with Association",
+      "Fix the typos",
+      "Fix the formatting in this document",
+      "Proofread this",
+      "Redline this agreement",
+      "Mark up this contract",
+      "Add a termination clause",
+      "Add a section on insurance at the end",
+      "Insert a confidentiality paragraph after section 4",
+      "Remove the arbitration clause",
+      "Delete section 7",
+      "Rewrite the introduction",
+      "Reword the first sentence",
+      "Tighten this up",
+      "Make it shorter",
+      "Make the opening paragraph more formal",
+      "Make this document clearer",
+      "Shorten section 2",
+      "Translate this document into Spanish",
+      "Could you help me clean up this contract?",
+      "I need you to update the fee schedule",
+      "Would you mind fixing the dates in this agreement?",
+      "Review this agreement and fix anything that looks wrong",
+      "Populate the empty fields with test data",
+      "Customize this template for a dental office",
+      "pls chnage the date to March 3",
+      "Clean this up",
+      "Mark this up",
+      "Make the tone friendlier throughout",
+      "Make it more concise",
+      "Make this formal",
+      "I need this document updated with the new address",
+      "We need the fee schedule corrected",
+      "I want the dates fixed",
+      "Translate it to French",
+    ])("offers an edit for %j", (text) => {
+      expect(detectDocumentEdit(text, "attached")).toBe(true);
+    });
+
+    it.each([
+      "",
+      "What does section 3 mean?",
+      "Summarize this document",
+      "Summarize this",
+      "Explain the arbitration clause",
+      "What should I change in this document?",
+      "Is there anything to fix in this contract?",
+      "How do I fill out this form?",
+      "Who should update this agreement?",
+      "Why did they change the fee?",
+      "Does this need a termination clause?",
+      "Review this contract",
+      "Compare this with last year's agreement",
+      "What are the main risks here?",
+      "Can you read this and tell me what it says?",
+      "Update me on what this says",
+      "Fill me in on this document",
+      "The client changed the fee last week",
+      "Sarah will update the contract tomorrow",
+      "I already fixed the typos",
+      "Don't change anything, just tell me what it says",
+      "Do not edit this, only summarize it",
+      "Fix my Python script",
+      "Add these numbers up",
+      "Thanks, that helps",
+      "Change of address notice attached, what happens next?",
+      "If you were to edit this, where would you start?",
+      "Edit this in chat and show me the result here",
+      "Fix this paragraph: the quick brown fox jumped",
+      "Translate section 2 for me so I can understand it",
+      "Make a shorter version",
+      "Make an appointment with the board",
+      "Fix the typos, what is the fee?",
+      "Rewrite this as a memo",
+      "Rewrite this into a formal letter",
+      "I need the updated figures",
+      "The fee was updated last year",
+      "Is the schedule updated?",
+    ])("leaves %j in chat", (text) => {
+      expect(detectDocumentEdit(text, "attached")).toBe(false);
+    });
+  });
+
+  describe("with a file from earlier in the chat", () => {
+    it.each([
+      "Now change the fee in the agreement to 5 percent",
+      "Update the contract with the new address",
+      "Add a termination clause to the document",
+      "Fix section 4",
+      "Fill in the blanks in that form",
+    ])("offers an edit when %j names the document", (text) => {
+      expect(detectDocumentEdit(text, "earlier")).toBe(true);
+    });
+
+    it.each([
+      "Fix the typo in your last answer",
+      "Make that shorter",
+      "Update the table you just gave me",
+      "Change the tone",
+      "Rewrite your reply as bullets",
+    ])("leaves %j in chat, because it is about the reply", (text) => {
+      expect(detectDocumentEdit(text, "earlier")).toBe(false);
+    });
+  });
+});
+
+describe("draftHandoffOffer", () => {
+  const file: ChatAttachment = { id: "upload-1", name: "lease.docx", size: "1 KB", kind: "Word" };
+
+  it.each([
+    ["Fill in the blanks", [file], "edit"],
+    ["Turn this into a slide deck", [file], "deck"],
+    ["Make a spreadsheet of the fees in this contract", [file], "spreadsheet"],
+    ["Write a cover letter based on this resume", [file], "document"],
+    ["Rewrite this as a memo", [file], "document"],
+    ["Write an essay about ferries", [], "document"],
+    ["What does this say?", [file], null],
+    ["Fill in the blanks", [], null],
+    ["Fix the agreement", [], null],
+    ["Update this and turn it into a slide deck", [file], "deck"],
+    ["Fix the dates and make a spreadsheet of the fees", [file], "spreadsheet"],
+  ] as const)("reads %j", (text, attachments, offer) => {
+    expect(draftHandoffOffer(text, attachments, [])).toBe(offer);
+  });
+});
+
+describe("editableAttachment", () => {
+  const file = (name: string, id: string | null = "upload-1"): ChatAttachment => ({ id, name, size: "1 KB", kind: "File" });
+
+  it("picks the file Drafts can open", () => {
+    expect(editableAttachment([file("photo.png"), file("lease.docx", "upload-2")])?.id).toBe("upload-2");
+  });
+
+  it("picks the one the message names when there are several", () => {
+    const picked = editableAttachment([file("lease.docx"), file("bylaws.pdf", "upload-2")], "Fix the dates in bylaws.pdf");
+    expect(picked?.name).toBe("bylaws.pdf");
+  });
+
+  it("takes a staged file, which has no id yet", () => {
+    expect(editableAttachment([file("lease.pdf", null)])?.name).toBe("lease.pdf");
+  });
+
+  it("will not offer what Drafts cannot open", () => {
+    expect(editableAttachment([file("deck.pptx"), file("sheet.xlsx"), file("clip.mp3")])).toBeNull();
+  });
+
+  it("needs a file at all", () => {
+    expect(editableAttachment([])).toBeNull();
+  });
+});
+
+describe("threadEditableAttachment", () => {
+  const message = (attachments: ChatAttachment[], role: ChatMessage["role"] = "user"): ChatMessage => ({
+    id: "m",
+    role,
+    content: "",
+    createdAt: "now",
+    status: "ok",
+    attachments,
+  });
+  const file = (name: string, id: string): ChatAttachment => ({ id, name, size: "1 KB", kind: "File" });
+
+  it("finds the newest document shared in the chat", () => {
+    const picked = threadEditableAttachment([
+      message([file("old.docx", "upload-1")]),
+      message([file("new.pdf", "upload-2")]),
+    ]);
+    expect(picked?.id).toBe("upload-2");
+  });
+
+  it("skips a file with no id, which cannot be fetched", () => {
+    expect(threadEditableAttachment([message([{ name: "lost.docx", size: "1 KB", kind: "File" }])])).toBeNull();
   });
 });

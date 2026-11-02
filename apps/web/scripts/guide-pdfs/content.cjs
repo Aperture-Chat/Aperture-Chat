@@ -184,7 +184,7 @@ const SECTIONS = [
       ]),
       sub("Where the consoles live"),
       p(
-        "Administrators choose Admin console near the bottom of the sidebar; platform owners also see Platform console. The account drawer's Workspace section lists the same consoles. Regular users see neither. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
+        "Administrators select their name at the bottom of the sidebar, then choose Admin console in the account drawer's Workspace section; platform owners also see Platform owner console there. Regular users see neither. The account drawer also holds View as role previews, Usage this month, and your Archived chats — all covered in “Your account”.",
       ),
       sub("Returning to a view"),
       p("The browser address follows the workspace view and console tab. Browser Back and Forward return to those views; opening a saved chat or draft link still checks your account's access. A link does not share private content or grant permission to another person."),
@@ -400,7 +400,7 @@ const SECTIONS = [
         "Press Enter to insert the highlighted item, Tab to complete it, or Escape to dismiss the menu.",
       ]),
       sub("Browse resources"),
-      p("On the Resources tab, use Find a resource to search by name, or select All, Knowledge bases, Files in knowledge sources, MCP connections, Prompts, Agents, Skill files, or Automations. A selected connection or automation shows a check; choose it again to remove it. Read an empty or failed-loading state before retrying. The Type shortcuts in chat reference explains each symbol below the results."),
+      p("On the Resources tab, search by name, or choose a category: Knowledge bases, Knowledge files, Connections, Prompts, Agents, Skill files, Automations, or All resources. Back returns to the categories, and a category with something selected says how many are in use. A selected connection or automation shows a check; choose it again to remove it. Read an empty or failed-loading state before retrying. Typing shortcuts, at the bottom of the tab, opens a reference for each symbol."),
       note("tip", "The expanded composer focuses on editing a longer message. Return to the normal composer to browse resources, adjust send options, and send with the visible controls."),
       lesson("user", "composer-commands"),
     ],
@@ -444,8 +444,8 @@ const SECTIONS = [
     blocks: [
       list([
         "Click the chevron (˅) beside the paper-plane send button.",
-        "The menu opens with Send now at the top — that simply sends with the current settings.",
-        "Below it are three switches you can turn on or off for the next reply, and a Reasoning slider at the bottom.",
+        "The panel opens on Reply settings. Use in this chat holds three On/Off switches, and Reply style holds Reasoning and Stream replies.",
+        "Send now, at the bottom of the panel, simply sends with the current settings.",
       ]),
       table(
         ["Switch", "What it does when on"],
@@ -457,12 +457,12 @@ const SECTIONS = [
       ),
       sub("Reasoning level"),
       p(
-        "The Reasoning group at the bottom of the menu is a three-position slider from Fast to Smart. Fast favors quicker answers; Smart makes the model think longer for more detailed output; the middle is a balanced default. The slider is only active when the selected model supports reasoning levels — otherwise it is disabled and says so.",
+        "Reasoning, under Reply style, has three stops: Fast, Balanced, and Smart. Fast favors quicker answers; Smart makes the model think longer for more detailed output; Balanced keeps the model's usual pace. The stops only work when the selected model supports reasoning levels — otherwise they are locked and the panel says so.",
       ),
       p(
         "Whenever tools are on, the active-tools chip appears next to the paperclip: the single tool's name, or Tools with a count. Click its × to turn off Knowledge, Web, and Agent and clear selected MCP connections and queued automations for the next message.",
       ),
-      p("On the Reply settings tab, Stream replies controls whether text appears as the model produces it or only after the reply finishes. The Resources tab opens the searchable resource picker; MCP connections and resources also opens it from Reply settings. These controls change how the next reply is prepared or displayed; they do not supply missing provider or connector access."),
+      p("On the Reply settings tab, Stream replies controls whether text appears as the model produces it or only after the reply finishes. The Resources tab opens the searchable resource picker. These controls change how the next reply is prepared or displayed; they do not supply missing provider or connector access."),
       lesson("user", "send-options"),
     ],
   },
@@ -1064,7 +1064,7 @@ const SECTIONS = [
     summary: "Where the console lives and what its eleven tenant-governance tabs control.",
     blocks: [
       steps([
-        "Click Admin console near the bottom of the sidebar. (Only workspace administrators and platform owners see it; the account drawer's Workspace section lists it too.)",
+        "Select your name at the bottom of the sidebar, then click Admin console in the account drawer's Workspace section. (Only workspace administrators and platform owners see it.)",
         "The console opens with eleven tabs across the top: Users, Groups, Model Access, Connections, SSO, Analytics, Reports, Policies, Datasets, Audit, and Alerts. Policies is always present between Analytics and Datasets; service-wide availability determines which organization controls are active inside it.",
       ]),
       p(
@@ -1585,7 +1585,7 @@ const SECTIONS = [
     summary: "The highest access level, its seven tabs, and the role ceilings.",
     blocks: [
       steps([
-        "Click Platform console (building icon) near the bottom of the sidebar. (Only platform owners see it; the account drawer's Workspace section lists it as Platform owner console.)",
+        "Select your name at the bottom of the sidebar, then click Platform owner console (building icon) in the account drawer's Workspace section. (Only platform owners see it.)",
         "The console has seven tabs: Org Settings, Models, Providers, Analytics, Reports, Audit, and Alerts. Org Settings holds organization configuration; API keys live on each provider's card under Providers.",
       ]),
       p("Keep the three role ceilings in mind — they explain who can touch what across the entire platform:"),

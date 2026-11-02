@@ -24,7 +24,7 @@ async function openMenu(page) {
   return menu;
 }
 
-const option = (menu, name) => menu.locator(".send-option").filter({ has: menu.page().locator(`strong:text-is('${name}')`) });
+const option = (menu, name) => menu.locator(".composer-option-row").filter({ has: menu.page().locator(`strong:text-is('${name}')`) });
 
 /** Turn a reply setting on or off; the workspace remembers some of them. */
 async function setOption(menu, name, on) {
@@ -130,11 +130,11 @@ async function capture(kit, shot, model) {
   await setOption(menu, "Agent", false);
 
   // 7. Resources: search and insert a saved prompt.
-  await menu.locator(".composer-options-tabs").getByRole("button", { name: "Resources" }).click();
-  await menu.locator(".composer-resource-results").waitFor();
+  await menu.getByRole("radio", { name: "Resources" }).click();
+  await menu.locator(".composer-resource-tiles").waitFor();
   await page.waitForTimeout(400);
   await shot("send-resources", { keepFocus: true });
-  await menu.getByPlaceholder("Search resources by name…").fill("Matter Summary");
+  await menu.getByRole("textbox", { name: "Find a resource" }).fill("Matter Summary");
   await page.waitForTimeout(400);
   await menu.locator(".composer-resource-results").getByText("Matter Summary", { exact: true }).first().click();
   await page.waitForTimeout(600);
