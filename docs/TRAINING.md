@@ -4,14 +4,14 @@ Training ships with the web application. Help opens the user library; Documentat
 
 ## Current inventory
 
-The training set contains **71 lessons, 862 scenes, 71 MP3 tracks, and 12,879 seconds of narration timelines (214 minutes 39 seconds)**. Its 792 measured focus-map entries comprise 394 user targets and 398 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
+The training set contains **71 lessons, 862 scenes, 71 MP3 tracks, and 12,913 seconds of narration timelines (215 minutes 13 seconds)**. Its 792 measured focus-map entries comprise 394 user targets and 398 administrator/owner targets. Scene counts and reusable focus-map entries are counted independently.
 
 | Audience | Lessons | Scenes | Measured focus entries | MP3s | Seconds | Guide sections |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| User | 33 | 412 | 394 | 33 | 5945 | 35 |
-| Administrator | 18 | 227 | 216 | 18 | 3235 | 54 |
-| Platform owner | 20 | 223 | 182 | 20 | 3699 | 75 |
-| Total | 71 | 862 | 792 | 71 | 12879 | — |
+| User | 33 | 412 | 394 | 33 | 5948 | 35 |
+| Administrator | 18 | 227 | 216 | 18 | 3244 | 54 |
+| Platform owner | 20 | 223 | 182 | 20 | 3721 | 75 |
+| Total | 71 | 862 | 792 | 71 | 12913 | — |
 
 All three downloadable guides have byte-identical copies in `apps/web/public/docs/` and `docs/`: `aperture-user-guide.pdf`, `aperture-admin-guide.pdf`, and `aperture-owner-guide.pdf`. The 35/54/75 section counts are role-filtered: administrator guides include user sections, and the owner guide includes both user and administrator sections.
 
@@ -88,8 +88,8 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | User | Get started | Start chatting | `chat-basics` | 8 | 0 | 116 |
 | User | Get started | Choose models and request access | `model-access` | 8 | 0 | 118 |
 | User | Get started | Protect your account and recover access | `account-security` | 12 | 1 | 177 |
-| User | Chat | Symbol shortcuts: / @ # $ > | `composer-commands` | 12 | 0 | 128 |
-| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 187 |
+| User | Chat | Symbol shortcuts: / @ # $ > | `composer-commands` | 12 | 0 | 132 |
+| User | Chat | Knowledge, Web, Agent, and reply settings | `send-options` | 12 | 0 | 186 |
 | User | Chat | Attach files and sources | `attachments` | 9 | 1 | 129 |
 | User | Chat | Dictation, images, and diagrams | `dictation-images` | 6 | 0 | 106 |
 | User | Chat | Follow the work trace and act on replies | `work-traces` | 13 | 0 | 199 |
@@ -117,8 +117,8 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | User | Organize and personalize | Personalization memory | `personalization-memory` | 7 | 0 | 96 |
 | User | Organize and personalize | Personalize, use mobile, and get help | `account-mobile-help` | 20 | 1 | 273 |
 | User | Organize and personalize | Report a problem and follow it up | `report-and-follow-up` | 18 | 2 | 246 |
-| Administrator | Accounts and access | Approve access and finish sign-in | `admin-access-onboarding` | 17 | 1 | 209 |
-| Administrator | Accounts and access | Users and accounts | `admin-users` | 12 | 0 | 159 |
+| Administrator | Accounts and access | Approve access and finish sign-in | `admin-access-onboarding` | 17 | 1 | 211 |
+| Administrator | Accounts and access | Users and accounts | `admin-users` | 12 | 0 | 160 |
 | Administrator | Accounts and access | Groups and permissions | `admin-groups` | 10 | 0 | 125 |
 | Administrator | Accounts and access | Tenant model access | `admin-model-access` | 8 | 0 | 111 |
 | Administrator | Accounts and access | Review model requests and explain access | `admin-model-requests` | 8 | 0 | 97 |
@@ -129,32 +129,32 @@ Lessons are listed in each library's curriculum order. Seconds are the sum of ea
 | Administrator | Privacy and training data | Protect personal data | `admin-personal-data` | 13 | 0 | 210 |
 | Administrator | Privacy and training data | Build training datasets from ratings and corrections | `admin-training-datasets` | 18 | 0 | 276 |
 | Administrator | Privacy and training data | Wall off documents and read file properties | `admin-ethical-walls` | 20 | 1 | 323 |
-| Administrator | Oversight and compliance | Tenant analytics | `admin-analytics` | 9 | 0 | 123 |
-| Administrator | Oversight and compliance | Tenant audit | `admin-audit` | 7 | 0 | 93 |
+| Administrator | Oversight and compliance | Tenant analytics | `admin-analytics` | 9 | 0 | 128 |
+| Administrator | Oversight and compliance | Tenant audit | `admin-audit` | 7 | 0 | 94 |
 | Administrator | Oversight and compliance | Alerts and delivery | `admin-alerts` | 9 | 1 | 133 |
 | Administrator | Oversight and compliance | Data retention and tagging | `admin-retention` | 10 | 0 | 136 |
 | Administrator | Oversight and compliance | Review feedback and reported issues | `admin-feedback-issues` | 7 | 0 | 93 |
 | Administrator | Oversight and compliance | Work reported problems in Reports | `admin-reports` | 16 | 0 | 188 |
-| Platform owner | Get started | Set up the first workspace | `owner-first-workspace` | 13 | 1 | 232 |
-| Platform owner | Get started | Providers and connections | `provider-setup` | 23 | 7 | 388 |
+| Platform owner | Get started | Set up the first workspace | `owner-first-workspace` | 13 | 1 | 233 |
+| Platform owner | Get started | Providers and connections | `provider-setup` | 23 | 7 | 391 |
 | Platform owner | Get started | API Key Vault and replacement | `api-key-vault` | 7 | 0 | 111 |
 | Platform owner | Get started | Organization model availability | `model-availability` | 8 | 0 | 125 |
 | Platform owner | People and access | Users and role boundaries | `users-roles` | 8 | 0 | 130 |
-| Platform owner | Single sign-on | Single sign-on, start to finish | `sso-setup` | 20 | 1 | 326 |
-| Platform owner | Single sign-on | Single sign-on with Microsoft Entra ID | `sso-entra` | 9 | 4 | 157 |
-| Platform owner | Single sign-on | Single sign-on with Okta | `sso-okta` | 8 | 5 | 125 |
+| Platform owner | Single sign-on | Single sign-on, start to finish | `sso-setup` | 20 | 1 | 327 |
+| Platform owner | Single sign-on | Single sign-on with Microsoft Entra ID | `sso-entra` | 9 | 4 | 158 |
+| Platform owner | Single sign-on | Single sign-on with Okta | `sso-okta` | 8 | 5 | 126 |
 | Platform owner | Single sign-on | Single sign-on with Google Workspace | `sso-google` | 6 | 4 | 98 |
 | Platform owner | Single sign-on | Single sign-on with WorkOS | `sso-workos` | 15 | 4 | 250 |
 | Platform owner | Single sign-on | Go live: groups, MFA, and enforcement | `sso-security` | 7 | 1 | 128 |
 | Platform owner | Policies and branding | Policies, budget, and the connector ceiling | `policies-connectors` | 15 | 1 | 239 |
-| Platform owner | Policies and branding | Platform branding | `branding` | 11 | 0 | 197 |
+| Platform owner | Policies and branding | Platform branding | `branding` | 11 | 0 | 198 |
 | Platform owner | Policies and branding | Review workspace search readiness | `search-index` | 4 | 0 | 62 |
-| Platform owner | Monitoring and compliance | Analytics: runtime, activity, and usage | `runtime-analytics` | 9 | 0 | 123 |
+| Platform owner | Monitoring and compliance | Analytics: runtime, activity, and usage | `runtime-analytics` | 9 | 0 | 133 |
 | Platform owner | Monitoring and compliance | Share reports with the Aperture Chat maintainers | `owner-reports-sharing` | 17 | 2 | 318 |
-| Platform owner | Monitoring and compliance | Owner audit signals | `owner-audit` | 9 | 0 | 136 |
+| Platform owner | Monitoring and compliance | Owner audit signals | `owner-audit` | 9 | 0 | 139 |
 | Platform owner | Monitoring and compliance | Alerts and email delivery | `owner-alerts` | 12 | 3 | 215 |
 | Platform owner | Monitoring and compliance | Elastic Analytics export | `elastic-analytics` | 12 | 2 | 184 |
-| Platform owner | Monitoring and compliance | Data retention and tagging | `owner-retention` | 10 | 0 | 155 |
+| Platform owner | Monitoring and compliance | Data retention and tagging | `owner-retention` | 10 | 0 | 156 |
 
 ## Rebuild workflow
 
@@ -380,3 +380,14 @@ The Drafts spreadsheet format, the document viewer, the Account drawer, chat cod
 - **Narration:** 27 tracks were regenerated with the same Kokoro voice and compared with their scripts by Whisper (agreement 0.970–1.000).
 - **Help count:** `help-drawer.png`, `report-help.png`, and `report-unread.png` print the playlist total, so any change to a lesson's timing needs those frames recaptured from `user-account` and `user-reports`.
 - **Guides:** the user, administrator, and owner PDFs were regenerated (122, 180, and 242 pages). Every page was rasterized and checked for blank pages and ink at the page edges, and the new sections were inspected. Each pair of copies is byte-identical.
+
+## Console exports and filters — November 2, 2026
+
+Every console export became an **Export** button that offers an Excel workbook or a CSV file, user filters became checkbox panels, and the Runtime Clock Metadata list now names each run and opens its conversation. This refresh recaptured the four lessons that teach those screens (`admin-analytics`, `admin-audit`, `runtime-analytics`, and `owner-audit`) and corrected the owner console's name everywhere it is taught.
+
+- **Evidence:** the four walkthrough modules ran one at a time on a freshly reset isolated synthetic instance against a local Qwen 3.5 9B, and 34 frames were published. The exports in `admin-analytics`, `runtime-analytics`, and `owner-audit` really downloaded and were checked. `admin/an-runtime.png` and `owner/an-usage-user.png` are taken with the checkbox panel open and the person ticked. The fixture's activity had aged past the 30-day filters, so its activity dates were moved forward 30 whole days, which keeps the hour-of-day charts, and the 68 seeded `chat.completion` audit rows that named a person as their target now name a catalog model, as the product records. The flagged prompt in `admin-audit` was sent through the real chat on the day of capture. Chat Feedback, Model Activity, User Usage, and alert detail lines print a model's id rather than its name, as they have since the first release; audit records print their literal fields.
+- **Label:** the 54 mentions of "Platform console" in owner steps, captions, and narration now read "Platform owner console", the Account panel button that opens it. The guides' four mentions match, and the guide's sidebar list now says the consoles open from the account card.
+- **Narration:** the scenes that said C S V or described a single-person picker were rewritten, and every count spoken or printed comes from the final capture. 24 segments across 17 tracks were synthesized with the same Kokoro voice. Kokoro varies slightly between runs, so unchanged scenes kept their saved speech. Each track was compared with its script by Whisper (agreement 0.932–0.997), and all 24 new segments were checked alone; the differences are spoken numbers written as digits, split words, vendor names, and "owner" misheard in two segments.
+- **Focus and layout:** 34 focus regions were measured from the live DOM and imported against the exact published PNG bytes. The 34 scenes of the four lessons were rendered through the composition with no overlap between title cards, captions, and highlights.
+- **Guides:** the user, administrator, and owner PDFs were regenerated (122, 180, and 242 pages) with the Export and checkbox wording. Every page was rasterized and checked for blank pages and ink at the page edges, the changed passages were inspected, and each pair of copies is byte-identical.
+- **Inventory:** the tables above also pick up timing changes from v0.5.19 that were not recorded at the time.

@@ -236,6 +236,45 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.19
+
+- **The consoles fit the window you have.** Layouts answered to the window's
+  width even though the sidebar takes 226 pixels of it, so Budget and Reports
+  could run off the screen at some sizes. Grids now size to their own room, and
+  tables and lists answer to the space the console really has. The same pass
+  brought Delete back into the Users table at laptop widths, put audit trail
+  times back in their column, and stopped a fade from veiling the last row of a
+  list.
+- **Export to Excel or CSV everywhere.** Every console export is now an **Export**
+  button: choose **Excel workbook** or **CSV file**, pick dates or All dates, and
+  download. The workbook is a real table with a frozen header and real dates, and
+  text stays text. A CSV file keeps each value exactly as recorded, including text
+  that looks like a formula, so use the workbook for files that will be opened in
+  Excel.
+- **Filter by one person or several.** The single person picker is replaced by
+  checkboxes in Analytics, where no one ticked means everyone. On the API,
+  `user_id` can repeat on the usage routes. One id outside what the viewer may see
+  still answers 404 for the whole query.
+- **The runtime log says what ran.** Each run shows its conversation or draft by
+  name, who ran it, the model, and the provider, and a chat run opens its
+  conversation. New `/thread-titles` routes on the platform and admin APIs supply
+  those names, concealed like the prompts and limited to 100 ids per lookup.
+  Opening a conversation from the log is not itself written to the audit trail.
+- **Only real runs count.** The log used to take any event that carried a surface
+  as a run, so flagged prompts and newly created or failed automations raised the
+  Runtime events, Chat, and Drafts totals. Those totals can read lower after this
+  update. The events themselves stay in the audit trail, and a finished automation
+  is listed as **Automation**, since one automation can use several models.
+- **Usage cards name people.** Activity and usage cards show full names and say
+  what each count means.
+- **No migration and no new settings.** Back up as usual before upgrading.
+- **Training and the README follow the changes.** The admin and owner analytics
+  and audit lessons are recaptured and re-narrated for Export and the checkbox
+  filters, owner lessons say **Platform owner console** as the button does, and
+  the three PDF guides are rebuilt. The README screenshots and tour are recaptured
+  from this interface and now show spreadsheets. Other lessons teach the right
+  steps but may still picture the earlier sidebar, Help blade, and account button.
+
 ## New Since v0.5.18
 
 - **Attached files are kept and read like knowledge documents.** A file attached

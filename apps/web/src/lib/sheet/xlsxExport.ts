@@ -35,7 +35,7 @@ import { planMerges, planTables, tableXml } from "./xlsx/tables";
 import { themeXml } from "./xlsx/theme";
 import { worksheetXml } from "./xlsx/worksheet";
 
-export const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+export { XLSX_MIME_TYPE } from "./xlsxMime";
 
 export type XlsxExportResult = { bytes: Uint8Array; warnings: string[] };
 

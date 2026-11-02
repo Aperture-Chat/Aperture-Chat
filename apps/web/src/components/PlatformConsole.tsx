@@ -117,6 +117,8 @@ import { UserAvatar } from "./UserAvatar";
 import {
   EMPTY_SECTION_SCOPE,
   SectionScopeFilter,
+  scopeFilenamePart,
+  toggleScopeUser,
   sectionScopeMatch,
   timestampInDateRange,
   type SectionScope,
@@ -126,7 +128,21 @@ const OwnerDocumentationModal = lazyWithReload("owner-documentation", () =>
   import("./OwnerTrainingVideos").then((module) => ({ default: module.OwnerDocumentationModal })),
 );
 import { PasswordResetDialog } from "./PasswordResetDialog";
+import {
+  AUDIT_TRAIL_EXPORT_COLUMNS,
+  CHAT_FEEDBACK_EXPORT_COLUMNS,
+  PROMPT_ACTIVITY_EXPORT_COLUMNS,
+  RUNTIME_ANALYTICS_EXPORT_COLUMNS,
+  USAGE_RECORD_EXPORT_COLUMNS,
+  type FeedbackDisplayItem,
+} from "../lib/consoleExportColumns";
+import { runtimeRecordsFromAudit, runtimeThreadIds } from "../lib/runtimeRecords";
+import { useThreadTitles, type ThreadTitleLoader } from "../lib/threadTitles";
+import { ActivityPersonCard } from "./ActivityPersonCard";
+import { DataExportControl } from "./DataExportControl";
+import { RuntimeRecordList } from "./RuntimeRecordList";
 import { FeedbackConversationPreview, PromptActivityList } from "./PromptActivityList";
+import { UserFilterControl } from "./UserFilterControl";
 import { renderConcealed } from "./ConcealedText";
 import { IssueReportPreview } from "./IssueReportPreview";
 import { markdownToPreviewText } from "../lib/markdown";
@@ -155,23 +171,6 @@ import {
 type ActionStatus = {
   tone: "success" | "warning" | "info";
   message: string;
-};
-
-type RuntimeAuditRow = {
-  id: string;
-  surface: "chat" | "draft";
-  title: string;
-  detail: string;
-  metadata: string;
-  executedAt: string;
-  actorId: string;
-  actorName: string;
-};
-
-type CsvValue = string | number | boolean | null | undefined;
-type CsvColumn<T> = {
-  header: string;
-  value: (item: T) => CsvValue;
 };
 
 type ProviderDraftState = {
@@ -219,168 +218,6 @@ type ProviderDeleteDialogState = {
 };
 
 type CopyStatus = "idle" | "copied" | "failed";
-
-const RUNTIME_ANALYTICS_CSV_COLUMNS: Array<CsvColumn<RuntimeAuditRow>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "actor_id", value: (item) => item.actorId },
-  { header: "actor_name", value: (item) => item.actorName },
-  { header: "surface", value: (item) => item.surface },
-  { header: "title", value: (item) => item.title },
-  { header: "detail", value: (item) => item.detail },
-  { header: "metadata", value: (item) => item.metadata },
-  { header: "executed_at", value: (item) => item.executedAt },
-];
-
-type FeedbackDisplayItem = ChatFeedbackEvent & { comment?: string };
-
-const CHAT_FEEDBACK_CSV_COLUMNS: Array<CsvColumn<FeedbackDisplayItem>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
-  { header: "rating", value: (item) => item.rating },
-  { header: "comment", value: (item) => item.comment ?? "" },
-  { header: "thread_id", value: (item) => item.thread_id },
-  { header: "thread_title", value: (item) => item.thread_title },
-  { header: "message_id", value: (item) => item.message_id },
-  { header: "model_id", value: (item) => item.model_id },
-  { header: "user_id", value: (item) => item.user_id },
-  { header: "user_name", value: (item) => item.user_name },
-  { header: "message_preview", value: (item) => item.message_preview },
-];
-
-const AUDIT_TRAIL_CSV_COLUMNS: Array<CsvColumn<AuditEvent>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
-  { header: "tenant_id", value: (item) => item.tenant_id ?? "" },
-  { header: "actor_id", value: (item) => item.actor_id },
-  { header: "actor_name", value: (item) => item.actor_name },
-  { header: "actor_role", value: (item) => item.actor_role },
-  { header: "action", value: (item) => item.action },
-  { header: "action_type", value: (item) => item.action_type },
-  { header: "target", value: (item) => item.target },
-  { header: "target_type", value: (item) => item.target_type },
-  { header: "target_name", value: (item) => item.target_name },
-  { header: "detail", value: (item) => item.detail },
-  { header: "severity", value: (item) => item.severity ?? "" },
-  { header: "severity_reason", value: (item) => item.severity_reason ?? "" },
-  { header: "redacted", value: (item) => item.redacted },
-  { header: "metadata_json", value: (item) => JSON.stringify(item.metadata ?? {}) },
-];
-
-const USAGE_RECORD_CSV_COLUMNS: Array<CsvColumn<UsageRecord>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
-  { header: "user_id", value: (item) => item.user_id },
-  { header: "user_name", value: (item) => item.user_name },
-  { header: "user_role", value: (item) => item.user_role },
-  { header: "model_id", value: (item) => item.model_id },
-  { header: "provider_name", value: (item) => item.provider_name },
-  { header: "surface", value: (item) => item.surface },
-  { header: "message_count", value: (item) => item.message_count },
-  { header: "prompt_tokens", value: (item) => item.prompt_tokens ?? "" },
-  { header: "completion_tokens", value: (item) => item.completion_tokens ?? "" },
-  { header: "total_tokens", value: (item) => item.total_tokens ?? "" },
-  { header: "thread_id", value: (item) => item.thread_id ?? "" },
-  { header: "source", value: (item) => item.source },
-];
-
-const PROMPT_ACTIVITY_CSV_COLUMNS: Array<CsvColumn<UserPromptRecord>> = [
-  { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at_iso || item.created_at },
-  { header: "user_id", value: (item) => item.user_id },
-  { header: "user_name", value: (item) => item.user_name },
-  { header: "user_email", value: (item) => item.user_email },
-  { header: "user_role", value: (item) => item.user_role ?? "" },
-  { header: "thread_id", value: (item) => item.thread_id },
-  { header: "thread_title", value: (item) => item.thread_title },
-  { header: "model_id", value: (item) => item.model_id },
-  { header: "active_alert_count", value: (item) => item.alert_count },
-  { header: "prompt", value: (item) => item.content },
-  { header: "response", value: (item) => item.response_content ?? "" },
-  { header: "response_status", value: (item) => item.response_status ?? "" },
-  { header: "response_truncated", value: (item) => item.response_truncated ?? false },
-];
-
-function CsvExportControl<T>({
-  label,
-  filenameBase,
-  items,
-  getTimestamp,
-  columns,
-}: {
-  label: string;
-  filenameBase: string;
-  items: T[];
-  getTimestamp: (item: T) => string;
-  columns: Array<CsvColumn<T>>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [fromDate, setFromDate] = useState("");
-  const [throughDate, setThroughDate] = useState("");
-  const filteredItems = items.filter((item) => timestampInDateRange(getTimestamp(item), fromDate, throughDate));
-  const rangeLabel = csvRangeLabel(fromDate, throughDate);
-
-  function download() {
-    downloadCsvFile(`${filenameBase}-${rangeLabel}.csv`, rowsToCsv(filteredItems, columns));
-    setOpen(false);
-  }
-
-  return (
-    <div className="csv-export-control">
-      <button
-        className="secondary-button compact"
-        type="button"
-        aria-label={`Export ${label} CSV`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        data-tooltip={`Choose a date range and download ${label} as CSV`}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Download size={14} /> CSV
-      </button>
-      {open && (
-        <div className="csv-export-popover" role="dialog" aria-label={`${label} CSV date range`}>
-          <div>
-            <strong>CSV date range</strong>
-            <small>{filteredItems.length.toLocaleString()} of {items.length.toLocaleString()} rows selected</small>
-          </div>
-          <label>
-            From
-            <input
-              type="date"
-              aria-label={`${label} start date`}
-              value={fromDate}
-              onChange={(event) => setFromDate(event.target.value)}
-            />
-          </label>
-          <label>
-            Through
-            <input
-              type="date"
-              aria-label={`${label} end date`}
-              value={throughDate}
-              onChange={(event) => setThroughDate(event.target.value)}
-            />
-          </label>
-          <div className="csv-export-actions">
-            <button
-              className="secondary-button compact"
-              type="button"
-              onClick={() => {
-                setFromDate("");
-                setThroughDate("");
-              }}
-            >
-              All dates
-            </button>
-            <button className="primary-button compact" type="button" onClick={download}>
-              Download {filteredItems.length.toLocaleString()} row{filteredItems.length === 1 ? "" : "s"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 type TenantPolicyState = {
   downstreamApiEnabled: boolean;
@@ -618,6 +455,7 @@ export type PlatformConsoleActions = {
   /** Loads every saved exchange of one chat thread so the audit preview can
    * show the full conversation, not just the clicked record. */
   listThreadPromptActivity?: (threadId: string) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+  listThreadTitles?: ThreadTitleLoader;
   // Data retention governance for the sole tenant. Metadata only.
   getRetentionPolicy?: () => Promise<TenantRetentionPolicy | void>;
   updateRetentionPolicy?: (
@@ -635,11 +473,11 @@ export type PlatformConsoleActions = {
     acknowledged: boolean,
   ) => Promise<SecurityAlert | void> | SecurityAlert | void;
   getUsageSummary?: (options?: {
-    targetUserId?: string;
+    targetUserIds?: string[];
     fromDate?: string;
     throughDate?: string;
   }) => Promise<UsageSummary | void> | UsageSummary | void;
-  listUsageRecords?: (userId?: string) => Promise<UsageRecord[] | void> | UsageRecord[] | void;
+  listUsageRecords?: (userIds?: string[]) => Promise<UsageRecord[] | void> | UsageRecord[] | void;
   listAlertRules?: () => Promise<AlertRule[] | void>;
   createAlertRule?: (payload: AlertRuleCreateRequest) => Promise<AlertRule | void>;
   updateAlertRule?: (ruleId: string, patch: AlertRuleUpdateRequest) => Promise<AlertRule | void>;
@@ -868,7 +706,20 @@ export function PlatformConsole({
   const [usageSummary, setUsageSummary] = useState<UsageSummary | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
-  const runtimeAuditRows = useMemo(() => platformRuntimeAuditRows(auditTrail ?? []), [auditTrail]);
+  const runtimeThreadList = useMemo(
+    () => (activeSection === "analytics" ? runtimeThreadIds(auditTrail ?? []) : []),
+    [activeSection, auditTrail],
+  );
+  const runtimeThreadTitles = useThreadTitles(runtimeThreadList, platformActions?.listThreadTitles);
+  const runtimeAuditRows = useMemo(
+    () =>
+      runtimeRecordsFromAudit(auditTrail ?? [], {
+        threadTitles: runtimeThreadTitles,
+        modelName: (modelId) => data.models.find((model) => model.id === modelId)?.name ?? modelId,
+        formatTime: formatAuditTimestamp,
+      }),
+    [auditTrail, data.models, runtimeThreadTitles],
+  );
   const filteredRuntimeAuditRows = useMemo(
     () => runtimeAuditRows.filter((item) => sectionScopeMatch(runtimeScope, item.executedAt, item.actorId)),
     [runtimeScope, runtimeAuditRows],
@@ -898,9 +749,10 @@ export function PlatformConsole({
     [data.users],
   );
   const auditUserIds = useMemo(() => new Set(auditUsers.map((user) => user.id)), [auditUsers]);
-  const promptScopeUser = promptScope.userId === "all"
-    ? null
-    : auditUsers.find((user) => user.id === promptScope.userId) ?? null;
+  const promptScopeUser =
+    promptScope.userIds.length === 1
+      ? (auditUsers.find((user) => user.id === promptScope.userIds[0]) ?? null)
+      : null;
   const promptActivityRows = useMemo(
     () => (promptActivity ?? []).filter((record) => auditUserIds.has(record.user_id)),
     [auditUserIds, promptActivity],
@@ -976,7 +828,7 @@ export function PlatformConsole({
       .map((user) => ({ id: user.id, label: user.display_name || user.email })),
     [data.users],
   );
-  const selectedUsageUserParam = usageScope.userId === "all" ? undefined : usageScope.userId;
+  const selectedUsageUserIds = usageScope.userIds;
   // The usage picker covers the same population: owner, admin, and user
   // activity are all tracked here.
   const usageUsers = auditUsers;
@@ -1012,9 +864,11 @@ export function PlatformConsole({
   );
   const promptActivityExportLabel = promptScopeUser
     ? `${promptScopeUser.display_name} prompt activity`
-    : "all user prompt activity";
+    : promptScope.userIds.length > 1
+      ? "selected users prompt activity"
+      : "all user prompt activity";
   const promptActivityFilename = `aperture-prompt-activity-${
-    promptScopeUser ? csvFilenamePart(promptScopeUser.display_name || promptScopeUser.id) : "all-users"
+    scopeFilenamePart(promptScope, auditUserOptions) || "all-users"
   }`;
   const modelActivityRows = useMemo(() => buildPromptModelActivityRows(analyticsPromptActivityRows), [analyticsPromptActivityRows]);
   const promptUsageTrendRows = useMemo(() => buildPromptUsageTrendRows(analyticsPromptActivityRows), [analyticsPromptActivityRows]);
@@ -1233,7 +1087,7 @@ export function PlatformConsole({
     let active = true;
     Promise.resolve(
       getUsageSummaryAction({
-        targetUserId: selectedUsageUserParam,
+        targetUserIds: selectedUsageUserIds,
         fromDate: usageScope.fromDate || undefined,
         throughDate: usageScope.throughDate || undefined,
       }),
@@ -1250,13 +1104,13 @@ export function PlatformConsole({
     return () => {
       active = false;
     };
-  }, [getUsageSummaryAction, usageScope, selectedUsageUserParam, auditTrailRefreshToken]);
+  }, [getUsageSummaryAction, usageScope, selectedUsageUserIds, auditTrailRefreshToken]);
 
   const listUsageRecordsAction = platformActions?.listUsageRecords;
   useEffect(() => {
     if (!listUsageRecordsAction) return;
     let active = true;
-    Promise.resolve(listUsageRecordsAction(selectedUsageUserParam))
+    Promise.resolve(listUsageRecordsAction(selectedUsageUserIds))
       .then((records) => {
         if (!active || !records) return;
         setUsageRecords(records);
@@ -1268,7 +1122,7 @@ export function PlatformConsole({
     return () => {
       active = false;
     };
-  }, [listUsageRecordsAction, selectedUsageUserParam, auditTrailRefreshToken]);
+  }, [listUsageRecordsAction, selectedUsageUserIds, auditTrailRefreshToken]);
 
   const getPlatformSettingsAction = platformActions?.getPlatformSettings;
   useEffect(() => {
@@ -3535,18 +3389,16 @@ export function PlatformConsole({
                   <Clock3 size={18} /> Runtime Clock Metadata
                 </>
               }
-              subtitle="Authoritative execution timestamps captured from Chat and Draft completion audit events."
+              subtitle="The server's own record of every AI run: who ran it, which model answered, and exactly when. Use it to confirm activity at a given time. Open a chat run to read that conversation. Draft text stays with its author."
               actions={
-                <CsvExportControl
+                <DataExportControl
                   label="runtime analytics"
-                  filenameBase={
-                    runtimeScope.userId === "all"
-                      ? "aperture-runtime-analytics"
-                      : `aperture-runtime-analytics-${runtimeScope.userId}`
-                  }
+                  filenameBase={["aperture-runtime-analytics", scopeFilenamePart(runtimeScope, auditUserOptions)]
+                    .filter(Boolean)
+                    .join("-")}
                   items={filteredRuntimeAuditRows}
                   getTimestamp={(item) => item.executedAt}
-                  columns={RUNTIME_ANALYTICS_CSV_COLUMNS}
+                  columns={RUNTIME_ANALYTICS_EXPORT_COLUMNS}
                 />
               }
               defaultCollapsed
@@ -3586,21 +3438,12 @@ export function PlatformConsole({
                   </span>
                 </div>
               ) : filteredRuntimeAuditRows.length > 0 ? (
-                <div className="feedback-event-list scrollable-log-list" aria-label="Runtime clock events">
-                  {filteredRuntimeAuditRows.map((item) => (
-                    <div className="feedback-event-row" key={item.id}>
-                      <span className="feedback-icon is-positive">
-                        <Clock3 size={15} />
-                      </span>
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>{item.detail}</small>
-                        <p>{item.metadata}</p>
-                      </span>
-                      <time dateTime={item.executedAt}>{formatAuditTimestamp(item.executedAt)}</time>
-                    </div>
-                  ))}
-                </div>
+                <RuntimeRecordList
+                  records={filteredRuntimeAuditRows}
+                  ariaLabel="Runtime clock events"
+                  formatTime={formatAuditTimestamp}
+                  loadThreadRecords={listThreadPromptActivity}
+                />
               ) : (
                 <div className="audit-empty-state">
                   <Clock3 size={20} />
@@ -3625,12 +3468,12 @@ export function PlatformConsole({
                   : "Thumbs ratings recorded in this browser. Server-side feedback and issue reports load when the platform API is connected."
               }
               actions={
-                  <CsvExportControl
+                  <DataExportControl
                     label="chat feedback analytics"
                     filenameBase="aperture-chat-feedback"
                     items={filteredChatFeedback}
                     getTimestamp={(item) => item.created_at}
-                    columns={CHAT_FEEDBACK_CSV_COLUMNS}
+                    columns={CHAT_FEEDBACK_EXPORT_COLUMNS}
                   />
               }
               defaultCollapsed
@@ -3912,15 +3755,15 @@ export function PlatformConsole({
                       </span>
                       <small>{promptUserRows.length} active user{promptUserRows.length === 1 ? "" : "s"}</small>
                     </div>
-                    <div className="model-user-activity-list scrollable-log-list usage-user-list">
+                    <div className="model-user-activity-list scrollable-log-list usage-user-list" role="list">
                       {promptUserRows.map((row) => (
-                        <div className="model-user-activity-row" key={row.userId}>
-                          <span>
-                            <strong>{row.userName}</strong>
-                            <small>{row.modelCount} model{row.modelCount === 1 ? "" : "s"} used</small>
-                          </span>
-                          <b>{row.promptCount}</b>
-                        </div>
+                        <ActivityPersonCard
+                          key={row.userId}
+                          name={row.userName}
+                          detail={`${row.modelCount} model${row.modelCount === 1 ? "" : "s"} used`}
+                          count={row.promptCount}
+                          countLabel={row.promptCount === 1 ? "prompt" : "prompts"}
+                        />
                       ))}
                     </div>
                   </section>
@@ -3938,12 +3781,12 @@ export function PlatformConsole({
               subtitle="Durable per-user usage from real completions across chat, drafts, agents, automations, and the API gateway. Token counts are provider-reported only and stay blank when a provider reported none. Includes platform owners, admins, and users."
               actions={
                 <>
-                  <CsvExportControl
+                  <DataExportControl
                     label="usage records"
                     filenameBase="aperture-platform-usage-records"
                     items={usageRecords}
                     getTimestamp={(item) => item.created_at}
-                    columns={USAGE_RECORD_CSV_COLUMNS}
+                    columns={USAGE_RECORD_EXPORT_COLUMNS}
                   />
                   <button
                     className="secondary-button compact"
@@ -4113,55 +3956,36 @@ export function PlatformConsole({
                             <Users size={16} />
                             <strong>Usage by user</strong>
                           </span>
-                          <label className="compact-select-field">
-                            <Users size={14} />
-                            <SelectControl
-                              aria-label="Focus usage on one user"
-                              value={usageScope.userId}
-                              onChange={(event) => setUsageScope((scope) => ({ ...scope, userId: event.target.value }))}
-                              data-tooltip="Show usage for a single owner, admin, or user"
-                            >
-                              <option value="all">All users ranked</option>
-                              {usageUsers.map((user) => (
-                                <option key={user.id} value={user.id}>
-                                  {user.display_name || user.email}
-                                </option>
-                              ))}
-                            </SelectControl>
-                          </label>
+                          <UserFilterControl
+                            label="Focus usage on selected users"
+                            users={usageUserOptions}
+                            selectedIds={usageScope.userIds}
+                            onChange={(userIds) => setUsageScope((scope) => ({ ...scope, userIds }))}
+                            allLabel="All users ranked"
+                            tooltip="Show usage for the owners, admins, and users you pick"
+                          />
                         </div>
                         <div className="model-user-activity-list scrollable-log-list usage-user-list" role="list">
                           {usageSummary.by_user.map((row) => (
-                            <button
-                              className="model-user-activity-row usage-user-row"
+                            <ActivityPersonCard
                               key={row.user_id}
-                              type="button"
-                              role="listitem"
-                              onClick={() =>
-                                setUsageScope((scope) => ({
-                                  ...scope,
-                                  userId: scope.userId === row.user_id ? "all" : row.user_id,
-                                }))
-                              }
-                              data-tooltip={`Show only ${row.user_name || row.user_id}'s usage`}
-                            >
-                              <span>
-                                <strong>{row.user_name || row.user_id}</strong>
-                                <small>
-                                  {formatAuditRole(row.user_role)} · {row.model_count} model
-                                  {row.model_count === 1 ? "" : "s"} · {row.surfaces.join(", ")} · last active{" "}
-                                  {formatAuditTimestamp(row.last_active_at)}
-                                </small>
-                              </span>
-                              <span className="usage-user-tokens">{formatTokenCount(row.total_tokens)} tokens</span>
-                              <b>{row.message_count}</b>
-                            </button>
+                              name={row.user_name || row.user_id}
+                              detail={`${formatAuditRole(row.user_role)} · ${row.model_count} model${
+                                row.model_count === 1 ? "" : "s"
+                              } · ${row.surfaces.join(", ")} · last active ${formatAuditTimestamp(row.last_active_at)}`}
+                              count={row.message_count}
+                              countLabel={row.message_count === 1 ? "message" : "messages"}
+                              tokensLabel={`${formatTokenCount(row.total_tokens)} tokens`}
+                              onSelect={() => setUsageScope((scope) => toggleScopeUser(scope, row.user_id))}
+                              selected={usageScope.userIds.includes(row.user_id)}
+                              tooltip={`Add or remove ${row.user_name || row.user_id} from the filter`}
+                            />
                           ))}
                         </div>
                         <small className="usage-token-muted">
                           {usageSummary.by_user.length.toLocaleString()} user
-                          {usageSummary.by_user.length === 1 ? "" : "s"} in range · pick a user from the selector, or
-                          click a row to focus it.
+                          {usageSummary.by_user.length === 1 ? "" : "s"} in range · tick people in the filter, or click a
+                          row to add or remove them.
                         </small>
                       </section>
                       {usageSummary.backfilled_record_count > 0 ? (
@@ -4255,12 +4079,12 @@ export function PlatformConsole({
               defaultCollapsed
               actions={
                 <>
-                  <CsvExportControl
+                  <DataExportControl
                     label={promptActivityExportLabel}
                     filenameBase={promptActivityFilename}
                     items={auditPromptActivityRows}
                     getTimestamp={(item) => item.created_at_iso || item.created_at}
-                    columns={PROMPT_ACTIVITY_CSV_COLUMNS}
+                    columns={PROMPT_ACTIVITY_EXPORT_COLUMNS}
                   />
                   <button
                     className="secondary-button compact"
@@ -4433,12 +4257,12 @@ export function PlatformConsole({
               defaultCollapsed
               actions={
                 <>
-                  <CsvExportControl
+                  <DataExportControl
                     label="audit trail"
                     filenameBase="aperture-audit-trail"
                     items={visibleAuditTrailRows}
                     getTimestamp={(item) => item.created_at}
-                    columns={AUDIT_TRAIL_CSV_COLUMNS}
+                    columns={AUDIT_TRAIL_EXPORT_COLUMNS}
                   />
                   <button
                     className="secondary-button compact"
@@ -4543,7 +4367,7 @@ export function PlatformConsole({
                       {visibleAuditTrailRows.map((event) => {
                         const severity = auditEventSeverity(event);
                         return (
-                          <div className="audit-row" role="listitem" key={event.id}>
+                          <div className="audit-row audit-event-row" role="listitem" key={event.id}>
                             <ListChecks size={17} />
                             <span>
                               <strong>{event.action_type || event.action}</strong>
@@ -7002,40 +6826,6 @@ function platformAuditSummary(
   ];
 }
 
-function platformRuntimeAuditRows(events: AuditEvent[]): RuntimeAuditRow[] {
-  return events
-    .map((event) => {
-      const metadata = asRecord(event.metadata);
-      const runtimeContext = asRecord(metadata.runtime_context);
-      const action = event.action || "";
-      const surfaceValue = stringValue(metadata.surface) || stringValue(runtimeContext.surface);
-      const isChatCompletion = action === "chat.completion" || action === "gateway.chat_completion" || action === "gateway.responses";
-      if (!isChatCompletion && !surfaceValue) return null;
-      const surface: "chat" | "draft" = surfaceValue === "draft" ? "draft" : "chat";
-      const executedAt =
-        stringValue(metadata.execution_started_at) ||
-        stringValue(runtimeContext.execution_started_at) ||
-        event.created_at;
-      const clientStartedAt = stringValue(metadata.client_started_at) || stringValue(runtimeContext.client_started_at);
-      const provider = stringValue(metadata.provider) || stringValue(metadata.provider_name) || stringValue(metadata.provider_kind) || "provider";
-      const draftTitle = stringValue(metadata.draft_title) || stringValue(runtimeContext.draft_title);
-      const threadId = stringValue(metadata.thread_id) || stringValue(runtimeContext.thread_id);
-      const messageCount = numberValue(metadata.message_count) ?? numberValue(runtimeContext.message_count);
-      const target = surface === "draft" ? draftTitle || "Draft execution" : threadId || "Chat completion";
-      return {
-        id: event.id,
-        surface,
-        title: surface === "draft" ? "Draft execution" : "Chat completion",
-        detail: `${event.actor_name || event.actor_id} · ${provider}${messageCount ? ` · ${messageCount} message${messageCount === 1 ? "" : "s"}` : ""}`,
-        metadata: `${target}${clientStartedAt ? ` · client started ${formatAuditTimestamp(clientStartedAt)}` : ""}`,
-        executedAt,
-        actorId: event.actor_id,
-        actorName: event.actor_name || event.actor_id,
-      };
-    })
-    .filter((item): item is RuntimeAuditRow => item !== null);
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -7544,14 +7334,6 @@ function formatPromptTrendDate(dateKey: string) {
   }).format(date);
 }
 
-function csvFilenamePart(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "selected-user";
-}
-
 function formatFeedbackTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Just now";
@@ -7561,48 +7343,6 @@ function formatFeedbackTimestamp(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-}
-
-function csvRangeLabel(fromDate: string, throughDate: string) {
-  if (fromDate && throughDate) return `${fromDate}_to_${throughDate}`;
-  if (fromDate) return `from_${fromDate}`;
-  if (throughDate) return `through_${throughDate}`;
-  return "all-dates";
-}
-
-function rowsToCsv<T>(items: T[], columns: Array<CsvColumn<T>>) {
-  const header = columns.map((column) => csvEscape(column.header)).join(",");
-  const rows = items.map((item) =>
-    columns.map((column) => csvEscape(column.value(item))).join(","),
-  );
-  return [header, ...rows].join("\r\n");
-}
-
-function csvEscape(value: CsvValue) {
-  const text = value === null || typeof value === "undefined" ? "" : String(value);
-  if (!/[",\r\n]/.test(text)) return text;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function downloadCsvFile(filename: string, csv: string) {
-  const anchor = document.createElement("a");
-  anchor.download = filename;
-  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
-  if (typeof URL.createObjectURL === "function") {
-    const href = URL.createObjectURL(blob);
-    anchor.href = href;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => {
-      if (typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(href);
-    }, 0);
-    return;
-  }
-  anchor.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
 }
 
 function formatAuditTimestamp(value: string) {

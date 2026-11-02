@@ -1,15 +1,16 @@
-import { Users } from "lucide-react";
 import type { ReactNode } from "react";
-import { SelectControl } from "./SelectControl";
+import { exportFilenamePart } from "../lib/tabularExport";
+import { UserFilterControl, type FilterUser } from "./UserFilterControl";
 
 export type DateRangeState = {
   fromDate: string;
   throughDate: string;
 };
 
-export type SectionScope = DateRangeState & { userId: string };
+/** An empty `userIds` means everyone. */
+export type SectionScope = DateRangeState & { userIds: string[] };
 
-export const EMPTY_SECTION_SCOPE: SectionScope = { fromDate: "", throughDate: "", userId: "all" };
+export const EMPTY_SECTION_SCOPE: SectionScope = { fromDate: "", throughDate: "", userIds: [] };
 
 export function timestampInDateRange(value: string, fromDate: string, throughDate: string) {
   if (!fromDate && !throughDate) return true;
@@ -23,8 +24,24 @@ export function timestampInDateRange(value: string, fromDate: string, throughDat
 export function sectionScopeMatch(scope: SectionScope, timestamp: string, userId: string | null | undefined) {
   return (
     timestampInDateRange(timestamp, scope.fromDate, scope.throughDate) &&
-    (scope.userId === "all" || userId === scope.userId)
+    (scope.userIds.length === 0 || (userId != null && scope.userIds.includes(userId)))
   );
+}
+
+/** Adds the person to the scope, or takes them out if already in it. */
+export function toggleScopeUser(scope: SectionScope, userId: string): SectionScope {
+  const userIds = scope.userIds.includes(userId)
+    ? scope.userIds.filter((id) => id !== userId)
+    : [...scope.userIds, userId];
+  return { ...scope, userIds };
+}
+
+/** Who the scope covers, for an export's file name; empty means everyone. */
+export function scopeFilenamePart(scope: SectionScope, users: FilterUser[]) {
+  if (scope.userIds.length === 0) return "";
+  if (scope.userIds.length > 1) return `${scope.userIds.length}-users`;
+  const person = users.find((user) => user.id === scope.userIds[0]);
+  return exportFilenamePart(person?.label ?? scope.userIds[0]);
 }
 
 export function DateRangeFilter({
@@ -120,7 +137,7 @@ export function SectionScopeFilter({
   label: string;
   scope: SectionScope;
   onChange: (scope: SectionScope) => void;
-  users: Array<{ id: string; label: string }>;
+  users: FilterUser[];
   selectedCount: number;
   totalCount: number;
   allUsersLabel?: string;
@@ -133,21 +150,13 @@ export function SectionScopeFilter({
       selectedCount={selectedCount}
       totalCount={totalCount}
       extra={
-        <label className="compact-select-field">
-          <Users size={14} />
-          <SelectControl
-            aria-label={`${label} user`}
-            value={scope.userId}
-            onChange={(event) => onChange({ ...scope, userId: event.target.value })}
-          >
-            <option value="all">{allUsersLabel}</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.label}
-              </option>
-            ))}
-          </SelectControl>
-        </label>
+        <UserFilterControl
+          label={`${label} user`}
+          users={users}
+          selectedIds={scope.userIds}
+          onChange={(userIds) => onChange({ ...scope, userIds })}
+          allLabel={allUsersLabel}
+        />
       }
     />
   );

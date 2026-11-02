@@ -12,6 +12,7 @@
  * downloaded file is checked).
  */
 const fs = require("node:fs");
+const { pickFilterUsers, tickFilterUsers } = require("./user-filter.cjs");
 
 async function scrollTo(page, locator, block = "center") {
   await locator.evaluate((element, where) => element.scrollIntoView({ block: where }), block);
@@ -56,16 +57,17 @@ const analytics = {
     await scrollTo(page, runtime, "start");
     await shot("an-runtime");
     const filter = runtime.locator("[aria-label='Runtime events filter']");
-    await filter.getByLabel("Runtime events filter user").selectOption({ label: "Jane Smith" });
+    await pickFilterUsers(page, filter, "Runtime events filter user", "Jane Smith");
     await filter.getByRole("button", { name: "30 days" }).click();
     await page.waitForTimeout(800);
     await scrollTo(page, runtime, "start");
     await shot("an-runtime-scoped");
 
     // CSV export: its own date range, then a real download.
-    await runtime.getByRole("button", { name: "Export runtime analytics CSV" }).click();
-    const popover = page.getByRole("dialog", { name: "runtime analytics CSV date range" });
+    await runtime.getByRole("button", { name: "Export runtime analytics" }).click();
+    const popover = page.getByRole("dialog", { name: "Export runtime analytics" });
     await popover.waitFor();
+    await popover.getByRole("radio", { name: "CSV file" }).click();
     await page.waitForTimeout(400);
     await shot("an-runtime-csv", { keepFocus: true });
     const [download] = await Promise.all([page.waitForEvent("download"), popover.getByRole("button", { name: /Download/ }).click()]);
@@ -96,12 +98,9 @@ const analytics = {
     const usage = await expand(page, "User Usage");
     await scrollTo(page, usage, "start");
     await shot("an-usage");
-    const picker = usage.getByLabel("Focus usage on one user");
-    const options = await picker.locator("option").allInnerTexts();
-    const person = options.find((text) => /Jane Smith/.test(text)) ?? options[1];
-    await picker.selectOption({ label: person });
-    await page.waitForTimeout(800);
     await scrollTo(page, usage.locator("[aria-label='Usage by user']"), "center");
+    await tickFilterUsers(page, usage, "Focus usage on selected users", "Jane Smith");
+    await page.waitForTimeout(800);
     await shot("an-usage-user");
   },
 };
@@ -168,11 +167,12 @@ const audit = {
     await page.waitForTimeout(800);
     await scrollTo(page, trail, "start");
     await shot("au-trail-filtered");
-    const exportButton = trail.getByRole("button", { name: "Export audit trail CSV" });
+    const exportButton = trail.getByRole("button", { name: "Export audit trail" });
     await scrollTo(page, exportButton, "center");
     await exportButton.click();
-    const csvPopover = page.getByRole("dialog", { name: "audit trail CSV date range" });
+    const csvPopover = page.getByRole("dialog", { name: "Export audit trail" });
     await csvPopover.waitFor();
+    await csvPopover.getByRole("radio", { name: "CSV file" }).click();
     await page.waitForTimeout(400);
     await shot("au-trail-export", { keepFocus: true });
     const [download] = await Promise.all([page.waitForEvent("download"), csvPopover.getByRole("button", { name: /Download/ }).click()]);
