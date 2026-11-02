@@ -52,6 +52,7 @@ import {
   listAdminAuditEvents,
   listAdminModelAccess,
   listAdminPromptActivity,
+  listAdminThreadTitles,
   listAdminSecurityAlerts,
   getAdminUsageSummary,
   listAdminUsageRecords,
@@ -64,6 +65,7 @@ import {
   getAdminAlertEmailStatus,
   listPlatformAuditEvents,
   listPlatformPromptActivity,
+  listPlatformThreadTitles,
   listPlatformSecurityAlerts,
   getPlatformUsageSummary,
   listPlatformUsageRecords,
@@ -1006,6 +1008,7 @@ export function App() {
       // the server-side maximum page size.
       listThreadPromptActivity: (actorUserId, threadId) =>
         listAdminPromptActivity(actorUserId, { threadId, limit: 500 }),
+      listThreadTitles: (actorUserId, threadIds) => listAdminThreadTitles(actorUserId, threadIds),
       listSecurityAlerts: (actorUserId, targetUserId) =>
         listAdminSecurityAlerts(actorUserId, {
           targetUserId,
@@ -1015,8 +1018,8 @@ export function App() {
       acknowledgeSecurityAlert: (actorUserId, alertId, acknowledged) =>
         updateAdminSecurityAlert(actorUserId, alertId, { acknowledged }),
       getUsageSummary: (actorUserId, options) => getAdminUsageSummary(actorUserId, options),
-      listUsageRecords: (actorUserId, targetUserId) =>
-        listAdminUsageRecords(actorUserId, { targetUserId, limit: 500 }),
+      listUsageRecords: (actorUserId, targetUserIds) =>
+        listAdminUsageRecords(actorUserId, { targetUserIds, limit: 500 }),
       listAlertRules: (actorUserId) => listAdminAlertRules(actorUserId),
       createAlertRule: (actorUserId, payload) => createAdminAlertRule(actorUserId, payload),
       updateAlertRule: (actorUserId, ruleId, patch) =>
@@ -1244,6 +1247,7 @@ export function App() {
       // the server-side maximum page size.
       listThreadPromptActivity: (threadId) =>
         listPlatformPromptActivity(data.me.id, { threadId, limit: 500 }),
+      listThreadTitles: (threadIds) => listPlatformThreadTitles(data.me.id, threadIds),
       // Retention governance rides the admin endpoints, which already admit
       // platform owners and scope them to the deployment's sole tenant.
       listChatFeedback: () => listAdminChatFeedback(data.me.id, { limit: 500 }),
@@ -1263,8 +1267,8 @@ export function App() {
       acknowledgeSecurityAlert: (alertId, acknowledged) =>
         updatePlatformSecurityAlert(data.me.id, alertId, { acknowledged }),
       getUsageSummary: (options) => getPlatformUsageSummary(data.me.id, options),
-      listUsageRecords: (targetUserId) =>
-        listPlatformUsageRecords(data.me.id, { targetUserId, limit: 500 }),
+      listUsageRecords: (targetUserIds) =>
+        listPlatformUsageRecords(data.me.id, { targetUserIds, limit: 500 }),
       listAlertRules: () => listPlatformAlertRules(data.me.id),
       createAlertRule: (payload) => createPlatformAlertRule(data.me.id, payload),
       updateAlertRule: (ruleId, patch) => updatePlatformAlertRule(data.me.id, ruleId, patch),

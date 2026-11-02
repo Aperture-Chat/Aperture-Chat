@@ -10224,6 +10224,10 @@ button.toggle {
   color: var(--teal);
 }
 
+.provider-summary .muted-note {
+  overflow-wrap: anywhere;
+}
+
 .provider-summary {
   min-width: 0;
 }
@@ -10271,7 +10275,7 @@ button.toggle {
 /* Scoped under .provider-card to outrank its `> :not(.panel-header) { padding: 0 }` reset. */
 .provider-card > .provider-connection-editor {
   grid-column: 1 / -1;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   margin: 0;
   padding: 12px;
 }
@@ -10562,7 +10566,7 @@ dd {
 .provider-builder-form,
 .model-builder-form,
 .key-builder-form {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
 }
 
 .inline-checklist {
@@ -10585,7 +10589,7 @@ dd {
 
 .inline-choice-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
   gap: 8px;
 }
 
@@ -10615,7 +10619,7 @@ dd {
 }
 
 .provider-grid-wide {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
 }
 
 /* ---------- Responsive model list ---------- */
@@ -10645,7 +10649,7 @@ dd {
 .model-list-row {
   display: grid;
   grid-template-columns:
-    minmax(76px, 0.72fr)
+    minmax(92px, 0.72fr)
     minmax(126px, 1.15fr)
     minmax(118px, 1fr)
     minmax(104px, max-content)
@@ -10936,7 +10940,7 @@ dd {
 }
 
 .model-detail-editor {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   margin-bottom: 14px;
 }
 
@@ -11070,12 +11074,12 @@ dd {
   min-height: var(--control-height-compact);
 }
 
-.csv-export-control {
+.data-export-control {
   position: relative;
   display: inline-flex;
 }
 
-.csv-export-popover {
+.data-export-popover {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -11090,24 +11094,24 @@ dd {
   box-shadow: var(--shadow-lg);
 }
 
-.csv-export-popover strong,
-.csv-export-popover small {
+.data-export-popover strong,
+.data-export-popover small {
   display: block;
 }
 
-.csv-export-popover strong {
+.data-export-popover strong {
   color: var(--text-strong);
   font-size: 13px;
   font-weight: 800;
 }
 
-.csv-export-popover small {
+.data-export-popover small {
   margin-top: 2px;
   color: var(--muted);
   font-size: 11.5px;
 }
 
-.csv-export-popover label {
+.data-export-popover label {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -11115,7 +11119,7 @@ dd {
   font-weight: 750;
 }
 
-.csv-export-popover input {
+.data-export-popover input {
   width: 100%;
   height: var(--control-height);
   border: 1px solid var(--border-strong);
@@ -11127,22 +11131,155 @@ dd {
   font-size: var(--control-font-size);
 }
 
-.csv-export-actions {
+.data-export-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
 }
 
+.data-export-message {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Checkbox filter for one person, several, or everyone. */
+.compact-select-field.user-filter-trigger {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--control-font-size);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-filter-trigger > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-block: 4px;
+  color: var(--text);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.user-filter-trigger > svg {
+  flex: 0 0 auto;
+}
+
+.user-filter-panel {
+  position: fixed;
+  z-index: 235;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.user-filter-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--control-height);
+  margin-bottom: 4px;
+  padding: 0 var(--control-padding-x);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.user-filter-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--control-font-size);
+}
+
+.user-filter-list {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.user-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.user-filter-row:hover {
+  background: var(--surface-soft);
+}
+
+.user-filter-row input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.user-filter-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.user-filter-row.is-all {
+  margin-bottom: 2px;
+  font-weight: 700;
+}
+
+.user-filter-empty {
+  margin: 0;
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.user-filter-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 2px 0;
+  border-top: 1px solid var(--border);
+}
+
+.user-filter-foot small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
 .audit-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 12px;
 }
 
 .feedback-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -11502,12 +11639,10 @@ dd {
 }
 
 .audit-signal-label {
-  overflow: hidden;
   color: var(--text);
   font-size: 12.5px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .audit-signal-row strong {
@@ -12298,10 +12433,6 @@ button.audit-chart-slot:hover .audit-chart-column {
   margin-left: auto;
 }
 
-.audit-trail-list .audit-row {
-  grid-template-columns: 28px minmax(0, 1fr) auto auto;
-}
-
 .audit-severity-pill {
   display: inline-flex;
   align-items: center;
@@ -12329,11 +12460,9 @@ button.audit-chart-slot:hover .audit-chart-column {
   background: var(--surface-soft);
 }
 
-.usage-user-tokens {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  flex: 0 0 auto;
+.usage-user-row.is-selected {
+  border-color: var(--teal);
+  background: var(--teal-soft);
 }
 
 .usage-token-muted {
@@ -12445,7 +12574,7 @@ button.audit-chart-slot:hover .audit-chart-column {
 }
 
 .alert-detection-field .model-group-check-grid {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
 }
 
 /* Detection names are short phrases; let them wrap instead of truncating. */
@@ -12488,18 +12617,6 @@ button.audit-chart-slot:hover .audit-chart-column {
 
   .alert-rule-actions {
     justify-content: flex-start;
-  }
-}
-
-@media (max-width: 560px) {
-  /* Match the base mobile audit-row collapse; the severity pill stacks under
-     the event text instead of squeezing the trailing columns. */
-  .audit-trail-list .audit-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .audit-severity-pill {
-    justify-self: start;
   }
 }
 
@@ -12615,7 +12732,12 @@ button.audit-chart-slot:hover .audit-chart-column {
 }
 
 .prompt-activity-summary strong,
-.prompt-activity-summary small,
+.prompt-activity-summary small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* One line of the prompt is a preview; the row opens the rest. */
 .prompt-activity-summary span {
   min-width: 0;
   overflow: hidden;
@@ -13073,51 +13195,59 @@ button.audit-chart-slot:hover .audit-chart-column {
 
 .model-user-activity-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 8px;
 }
 
 .model-user-activity-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  padding: 9px 10px;
+  padding: 10px 12px;
+  text-align: left;
 }
 
-.model-user-activity-row span,
-.model-user-activity-row strong,
-.model-user-activity-row small {
-  display: block;
+.activity-person,
+.activity-numbers {
+  display: grid;
+  gap: 2px;
   min-width: 0;
 }
 
-.model-user-activity-row strong,
-.model-user-activity-row small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-user-activity-row strong {
+.activity-person strong {
   color: var(--text-strong);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
-.model-user-activity-row small {
+.activity-person small,
+.activity-numbers small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-.model-user-activity-row b {
+.activity-numbers {
+  justify-items: end;
+  text-align: right;
+}
+
+.activity-numbers b {
   color: var(--teal-strong);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 850;
+  line-height: 1.15;
+}
+
+.activity-numbers small {
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {
@@ -13177,6 +13307,7 @@ button.audit-chart-slot:hover .audit-chart-column {
 }
 
 .feedback-event-list {
+  container: event-list / inline-size;
   display: grid;
   gap: 9px;
 }
@@ -13204,19 +13335,6 @@ button.audit-chart-slot:hover .audit-chart-column {
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
   box-shadow: inset 0 -22px 18px -22px rgba(15, 35, 45, 0.3);
-}
-
-.scrollable-log-list::after {
-  content: "";
-  position: sticky;
-  bottom: -12px;
-  display: block;
-  height: 34px;
-  margin: -34px -12px -12px;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface-soft) 78%);
-  pointer-events: none;
 }
 
 .feedback-event-row {
@@ -13250,6 +13368,26 @@ button.audit-chart-slot:hover .audit-chart-column {
 .feedback-event-row p {
   display: block;
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A narrow list gives the text the row and moves the time under it. */
+@container event-list (max-width: 420px) {
+  .feedback-event-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .feedback-event-row > time,
+  .feedback-event-row > .feedback-row-side {
+    grid-column: 2;
+  }
+
+  .feedback-event-row > .feedback-row-side {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
 }
 
 .feedback-icon.is-issue-report {
@@ -13331,6 +13469,7 @@ button.audit-chart-slot:hover .audit-chart-column {
 }
 
 .audit-trail-list {
+  container: audit-list / inline-size;
   display: grid;
   gap: 0;
 }
@@ -13340,6 +13479,38 @@ button.audit-chart-slot:hover .audit-chart-column {
   align-items: start;
   gap: 10px;
   padding: 12px 14px;
+}
+
+/* Event, severity, and time. .audit-row.audit-event-row outranks the generic
+   three-column row above, which would drop the time into the icon's column. */
+.audit-console-grid .audit-row.audit-event-row {
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+}
+
+/* On a phone the time sits under the text, not squeezed in the icon's column. */
+@media (max-width: 560px) {
+  .audit-console-grid .audit-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .audit-console-grid .audit-row > time {
+    grid-column: 2;
+    order: 0;
+    justify-self: start;
+    white-space: normal;
+  }
+}
+
+@container audit-list (max-width: 520px) {
+  .audit-console-grid .audit-row.audit-event-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .audit-event-row > .audit-severity-pill,
+  .audit-event-row > time {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 .audit-console-grid .audit-row > svg {
@@ -14502,7 +14673,7 @@ button.owner-doc-card:hover {
 
 .knowledge-create-source-options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(165px, 100%), 1fr));
   gap: 8px;
   min-width: 0;
 }
@@ -14927,7 +15098,7 @@ button.owner-doc-card:hover {
 .tool-config-form,
 .agent-builder-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
   gap: 12px;
   min-width: 0;
 }
@@ -15087,7 +15258,7 @@ button.owner-doc-card:hover {
 
 .knowledge-auth-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(165px, 100%), 1fr));
   gap: 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -15171,7 +15342,7 @@ button.owner-doc-card:hover {
 }
 
 .knowledge-api-source-details .knowledge-api-auth-panel {
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
   gap: 8px;
   padding: 8px;
 }
@@ -15305,7 +15476,7 @@ button.owner-doc-card:hover {
 }
 
 .tool-runtime-form > .tool-toggle-stack {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   align-content: start;
   min-height: 0;
 }
@@ -16041,7 +16212,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .memory-policy-numbers {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -16411,9 +16582,7 @@ button.retention-tagged-title:focus-visible strong {
 .owner-user-row strong,
 .owner-user-row small {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .owner-user-row small {
@@ -16614,7 +16783,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .connector-config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -17156,7 +17325,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .managed-group-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -17173,15 +17342,20 @@ button.retention-tagged-title:focus-visible strong {
 
 .group-card-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
   min-width: 0;
   border: 0;
   background: transparent;
   color: inherit;
   padding: 0;
   text-align: left;
+}
+
+.group-card-main > .pill {
+  grid-column: 2;
+  justify-self: start;
 }
 
 .group-card-main > svg {
@@ -17336,7 +17510,7 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .group-user-table {
-  min-width: 560px;
+  min-width: 0;
   font-size: 12.5px;
 }
 
@@ -17347,6 +17521,8 @@ button.retention-tagged-title:focus-visible strong {
 
 .group-user-table td {
   padding: 8px 10px;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .compact-person-cell {
@@ -17364,7 +17540,7 @@ button.retention-tagged-title:focus-visible strong {
   display: grid;
   /* auto-fit: a single section stretches across the whole card instead of
      stopping at the half-width column the old fixed 2-column grid reserved. */
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -17577,8 +17753,12 @@ button.retention-tagged-title:focus-visible strong {
   }
 }
 
+.console-table-fit {
+  container: console-table / inline-size;
+}
+
 .user-management-table {
-  width: max(100%, 890px);
+  width: 100%;
   min-width: 0;
   table-layout: fixed;
   font-size: 12.5px;
@@ -17588,20 +17768,11 @@ button.retention-tagged-title:focus-visible strong {
 .user-management-table td {
   white-space: normal;
   padding: 8px 7px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .user-table-select-col {
   width: 30px;
-}
-
-.user-table-name-col {
-  width: 132px;
-}
-
-.user-table-email-col {
-  width: 158px;
 }
 
 .user-table-role-col {
@@ -17609,7 +17780,7 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .user-table-groups-col {
-  width: 104px;
+  width: 118px;
 }
 
 .user-table-auth-col {
@@ -17625,8 +17796,8 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .user-table-actions-col {
-  /* Reserve all three controls, their gaps, and the cell padding. */
-  width: 136px;
+  /* All four keys, their gaps, and the cell padding. */
+  width: 176px;
 }
 
 .user-management-table .person-cell {
@@ -17634,29 +17805,25 @@ button.retention-tagged-title:focus-visible strong {
   gap: 8px;
 }
 
+.user-management-table .person-cell > span {
+  min-width: 0;
+}
+
 .user-management-table .person-cell strong {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .table-email {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: middle;
+  overflow-wrap: anywhere;
 }
 
 .group-chip-list {
   display: inline-flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   vertical-align: middle;
 }
 
@@ -17673,9 +17840,7 @@ button.retention-tagged-title:focus-visible strong {
   padding: 0 8px;
   font-size: 11.5px;
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .group-chip-count {
@@ -17745,7 +17910,8 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .model-access-table {
-  min-width: 840px;
+  width: 100%;
+  min-width: 0;
   font-size: 12.5px;
 }
 
@@ -17756,6 +17922,8 @@ button.retention-tagged-title:focus-visible strong {
 
 .model-access-table td {
   padding: 7px 10px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .model-access-table .table-subtext {
@@ -17795,9 +17963,9 @@ button.retention-tagged-title:focus-visible strong {
 
 .model-grant-cell {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  white-space: nowrap;
+  gap: 4px 8px;
 }
 
 .model-grant-cell em {
@@ -17814,7 +17982,7 @@ button.retention-tagged-title:focus-visible strong {
 .model-groups-cell {
   display: flex;
   align-items: center;
-  min-width: 138px;
+  min-width: 0;
 }
 
 .model-groups-button {
@@ -17846,7 +18014,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .model-group-check-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
   gap: 7px;
 }
 
@@ -17883,6 +18051,12 @@ button.retention-tagged-title:focus-visible strong {
 .model-group-check small {
   color: var(--muted);
   font-size: 11.5px;
+}
+
+.inline-warning .pill {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
 }
 
 .inline-warning {
@@ -19789,6 +19963,14 @@ button.retention-tagged-title:focus-visible strong {
   }
 }
 
+/* The gutter beside the page is narrower than the navigator's usual offset. */
+@media (min-width: 861px) and (max-width: 1040px) {
+  .document-page-navigator {
+    width: 34px;
+    margin-left: -35px;
+  }
+}
+
 @media (max-width: 560px) {
   /* Phones scroll the whole page: the toolbars take too much of a small screen
      to stay, so they roll away and the document gets the room. */
@@ -20098,7 +20280,7 @@ button.retention-tagged-title:focus-visible strong {
 
   .owner-video-outcomes {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(126px, 100%), 1fr));
     gap: 6px;
     margin-top: 8px;
   }
@@ -20681,6 +20863,7 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .section-tabs-list {
+    flex-wrap: wrap;
     gap: 2px;
   }
 
@@ -20998,7 +21181,7 @@ button.retention-tagged-title:focus-visible strong {
 }
 .automation-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -24429,6 +24612,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .budget-editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   padding: 14px;
   border: 1px solid var(--border);
@@ -24438,7 +24622,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .budget-control-grid {
   display: grid;
-  grid-template-columns: minmax(190px, 0.9fr) minmax(190px, 0.85fr) minmax(240px, 1.2fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -24526,10 +24710,10 @@ button.retention-tagged-title:focus-visible strong {
 }
 
 .budget-usage-card {
-  display: grid;
-  grid-template-columns: minmax(110px, auto) minmax(140px, auto) minmax(260px, 1fr);
-  align-items: center;
-  gap: 8px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
   padding: 11px 13px;
   border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--border));
   border-radius: var(--radius-sm);
@@ -24548,20 +24732,17 @@ button.retention-tagged-title:focus-visible strong {
   font-weight: 780;
 }
 
+.budget-usage-card small {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
 .budget-save-button {
   justify-self: start;
   min-width: 154px;
 }
 
 @media (max-width: 900px) {
-  .budget-control-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .budget-usage-card {
-    grid-template-columns: 1fr;
-  }
-
   .budget-save-button {
     width: 100%;
   }
@@ -24834,8 +25015,8 @@ button.retention-tagged-title:focus-visible strong {
     justify-content: stretch;
   }
 
-  .panel-actions > .csv-export-control,
-  .panel-actions > .csv-export-control > button {
+  .panel-actions > .data-export-control,
+  .panel-actions > .data-export-control > button {
     width: 100%;
   }
 
@@ -24947,16 +25128,12 @@ button.retention-tagged-title:focus-visible strong {
 
   /* Wide management tables become readable record cards. The data-label
      attributes preserve each desktop column's meaning beside its value. */
-  .user-table-scroll,
   .group-user-table-scroll,
-  .model-access-panel > .table-scroll,
   .usage-allocations-panel .table-scroll {
     overflow: visible;
   }
 
-  .user-management-table,
   .group-user-table,
-  .model-access-table,
   .usage-allocations-table {
     display: block;
     width: 100%;
@@ -24964,26 +25141,19 @@ button.retention-tagged-title:focus-visible strong {
     table-layout: auto;
   }
 
-  .user-management-table colgroup,
-  .user-management-table thead,
   .group-user-table thead,
-  .model-access-table thead,
   .usage-allocations-table thead {
     display: none;
   }
 
-  .user-management-table tbody,
   .group-user-table tbody,
-  .model-access-table tbody,
   .usage-allocations-table tbody {
     display: grid;
     gap: 12px;
     width: 100%;
   }
 
-  .user-management-table tbody > tr,
   .group-user-table tbody > tr,
-  .model-access-table tbody > tr:not(.model-group-editor-row),
   .usage-allocations-table tbody > tr {
     display: block;
     width: 100%;
@@ -24994,13 +25164,7 @@ button.retention-tagged-title:focus-visible strong {
     box-shadow: var(--shadow-sm);
   }
 
-  .user-management-table tbody > tr.locked-row {
-    background: var(--surface-soft);
-  }
-
-  .user-management-table td,
   .group-user-table td,
-  .model-access-table tr:not(.model-group-editor-row) > td,
   .usage-allocations-table td {
     display: grid;
     grid-template-columns: minmax(86px, 32%) minmax(0, 1fr);
@@ -25016,17 +25180,148 @@ button.retention-tagged-title:focus-visible strong {
     overflow-wrap: anywhere;
   }
 
-  .user-management-table td:last-child,
   .group-user-table td:last-child,
-  .model-access-table tr:not(.model-group-editor-row) > td:last-child,
   .usage-allocations-table td:last-child {
     border-bottom: 0;
   }
 
-  .user-management-table td::before,
   .group-user-table td::before,
-  .model-access-table tr:not(.model-group-editor-row) > td::before,
   .usage-allocations-table td::before {
+    content: attr(data-label);
+    color: var(--faint);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .group-user-table .compact-person-cell {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .group-user-table td[data-label="User"] {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 6px;
+  }
+
+  .group-user-table td[data-label="User"] .compact-person-cell {
+    width: 100%;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .usage-allocations-table td[colspan] {
+    display: block;
+    width: 100%;
+    padding: 11px;
+    border-bottom: 0;
+  }
+
+  .usage-allocations-table td[colspan]::before {
+    content: none;
+  }
+
+  .group-user-table .toggle {
+    justify-self: start;
+  }
+
+  .usage-allocations-table .allocation-meter {
+    width: min(90px, 46%);
+  }
+
+  .allocation-add-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .allocation-add-row > * {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .data-export-popover {
+    position: fixed;
+    inset: auto 10px max(10px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: min(80dvh, 520px);
+    overflow-y: auto;
+  }
+}
+
+/* Wide tables become readable record cards once their panel can no longer show
+   every column. The sidebar takes room from the console, so this answers to the
+   panel's own width. The data-label attributes keep each column's meaning. */
+@container console-table (max-width: 880px) {
+  .user-table-scroll,
+  .model-access-panel .table-scroll {
+    overflow: visible;
+  }
+
+  .user-management-table,
+  .model-access-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+  }
+
+  .user-management-table colgroup,
+  .user-management-table thead,
+  .model-access-table thead {
+    display: none;
+  }
+
+  .user-management-table tbody,
+  .model-access-table tbody {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .user-management-table tbody > tr,
+  .model-access-table tbody > tr:not(.model-group-editor-row) {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .user-management-table tbody > tr.locked-row {
+    background: var(--surface-soft);
+  }
+
+  .user-management-table td,
+  .model-access-table tr:not(.model-group-editor-row) > td {
+    display: grid;
+    grid-template-columns: minmax(86px, 32%) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--border);
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  .user-management-table td:last-child,
+  .model-access-table tr:not(.model-group-editor-row) > td:last-child {
+    border-bottom: 0;
+  }
+
+  .user-management-table td::before,
+  .model-access-table tr:not(.model-group-editor-row) > td::before {
     content: attr(data-label);
     color: var(--faint);
     font-size: 10.5px;
@@ -25037,21 +25332,18 @@ button.retention-tagged-title:focus-visible strong {
 
   .user-management-table .person-cell,
   .user-management-table .table-email,
-  .user-management-table .group-chip-list,
-  .group-user-table .compact-person-cell {
+  .user-management-table .group-chip-list {
     min-width: 0;
     max-width: 100%;
     white-space: normal;
   }
 
-  .group-user-table td[data-label="User"],
   .model-access-table td[data-label="Model"] {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 6px;
   }
 
-  .group-user-table td[data-label="User"] .compact-person-cell,
   .model-access-table td[data-label="Model"] .table-subtext {
     width: 100%;
     max-width: 100%;
@@ -25075,7 +25367,8 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .user-row-actions .secondary-button.compact {
-    width: 100%;
+    flex: 1 1 auto;
+    width: auto;
     min-height: 44px;
     padding-inline: 10px;
     gap: 6px;
@@ -25109,8 +25402,7 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .model-access-table .model-group-editor-row > td,
-  .model-access-table td[colspan],
-  .usage-allocations-table td[colspan] {
+  .model-access-table td[colspan] {
     display: block;
     width: 100%;
     padding: 11px;
@@ -25118,38 +25410,66 @@ button.retention-tagged-title:focus-visible strong {
   }
 
   .model-access-table .model-group-editor-row > td::before,
-  .model-access-table td[colspan]::before,
-  .usage-allocations-table td[colspan]::before {
+  .model-access-table td[colspan]::before {
     content: none;
   }
 
-  .group-user-table .toggle,
   .model-access-table .toggle {
     justify-self: start;
   }
 
-  .usage-allocations-table .allocation-meter {
-    width: min(90px, 46%);
+  /* A compact card: who, then role and groups, then state, then actions. */
+  .user-management-table tbody {
+    grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   }
 
-  .allocation-add-row {
+  .user-management-table tbody > tr {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  .allocation-add-row > * {
-    width: 100%;
+    grid-template-columns: 34px repeat(6, minmax(0, 1fr));
     min-width: 0;
-    min-height: 44px;
   }
 
-  .csv-export-popover {
-    position: fixed;
-    inset: auto 10px max(10px, env(safe-area-inset-bottom));
-    width: auto;
-    max-height: min(80dvh, 520px);
-    overflow-y: auto;
+  .user-management-table td {
+    grid-template-columns: minmax(0, 1fr);
+    grid-column: span 3;
+    align-items: start;
+    align-content: start;
+    gap: 4px;
+    min-height: 0;
+    padding: 7px 10px;
+    border-bottom: 0;
+  }
+
+  .user-management-table td[data-label="Select"] {
+    grid-column: span 1;
+    padding: 13px 0 7px 11px;
+  }
+
+  .user-management-table td[data-label="Name"] {
+    grid-column: span 6;
+    padding-top: 10px;
+  }
+
+  .user-management-table td[data-label="Groups"] {
+    grid-column: span 4;
+  }
+
+  .user-management-table td[data-label="Auth"],
+  .user-management-table td[data-label="Last Active"] {
+    grid-column: span 2;
+  }
+
+  .user-management-table td[data-label="Actions"] {
+    grid-column: 1 / -1;
+    margin-top: 3px;
+    padding-block: 9px 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .user-management-table td[data-label="Select"]::before,
+  .user-management-table td[data-label="Name"]::before,
+  .user-management-table td[data-label="Actions"]::before {
+    content: none;
   }
 }
 
@@ -25719,7 +26039,7 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 .retention-schedule-fields { border:0; margin:0; padding:0; display:grid; gap:16px; min-width:0; }
 .retention-schedule-fields label, .retention-tag-management label { display:grid; gap:8px; font-size:13px; min-width:0; }
 .retention-duration-slider { width:100%; accent-color:var(--accent); padding:0; min-height:32px; }
-.retention-preset-labels { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
+.retention-preset-labels { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(62px,100%),1fr)); gap:8px; }
 .retention-preset-labels button { border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--muted); padding:10px 4px; font:inherit; font-size:12px; cursor:pointer; }
 .retention-preset-labels button[aria-pressed="true"] { color:var(--text); border-color:var(--accent); background:var(--surface-soft); }
 .retention-field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }

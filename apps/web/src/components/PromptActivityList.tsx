@@ -1,5 +1,5 @@
 import { Bot, Eye, MessageSquareText, ThumbsDown, ThumbsUp, UserRound, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChatFeedbackRating, Role, UserPromptRecord } from "../lib/types";
 import { Markdown } from "./Markdown";
@@ -368,6 +368,10 @@ export function PromptActivityList({
   );
 }
 
+type ThreadRecordsLoader = (
+  threadId: string,
+) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+
 export type FeedbackPreviewItem = {
   thread_id: string;
   thread_title: string;
@@ -378,6 +382,154 @@ export type FeedbackPreviewItem = {
   model_id: string;
   message_preview?: string;
 };
+
+/** Loads one saved conversation, oldest exchange first. */
+function useThreadConversation(
+  threadId: string,
+  loadThreadRecords: ThreadRecordsLoader | undefined,
+) {
+  const [records, setRecords] = useState<UserPromptRecord[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  // The loader identity can change every render (inline console closures);
+  // reading it through a ref keeps the fetch keyed on the previewed thread.
+  const loaderRef = useRef(loadThreadRecords);
+  loaderRef.current = loadThreadRecords;
+
+  useEffect(() => {
+    const loader = loaderRef.current;
+    if (!loader) {
+      setLoadFailed(true);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => loader(threadId))
+      .then((full) => {
+        if (!cancelled && Array.isArray(full)) setRecords(full);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  const conversation = useMemo(() => {
+    if (!records) return [];
+    // The API returns newest-first; flip to read the chat top-down, then a
+    // stable timestamp sort guards against any out-of-order rows.
+    return [...records].reverse().sort((a, b) => recordSortValue(a) - recordSortValue(b));
+  }, [records]);
+
+  return { records, loadFailed, conversation };
+}
+
+function useCloseOnEscape(onClose: () => void) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+}
+
+function conversationCountNote(count: number) {
+  if (count === 0) return "No saved exchanges were found for this chat.";
+  if (count === 1) return "1 exchange in this conversation.";
+  return `${count} exchanges in this conversation, oldest first.`;
+}
+
+/** One saved prompt and its answer inside a conversation dialog. */
+function ConversationExchange({
+  record,
+  index,
+  total,
+  badge,
+  anchorRef,
+}: {
+  record: UserPromptRecord;
+  index: number;
+  total: number;
+  /** Marks the exchange the dialog was opened for. */
+  badge?: ReactNode;
+  anchorRef?: (node: HTMLElement | null) => void;
+}) {
+  return (
+    <article
+      className={`prompt-output-exchange${badge ? " is-selected" : ""}`}
+      aria-label={`Exchange ${index + 1} of ${total}`}
+      ref={anchorRef}
+    >
+      <section className="prompt-output-message is-prompt" aria-label="User prompt">
+        <header>
+          <span><UserRound size={15} /> User prompt</span>
+          <span className="prompt-output-exchange-meta">
+            {badge}
+            <small>{record.created_at}</small>
+          </span>
+        </header>
+        <div className="prompt-output-rendered">
+          <Markdown content={record.content} />
+        </div>
+      </section>
+
+      <section className="prompt-output-message is-response" aria-label="Saved model output">
+        <header>
+          <span><Bot size={15} /> Model output</span>
+          {record.response_status && (
+            <Pill tone={record.response_status === "ok" ? "success" : "warning"}>
+              {record.response_status}
+            </Pill>
+          )}
+        </header>
+        {record.response_message_id || record.response_content != null ? (
+          <>
+            <div className="prompt-output-rendered">
+              {record.response_content ? (
+                <Markdown content={record.response_content} />
+              ) : (
+                <p className="prompt-output-plain">The saved model output was empty.</p>
+              )}
+            </div>
+            {(record.response_images?.length ?? 0) > 0 && (
+              <div
+                className="prompt-output-images"
+                role="group"
+                aria-label="Generated images saved with this output"
+              >
+                {record.response_images!.map((url) => (
+                  <AuditGeneratedImage url={url} key={url} />
+                ))}
+              </div>
+            )}
+            {record.response_truncated && (
+              <small className="prompt-output-truncated">
+                Preview limited to the first 12,000 saved characters.
+              </small>
+            )}
+          </>
+        ) : (
+          <div className="prompt-output-empty">
+            No saved model output is attached to this prompt.
+          </div>
+        )}
+      </section>
+    </article>
+  );
+}
+
+function ConversationFooter() {
+  return (
+    <footer className="modal-foot">
+      <Eye size={14} /> This preview shows persisted text and saved generated images; it does
+      not run the model again.
+    </footer>
+  );
+}
 
 /** Full-conversation preview for one feedback entry: the same rendered-chat
  * dialog auditors get from prompt activity, plus the person's written note.
@@ -392,56 +544,13 @@ export function FeedbackConversationPreview({
   item: FeedbackPreviewItem;
   /** Display-formatted timestamp of the rating. */
   sentLabel: string;
-  loadThreadRecords?: (
-    threadId: string,
-  ) => Promise<UserPromptRecord[] | void> | UserPromptRecord[] | void;
+  loadThreadRecords?: ThreadRecordsLoader;
   onClose: () => void;
 }) {
-  const [records, setRecords] = useState<UserPromptRecord[] | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const { records, loadFailed, conversation } = useThreadConversation(item.thread_id, loadThreadRecords);
   const titleId = useId();
   const ratedExchangeRef = useRef<HTMLElement | null>(null);
-  // The loader identity can change every render (inline console closures);
-  // reading it through a ref keeps the fetch keyed on the previewed item.
-  const loaderRef = useRef(loadThreadRecords);
-  loaderRef.current = loadThreadRecords;
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
-  useEffect(() => {
-    const loader = loaderRef.current;
-    if (!loader) {
-      setLoadFailed(true);
-      return;
-    }
-    let cancelled = false;
-    Promise.resolve()
-      .then(() => loader(item.thread_id))
-      .then((full) => {
-        if (!cancelled && Array.isArray(full)) setRecords(full);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [item.thread_id]);
-
-  const conversation = useMemo(() => {
-    if (!records) return [];
-    // The API returns newest-first; flip to read the chat top-down, then a
-    // stable timestamp sort guards against any out-of-order rows.
-    return [...records].reverse().sort((a, b) => recordSortValue(a) - recordSortValue(b));
-  }, [records]);
+  useCloseOnEscape(onClose);
 
   // Feedback targets an assistant message; its exchange is the prompt whose
   // saved response carries that id.
@@ -503,12 +612,7 @@ export function FeedbackConversationPreview({
           {records === null && !loadFailed && "Loading the conversation…"}
           {loadFailed &&
             "The conversation could not be loaded; showing the rated response preview only."}
-          {records !== null &&
-            (conversation.length === 0
-              ? "No saved exchanges were found for this chat."
-              : conversation.length === 1
-                ? "1 exchange in this conversation."
-                : `${conversation.length} exchanges in this conversation, oldest first.`)}
+          {records !== null && conversationCountNote(conversation.length)}
         </p>
 
         <div className="prompt-output-dialog-body">
@@ -527,83 +631,143 @@ export function FeedbackConversationPreview({
           {conversation.map((record, index) => {
             const rated = isRatedExchange(record);
             return (
-              <article
+              <ConversationExchange
                 key={`${record.thread_id}:${record.id}`}
-                className={`prompt-output-exchange${rated ? " is-selected" : ""}`}
-                aria-label={`Exchange ${index + 1} of ${conversation.length}`}
-                ref={
+                record={record}
+                index={index}
+                total={conversation.length}
+                badge={rated ? <Pill tone={isPositive ? "success" : "warning"}>Rated exchange</Pill> : undefined}
+                anchorRef={
                   rated
                     ? (node) => {
                         ratedExchangeRef.current = node;
                       }
                     : undefined
                 }
-              >
-                <section className="prompt-output-message is-prompt" aria-label="User prompt">
-                  <header>
-                    <span><UserRound size={15} /> User prompt</span>
-                    <span className="prompt-output-exchange-meta">
-                      {rated && (
-                        <Pill tone={isPositive ? "success" : "warning"}>Rated exchange</Pill>
-                      )}
-                      <small>{record.created_at}</small>
-                    </span>
-                  </header>
-                  <div className="prompt-output-rendered">
-                    <Markdown content={record.content} />
-                  </div>
-                </section>
-
-                <section className="prompt-output-message is-response" aria-label="Saved model output">
-                  <header>
-                    <span><Bot size={15} /> Model output</span>
-                    {record.response_status && (
-                      <Pill tone={record.response_status === "ok" ? "success" : "warning"}>
-                        {record.response_status}
-                      </Pill>
-                    )}
-                  </header>
-                  {record.response_message_id || record.response_content != null ? (
-                    <>
-                      <div className="prompt-output-rendered">
-                        {record.response_content ? (
-                          <Markdown content={record.response_content} />
-                        ) : (
-                          <p className="prompt-output-plain">The saved model output was empty.</p>
-                        )}
-                      </div>
-                      {(record.response_images?.length ?? 0) > 0 && (
-                        <div
-                          className="prompt-output-images"
-                          role="group"
-                          aria-label="Generated images saved with this output"
-                        >
-                          {record.response_images!.map((url) => (
-                            <AuditGeneratedImage url={url} key={url} />
-                          ))}
-                        </div>
-                      )}
-                      {record.response_truncated && (
-                        <small className="prompt-output-truncated">
-                          Preview limited to the first 12,000 saved characters.
-                        </small>
-                      )}
-                    </>
-                  ) : (
-                    <div className="prompt-output-empty">
-                      No saved model output is attached to this prompt.
-                    </div>
-                  )}
-                </section>
-              </article>
+              />
             );
           })}
         </div>
 
-        <footer className="modal-foot">
-          <Eye size={14} /> This preview shows persisted text and saved generated images; it does
-          not run the model again.
-        </footer>
+        <ConversationFooter />
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+/** The saved exchange a run most likely produced: the one closest to it in time. */
+export function nearestExchangeId(conversation: UserPromptRecord[], executedAt: string): string | null {
+  const runTime = Date.parse(executedAt);
+  if (Number.isNaN(runTime)) return null;
+  let nearest: { id: string; gap: number } | null = null;
+  for (const record of conversation) {
+    const recordTime = Date.parse(record.created_at_iso ?? "");
+    if (Number.isNaN(recordTime)) continue;
+    const gap = Math.abs(recordTime - runTime);
+    if (!nearest || gap < nearest.gap) nearest = { id: record.id, gap };
+  }
+  return nearest?.id ?? null;
+}
+
+export type RunPreviewItem = {
+  threadId: string;
+  title: string;
+  actorName: string;
+  model: string;
+  provider: string;
+  executedAt: string;
+};
+
+/** The conversation behind one AI run. Reads the same saved records, under the
+ * same access rules, as the prompt activity and feedback previews. */
+export function RunConversationPreview({
+  item,
+  ranLabel,
+  loadThreadRecords,
+  onClose,
+}: {
+  item: RunPreviewItem;
+  ranLabel: string;
+  loadThreadRecords?: ThreadRecordsLoader;
+  onClose: () => void;
+}) {
+  const { records, loadFailed, conversation } = useThreadConversation(item.threadId, loadThreadRecords);
+  const titleId = useId();
+  const runExchangeRef = useRef<HTMLElement | null>(null);
+  useCloseOnEscape(onClose);
+  const runExchangeId = useMemo(() => nearestExchangeId(conversation, item.executedAt), [conversation, item.executedAt]);
+
+  useEffect(() => {
+    runExchangeRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [runExchangeId]);
+
+  return createPortal(
+    <div className="modal-backdrop prompt-output-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal prompt-output-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <span className="modal-icon"><MessageSquareText size={20} /></span>
+          <div>
+            <h2 id={titleId}>Conversation behind this run</h2>
+            <p>{conversation[0]?.thread_title || item.title}</p>
+          </div>
+          <button
+            autoFocus
+            className="icon-button"
+            type="button"
+            aria-label="Close conversation"
+            data-tooltip="Close preview"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="prompt-output-meta" aria-label="Run details">
+          <span><strong>User</strong>{item.actorName}</span>
+          <span><strong>Model</strong>{item.model}</span>
+          <span><strong>Provider</strong>{item.provider}</span>
+          <span><strong>Ran</strong>{ranLabel}</span>
+        </div>
+
+        <p className="prompt-output-thread-note">
+          {records === null && !loadFailed && "Loading the conversation…"}
+          {loadFailed && "The conversation could not be loaded. Try again in a moment."}
+          {records !== null &&
+            (conversation.length === 0
+              ? "This chat is no longer saved, so only the run details above remain."
+              : conversationCountNote(conversation.length))}
+        </p>
+
+        <div className="prompt-output-dialog-body">
+          {conversation.map((record, index) => {
+            const isRun = record.id === runExchangeId;
+            return (
+              <ConversationExchange
+                key={`${record.thread_id}:${record.id}`}
+                record={record}
+                index={index}
+                total={conversation.length}
+                badge={isRun ? <Pill tone="info">This run</Pill> : undefined}
+                anchorRef={
+                  isRun
+                    ? (node) => {
+                        runExchangeRef.current = node;
+                      }
+                    : undefined
+                }
+              />
+            );
+          })}
+        </div>
+
+        <ConversationFooter />
       </section>
     </div>,
     document.body,

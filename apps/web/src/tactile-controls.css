@@ -979,6 +979,7 @@ span.mini-avatar.avatar-initials,
 .column-filter-popover input,
 .compact-select-field,
 .support-search,
+.user-filter-search,
 .support-field :is(input, textarea, select),
 .support-inline-input input,
 .issue-report-form :is(input:not([type="checkbox"]):not([type="file"]), textarea),
@@ -1004,7 +1005,7 @@ span.mini-avatar.avatar-initials,
 .agent-editor-card :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select):focus,
 .form-grid :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select):focus,
 .modal :is(input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="search"], input[type="number"], textarea, select):focus,
-:is(.search-box, .ws-search, .model-access-search, .auth-input-wrap, .compact-select-field, .support-search):focus-within {
+:is(.search-box, .ws-search, .model-access-search, .auth-input-wrap, .compact-select-field, .support-search, .user-filter-search):focus-within {
   border-color: var(--teal);
   box-shadow: var(--tactile-field-shadow), var(--tactile-field-focus);
   outline: none;
