@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   FileText,
+  Info,
   LoaderCircle,
   LocateFixed,
   Minus,
@@ -13,8 +14,18 @@ import {
   X,
   ZoomIn,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { loadKnowledgeDocumentOriginal } from "../lib/api/knowledge";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { loadKnowledgeDocumentOriginal, viewAddress, type DocumentAddress } from "../lib/api/knowledge";
 import { triggerBlobDownload } from "../lib/clipboard";
 import type { ViewerFailure } from "../lib/documentViewerFailures";
 import { ZOOM_STOPS, panStep, passageScrollTop, readableExcerpt, stepZoom } from "../lib/documentViewerModel";
@@ -62,16 +73,29 @@ const ANNOUNCE_AFTER_MS = 300;
 function IconKey({
   label,
   disabled,
+  expanded,
+  controls,
   onClick,
   children,
 }: {
   label: string;
   disabled?: boolean;
+  expanded?: boolean;
+  controls?: string;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
-    <button className="icon-button" type="button" aria-label={label} data-tooltip={label} disabled={disabled} onClick={onClick}>
+    <button
+      className="icon-button"
+      type="button"
+      aria-label={label}
+      aria-expanded={expanded}
+      aria-controls={controls}
+      data-tooltip={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
       {children}
     </button>
   );
@@ -166,14 +190,12 @@ function ZoomControls({ zoom }: { zoom: ViewerZoom }) {
 /** Fetches through the session header, so this cannot be a plain link. */
 export function DownloadOriginal({
   userId,
-  configId,
-  documentId,
+  address,
   name,
   labelled = false,
 }: {
   userId: string;
-  configId: string;
-  documentId: string;
+  address: DocumentAddress;
   name?: string;
   labelled?: boolean;
 }) {
@@ -181,7 +203,7 @@ export function DownloadOriginal({
   const download = async () => {
     setStatus("busy");
     try {
-      const { blob, filename } = await loadKnowledgeDocumentOriginal(userId, configId, documentId);
+      const { blob, filename } = await loadKnowledgeDocumentOriginal(userId, address);
       triggerBlobDownload(blob, filename ?? name ?? "document");
       setStatus("idle");
     } catch {
@@ -206,6 +228,65 @@ export function DownloadOriginal({
   );
 }
 
+/** The document on screen, for the toolbar every pane draws. A pane swaps its
+ * toolbar when its pages arrive, so whether the details are open lives here. */
+export const ViewedDocumentContext = createContext<{
+  view: KnowledgeDocumentView;
+  detailsOpen: boolean;
+  toggleDetails: () => void;
+} | null>(null);
+
+/** Holds the details open across a pane's loading and loaded toolbars. */
+export function ViewedDocument({ view, children }: { view: KnowledgeDocumentView; children: ReactNode }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const value = useMemo(
+    () => ({ view, detailsOpen, toggleDetails: () => setDetailsOpen((open) => !open) }),
+    [view, detailsOpen],
+  );
+  return <ViewedDocumentContext.Provider value={value}>{children}</ViewedDocumentContext.Provider>;
+}
+
+function indexFacts(view: KnowledgeDocumentView): string[] {
+  const pages = view.page_count;
+  const passages = view.passage_count;
+  return [
+    pages ? `${pages} ${pages === 1 ? "page" : "pages"}` : "",
+    passages ? `${passages} ${passages === 1 ? "passage" : "passages"} indexed` : "",
+  ].filter(Boolean);
+}
+
+function DocumentDetails({ view, id }: { view: KnowledgeDocumentView; id: string }) {
+  const properties = view.properties ?? [];
+  const facts = indexFacts(view);
+  return (
+    <section id={id} className="dv-details" aria-label="Document details">
+      {facts.length > 0 && (
+        <ul className="dv-details-facts">
+          {facts.map((fact) => (
+            <li key={fact}>{fact}</li>
+          ))}
+        </ul>
+      )}
+      {properties.length ? (
+        <dl className="dv-details-properties">
+          {properties.map(({ label, value }) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="dv-details-note">This file carried no properties beyond its name.</p>
+      )}
+    </section>
+  );
+}
+
+function hasDetails(view: KnowledgeDocumentView | null): view is KnowledgeDocumentView {
+  return Boolean(view && (view.passage_count || view.properties?.length));
+}
+
 export function ViewerToolbar({
   name,
   position,
@@ -221,16 +302,38 @@ export function ViewerToolbar({
   download?: ReactNode;
   onClose: () => void;
 }) {
+  const viewed = useContext(ViewedDocumentContext);
+  const view = viewed?.view ?? null;
+  const detailsOpen = viewed?.detailsOpen ?? false;
+  const detailsId = useId();
   return (
     <header className="dv-toolbar">
       <div className="dv-title">
         <span className="dv-title-icon" aria-hidden="true"><FileText size={15} /></span>
         <strong title={name}>{name}</strong>
       </div>
-      <IconKeyRow position={position} zoom={zoom} onJump={onJump} download={download} />
+      <IconKeyRow
+        position={position}
+        zoom={zoom}
+        onJump={onJump}
+        download={download}
+        details={
+          hasDetails(view) && (
+            <IconKey
+              label="Document details"
+              expanded={detailsOpen}
+              controls={detailsOpen ? detailsId : undefined}
+              onClick={() => viewed?.toggleDetails()}
+            >
+              <Info size={16} />
+            </IconKey>
+          )
+        }
+      />
       <IconKey label="Close document" onClick={onClose}>
         <X size={16} />
       </IconKey>
+      {detailsOpen && hasDetails(view) && <DocumentDetails view={view} id={detailsId} />}
     </header>
   );
 }
@@ -240,11 +343,13 @@ function IconKeyRow({
   zoom,
   onJump,
   download,
+  details,
 }: {
   position?: ViewerPosition;
   zoom?: ViewerZoom;
   onJump?: () => void;
   download?: ReactNode;
+  details?: ReactNode;
 }) {
   return (
     <div className="dv-controls">
@@ -256,6 +361,7 @@ function IconKeyRow({
         </IconKey>
       )}
       {download}
+      {details}
     </div>
   );
 }
@@ -269,8 +375,7 @@ export function ViewerToolbarDownload({
   return (
     <DownloadOriginal
       userId={userId}
-      configId={view.knowledge_config_id}
-      documentId={view.document_id}
+      address={viewAddress(view)}
       name={view.name}
       labelled={labelled}
     />

@@ -94,7 +94,9 @@ from app.models.schemas import (
     UsageRecord,
     UserApiKeyRecord,
 )
+from app.core.attachment_documents import attachment_ref
 from app.core.attachment_previews import delete_attachment_preview
+from app.core.knowledge_originals import KnowledgeOriginalStore
 from app.core.sessions import MAX_MFA_FACTOR_GENERATION
 
 
@@ -518,6 +520,9 @@ class ApplicationStateRepository:
         self._engine_state = _retain_engine(engine)
         self._closed = False
         self._closing = False
+        # Set by the store that owns it. Every path that removes attachment rows
+        # also removes their files through _remove_attachment_files.
+        self.attachment_documents: KnowledgeOriginalStore | None = None
 
         # Compatibility adapters are stable objects so SeedStore can expose
         # them in place of its former in-memory containers.
@@ -1792,7 +1797,7 @@ class ApplicationStateRepository:
 
         thread = self.run_transaction(operation)
         for attachment_id in doomed_attachment_ids:
-            delete_attachment_preview(attachment_id)
+            self._remove_attachment_files(attachment_id)
         return thread
 
     @staticmethod
@@ -1881,7 +1886,7 @@ class ApplicationStateRepository:
             return "deleted"
         outcome = self.run_transaction(operation)
         for attachment_id in doomed:
-            delete_attachment_preview(attachment_id)
+            self._remove_attachment_files(attachment_id)
         return outcome
 
     def count_chat_threads(self) -> int:
@@ -2119,6 +2124,26 @@ class ApplicationStateRepository:
             return [_freeze_chat_attachment(row.to_model()) for row in rows]
 
         return self.run_transaction(operation)
+
+    def _remove_attachment_files(self, attachment_id: str) -> None:
+        delete_attachment_preview(attachment_id)
+        if self.attachment_documents is not None:
+            self.attachment_documents.delete_document(attachment_ref(attachment_id))
+
+    def delete_unsent_chat_attachment(self, attachment_id: str) -> bool:
+        """Remove an attachment no chat holds. False if one does, or it is gone."""
+
+        def operation(session: Session) -> bool:
+            row = session.get(ChatAttachmentRow, attachment_id)
+            if row is None or row.thread_id is not None:
+                return False
+            session.delete(row)
+            return True
+
+        removed = self.run_transaction(operation)
+        if removed:
+            self._remove_attachment_files(attachment_id)
+        return removed
 
     def delete_chat_attachment(self, attachment_id: str) -> ChatAttachment | None:
         def operation(session: Session) -> ChatAttachment | None:
@@ -4369,7 +4394,7 @@ class ApplicationStateRepository:
 
         result = self.run_transaction(operation)
         for attachment_id in doomed_attachment_ids:
-            delete_attachment_preview(attachment_id)
+            self._remove_attachment_files(attachment_id)
         return result
 
     def purge_a5_tenant(
@@ -4574,7 +4599,7 @@ class ApplicationStateRepository:
 
         result = self.run_transaction(operation)
         for attachment_id in doomed_attachment_ids:
-            delete_attachment_preview(attachment_id)
+            self._remove_attachment_files(attachment_id)
         for report_id in doomed_issue_report_ids:
             delete_attachment_preview(report_id)
         return result

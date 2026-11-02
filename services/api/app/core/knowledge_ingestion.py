@@ -6,7 +6,7 @@ import os
 import re
 import zipfile
 from bisect import bisect_right
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 from email import policy
@@ -17,7 +17,9 @@ from typing import Any, BinaryIO, Protocol
 from defusedxml import ElementTree
 
 from app.core.document_metadata import (
+    PROPERTIES_LOCATOR,
     bounded_metadata,
+    descriptive_properties,
     email_metadata,
     image_metadata,
     office_metadata,
@@ -324,6 +326,18 @@ def chunk_segments(
                 )
             )
     return chunks
+
+
+def properties_passages(metadata: Mapping[str, str]) -> list[ExtractedSegment]:
+    """A searchable "Document properties" passage, so a question about an author,
+    a date, a label, or a custom field can find the file itself."""
+    properties = descriptive_properties(metadata)
+    if not properties:
+        return []
+    lines = "\n\n".join(f"{key}: {value}" for key, value in properties)
+    return chunk_segments(
+        [ExtractedSegment(text=f"Document properties:\n\n{lines}", locator=PROPERTIES_LOCATOR)]
+    )
 
 
 def _extension(filename: str) -> str:

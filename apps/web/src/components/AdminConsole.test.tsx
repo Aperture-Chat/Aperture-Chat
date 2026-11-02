@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { useState } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { sampleData } from "../data/sampleData";
-import type { BootstrapData, Connector, Group, ModelConfig, SecurityAlert, User, UserPromptRecord } from "../lib/types";
+import type { AdminModelAccessRequestView, BootstrapData, Connector, Group, ModelConfig, SecurityAlert, User, UserPromptRecord } from "../lib/types";
 import { AdminConsole, type AdminConsoleApi } from "./AdminConsole";
 import type { ConnectorsPanelApi } from "./ConnectorsPanel";
 
@@ -1594,6 +1594,56 @@ test("admin documentation lists narrated walkthroughs for every console tab", as
   fireEvent.click(screen.getByRole("button", { name: "Back to documentation videos" }));
   fireEvent.click(screen.getByRole("button", { name: "Close documentation" }));
   expect(screen.queryByRole("dialog", { name: "Admin console documentation" })).not.toBeInTheDocument();
+});
+
+function renderModelRequests(count: number, respond: (url: string) => Response) {
+  const pending: AdminModelAccessRequestView = {
+    request: { id: "mar-1", tenant_id: sampleData.currentTenant.id, user_id: "user-jane", model_id: "frontier", status: "pending" },
+    requester_display_name: "Jane Smith",
+    requester_email: "jane.smith@example.com",
+    requester_group_ids: [sampleData.groups[0].id],
+    model_name: "Frontier",
+    model_provider_name: "Example Provider",
+    eligible_group_ids: [sampleData.groups[0].id],
+    can_grant_new_group: true,
+    decision: { allowed: false, usable: false, reason_code: "group_grant", reason: "Not granted.", grant_group_ids: [] },
+  } as AdminModelAccessRequestView;
+  vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/api/admin/model-access-requests?")) {
+      return new Response(JSON.stringify([pending]), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return respond(url);
+  });
+  const seen = { count: null as number | null | undefined };
+  function Harness() {
+    const [data, setData] = useState<BootstrapData>(() => ({ ...cloneData(), modelAccessRequestCount: count }));
+    seen.count = data.modelAccessRequestCount;
+    return <AdminConsole data={data} onDataChange={setData} adminApi={{}} />;
+  }
+  render(<Harness />);
+  selectTab("Model Access");
+  return seen;
+}
+
+test("resolving a model access request lowers the waiting count", async () => {
+  const seen = renderModelRequests(2, () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
+  await waitFor(() => expect(seen.count).toBe(1));
+});
+
+test("the waiting count never drops below zero", async () => {
+  const seen = renderModelRequests(0, () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
+  expect(await screen.findByText("Declined the request from Jane Smith.")).toBeInTheDocument();
+  expect(seen.count).toBe(0);
+});
+
+test("a request the server refuses to resolve stays in the waiting count", async () => {
+  const seen = renderModelRequests(2, () => new Response(JSON.stringify({ detail: "Already resolved." }), { status: 409, headers: { "Content-Type": "application/json" } }));
+  fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
+  expect(await screen.findByText("Already resolved.")).toBeInTheDocument();
+  expect(seen.count).toBe(2);
 });
 
 function renderAdmin(adminApi: AdminConsoleApi, initialData = cloneData(), connectorApi?: ConnectorsPanelApi) {

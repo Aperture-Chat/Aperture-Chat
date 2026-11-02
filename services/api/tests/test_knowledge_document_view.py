@@ -330,6 +330,9 @@ def test_native_pdf_points_at_the_stored_page(store) -> None:
         },
         "segments": None,
         "notice": None,
+        "attachment_id": None,
+        "properties": [],
+        "passage_count": 2,
     }
 
 

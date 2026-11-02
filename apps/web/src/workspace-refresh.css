@@ -99,8 +99,6 @@
 .sidebar-dark .nav-item { color: #bfd0d4; }
 .sidebar-dark .nav-item:hover { color: white; }
 .sidebar-dark { --primary-nav-node-fill: var(--rail-dark); background: var(--sidebar-gradient, var(--rail-dark)); }
-.account-card { box-shadow: none; border-color: transparent; background: transparent; }
-.account-card:hover { border-color: var(--border); background: var(--surface); }
 span.avatar.avatar-initials,
 span.mini-avatar.avatar-initials {
   position: relative;
@@ -391,19 +389,14 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 
 .document-assistant-page .draft-command-box textarea { resize: none; field-sizing: content; }
 .draft-upload-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.draft-upload-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; border: 1px solid var(--draft-edge, var(--border)); border-radius: 8px; background: var(--surface-soft, var(--surface)); color: var(--text); padding: 0 4px 0 8px; font-size: 12px; font-weight: 600; animation: apx-rise .25s var(--ease) both; }
-.draft-upload-chip > svg { flex: 0 0 auto; color: var(--teal); }
-.draft-upload-chip > span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.draft-upload-chip.is-uploading { color: var(--muted); }
-.draft-upload-chip.is-name-only { border-color: color-mix(in srgb, var(--amber, #b45309) 40%, var(--border)); background: color-mix(in srgb, var(--amber, #b45309) 7%, var(--surface)); }
-.draft-upload-chip.is-name-only > svg { color: var(--amber, #b45309); }
-.draft-upload-chip.is-error { border-color: var(--red-border, var(--red)); background: var(--red-soft, var(--surface)); color: var(--red); }
-.draft-upload-chip.is-error > svg { color: var(--red); }
-.document-assistant-page .draft-command-box .draft-upload-chip button { display: grid; place-items: center; width: 20px; min-width: 20px; height: 20px; min-height: 20px; flex: 0 0 20px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); padding: 0; cursor: pointer; }
-.draft-upload-chip button:hover { background: var(--surface-sunken, var(--surface)); color: var(--text-strong); }
+.draft-source-block { max-width: 100%; min-width: 0; }
+.draft-source-block .attach-chip { max-width: 100%; }
+.draft-source-block.is-name-only .attach-chip { border-color: color-mix(in srgb, var(--amber, #b45309) 45%, var(--border)); }
+/* The # list opens from the box the way it does from the chat composer. */
+.document-assistant-page .draft-command-box { position: relative; }
 
 @media (prefers-reduced-motion: reduce) {
-  .draft-assistant-title small.is-working svg, .draft-chat-empty, .draft-rail-notice, .draft-upload-chip { animation: none; }
+  .draft-assistant-title small.is-working svg, .draft-chat-empty, .draft-rail-notice { animation: none; }
   .draft-context-chip:hover:not(:disabled), .draft-suggestion-list button:hover:not(:disabled) { transform: none; }
 }
 .document-assistant-page .document-editor-body { background: var(--surface-sunken); }
@@ -568,9 +561,6 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 .chat-row-menu { position: fixed; top: auto; right: auto; z-index: 250; width: min(190px, calc(100vw - 32px)); overflow-y: auto; box-shadow: 0 10px 28px -12px rgb(8 41 56 / 28%), 0 2px 6px rgb(8 41 56 / 8%); }
 .theme-dark .chat-row-menu { box-shadow: 0 12px 30px -12px rgb(0 0 0 / 65%); }
 .sidebar .chat-row .minor-row span { text-overflow: ellipsis; }
-
-a.minor-row { box-sizing: border-box; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
-.console-link-count { margin-left: auto; min-width: 20px; justify-content: center; font-size: 11px; }
 
 .help-row:hover, .help-row:focus-within { background: transparent; color: inherit; }
 .sidebar-dark .help-row:hover, .sidebar-dark .help-row:focus-within { background: transparent; color: inherit; }

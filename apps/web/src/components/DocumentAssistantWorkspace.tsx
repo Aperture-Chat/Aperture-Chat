@@ -1,5 +1,14 @@
 import { connectorHidden } from "../lib/connectors";
 import { draftHtmlForAccount, reflowSavedVersions, removeDraftPageLabels } from "../lib/draftPageLayout";
+import { applyCommandText, knowledgeCommandItems, type KnowledgeCommandItem } from "../lib/composerCommands";
+import { plainDraftCitations } from "../lib/draftCitations";
+import { fileKind } from "../lib/fileKinds";
+import { useCommandMenuFit } from "../lib/useCommandMenuFit";
+import { useComposerCommandToken } from "../lib/useComposerCommandToken";
+import { useKnowledgeFiles } from "../lib/useKnowledgeFiles";
+import { ComposerCommandMenu, KnowledgeMenuStatus } from "./ComposerCommandMenu";
+import { ComposerFileBlock } from "./ComposerFileBlock";
+import { useKnowledgeDocumentViewer } from "./KnowledgeDocumentViewerHost";
 import { DocumentToolbarPanel } from "./DocumentToolbarPanel";
 import { DeckBlade, DECK_BLADE_DEFAULT_WIDTH } from "./DeckBlade";
 import { SpreadsheetEditor, type SheetAiAsk } from "./spreadsheet/SpreadsheetEditor";
@@ -66,7 +75,8 @@ import { DraftModelMenu } from "./DraftModelMenu";
 import { DraftSaveStatus } from "./DraftSaveStatus";
 import { draftSaveStatus, type DraftServerSaveState } from "../lib/draftSaveStatus";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
-import type { DraftHandoffRequest } from "../lib/draftHandoff";
+import { OPEN_IN_EDITOR_EXTENSIONS, type DraftHandoffRequest } from "../lib/draftHandoff";
+import { applyDocumentPatch, documentBlocks, documentPatchPrompt, parseDocumentPatch } from "../lib/documentBlockEdit";
 import { SelectControl } from "./SelectControl";
 import { WorkTrace } from "./WorkTrace";
 import {
@@ -166,6 +176,7 @@ import {
 } from "./connectorIcons";
 import {
   Fragment,
+  useId,
   useMemo,
   useCallback,
   useRef,
@@ -221,8 +232,11 @@ import {
   ChatRequestError,
   apiBase,
   fetchExportImageDataUrl,
+  loadKnowledgeDocumentOriginal,
   sendChat,
   sendChatStream,
+  attachKnowledge,
+  deleteChatAttachment,
   uploadChatAttachment,
   type ChatWireMessage,
 } from "../lib/api";
@@ -583,13 +597,16 @@ type SaveFilePickerWindow = Window & {
   }) => Promise<FileSystemFileHandleLike>;
 };
 
-/** A file attached from this device. It is uploaded through the same
- * attachment endpoint the chat composer uses, so the server extracts its text
- * and every draft request can send it to the model by id. */
+const HASH_SYMBOL_ONLY = ["#"] as const;
+
+/** A file attached from this device, or a knowledge document or base pulled in
+ * with #. It is an attachment like the chat composer's, so the server keeps and
+ * indexes it, it opens in the viewer, and every request can send it by id. */
 type DraftSourceFile = {
   id: string;
   name: string;
   size: string;
+  kind: string;
   status: "uploading" | "ready" | "error";
   attachmentId?: string;
   /** False when the server could not extract readable text (for example a
@@ -2273,6 +2290,45 @@ export function DocumentAssistantWorkspace({
   }
   const [codeArtifact, setCodeArtifact] = useState<CodeArtifact | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<DraftSourceFile[]>([]);
+  const attachedFilesRef = useRef(attachedFiles);
+  attachedFilesRef.current = attachedFiles;
+  const instructionRef = useRef<HTMLTextAreaElement | null>(null);
+  const hashMenuRef = useRef<HTMLDivElement>(null);
+  const hashListId = useId();
+  const {
+    token: hashToken,
+    index: hashIndex,
+    setIndex: setHashIndex,
+    update: updateHashToken,
+    clear: clearHashToken,
+    handleKey: handleHashKey,
+  } = useComposerCommandToken(instructionRef, HASH_SYMBOL_ONLY);
+  const hashBases = useMemo(() => data.knowledgeBases.filter((base) => base.enabled), [data.knowledgeBases]);
+  const knowledgeFiles = useKnowledgeFiles({
+    userId: completionUserId,
+    tenantId: data.currentTenant?.id,
+    open: hashToken !== null,
+    bases: hashBases,
+  });
+  const hashItems = useMemo(
+    () => (hashToken ? knowledgeCommandItems(hashBases, knowledgeFiles.docs, hashToken.query) : []),
+    [hashToken, hashBases, knowledgeFiles.docs],
+  );
+  // Keep the highlight on a real row as filtering narrows the list.
+  useEffect(() => {
+    setHashIndex((current) => Math.min(current, Math.max(hashItems.length - 1, 0)));
+  }, [hashItems.length, setHashIndex]);
+  useCommandMenuFit({
+    open: hashToken !== null,
+    menuRef: hashMenuRef,
+    textareaRef: instructionRef,
+    composerSelector: ".draft-command-box",
+    ceilingSelector: ".document-assistant-rail",
+    ceilingEdge: "top",
+    keepCaretInView: false,
+    contentKey: `${hashToken?.start}:${hashToken?.query}:${attachedFiles.length}:${hashItems.length}`,
+  });
+  const { openDocument: openViewerDocument, documentViewerLayer } = useKnowledgeDocumentViewer(completionUserId);
   const [selectedVersionId, setSelectedVersionId] = useState(importedDraftState?.version.id ?? "version-1");
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
@@ -3311,6 +3367,7 @@ export function DocumentAssistantWorkspace({
         id: `chat-${attachment.attachmentId}`,
         name: attachment.name,
         size: attachment.size,
+        kind: fileKind(attachment.name),
         status: "ready" as const,
         attachmentId: attachment.attachmentId,
         hasText: attachment.hasText,
@@ -3321,9 +3378,33 @@ export function DocumentAssistantWorkspace({
     setInstruction(initialRequest.prompt);
     if (initialRequest.kind === "deck") startBlankDeck();
     if (initialRequest.kind === "spreadsheet") startBlankWorkbook();
-    setHandoffToRun(initialRequest);
+    if (initialRequest.kind === "edit") void openHandoffDocument(initialRequest);
+    else setHandoffToRun(initialRequest);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialRequest?.id]);
+
+  /** The file an edit is about opens first, as the document itself. The change
+   * then starts on the next render, against what opened. */
+  async function openHandoffDocument(request: DraftHandoffRequest) {
+    const target = request.editTarget;
+    if (!target) {
+      notifyRail("That file is no longer attached. Attach it again in chat and try once more.");
+      return;
+    }
+    setStatus(`Opening ${target.name} in the editor...`);
+    try {
+      const { blob } = await loadKnowledgeDocumentOriginal(completionUserId, { attachmentId: target.attachmentId });
+      const file = new File([await blob.arrayBuffer()], target.name, { type: blob.type });
+      const opened = await readDocumentFileForEditor(file, completionUserId);
+      const nextContentHtml = await paginatedOpenedDocument(opened);
+      requestDraftNavigation(`open ${target.name}`, () => {
+        openDocumentInEditor(opened, nextContentHtml);
+        setHandoffToRun(request);
+      });
+    } catch (error) {
+      notifyRail(`Could not open ${target.name}. ${handoffOpenFailure(error)}`);
+    }
+  }
 
   useEffect(() => {
     if (!handoffToRun) return;
@@ -3333,12 +3414,15 @@ export function DocumentAssistantWorkspace({
         ? "Building the slide deck you asked for in chat."
         : handoffToRun.kind === "spreadsheet"
           ? "Building the spreadsheet you asked for in chat."
-          : "Writing the document you asked for in chat.",
+          : handoffToRun.kind === "edit"
+            ? `Making the change you asked for in chat to ${handoffToRun.editTarget?.name ?? "this document"}.`
+            : "Writing the document you asked for in chat.",
     );
     void (async () => {
       try {
         if (handoffToRun.kind === "deck") await runDeckAssistantRequest(handoffToRun.prompt);
         else if (handoffToRun.kind === "spreadsheet") await runSpreadsheetAssistantRequest(handoffToRun.prompt);
+        else if (handoffToRun.kind === "edit") await applyDocumentEdit(handoffToRun.prompt);
         else await runAssistantInstruction(handoffToRun.prompt, { fromChat: true });
       } finally {
         handoffChatContextRef.current = null;
@@ -5039,6 +5123,7 @@ export function DocumentAssistantWorkspace({
           webEnabled: false,
           citationsEnabled: false,
           knowledgeConfigIds: activeSourceIds,
+          ...draftAttachmentRuntime(),
           maxCompletionTokens: session.mode === "slide" ? 4000 : 2000,
         },
         onDelta: (fullText) => {
@@ -5890,7 +5975,7 @@ export function DocumentAssistantWorkspace({
       });
       const { visibleContent, thinkingTraces } = splitAssistantThinking(reply.content ?? "");
       record((steps) => sheetRunReplied(steps, askedAt, Date.now()), thinkingTraces);
-      return visibleContent;
+      return plainDraftCitations(visibleContent, reply.citations);
     };
     const contextLines = [
       useWebSearch
@@ -6034,7 +6119,7 @@ export function DocumentAssistantWorkspace({
           reasoningEffort: reasoningEffortForSend,
         },
       });
-      return reply.content ?? "";
+      return plainDraftCitations(reply.content ?? "", reply.citations);
     };
     // Fit fixes are rewording only: no web, sources, or attachments.
     const askFit = async (prompt: string) => {
@@ -7868,7 +7953,7 @@ export function DocumentAssistantWorkspace({
         },
       });
       advanceDraftTrace("generate");
-      const markdownWithSources = appendWebCitationList(reply.content, reply.citations);
+      const markdownWithSources = appendWebCitationList(plainDraftCitations(reply.content, reply.citations), reply.citations);
       if (contentRef.current !== sourceHtmlBeforeDraft) {
         throw new Error(
           "The document changed while the assistant was working, so the new draft was not substituted. Submit the request again from the current version.",
@@ -8042,84 +8127,33 @@ export function DocumentAssistantWorkspace({
     return nextVersion;
   }
 
-  async function applyProviderRevision(
-    request: string,
-    sourceSummaryForRevision = sourceSummary,
-    sourceIdsForRevision: string[] = activeSourceIds,
-  ) {
-    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
-    if (revisionInFlightRef.current) {
-      setStatus("The document assistant is already revising this draft.");
-      return;
-    }
-    const useWebSearch = webSearchEnabled && revisionNeedsWebSearch(request);
-    if (useWebSearch && !webSearchAvailable) {
-      setStatus("Web search is turned off for this model by your workspace configuration.");
-      return;
-    }
+  /** One change to the open document through the model, start to finish: the
+   * work trace, the running history entry, the new version when it lands, and
+   * the record when it does not. `produce` decides what the change is. */
+  async function runDocumentChange(agent: NonNullable<typeof selectedAgent>, request: string, change: DocumentChangeRun) {
     const sourceHtml = contentRef.current;
-    const revisionSnapshot = documentHtmlToRevisionSnapshot(sourceHtml);
-    const currentDraftText = revisionSnapshot.markdown;
-    const requestedAdditionalPages = parseRequestedAdditionalPageCount(request);
-    const originalPageCount = Math.max(1, countDocumentPages(sourceHtml) || pageCount);
-    // A revision follows the selected template only when the user asks for
-    // it; routine edits must not be steered by a template in the background.
-    const revisionTemplate =
-      templateContextEnabled && selectedTemplate && revisionReferencesTemplate(request, selectedTemplate)
-        ? selectedTemplate
-        : undefined;
-    const contextOptions = draftContextOptions(sourceSummaryForRevision, {
-      useTemplateContext: Boolean(revisionTemplate),
-      useWebSearch,
-    });
     const requestStartedAt = draftNowIso();
     const revisionBinding = serverDraftRef.current;
     const historyItemId = revisionBinding.historyId;
     const userEvent = draftEvent("user", "user", request, { createdAt: requestStartedAt });
-    const pendingEvent = assistantEvent(
-      "provider-revision-working",
-      requestedAdditionalPages
-        ? `Expanding the current document by ${requestedAdditionalPages} page${requestedAdditionalPages === 1 ? "" : "s"} through ${selectedAgent.name}.`
-        : `Revising the current document through ${selectedAgent.name}.`,
-      { createdAt: requestStartedAt, executedAt: requestStartedAt },
-    );
+    const pendingEvent = assistantEvent("provider-revision-working", change.workingMessage, {
+      createdAt: requestStartedAt,
+      executedAt: requestStartedAt,
+    });
     const priorEvents = events;
     const runningEvents = [...priorEvents, userEvent, pendingEvent];
-    const traceSteps: DraftTraceStep[] = [
-      {
-        id: "revise",
-        label: requestedAdditionalPages ? "Expanding current document" : "Revising current document",
-        detail: requestedAdditionalPages
-          ? `Adding at least ${requestedAdditionalPages} complete page${requestedAdditionalPages === 1 ? "" : "s"} without replacing the existing draft.`
-          : "Applying the requested change to the existing draft.",
-      },
-      {
-        id: "protect",
-        label: "Preserving document structure",
-        detail: `Protecting ${revisionSnapshot.assets.filter((asset) => asset.kind === "image").length} image${revisionSnapshot.assets.filter((asset) => asset.kind === "image").length === 1 ? "" : "s"} and ${revisionSnapshot.assets.filter((asset) => asset.kind === "link").length} hyperlink${revisionSnapshot.assets.filter((asset) => asset.kind === "link").length === 1 ? "" : "s"}.`,
-      },
-      {
-        id: "finalize",
-        label: "Finalizing revised version",
-        detail: "Checking requested scope, repaginating the document, and preparing the next saved version.",
-      },
-    ];
 
     revisionInFlightRef.current = true;
     setInstruction("");
-    setDraftTrace({ steps: traceSteps, activeIndex: 0, complete: false, startedAt: Date.now() });
-    setStatus(
-      contextOptions.useWebSearch
-        ? `Calling provider-hosted public web search to revise ${documentTitle}.`
-        : `Calling ${selectedAgent.name} to revise ${documentTitle}.`,
-    );
+    setDraftTrace({ steps: change.traceSteps, activeIndex: 0, complete: false, startedAt: Date.now() });
+    setStatus(change.workingStatus);
     setEvents(runningEvents);
     liveDraftRunIds.add(historyItemId);
     const runningHistory = persistDraftDocumentHistorySnapshot(draftScope, {
       id: historyItemId,
       title: documentTitle,
       content: sourceHtml,
-      summary: `Revising with ${selectedAgent.name}`,
+      summary: `Revising with ${agent.name}`,
       sourceLabel: activeSourceLabel,
       status: "running",
       createdAt: requestStartedAt,
@@ -8128,122 +8162,38 @@ export function DocumentAssistantWorkspace({
       events: runningEvents,
     });
     setDocumentHistory(runningHistory);
-    try {
-      const reply = await sendChat(completionUserId, {
-        model: selectedAgent.id,
-        messages: [
-          {
-            role: "user",
-            content: withCitationRequirement(
-              providerRevisionPrompt(
-                documentTitle,
-                currentDraftText,
-                request,
-                contextOptions,
-                revisionTemplate,
-              ),
-              requireCitations,
-            ),
-          },
-        ],
-        runtime: {
-          surface: "draft",
-          draftTitle: documentTitle,
-          clientStartedAt: requestStartedAt,
-          webEnabled: contextOptions.useWebSearch,
-          citationsEnabled: true,
-          knowledgeConfigIds: sourceIdsForRevision,
-          ...draftAttachmentRuntime(),
-          maxCompletionTokens: revisionCompletionTokenBudget(
-            currentDraftText,
-            requestedAdditionalPages,
-          ),
-          reasoningEffort: reasoningEffortForSend,
-        },
-      });
+    const ensureUnchanged = () => {
       if (contentRef.current !== sourceHtml || serverDraftRef.current !== revisionBinding) {
         throw new Error(
           "The document changed while the assistant was working, so the returned revision was not applied. Submit the instruction again from the current version.",
         );
       }
-      advanceDraftTrace("protect");
-      const revisedMarkdown = appendWebCitationList(reply.content, reply.citations);
-      const missingAssets = missingProtectedRevisionAssets(
-        revisionSnapshot.assets,
-        revisedMarkdown,
-        request,
-      );
-      if (missingAssets.length > 0) {
-        throw new Error(
-          `The drafting agent removed ${missingAssets.length} protected image or hyperlink reference${
-            missingAssets.length === 1 ? "" : "s"
-          }. The current document was left unchanged.`,
-        );
-      }
-      const preservationIssue = revisionContentPreservationIssue(
-        currentDraftText,
-        revisedMarkdown,
-        request,
-      );
-      if (preservationIssue) {
-        throw new Error(`${preservationIssue} The current document was left unchanged.`);
-      }
-      const restoredRevisionHtml = restoreRevisionAssetsInHtml(
-        documentHtmlFromMarkdown(revisedMarkdown),
-        revisionSnapshot.assets,
-      );
-      // A revised document keeps its page setup, headers, and footers (from
-      // Word, PDF, a template, or a layout request); only the text comes back
-      // from the model, and the returned blocks are set in the document's
-      // styles. A template or layout the request names replaces the setup.
-      const revisedBodyHtml = formatMlaDocument(
-        restoredRevisionHtml,
-        `${request} ${sourceHtml.includes("document-mla-text") ? "MLA" : ""}`,
-      );
-      const revisionLayout = revisedBodyHtml.includes("document-mla-text")
-        ? { markerHtml: "", bodyHtml: revisedBodyHtml }
-        : revisionPageLayout(sourceHtml, revisedBodyHtml, request, revisionTemplate);
-      let revisedHtml = paginateTransferredDocumentHtml(
-        withPageSetupMarker(revisionLayout.markerHtml, revisionLayout.bodyHtml),
-        `${documentTitle}\n\n${reply.content}`,
-      );
-      if (!isAutomatedTestMode()) {
-        revisedHtml = (await repaginateOverfullDocumentPages(revisedHtml)) ?? revisedHtml;
-      }
-      const revisedPageCount = Math.max(1, countDocumentPages(revisedHtml));
-      if (
-        requestedAdditionalPages > 0 &&
-        revisedPageCount < originalPageCount + requestedAdditionalPages
-      ) {
-        throw new Error(
-          `The drafting agent returned ${revisedPageCount} pages, but this request requires at least ${originalPageCount + requestedAdditionalPages}. The current document was left unchanged.`,
-        );
-      }
-      advanceDraftTrace("finalize");
-      const nextVersionNumber = versions.length + 1;
+    };
+    try {
+      const outcome = await change.produce({ sourceHtml, requestStartedAt, ensureUnchanged });
       const completedAt = draftNowIso();
       const durationMs = timestampDifferenceMs(requestStartedAt, completedAt);
+      const completionEvent = assistantEvent("provider-revision", outcome.completionMessage, {
+        createdAt: completedAt,
+        executedAt: requestStartedAt,
+        durationMs,
+      });
+      const completedEvents = [...priorEvents, userEvent, completionEvent];
+      const resultHtml = outcome.html ?? sourceHtml;
+      const nextVersionNumber = versions.length + 1;
       const nextVersion: DraftVersion = {
         id: `version-${nextVersionNumber}`,
         label: `Version ${nextVersionNumber}`,
         time: draftTimeLabel(completedAt),
         executedAt: completedAt,
-        content: revisedHtml,
-        summary: `Provider revision through ${selectedAgent.name}`,
+        content: resultHtml,
+        summary: outcome.versionSummary,
       };
-      const completionEvent = assistantEvent(
-        "provider-revision",
-        requestedAdditionalPages
-          ? `Expanded the document by ${revisedPageCount - originalPageCount} page${revisedPageCount - originalPageCount === 1 ? "" : "s"} through ${selectedAgent.name}.`
-          : `Provider revision completed through ${selectedAgent.name}; ${reply.citations.length} citation${reply.citations.length === 1 ? "" : "s"} returned.`,
-        { createdAt: completedAt, executedAt: requestStartedAt, durationMs },
-      );
-      const completedEvents = [...priorEvents, userEvent, completionEvent];
       const completedHistory = persistDraftDocumentHistorySnapshot(draftScope, {
         id: historyItemId,
         title: documentTitle,
-        content: revisedHtml,
-        summary: nextVersion.summary,
+        content: resultHtml,
+        summary: outcome.versionSummary,
         sourceLabel: activeSourceLabel,
         status: "complete",
         createdAt: requestStartedAt,
@@ -8253,23 +8203,29 @@ export function DocumentAssistantWorkspace({
         events: completedEvents,
         serverId: revisionBinding.id,
         serverRevision: revisionBinding.revision,
-        serverSavePending: true,
+        serverSavePending: outcome.html !== null,
       });
-      queueDraftServerSync({
-        historyId: historyItemId,
-        title: documentTitle,
-        content: revisedHtml,
-        summary: nextVersion.summary,
-        sourceLabel: activeSourceLabel,
-      }, revisionBinding);
-      recordUndoSnapshot();
-      setSavedDocumentTitle(documentTitle);
-      setContent(revisedHtml);
-      setCodeArtifact(null);
-      setVersions((current) => [...current, nextVersion]);
-      setSelectedVersionId(nextVersion.id);
-      setShowEdits(true);
-      setStatus(`${nextVersion.label} applied from provider revision.`);
+      if (outcome.html !== null) {
+        queueDraftServerSync({
+          historyId: historyItemId,
+          title: documentTitle,
+          content: resultHtml,
+          summary: outcome.versionSummary,
+          sourceLabel: activeSourceLabel,
+        }, revisionBinding);
+        recordUndoSnapshot();
+        setSavedDocumentTitle(documentTitle);
+        setContent(resultHtml);
+        setCodeArtifact(null);
+        setVersions((current) => [...current, nextVersion]);
+        setSelectedVersionId(nextVersion.id);
+        setShowEdits(true);
+        // Spread across a document, a passing glow would be gone before the
+        // writer scrolled to most of it. The trail keeps every change lit and
+        // lists each one to jump to, until they close it.
+        if (outcome.reviewEdits) setAiTrailOpen(true);
+      }
+      setStatus(outcome.status(nextVersion.label));
       setDocumentHistory(completedHistory);
       setEvents(completedEvents);
       finishDraftTrace();
@@ -8316,8 +8272,256 @@ export function DocumentAssistantWorkspace({
     }
   }
 
+  async function applyProviderRevision(
+    request: string,
+    sourceSummaryForRevision = sourceSummary,
+    sourceIdsForRevision: string[] = activeSourceIds,
+  ) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
+    if (revisionInFlightRef.current) {
+      setStatus("The document assistant is already revising this draft.");
+      return;
+    }
+    const agent = selectedAgent;
+    const useWebSearch = webSearchEnabled && revisionNeedsWebSearch(request);
+    if (useWebSearch && !webSearchAvailable) {
+      setStatus("Web search is turned off for this model by your workspace configuration.");
+      return;
+    }
+    const sourceHtml = contentRef.current;
+    const revisionSnapshot = documentHtmlToRevisionSnapshot(sourceHtml);
+    const currentDraftText = revisionSnapshot.markdown;
+    const requestedAdditionalPages = parseRequestedAdditionalPageCount(request);
+    const originalPageCount = Math.max(1, countDocumentPages(sourceHtml) || pageCount);
+    // A revision follows the selected template only when the user asks for
+    // it; routine edits must not be steered by a template in the background.
+    const revisionTemplate =
+      templateContextEnabled && selectedTemplate && revisionReferencesTemplate(request, selectedTemplate)
+        ? selectedTemplate
+        : undefined;
+    const contextOptions = draftContextOptions(sourceSummaryForRevision, {
+      useTemplateContext: Boolean(revisionTemplate),
+      useWebSearch,
+    });
+    await runDocumentChange(agent, request, {
+      workingMessage: requestedAdditionalPages
+        ? `Expanding the current document by ${requestedAdditionalPages} page${requestedAdditionalPages === 1 ? "" : "s"} through ${agent.name}.`
+        : `Revising the current document through ${agent.name}.`,
+      workingStatus: contextOptions.useWebSearch
+        ? `Calling provider-hosted public web search to revise ${documentTitle}.`
+        : `Calling ${agent.name} to revise ${documentTitle}.`,
+      traceSteps: [
+        {
+          id: "revise",
+          label: requestedAdditionalPages ? "Expanding current document" : "Revising current document",
+          detail: requestedAdditionalPages
+            ? `Adding at least ${requestedAdditionalPages} complete page${requestedAdditionalPages === 1 ? "" : "s"} without replacing the existing draft.`
+            : "Applying the requested change to the existing draft.",
+        },
+        {
+          id: "protect",
+          label: "Preserving document structure",
+          detail: `Protecting ${revisionSnapshot.assets.filter((asset) => asset.kind === "image").length} image${revisionSnapshot.assets.filter((asset) => asset.kind === "image").length === 1 ? "" : "s"} and ${revisionSnapshot.assets.filter((asset) => asset.kind === "link").length} hyperlink${revisionSnapshot.assets.filter((asset) => asset.kind === "link").length === 1 ? "" : "s"}.`,
+        },
+        {
+          id: "finalize",
+          label: "Finalizing revised version",
+          detail: "Checking requested scope, repaginating the document, and preparing the next saved version.",
+        },
+      ],
+      produce: async ({ requestStartedAt, ensureUnchanged }) => {
+        const reply = await sendChat(completionUserId, {
+          model: agent.id,
+          messages: [
+            {
+              role: "user",
+              content: withCitationRequirement(
+                providerRevisionPrompt(
+                  documentTitle,
+                  currentDraftText,
+                  request,
+                  contextOptions,
+                  revisionTemplate,
+                ),
+                requireCitations,
+              ),
+            },
+          ],
+          runtime: {
+            surface: "draft",
+            draftTitle: documentTitle,
+            clientStartedAt: requestStartedAt,
+            webEnabled: contextOptions.useWebSearch,
+            citationsEnabled: true,
+            knowledgeConfigIds: sourceIdsForRevision,
+            ...draftAttachmentRuntime(),
+            maxCompletionTokens: revisionCompletionTokenBudget(
+              currentDraftText,
+              requestedAdditionalPages,
+            ),
+            reasoningEffort: reasoningEffortForSend,
+          },
+        });
+        ensureUnchanged();
+        advanceDraftTrace("protect");
+        const revisedMarkdown = appendWebCitationList(plainDraftCitations(reply.content, reply.citations), reply.citations);
+        const missingAssets = missingProtectedRevisionAssets(
+          revisionSnapshot.assets,
+          revisedMarkdown,
+          request,
+        );
+        if (missingAssets.length > 0) {
+          throw new Error(
+            `The drafting agent removed ${missingAssets.length} protected image or hyperlink reference${
+              missingAssets.length === 1 ? "" : "s"
+            }. The current document was left unchanged.`,
+          );
+        }
+        const preservationIssue = revisionContentPreservationIssue(
+          currentDraftText,
+          revisedMarkdown,
+          request,
+        );
+        if (preservationIssue) {
+          throw new Error(`${preservationIssue} The current document was left unchanged.`);
+        }
+        const restoredRevisionHtml = restoreRevisionAssetsInHtml(
+          documentHtmlFromMarkdown(revisedMarkdown),
+          revisionSnapshot.assets,
+        );
+        // A revised document keeps its page setup, headers, and footers (from
+        // Word, PDF, a template, or a layout request); only the text comes back
+        // from the model, and the returned blocks are set in the document's
+        // styles. A template or layout the request names replaces the setup.
+        const revisedBodyHtml = formatMlaDocument(
+          restoredRevisionHtml,
+          `${request} ${sourceHtml.includes("document-mla-text") ? "MLA" : ""}`,
+        );
+        const revisionLayout = revisedBodyHtml.includes("document-mla-text")
+          ? { markerHtml: "", bodyHtml: revisedBodyHtml }
+          : revisionPageLayout(sourceHtml, revisedBodyHtml, request, revisionTemplate);
+        let revisedHtml = paginateTransferredDocumentHtml(
+          withPageSetupMarker(revisionLayout.markerHtml, revisionLayout.bodyHtml),
+          `${documentTitle}\n\n${reply.content}`,
+        );
+        if (!isAutomatedTestMode()) {
+          revisedHtml = (await repaginateOverfullDocumentPages(revisedHtml)) ?? revisedHtml;
+        }
+        const revisedPageCount = Math.max(1, countDocumentPages(revisedHtml));
+        if (
+          requestedAdditionalPages > 0 &&
+          revisedPageCount < originalPageCount + requestedAdditionalPages
+        ) {
+          throw new Error(
+            `The drafting agent returned ${revisedPageCount} pages, but this request requires at least ${originalPageCount + requestedAdditionalPages}. The current document was left unchanged.`,
+          );
+        }
+        advanceDraftTrace("finalize");
+        return {
+          html: revisedHtml,
+          versionSummary: `Provider revision through ${agent.name}`,
+          completionMessage: requestedAdditionalPages
+            ? `Expanded the document by ${revisedPageCount - originalPageCount} page${revisedPageCount - originalPageCount === 1 ? "" : "s"} through ${agent.name}.`
+            : `Provider revision completed through ${agent.name}; ${reply.citations.length} citation${reply.citations.length === 1 ? "" : "s"} returned.`,
+          status: (versionLabel) => `${versionLabel} applied from provider revision.`,
+        };
+      },
+    });
+  }
+
+  /** A change to a document that already exists, as it was asked for in chat.
+   * Word changes go in block by block, so the document keeps its look. A request
+   * for a new look or shape cannot map onto the blocks, so it is a revision. */
+  async function applyDocumentEdit(request: string) {
+    if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
+    if (!aiEditKeepsFormatting(aiEditIntent(request))) {
+      await applyProviderRevision(request);
+      return;
+    }
+    if (revisionInFlightRef.current) {
+      setStatus("The document assistant is already revising this draft.");
+      return;
+    }
+    const agent = selectedAgent;
+    const holder = window.document.createElement("div");
+    holder.innerHTML = contentRef.current;
+    const blocks = documentBlocks(holder);
+    await runDocumentChange(agent, request, {
+      workingMessage: `Changing ${documentTitle} through ${agent.name}.`,
+      workingStatus: `Calling ${agent.name} to change ${documentTitle}.`,
+      traceSteps: [
+        {
+          id: "revise",
+          label: "Making the change",
+          detail: `Reading ${blocks.length} passage${blocks.length === 1 ? "" : "s"} and changing only the ones this needs.`,
+        },
+        {
+          id: "protect",
+          label: "Keeping the formatting",
+          detail: "Writing each change into the document's own text.",
+        },
+        {
+          id: "finalize",
+          label: "Finalizing the new version",
+          detail: "Repaginating the document and preparing the next saved version.",
+        },
+      ],
+      produce: async ({ requestStartedAt, ensureUnchanged }) => {
+        const reply = await sendChat(completionUserId, {
+          model: agent.id,
+          messages: [{ role: "user", content: documentPatchPrompt({ documentTitle, instruction: request, blocks }) }],
+          runtime: {
+            surface: "draft",
+            draftTitle: documentTitle,
+            clientStartedAt: requestStartedAt,
+            webEnabled: false,
+            citationsEnabled: false,
+            knowledgeConfigIds: activeSourceIds,
+            ...draftAttachmentRuntime(),
+            maxCompletionTokens: revisionCompletionTokenBudget(blocks.map((block) => block.text).join(" "), 0),
+            reasoningEffort: reasoningEffortForSend,
+          },
+        });
+        ensureUnchanged();
+        advanceDraftTrace("protect");
+        const stampedAt = Date.parse(draftNowIso());
+        const patches = parseDocumentPatch(splitAssistantThinking(reply.content).visibleContent);
+        const { changed } = applyDocumentPatch(blocks, patches, (content, order) => {
+          // The edit trail counts runs with one stamp as one edit, and each of
+          // these should be its own stop.
+          const stamp = { at: new Date(stampedAt + order).toISOString(), by: agent.name };
+          const marker = markInlineAiSuggestion(window.document.createElement("span"), stamp);
+          marker.appendChild(content);
+          return marker;
+        });
+        advanceDraftTrace("finalize");
+        if (!changed) {
+          return {
+            html: null,
+            versionSummary: `No change through ${agent.name}`,
+            completionMessage: `${agent.name} found nothing needed to change.`,
+            status: () => "The assistant found nothing needed to change.",
+          };
+        }
+        const patchedHtml = holder.innerHTML;
+        return {
+          html: isAutomatedTestMode() ? patchedHtml : (await repaginateOverfullDocumentPages(patchedHtml)) ?? patchedHtml,
+          versionSummary: `${changed} change${changed === 1 ? "" : "s"} through ${agent.name}`,
+          completionMessage: `Made ${changed} change${changed === 1 ? "" : "s"} through ${agent.name}. The formatting was kept.`,
+          status: (versionLabel) => `${versionLabel} applied. Every change is marked in the document.`,
+          reviewEdits: true,
+        };
+      },
+    });
+  }
+
   async function submitInstruction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // The Send key is off while a file arrives, but Enter submits the form anyway.
+    if (attachedFiles.some((file) => file.status === "uploading")) {
+      notifyRail("Your files are still on their way. Send again in a moment.");
+      return;
+    }
     await runAssistantInstruction(instruction.trim());
   }
 
@@ -8812,6 +9016,7 @@ export function DocumentAssistantWorkspace({
         id: `${batch}-${index}-${file.name}`,
         name: file.name,
         size: formatBytes(file.size),
+        kind: fileKind(file.name),
         status: "uploading" as const,
       },
     }));
@@ -8831,7 +9036,7 @@ export function DocumentAssistantWorkspace({
           setAttachedFiles((current) =>
             current.map((item) =>
               item.id === entry.id
-                ? { ...item, status: "ready", attachmentId, hasText }
+                ? { ...item, status: "ready", attachmentId, hasText, size: uploaded.size, kind: uploaded.kind }
                 : item,
             ),
           );
@@ -8864,10 +9069,62 @@ export function DocumentAssistantWorkspace({
     };
   }
 
+  /** Best effort: a saved copy is harmless to the person, and the server refuses
+   * a file a chat holds. */
+  function takeBackAttachment(attachmentId: string) {
+    void deleteChatAttachment(completionUserId, attachmentId).catch(() => undefined);
+  }
+
   function removeAttachedFile(fileId: string) {
     const file = attachedFiles.find((item) => item.id === fileId);
     setAttachedFiles((current) => current.filter((item) => item.id !== fileId));
-    if (file) notifyRail(`${file.name} removed from this draft's sources.`);
+    if (!file) return;
+    notifyRail(`${file.name} removed from this draft's sources.`);
+    if (file.attachmentId) takeBackAttachment(file.attachmentId);
+  }
+
+  /** A # pick joins the draft's sources as a block that points at the file or base. */
+  async function pullInKnowledge(item: KnowledgeCommandItem) {
+    const documentId = item.kind === "knowledge-file" ? item.doc.id : undefined;
+    const id = `knowledge:${item.base.id}:${documentId ?? ""}`;
+    if (attachedFilesRef.current.some((file) => file.id === id)) return;
+    const kind = documentId ? fileKind(item.name) : "Knowledge";
+    setAttachedFiles((current) => [...current, { id, name: item.name, size: "", kind, status: "uploading" }]);
+    try {
+      const saved = await attachKnowledge(completionUserId, {
+        knowledge_config_id: item.base.id,
+        document_id: documentId,
+      });
+      if (!attachedFilesRef.current.some((file) => file.id === id)) {
+        if (saved.id) takeBackAttachment(saved.id);
+        return;
+      }
+      setAttachedFiles((current) =>
+        current.map((file) =>
+          file.id === id
+            ? { ...file, status: "ready", attachmentId: saved.id ?? undefined, hasText: true, size: saved.size, kind: saved.kind }
+            : file,
+        ),
+      );
+      notifyRail(`${item.name} is ready. The assistant reads it with your next request.`);
+    } catch (error) {
+      setAttachedFiles((current) => current.filter((file) => file.id !== id));
+      const message = error instanceof Error && error.message ? error.message : "The file could not be reached.";
+      notifyRail(`${item.name} could not be attached: ${message}`);
+    }
+  }
+
+  function applyHashItem(item: KnowledgeCommandItem) {
+    void pullInKnowledge(item);
+    const caret = instructionRef.current?.selectionStart ?? instruction.length;
+    const applied = applyCommandText(instruction, hashToken?.start ?? null, caret, "");
+    setInstruction(applied.text);
+    clearHashToken();
+    requestAnimationFrame(() => {
+      const textarea = instructionRef.current;
+      textarea?.focus();
+      textarea?.setSelectionRange(applied.caret, applied.caret);
+    });
   }
 
   async function handleWordTemplateUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -8907,11 +9164,14 @@ export function DocumentAssistantWorkspace({
       notifyRail(`Could not open ${file.name}.${reason}`);
       return;
     }
-    let nextContentHtml = paginateTransferredDocumentHtml(opened.html, "", { forceMarkerPages: true });
-    if (!isAutomatedTestMode()) {
-      nextContentHtml = (await repaginateOverfullDocumentPages(nextContentHtml)) ?? nextContentHtml;
-    }
+    const nextContentHtml = await paginatedOpenedDocument(opened);
     requestDraftNavigation(`open ${file.name}`, () => openDocumentInEditor(opened, nextContentHtml));
+  }
+
+  async function paginatedOpenedDocument(opened: UploadedWordTemplate) {
+    const paginated = paginateTransferredDocumentHtml(opened.html, "", { forceMarkerPages: true });
+    if (isAutomatedTestMode()) return paginated;
+    return (await repaginateOverfullDocumentPages(paginated)) ?? paginated;
   }
 
   function openDocumentInEditor(opened: UploadedWordTemplate, nextContentHtml: string) {
@@ -10607,6 +10867,7 @@ export function DocumentAssistantWorkspace({
           webEnabled: false,
           citationsEnabled: false,
           knowledgeConfigIds: activeSourceIds,
+          ...draftAttachmentRuntime(),
           maxCompletionTokens: session.mode === "insert" ? 3000 : 2000,
         },
         onDelta: (fullText) => {
@@ -10945,6 +11206,7 @@ export function DocumentAssistantWorkspace({
         railIsDrawer && railOpen ? "rail-drawer-open" : ""
       } ${draftKind === "deck" ? "is-deck-mode" : ""} ${draftKind === "spreadsheet" ? "is-sheet-mode" : ""}`}
     >
+      {documentViewerLayer}
       {historyDeleteTarget && (
         <div className="modal-backdrop">
           <section className="modal confirm-dialog" tabIndex={-1} ref={historyDeleteRef} role="dialog" aria-modal="true" aria-label="Delete draft">
@@ -11663,7 +11925,7 @@ export function DocumentAssistantWorkspace({
                   </div>
                   {attachedFiles.length > 0 && (
                     <div className="draft-attached-source-list">
-                      <strong>Draft uploads</strong>
+                      <strong>Attached to this draft</strong>
                       {attachedFiles.map((file) => (
                         <span key={file.id}>
                           {file.name} · {file.size} · {draftUploadStateLabel(file)}
@@ -11881,41 +12143,57 @@ export function DocumentAssistantWorkspace({
                 {attachedFiles.map((file) => (
                   <li
                     key={file.id}
-                    className={`draft-upload-chip is-${file.status} ${
+                    className={`draft-source-block is-${file.status} ${
                       file.status === "ready" && !file.hasText ? "is-name-only" : ""
                     }`}
-                    data-tooltip={
-                      file.status === "error"
-                        ? file.error
-                        : file.status === "ready" && !file.hasText
-                          ? "No readable text was extracted, so the assistant sees only the file name"
-                          : `${file.size} · ${draftUploadStateLabel(file)}`
-                    }
                   >
-                    {file.status === "uploading" ? (
-                      <LoaderCircle className="is-spinning" size={13} aria-hidden="true" />
-                    ) : (
-                      <FileText size={13} aria-hidden="true" />
-                    )}
-                    <span>{file.name}</span>
-                    <small className="sr-only">{draftUploadStateLabel(file)}</small>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${file.name}`}
-                      onClick={() => removeAttachedFile(file.id)}
-                    >
-                      <X size={12} />
-                    </button>
+                    <ComposerFileBlock
+                      name={file.name}
+                      kind={file.kind}
+                      detail={draftSourceDetail(file)}
+                      status={file.status}
+                      canOpen={file.status === "ready" && Boolean(file.attachmentId)}
+                      openHint={
+                        file.status === "error"
+                          ? file.error ?? "This file could not be attached"
+                          : `See ${file.name} as it opens from a citation`
+                      }
+                      removeHint={`Remove ${file.name} from this draft's sources`}
+                      onOpen={() => {
+                        if (file.attachmentId) {
+                          openViewerDocument({ kind: "attachment", attachmentId: file.attachmentId, chunkId: null });
+                        }
+                      }}
+                      onRemove={() => removeAttachedFile(file.id)}
+                    />
                   </li>
                 ))}
               </ul>
+            )}
+            {hashToken && (
+              <ComposerCommandMenu
+                menuRef={hashMenuRef}
+                listId={hashListId}
+                label="Knowledge commands"
+                items={hashItems}
+                activeIndex={hashIndex}
+                iconFor={(item) => (item.kind === "knowledge-base" ? BookOpen : FileText)}
+                onHighlight={setHashIndex}
+                onPick={applyHashItem}
+              >
+                <KnowledgeMenuStatus files={knowledgeFiles} itemCount={hashItems.length} query={hashToken.query} />
+              </ComposerCommandMenu>
             )}
             <label className="sr-only" htmlFor="draft-assistant-command">
               {draftKind === "deck" ? "Ask the deck assistant" : draftKind === "spreadsheet" ? "Ask the spreadsheet assistant" : "Ask the document assistant"}
             </label>
             <textarea
+              ref={instructionRef}
               id="draft-assistant-command"
               aria-describedby={!draftAiAvailable ? "draft-ai-unavailable" : undefined}
+              aria-autocomplete="list"
+              aria-controls={hashToken ? hashListId : undefined}
+              aria-activedescendant={hashToken && hashItems[hashIndex] ? `${hashListId}-${hashIndex}` : undefined}
               data-tooltip={
                 draftKind === "deck"
                   ? "Describe the deck you want the assistant to build, or ask for changes to the current slides."
@@ -11924,9 +12202,19 @@ export function DocumentAssistantWorkspace({
                     : "Describe the draft you want, paste revision instructions, or ask the assistant to edit the current document using the selected templates and sources."
               }
               value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
+              onChange={(event) => {
+                setInstruction(event.target.value);
+                updateHashToken(event.target);
+              }}
+              onSelect={(event) => updateHashToken(event.currentTarget)}
+              onBlur={clearHashToken}
               onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                if (event.nativeEvent.isComposing) return;
+                if (handleHashKey(event, hashItems.length, (index) => {
+                  const item = hashItems[index];
+                  if (item) applyHashItem(item);
+                })) return;
+                if (event.key !== "Enter" || event.shiftKey) return;
                 event.preventDefault();
                 event.currentTarget.form?.requestSubmit();
               }}
@@ -14566,7 +14854,7 @@ export function DocumentAssistantWorkspace({
                     >
                       <span>[U{index + 1}]</span>
                       <strong>{file.name}</strong>
-                      <small>{file.size} upload</small>
+                      <small>{draftSourceDetail(file)}</small>
                     </button>
                   ))}
                 </div>
@@ -15733,10 +16021,31 @@ function tagWordParagraphAlignment(element: MammothDocumentElement): MammothDocu
   return syntheticStyle ? { ...next, ...syntheticStyle } : next;
 }
 
-const OPEN_IN_EDITOR_EXTENSIONS = new Set(["docx", "dotx", "pdf", "doc", "md", "markdown", "txt", "html", "htm"]);
 const OPEN_IN_EDITOR_ACCEPT =
   ".docx,.dotx,.pdf,.doc,.md,.markdown,.txt,.html,.htm,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,application/msword,text/markdown,text/plain,text/html";
 const OPEN_IN_EDITOR_TYPES_LABEL = ".docx, .pdf, .doc, .md, .txt, or .html";
+
+type DocumentChangeOutcome = {
+  /** The next document, or null when nothing needed to change. */
+  html: string | null;
+  versionSummary: string;
+  completionMessage: string;
+  status: (versionLabel: string) => string;
+  /** Opens the AI edit trail on the changes that just landed. */
+  reviewEdits?: boolean;
+};
+
+type DocumentChangeRun = {
+  workingMessage: string;
+  workingStatus: string;
+  traceSteps: DraftTraceStep[];
+  produce: (run: {
+    sourceHtml: string;
+    requestStartedAt: string;
+    /** Throws when the writer moved on, so a late reply never overwrites them. */
+    ensureUnchanged: () => void;
+  }) => Promise<DocumentChangeOutcome>;
+};
 
 /** Reads a local file for "Open in editor". Word and PDF files open with
  * their own page setup and formatting intact (Word converted here, PDF by
@@ -15753,6 +16062,14 @@ async function readDocumentFileForEditor(file: File, userId: string): Promise<Up
   const text = documentHtmlToText(html);
   if (!text.trim()) throw new Error("The file did not contain readable document content.");
   return { filename: file.name, html, text, title: titleFromUploadedTemplate(file.name, text), warnings: [] };
+}
+
+/** Why a file from chat would not open, with the one step that can help. */
+function handoffOpenFailure(error: unknown) {
+  if (error instanceof ChatRequestError && error.status === 404) {
+    return "Its original file was not kept, which happens with older uploads. Attach it again in chat to edit it here.";
+  }
+  return error instanceof ChatRequestError ? error.message : `Choose a ${OPEN_IN_EDITOR_TYPES_LABEL} file.`;
 }
 
 async function readPdfDocumentForEditor(file: File, userId: string): Promise<UploadedWordTemplate> {
@@ -16829,6 +17146,14 @@ function draftTemplateCategoryIcon(category: string): LucideIcon {
     default:
       return FileText;
   }
+}
+
+/** The line under a source's name, in words, so its state is never color alone. */
+function draftSourceDetail(file: DraftSourceFile) {
+  const facts = [file.size, file.kind].filter(Boolean).join(" · ");
+  if (file.status === "uploading") return `${facts} · Getting it ready`;
+  if (file.status === "error") return "Could not be attached";
+  return file.hasText ? facts : `${facts} · No readable text`;
 }
 
 function draftUploadStateLabel(file: DraftSourceFile) {

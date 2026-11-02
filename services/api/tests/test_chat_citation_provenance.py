@@ -2047,12 +2047,15 @@ def test_an_address_needs_both_ids_to_name_the_document() -> None:
 
 
 def test_every_text_field_of_a_citation_is_screened_except_identifiers() -> None:
-    identifiers = {"id", "source_type", "chunk_id", "document_id", "knowledge_config_id"}
+    identifiers = {
+        "id", "source_type", "chunk_id", "document_id", "knowledge_config_id", "attachment_id",
+    }
     text_fields = {
         name
         for name, value in ChatCitation(
             id="x", source_name="x", source_type="x", source_uri="x", snippet="x",
             locator="x", chunk_id="x", document_id="x", knowledge_config_id="x", passage="x",
+            attachment_id="x",
         ).model_dump().items()
         if isinstance(value, str)
     }

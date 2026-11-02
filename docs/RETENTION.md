@@ -58,7 +58,7 @@ chat deletion. Release is tenant-scoped and explicit. Release starts a new revie
 window. To preserve future chats for a client, also apply a Forever rule to its
 confirmed identity. Holds do not automatically expand to newly mentioned clients.
 
-Automatic cleanup removes the chat, linked uploads/image previews, search entry,
+Automatic cleanup removes the chat, linked uploads with their kept files and image previews, search entry,
 chat feedback, tags, and released hold membership. An atomic content-free deletion
 ledger prevents a stale workspace save from restoring the same chat ID. An audit
 event and its delivery outbox entry commit with the deletion.

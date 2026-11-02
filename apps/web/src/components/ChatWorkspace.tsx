@@ -2,12 +2,51 @@ import { SelectControl } from "./SelectControl";
 import { ModelSelect } from "./ModelSelect";
 import { useModalFocus } from "../lib/useModalFocus";
 import {
-  ReasoningSlider,
+  applyCommandText,
+  detectComposerCommandToken,
+  groupCommandSections,
+  knowledgeCommandItems,
+  rankCommandMatches,
+  type ComposerCommandSymbol,
+  type ComposerCommandToken,
+  type KnowledgeCommandItem,
+} from "../lib/composerCommands";
+import { fileIconClass, fileKind } from "../lib/fileKinds";
+import { useCommandMenuFit } from "../lib/useCommandMenuFit";
+import { useComposerCommandToken } from "../lib/useComposerCommandToken";
+import { useKnowledgeFiles } from "../lib/useKnowledgeFiles";
+import { ComposerCommandMenu, KnowledgeMenuStatus } from "./ComposerCommandMenu";
+import { ComposerFileBlock } from "./ComposerFileBlock";
+import {
+  ReasoningRail,
+  reasoningHelp,
   REASONING_EFFORT_BY_LEVEL,
   loadReasoningLevel,
   storeReasoningLevel,
   type ReasoningLevel,
 } from "./ReasoningSlider";
+import {
+  OptionCopy,
+  ResourceListHeader,
+  ResourceSearch,
+  ResourceTiles,
+  SEND_MENU_TABS,
+  ShortcutGuide,
+  StreamSwitch,
+  ToolSwitch,
+  agentOptionDetail,
+  knowledgeOptionDetail,
+  resourceListShows,
+  resourceSectionIcon,
+  resourceSectionLabel,
+  resourceViewLoadsKnowledgeFiles,
+  resourceViewTitle,
+  webOptionDetail,
+  type ResourceSection,
+  type ResourceView,
+  type SendMenuTab,
+} from "./ComposerOptions";
+import { RailSwitch } from "./RailSwitch";
 import {
   ArrowUpRight,
   BookOpen,
@@ -18,6 +57,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  FilePenLine,
   FileText,
   Globe2,
   Info,
@@ -66,6 +106,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -79,7 +120,6 @@ import type {
   Automation,
   CustomScriptRunResult,
   KnowledgeBase,
-  KnowledgeDocument,
   ModelConfig,
   PromptTemplate,
   SkillFile,
@@ -93,6 +133,7 @@ import {
 } from "../lib/chatStore";
 import {
   approveMcpTool,
+  attachKnowledge,
   ChatRequestError,
   hermesLocked,
   isHermesAgent,
@@ -101,7 +142,7 @@ import {
   getCloudAttachmentAuthorizeUrl,
   importCloudAttachments,
   listCloudAttachmentItems,
-  listKnowledgeDocuments,
+  deleteChatAttachment,
   loadChatAttachmentPreview,
   runCustomScriptTool,
   sendChat,
@@ -117,10 +158,13 @@ import {
   webSearchSupportedForModel,
 } from "../lib/modelAccess";
 import {
-  detectDraftHandoff,
+  draftHandoffEditTarget,
+  draftHandoffOffer,
   draftHandoffAttachments,
   draftHandoffChatContext,
-  type DraftHandoffKind,
+  editableAttachment,
+  threadEditableAttachment,
+  type DraftHandoffOffer,
   type DraftHandoffRequest,
 } from "../lib/draftHandoff";
 import { connectorEnabled, connectorHidden, isMcpRuntimeTool } from "../lib/connectors";
@@ -279,7 +323,7 @@ type PendingAttachment = ChatAttachment & {
  * chat. It keeps the composer settings it was sent with. */
 type PendingDraftHandoff = {
   id: string;
-  kind: DraftHandoffKind;
+  kind: DraftHandoffOffer;
   threadId: string;
   text: string;
   attachments: PendingAttachment[];
@@ -507,56 +551,6 @@ function formatBytes(bytes: number): string {
   return `${index === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
 }
 
-const KIND_BY_EXT: Record<string, string> = {
-  pdf: "PDF",
-  doc: "Word",
-  docx: "Word",
-  rtf: "Word",
-  xls: "Excel",
-  xlsx: "Excel",
-  csv: "CSV",
-  ppt: "PPT",
-  pptx: "PPT",
-  png: "Image",
-  jpg: "Image",
-  jpeg: "Image",
-  gif: "Image",
-  webp: "Image",
-  svg: "Image",
-  txt: "Text",
-  md: "Text",
-  eml: "Email",
-  zip: "Archive",
-  mp3: "Audio",
-  wav: "Audio",
-  m4a: "Audio",
-  aac: "Audio",
-  ogg: "Audio",
-  oga: "Audio",
-  flac: "Audio",
-  mp4: "Video",
-  mov: "Video",
-  m4v: "Video",
-  webm: "Video",
-  mkv: "Video",
-  avi: "Video",
-  mpeg: "Video",
-  mpg: "Video",
-};
-
-function fileKind(name: string): string {
-  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
-  return KIND_BY_EXT[ext] ?? (ext ? ext.toUpperCase() : "File");
-}
-
-function fileIconClass(kind: string): string {
-  const value = kind.toLowerCase();
-  if (value.includes("pdf")) return "pdf";
-  if (value.includes("word") || value.includes("doc")) return "word";
-  if (value.includes("email") || value === "eml") return "eml";
-  return "file-generic";
-}
-
 function describeFile(file: File): PendingAttachment {
   return {
     localId: nextAttachmentId(),
@@ -576,6 +570,21 @@ function describeUploadedAttachment(attachment: ChatAttachment): PendingAttachme
     localId: nextAttachmentId(),
     uploadStatus: "ready",
   };
+}
+
+/** The line under a staged file's name. */
+function stagedAttachmentDetail(file: PendingAttachment) {
+  const uploading = isMediaUploadFile(file.file ?? { name: file.name, type: file.mime_type ?? "" })
+    ? " · Uploading and transcribing"
+    : " · Uploading";
+  const facts = [file.size, file.kind].filter(Boolean).join(" · ");
+  if (file.uploadStatus === "uploading") return `${facts}${uploading}`;
+  return file.uploadStatus === "error" ? `${facts} · Upload failed` : facts;
+}
+
+/** A # pick the server has not answered yet, so it has no id to send. */
+function isArrivingAttachment(attachment: PendingAttachment) {
+  return attachment.uploadStatus === "uploading" && !attachment.file;
 }
 
 function toChatAttachment(attachment: PendingAttachment): ChatAttachment {
@@ -712,29 +721,20 @@ function messagePlainText(message: ChatMessage) {
 
 /* ---------- Composer symbol commands (# / $ @) ---------- */
 
-type ComposerCommandSymbol = "#" | "/" | "$" | "@" | ">";
-
-type ComposerCommandToken = {
-  symbol: ComposerCommandSymbol;
-  query: string;
-  /** Index of the symbol character in the draft. */
-  start: number;
-};
-
-type ComposerCommandItem = {
-  id: string;
-  section: string;
-  name: string;
-  detail: string;
-} & (
-  | { kind: "knowledge-base"; base: KnowledgeBase }
-  | { kind: "knowledge-file"; doc: KnowledgeDocument; base: KnowledgeBase }
-  | { kind: "prompt"; prompt: PromptTemplate }
-  | { kind: "mcp-tool"; tool: ToolConfig }
-  | { kind: "skill"; skill: SkillFile }
-  | { kind: "agent"; agent: ModelConfig }
-  | { kind: "automation"; automation: Automation }
-);
+type ComposerCommandItem =
+  | KnowledgeCommandItem
+  | ({
+      id: string;
+      section: string;
+      name: string;
+      detail: string;
+    } & (
+      | { kind: "prompt"; prompt: PromptTemplate }
+      | { kind: "mcp-tool"; tool: ToolConfig }
+      | { kind: "skill"; skill: SkillFile }
+      | { kind: "agent"; agent: ModelConfig }
+      | { kind: "automation"; automation: Automation }
+    ));
 
 const COMMAND_MENU_TITLES: Record<ComposerCommandSymbol, string> = {
   "#": "Knowledge",
@@ -775,28 +775,29 @@ function automationScheduleLabel(automation: Automation): string {
 
 /** Finds an in-progress symbol command at the caret: a #, /, $, or @ that
  * starts a word, plus whatever has been typed after it. */
-function detectComposerCommandToken(value: string, caret: number | null): ComposerCommandToken | null {
-  if (caret === null) return null;
-  const before = value.slice(0, caret);
-  const match = /(?:^|\s)([#/$@>])([\w .()&-]{0,60})$/.exec(before);
-  if (!match) return null;
-  return {
-    symbol: match[1] as ComposerCommandSymbol,
-    query: match[2],
-    start: before.length - match[2].length - 1,
-  };
+function commandItemIcon(item: ComposerCommandItem) {
+  if (item.kind === "knowledge-base") return BookOpen;
+  if (item.kind === "knowledge-file") return FileText;
+  if (item.kind === "prompt") return ScrollText;
+  if (item.kind === "mcp-tool") return Plug;
+  if (item.kind === "skill") return Sparkles;
+  return item.kind === "automation" ? Play : Bot;
 }
 
-/** Sorts command matches so name-prefix hits rank above substring hits. */
-function rankCommandMatches<T>(entries: T[], nameOf: (entry: T) => string, query: string): T[] {
-  const q = query.trim().toLowerCase();
-  return entries
-    .filter((entry) => nameOf(entry).toLowerCase().includes(q))
-    .sort((a, b) => {
-      const aPrefix = nameOf(a).toLowerCase().startsWith(q) ? 0 : 1;
-      const bPrefix = nameOf(b).toLowerCase().startsWith(q) ? 0 : 1;
-      return aPrefix - bPrefix || nameOf(a).localeCompare(nameOf(b));
-    });
+/** Why a symbol other than # has nothing to offer. */
+function emptyCommandText(token: ComposerCommandToken, connectors: BootstrapData["connectors"]) {
+  if (token.query.trim()) return "No matching commands. Try another name.";
+  if (token.symbol === "/") {
+    const prompts = connectorEnabled(connectors, "prompt-library");
+    const mcp = connectorEnabled(connectors, "mcp");
+    if (!prompts && !mcp) return "The Prompt Library and MCP servers are turned off for this workspace";
+    if (!prompts) return "The Prompt Library is turned off for this workspace — no MCP connections are enabled yet";
+    if (!mcp) return "MCP servers are turned off for this workspace — no saved prompts yet";
+    return "No saved prompts or enabled MCP connections yet — add them under Tools";
+  }
+  if (token.symbol === "$") return "No skill files saved yet — create one under Tools";
+  if (token.symbol === ">") return "No automations yet — create one under Automations";
+  return "No agent profiles available yet — create one under Agents";
 }
 
 function skillAttachmentFile(skill: SkillFile): File {
@@ -1086,6 +1087,8 @@ export function ChatWorkspace({
   // Show replies as they stream in; sticky per user, display-only.
   const [streamResponses, setStreamResponses] = useState(() => loadLiveStreamPreference(data.me.id));
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const stagedAttachmentsRef = useRef(attachments);
+  stagedAttachmentsRef.current = attachments;
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   // Ad-hoc web pages (≤3) fetched server-side as [U#] sources for the next message.
@@ -1112,20 +1115,13 @@ export function ChatWorkspace({
   );
   const [sendMenuOpen, setSendMenuOpen] = useState(false);
   const [cloudPicker, setCloudPicker] = useState<CloudPickerState | null>(null);
-  const [commandToken, setCommandToken] = useState<ComposerCommandToken | null>(null);
-  const [sendMenuTab, setSendMenuTab] = useState<"settings" | "resources">("settings");
+  const [sendMenuTab, setSendMenuTab] = useState<SendMenuTab>("settings");
   const resourceBrowserOpen = sendMenuOpen && sendMenuTab === "resources";
   const [shortcutQuery, setShortcutQuery] = useState("");
-  const [shortcutSection, setShortcutSection] = useState("");
-  const [commandIndex, setCommandIndex] = useState(0);
+  const [resourceView, setResourceView] = useState<ResourceView>("tiles");
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [pendingAutomations, setPendingAutomations] = useState<Automation[]>([]);
-  const [knowledgeDocs, setKnowledgeDocs] = useState<Record<string, KnowledgeDocument[]>>({});
-  const [knowledgeDocsStatus, setKnowledgeDocsStatus] = useState<"idle" | "loading" | "loaded">("idle");
-  const [knowledgeDocsError, setKnowledgeDocsError] = useState(false);
-  const [knowledgeDocsReload, setKnowledgeDocsReload] = useState(0);
   const commandListId = useId();
-  const dismissedCommandRef = useRef<{ value: string; caret: number } | null>(null);
   const [customToolRun, setCustomToolRun] = useState<CustomToolRunState | null>(null);
   const [pendingHandoff, setPendingHandoff] = useState<PendingDraftHandoff | null>(null);
   const pendingHandoffRef = useRef<PendingDraftHandoff | null>(null);
@@ -1133,6 +1129,14 @@ export function ChatWorkspace({
   const [handoffNudged, setHandoffNudged] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const {
+    token: commandToken,
+    index: commandIndex,
+    setIndex: setCommandIndex,
+    update: updateCommandToken,
+    clear: clearCommandToken,
+    handleKey: handleCommandKey,
+  } = useComposerCommandToken(textareaRef);
   const expandedComposerRef = useRef<HTMLFormElement | null>(null);
   const inspectorRef = useRef<HTMLElement | null>(null);
   useModalFocus(expandedComposerRef, isComposerExpanded, () => { if (!isImproving) setIsComposerExpanded(false); });
@@ -1514,60 +1518,18 @@ export function ChatWorkspace({
     };
   }, [attachMenuOpen, sendMenuOpen]);
 
-  // Stable scope values keep ordinary draft/status rerenders from cancelling
-  // their own request. Reopening # refreshes the list, and closing it or
-  // switching workspace aborts a stale response before it can replace results.
-  const knowledgeCommandOpen = commandToken?.symbol === "#" || (resourceBrowserOpen && (!shortcutSection || shortcutSection === "Knowledge bases" || shortcutSection === "Files in knowledge sources"));
-  const knowledgeBaseIdsKey = JSON.stringify(enabledKnowledgeBases.map((base) => base.id));
-  useEffect(() => {
-    if (!knowledgeCommandOpen) return;
-    const controller = new AbortController();
-    const baseIds = JSON.parse(knowledgeBaseIdsKey) as string[];
-    setKnowledgeDocs({});
-    setKnowledgeDocsError(false);
-    setKnowledgeDocsStatus("loading");
-    void Promise.allSettled(
-      baseIds.map(async (baseId) => {
-        const docs = await listKnowledgeDocuments(data.me.id, baseId, { signal: controller.signal });
-        return [baseId, docs] as const;
-      }),
-    ).then((results) => {
-      if (controller.signal.aborted) return;
-      setKnowledgeDocs(Object.fromEntries(results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])));
-      setKnowledgeDocsError(results.some((result) => result.status === "rejected"));
-      setKnowledgeDocsStatus("loaded");
-    });
-    return () => controller.abort();
-  }, [knowledgeCommandOpen, knowledgeBaseIdsKey, data.me.id, data.currentTenant.id, knowledgeDocsReload]);
+  const knowledgeCommandOpen = commandToken?.symbol === "#" || (resourceBrowserOpen && resourceViewLoadsKnowledgeFiles(resourceView));
+  const knowledgeFiles = useKnowledgeFiles({
+    userId: data.me.id,
+    tenantId: data.currentTenant.id,
+    open: knowledgeCommandOpen,
+    bases: enabledKnowledgeBases,
+  });
 
   const commandItems = useMemo<ComposerCommandItem[]>(() => {
     function itemsForToken(commandToken: Pick<ComposerCommandToken, "symbol" | "query">): ComposerCommandItem[] {
     const query = commandToken.query;
-    if (commandToken.symbol === "#") {
-      const files = enabledKnowledgeBases.flatMap((base) =>
-        (knowledgeDocs[base.id] ?? []).map((doc) => ({ base, doc })),
-      );
-      return [
-        ...rankCommandMatches(enabledKnowledgeBases, (base) => base.name, query).map((base) => ({
-          kind: "knowledge-base" as const,
-          id: `kb-${base.id}`,
-          section: "Knowledge bases",
-          name: base.name,
-          detail: `${base.document_count} files · ${base.source}`,
-          base,
-        })),
-        ...rankCommandMatches(files, (entry) => entry.doc.name, query).map((entry) => ({
-          kind: "knowledge-file" as const,
-          id: `file-${entry.doc.id}`,
-          section: "Files in knowledge sources",
-          name: entry.doc.name,
-          detail: `Searches ${entry.base.name}`,
-
-          doc: entry.doc,
-          base: entry.base,
-        })),
-      ];
-    }
+    if (commandToken.symbol === "#") return knowledgeCommandItems(enabledKnowledgeBases, knowledgeFiles.docs, query);
     if (commandToken.symbol === "/") {
       // Workspace kill switches: disabled connectors remove these sections
       // from the palette entirely — off is off, for View-as previews too.
@@ -1631,12 +1593,12 @@ export function ChatWorkspace({
     const typed = detectComposerCommandToken(shortcutQuery, shortcutQuery.length);
     const symbols: ComposerCommandToken["symbol"][] = typed ? [typed.symbol] : ["/", "@", "#", "$", ">"];
     return symbols.flatMap((symbol) => itemsForToken({ symbol, query: typed?.query ?? shortcutQuery }))
-      .filter((item) => !shortcutSection || item.section === shortcutSection);
+      .filter((item) => resourceListShows(resourceView, item.section));
   }, [
-    resourceBrowserOpen, shortcutQuery, shortcutSection, data.connectors,
+    resourceBrowserOpen, shortcutQuery, resourceView, data.connectors,
     commandToken,
     enabledKnowledgeBases,
-    knowledgeDocs,
+    knowledgeFiles.docs,
     data.promptTemplates,
     data.tools,
     data.skillFiles,
@@ -1644,58 +1606,34 @@ export function ChatWorkspace({
     agentProfiles,
   ]);
 
-  const commandSections = useMemo(() => {
-    const sections: { title: string; items: ComposerCommandItem[] }[] = [];
-    for (const item of commandItems) {
-      const section = sections.find((entry) => entry.title === item.section);
-      if (section) section.items.push(item);
-      else sections.push({ title: item.section, items: [item] });
-    }
-    return sections;
-  }, [commandItems]);
+  const commandSections = useMemo(() => groupCommandSections(commandItems), [commandItems]);
 
   // With a bare symbol (no query yet) the menu stays open even when the
   // library is empty, so the empty-state hint teaches what the symbol does.
+  const commandMenuRef = useRef<HTMLDivElement>(null);
   const commandMenuVisible =
     commandToken !== null;
+
+  useCommandMenuFit({
+    open: commandMenuVisible,
+    menuRef: commandMenuRef,
+    textareaRef,
+    composerSelector: "form.composer",
+    ceilingSelector: ".workspace-header",
+    ceilingEdge: "bottom",
+    keepCaretInView: isComposerExpanded,
+    contentKey: `${commandToken?.start}:${commandToken?.query}:${attachments.length}:${commandItems.length}`,
+  });
 
   // Keep the highlight on a real row as filtering narrows the list.
   useEffect(() => {
     setCommandIndex((current) => Math.min(current, Math.max(commandItems.length - 1, 0)));
   }, [commandItems.length]);
 
-  function dismissCommandMenu() {
-    const textarea = textareaRef.current;
-    dismissedCommandRef.current = textarea ? { value: textarea.value, caret: textarea.selectionStart } : null;
-    setCommandToken(null);
-  }
-
-  function updateCommandTokenFromTextarea(target: HTMLTextAreaElement) {
-    const dismissed = dismissedCommandRef.current;
-    if (dismissed?.value === target.value && dismissed.caret === target.selectionStart) return;
-    dismissedCommandRef.current = null;
-    const token = detectComposerCommandToken(target.value, target.selectionStart);
-    setCommandToken((current) => {
-      if (current?.symbol !== token?.symbol || current?.start !== token?.start || current?.query !== token?.query) {
-        if (current?.symbol !== token?.symbol || current?.start !== token?.start) {
-          setCommandIndex(0);
-        }
-        return token;
-      }
-      return current;
-    });
-  }
-
   function applyCommandItem(item: ComposerCommandItem) {
     let replacement = "";
-    if (item.kind === "knowledge-base") {
-      setComposerTools((current) => ({ ...current, Knowledge: true }));
-      setSelectedKnowledgeBaseId(item.base.id);
-      replacement = `#${item.name} `;
-    } else if (item.kind === "knowledge-file") {
-      setComposerTools((current) => ({ ...current, Knowledge: true }));
-      setSelectedKnowledgeBaseId(item.base.id);
-      replacement = `#${item.name} `;
+    if (item.kind === "knowledge-base" || item.kind === "knowledge-file") {
+      void pullInKnowledge(item);
     } else if (item.kind === "prompt") {
       replacement = `${item.prompt.content.trimEnd()} `;
     } else if (item.kind === "mcp-tool") {
@@ -1712,59 +1650,50 @@ export function ChatWorkspace({
       replacement = `@${item.name} `;
     }
     const caret = textareaRef.current?.selectionStart ?? draft.length;
-    const start = commandToken?.start ?? caret;
-    if (!commandToken && replacement && start > 0 && !/\s/.test(draft[start - 1])) {
-      replacement = ` ${replacement}`;
-    }
-    const nextDraft = draft.slice(0, start) + replacement + draft.slice(caret);
-    const nextCaret = start + replacement.length;
+    const applied = applyCommandText(draft, commandToken?.start ?? null, caret, replacement);
     if (item.kind !== "mcp-tool" && item.kind !== "automation") setSendMenuOpen(false);
-    setDraft(nextDraft);
-    setCommandToken(null);
+    setDraft(applied.text);
+    clearCommandToken();
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
       if (!resourceBrowserOpen || (item.kind !== "mcp-tool" && item.kind !== "automation")) textarea.focus();
-      textarea.setSelectionRange(nextCaret, nextCaret);
+      textarea.setSelectionRange(applied.caret, applied.caret);
     });
   }
 
-  /** Handles menu navigation while a symbol command is open. Returns true when
-   * the key was consumed so send-on-Enter doesn't also fire. */
-  function handleCommandMenuKey(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
-    if (!commandMenuVisible) return false;
-    if (event.key === "ArrowDown" && commandItems.length > 0) {
-      event.preventDefault();
-      setCommandIndex((current) => Math.min(current + 1, commandItems.length - 1));
-      return true;
-    }
-    if (event.key === "ArrowUp" && commandItems.length > 0) {
-      event.preventDefault();
-      setCommandIndex((current) => Math.max(current - 1, 0));
-      return true;
-    }
-    if (event.key === "Enter" && !event.shiftKey && commandItems.length > 0) {
-      event.preventDefault();
-      const item = commandItems[commandIndex];
-      if (item) applyCommandItem(item);
-      return true;
-    }
-    if (event.key === "Tab") {
-      if (!event.shiftKey && commandItems.length === 1) {
-        event.preventDefault();
-        applyCommandItem(commandItems[0]);
-        return true;
+  /** The file or base joins the message as a block that points at it. */
+  async function pullInKnowledge(item: Extract<ComposerCommandItem, { kind: "knowledge-base" | "knowledge-file" }>) {
+    const documentId = item.kind === "knowledge-file" ? item.doc.id : undefined;
+    const localId = `knowledge:${item.base.id}:${documentId ?? ""}`;
+    if (stagedAttachmentsRef.current.some((staged) => staged.localId === localId)) return;
+    setUploadError(null);
+    setAttachments((prev) => [
+      ...prev,
+      {
+        localId,
+        name: item.name,
+        size: "",
+        kind: documentId ? fileKind(item.name) : "Knowledge",
+        uploadStatus: "uploading",
+      },
+    ]);
+    try {
+      const saved = await attachKnowledge(data.me.id, {
+        knowledge_config_id: item.base.id,
+        document_id: documentId,
+      });
+      if (!stagedAttachmentsRef.current.some((staged) => staged.localId === localId)) {
+        if (saved.id) takeBackAttachment(saved.id);
+        return;
       }
-      // Multiple matches must not trap keyboard users in the textarea.
-      dismissCommandMenu();
-      return false;
+      setAttachments((prev) =>
+        prev.map((staged) => (staged.localId === localId ? { ...saved, localId, uploadStatus: "ready" } : staged)),
+      );
+    } catch (error) {
+      setAttachments((prev) => prev.filter((staged) => staged.localId !== localId));
+      setUploadError(readableError(error, `Could not attach ${item.name}.`));
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      dismissCommandMenu();
-      return true;
-    }
-    return false;
   }
 
   // The model the next send targets: the agent profile when Agent mode is on,
@@ -1801,7 +1730,8 @@ export function ChatWorkspace({
       isSending ||
       isImproving ||
       isComposerExpanded ||
-      isUploadingAttachments
+      isUploadingAttachments ||
+      attachments.some(isArrivingAttachment)
     ) {
       return;
     }
@@ -1813,7 +1743,7 @@ export function ChatWorkspace({
     // cannot ride an automation run, so they stay staged in the composer.
     if (queuedAutomations.length > 0) {
       setPendingAutomations([]);
-      setCommandToken(null);
+      clearCommandToken();
       for (const automation of queuedAutomations) {
         await chat.runAutomationNow(automation, text || undefined);
       }
@@ -1823,7 +1753,7 @@ export function ChatWorkspace({
     }
     // A document or deck request waits for the user to pick Drafts or chat.
     // Agent mode, tools, and fetched links only work in chat, so those stay.
-    const handoffKind =
+    const handoffOffer =
       onSendToDrafts &&
       !toolOverrides &&
       approvedToolConfigIds.length === 0 &&
@@ -1831,13 +1761,13 @@ export function ChatWorkspace({
       selectedToolIds.length === 0 &&
       fetchUrls.length === 0 &&
       approvedWorkspaceModels(data).length > 0
-        ? detectDraftHandoff(text)
+        ? draftHandoffOffer(text, attachments, messages)
         : null;
-    if (handoffKind) {
+    if (handoffOffer) {
       const createdAtIso = new Date().toISOString();
       setPendingHandoff({
         id: `handoff-${Date.now()}`,
-        kind: handoffKind,
+        kind: handoffOffer,
         threadId: chat.activeId,
         text,
         attachments,
@@ -1850,7 +1780,7 @@ export function ChatWorkspace({
       setDraft("");
       setOriginalDraft(null);
       setAttachments([]);
-      setCommandToken(null);
+      clearCommandToken();
       setSendMenuOpen(false);
       setUploadError(null);
       return;
@@ -1921,7 +1851,7 @@ export function ChatWorkspace({
       setOriginalDraft(null);
       setAttachments((current) => current.filter((attachment) => !sentAttachmentIds.has(attachment.localId)));
       setSelectedToolIds((current) => current.filter((id) => !sentToolIds.has(id)));
-      setCommandToken(null);
+      clearCommandToken();
       setFetchUrls((current) => current.filter((url) => !sentUrls.has(url)));
       setLinkComposerOpen(false);
       setLinkDraft((current) => current === linkDraft ? "" : current);
@@ -2016,6 +1946,7 @@ export function ChatWorkspace({
       const knowledgeBase = pending.composerTools.Knowledge
         ? enabledKnowledgeBases.find((knowledge) => knowledge.id === pending.knowledgeBaseId) ?? enabledKnowledgeBases[0]
         : undefined;
+      const editTarget = pending.kind === "edit" ? draftHandoffEditTarget(pending.text, uploaded, messages) : null;
       const request: DraftHandoffRequest = {
         id: pending.id,
         kind: pending.kind,
@@ -2023,8 +1954,12 @@ export function ChatWorkspace({
         webSearch: pending.composerTools.Web,
         modelId: chat.model || null,
         knowledgeIds: knowledgeBase ? [knowledgeBase.id] : [],
-        attachments: draftHandoffAttachments(uploaded, messages),
+        // The file being changed is the document itself, not a source beside it.
+        attachments: draftHandoffAttachments(uploaded, messages).filter(
+          (file) => file.attachmentId !== editTarget?.attachmentId,
+        ),
         chatContext: draftHandoffChatContext(messages),
+        editTarget,
       };
       setPendingHandoff(null);
       onSendToDrafts(request);
@@ -2135,8 +2070,48 @@ export function ChatWorkspace({
   }
 
   function removeAttachment(id: string) {
+    const removed = stagedAttachmentsRef.current.find((item) => item.localId === id);
     setAttachments((prev) => prev.filter((item) => item.localId !== id));
     setUploadError(null);
+    if (removed?.id) takeBackAttachment(removed.id);
+  }
+
+  /** A file uploaded to be viewed and never sent has no chat to go with, so
+   * nothing else would ever remove it. Best effort: a saved copy is harmless
+   * to the person, and the server refuses a file a chat holds. */
+  function takeBackAttachment(attachmentId: string) {
+    void deleteChatAttachment(data.me.id, attachmentId).catch(() => undefined);
+  }
+
+  /** A staged file opens like a sent one, which takes an uploaded copy. It stays
+   * staged, and sending uses that copy instead of uploading again. */
+  async function viewStagedAttachment(localId: string) {
+    const staged = stagedAttachmentsRef.current.find((item) => item.localId === localId);
+    if (!staged || staged.uploadStatus === "uploading") return;
+    if (staged.id) {
+      openDocument({ kind: "attachment", attachmentId: staged.id, chunkId: null });
+      return;
+    }
+    setIsUploadingAttachments(true);
+    setUploadError(null);
+    const marked = (status: Partial<PendingAttachment>) =>
+      setAttachments((prev) => prev.map((item) => (item.localId === localId ? { ...item, ...status } : item)));
+    marked({ uploadStatus: "uploading", uploadError: undefined });
+    try {
+      const [uploaded] = await uploadPendingAttachments([staged]);
+      if (!stagedAttachmentsRef.current.some((item) => item.localId === localId)) {
+        if (uploaded.id) takeBackAttachment(uploaded.id);
+        return;
+      }
+      marked({ ...uploaded, file: undefined, uploadStatus: "ready" });
+      if (uploaded.id) openDocument({ kind: "attachment", attachmentId: uploaded.id, chunkId: null });
+    } catch (error) {
+      const message = readableError(error, "Could not upload the attachment.");
+      setUploadError(message);
+      marked({ uploadStatus: "error", uploadError: message });
+    } finally {
+      setIsUploadingAttachments(false);
+    }
   }
 
   function openFilePicker() {
@@ -2380,7 +2355,7 @@ export function ChatWorkspace({
     setAttachments(stagedAttachments);
     setUploadError(null);
     setSelectedToolIds([]);
-    setCommandToken(null);
+    clearCommandToken();
     setPendingToolApproval(null);
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -2405,10 +2380,36 @@ export function ChatWorkspace({
     !isImproving &&
     !isComposerExpanded &&
     !isUploadingAttachments &&
+    !attachments.some(isArrivingAttachment) &&
     !pendingHandoff;
   const canOpenSendOptions =
     chat.enabledModels.length > 0 && !isSending && !isUploadingAttachments && !isComposerExpanded;
   const hasDraftText = draft.trim().length > 0;
+
+  /** Each tile reports what is switched on inside it, since its list is out of sight. */
+  const knowledgeBlocks = attachments.filter((attachment) => attachment.source_type === "knowledge");
+  const baseBlocks = knowledgeBlocks.filter((attachment) => attachment.kind === "Knowledge").length;
+  const resourcesInUse: Partial<Record<ResourceSection, number>> = {
+    "Knowledge bases": (composerTools.Knowledge && selectedKnowledgeBaseId ? 1 : 0) + baseBlocks,
+    "Files in knowledge sources": knowledgeBlocks.length - baseBlocks,
+    "MCP connections": selectedToolIds.length,
+    Agents: composerTools.Agent && selectedAgentId ? 1 : 0,
+    Automations: pendingAutomations.length,
+  };
+
+  function searchResources(query: string) {
+    setShortcutQuery(query);
+    setResourceView(query ? "all" : "tiles");
+  }
+
+  function showResourceTiles() {
+    const leaving = resourceView;
+    setShortcutQuery("");
+    setResourceView("tiles");
+    requestAnimationFrame(() => {
+      sendMenuRef.current?.querySelector<HTMLElement>(`[data-resource-tile="${leaving}"]`)?.focus();
+    });
+  }
 
   function toggleComposerTool(tool: keyof ComposerTools) {
     setComposerTools((current) => {
@@ -2487,29 +2488,18 @@ export function ChatWorkspace({
       {attachments.length > 0 && (
         <div className="attach-tray">
           {attachments.map((file) => (
-            <span className={`attach-chip ${file.uploadStatus ? `is-${file.uploadStatus}` : ""}`} key={file.localId}>
-              <span className={`file-icon ${fileIconClass(file.kind)}`}>{file.kind[0]?.toUpperCase() ?? "F"}</span>
-              <span className="attach-chip-text">
-                <strong>{file.name}</strong>
-                <small>
-                  {file.size} · {file.kind}
-                  {file.uploadStatus === "uploading"
-                    ? isMediaUploadFile(file.file ?? { name: file.name, type: file.mime_type ?? "" })
-                      ? " · Uploading and transcribing"
-                      : " · Uploading"
-                    : ""}
-                  {file.uploadStatus === "error" ? " · Upload failed" : ""}
-                </small>
-              </span>
-              <button
-                type="button"
-                aria-label={`Remove ${file.name}`}
-                data-tooltip={`Remove ${file.name} from this message before sending`}
-                onClick={() => removeAttachment(file.localId)}
-              >
-                <X size={14} />
-              </button>
-            </span>
+            <ComposerFileBlock
+              key={file.localId}
+              name={file.name}
+              kind={file.kind}
+              detail={stagedAttachmentDetail(file)}
+              status={file.uploadStatus}
+              canOpen={file.uploadStatus !== "uploading"}
+              openHint={`See ${file.name} as it opens from a citation`}
+              removeHint={`Remove ${file.name} from this message before sending`}
+              onOpen={() => void viewStagedAttachment(file.localId)}
+              onRemove={() => removeAttachment(file.localId)}
+            />
           ))}
         </div>
       )}
@@ -2646,96 +2636,24 @@ export function ChatWorkspace({
       )}
 
       {commandMenuVisible && commandToken && (
-        <div
-          className="composer-command-menu"
-          id={commandListId}
-          role="listbox"
-          aria-label={`${COMMAND_MENU_TITLES[commandToken.symbol]} commands`}
+        <ComposerCommandMenu
+          menuRef={commandMenuRef}
+          listId={commandListId}
+          label={`${COMMAND_MENU_TITLES[commandToken.symbol]} commands`}
+          items={commandItems}
+          activeIndex={commandIndex}
+          iconFor={commandItemIcon}
+          onHighlight={setCommandIndex}
+          onPick={applyCommandItem}
         >
-          {commandSections.map((section) => (
-            <Fragment key={section.title}>
-              <span className="composer-command-section">{section.title}</span>
-              {section.items.map((item) => {
-                const index = commandItems.indexOf(item);
-                const Icon =
-                  item.kind === "knowledge-base"
-                    ? BookOpen
-                    : item.kind === "knowledge-file"
-                      ? FileText
-                      : item.kind === "prompt"
-                        ? ScrollText
-                        : item.kind === "mcp-tool"
-                          ? Plug
-                          : item.kind === "skill"
-                            ? Sparkles
-                            : item.kind === "automation"
-                              ? Play
-                              : Bot;
-                return (
-                  <button
-                    key={item.id}
-                    id={`${commandListId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === commandIndex}
-                    className={`composer-command-item ${index === commandIndex ? "is-active" : ""}`}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onMouseEnter={() => setCommandIndex(index)}
-                    onClick={() => applyCommandItem(item)}
-                  >
-                    <Icon size={15} />
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>{item.detail}</small>
-                    </span>
-                  </button>
-                );
-              })}
-            </Fragment>
-          ))}
-          {commandToken.symbol === "#" && commandItems.some((item) => item.kind === "knowledge-file") && (
-            <span className="composer-command-hint">Choosing a file references it in your prompt and searches its knowledge source.</span>
+          {commandToken.symbol === "#" ? (
+            <KnowledgeMenuStatus files={knowledgeFiles} itemCount={commandItems.length} query={commandToken.query} />
+          ) : (
+            commandItems.length === 0 && (
+              <span className="composer-command-loading">{emptyCommandText(commandToken, data.connectors)}</span>
+            )
           )}
-          {commandToken.symbol === "#" && knowledgeDocsStatus === "loading" && (
-            <span className="composer-command-loading">Loading files…</span>
-          )}
-          {commandToken.symbol === "#" && knowledgeDocsError && (
-            <span className="composer-command-loading" role="status">
-              Some files could not be loaded.{' '}
-              <button
-                className="link-button"
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setKnowledgeDocsReload((current) => current + 1)}
-              >
-                Retry
-              </button>
-            </span>
-          )}
-          {commandItems.length === 0 && (!knowledgeCommandOpen || knowledgeDocsStatus !== "loading") && (!knowledgeCommandOpen || !knowledgeDocsError) && (
-            <span className="composer-command-loading">
-              {commandToken.query.trim() ? "No matching commands. Try another name." : commandToken.symbol === "#"
-                ? "No knowledge bases are enabled yet — add one under Knowledge"
-                : commandToken.symbol === "/"
-                  ? !connectorEnabled(data.connectors, "prompt-library") && !connectorEnabled(data.connectors, "mcp")
-                    ? "The Prompt Library and MCP servers are turned off for this workspace"
-                    : !connectorEnabled(data.connectors, "prompt-library")
-                      ? "The Prompt Library is turned off for this workspace — no MCP connections are enabled yet"
-                      : !connectorEnabled(data.connectors, "mcp")
-                        ? "MCP servers are turned off for this workspace — no saved prompts yet"
-                        : "No saved prompts or enabled MCP connections yet — add them under Tools"
-                  : commandToken.symbol === "$"
-                    ? "No skill files saved yet — create one under Tools"
-                    : commandToken.symbol === ">"
-                      ? "No automations yet — create one under Automations"
-                      : "No agent profiles available yet — create one under Agents"}
-            </span>
-          )}
-          <span className="composer-command-hint" aria-hidden="true">
-            ↑↓ navigate · Enter insert
-            {commandItems.length === 1 ? " · Tab complete" : ""} · Esc dismiss
-          </span>
-        </div>
+        </ComposerCommandMenu>
       )}
       <textarea
         ref={textareaRef}
@@ -2748,14 +2666,17 @@ export function ChatWorkspace({
         value={draft}
         onChange={(event) => {
           setDraft(event.target.value);
-          updateCommandTokenFromTextarea(event.target);
+          updateCommandToken(event.target);
         }}
-        onSelect={(event) => updateCommandTokenFromTextarea(event.currentTarget)}
-        onBlur={() => setCommandToken(null)}
+        onSelect={(event) => updateCommandToken(event.currentTarget)}
+        onBlur={() => clearCommandToken()}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
           if (event.key === "Escape") setSendMenuOpen(false);
-          if (handleCommandMenuKey(event)) return;
+          if (handleCommandKey(event, commandItems.length, (index) => {
+            const item = commandItems[index];
+            if (item) applyCommandItem(item);
+          })) return;
           if (event.key === "Enter" && !event.shiftKey && !isComposerExpanded) {
             event.preventDefault();
             void submitDraft();
@@ -2947,7 +2868,7 @@ export function ChatWorkspace({
             aria-haspopup="dialog"
             aria-expanded={sendMenuOpen}
             disabled={!canOpenSendOptions}
-            onClick={() => { setCommandToken(null); setSendMenuOpen((open) => !open); }}
+            onClick={() => { clearCommandToken(); setSendMenuOpen((open) => !open); }}
           >
             <ChevronDown size={16} />
           </button>
@@ -2955,206 +2876,127 @@ export function ChatWorkspace({
           {!isComposerExpanded && sendMenuOpen && createPortal(
             <div className="send-options-menu composer-options-panel" role="dialog" aria-label="Send options" tabIndex={-1} ref={sendMenuRef}>
               <div className="composer-options-heading"><strong>Send options</strong>
-                <button type="button" className="icon-button" aria-label="Close send options" onClick={() => setSendMenuOpen(false)}><X size={16} /></button></div>
-              <div className="composer-options-tabs" role="group" aria-label="Options sections">
-                <button type="button" aria-pressed={sendMenuTab === "settings"} onClick={() => setSendMenuTab("settings")}>Reply settings</button>
-                <button type="button" aria-pressed={sendMenuTab === "resources"} onClick={() => setSendMenuTab("resources")}>Resources</button>
-              </div>
+                <button type="button" className="icon-button" aria-label="Close send options" onClick={() => setSendMenuOpen(false)}><X size={18} /></button></div>
+              <RailSwitch block className="composer-options-rail" ariaLabel="Options sections" options={SEND_MENU_TABS} value={sendMenuTab} onChange={setSendMenuTab} />
+              <div className="composer-options-body" key={sendMenuTab}>
               {sendMenuTab === "settings" ? <div role="menu" aria-label="Reply settings">
-              <button
-                type="button"
-                role="menuitem"
-                className="send-option"
-                data-tooltip="Send your message now with the current composer settings"
-                disabled={!canSend}
-                onClick={() => void submitDraft()}
-              >
-                <Send size={16} />
-                <span>
-                  <strong>Send now</strong>
-                  <small>Use the current composer settings.</small>
-                </span>
-              </button>
-              <div className="attach-menu-divider" />
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={composerTools.Knowledge}
-                aria-haspopup="true"
-                aria-expanded={composerTools.Knowledge && knowledgePickerOpen}
-                className="send-option"
-                data-tooltip={
-                  composerTools.Knowledge
-                    ? "Stop using workspace knowledge sources for this reply"
-                    : "Ground this reply in your connected workspace knowledge"
-                }
-                disabled={enabledKnowledgeBases.length === 0}
-                onClick={toggleKnowledgeTool}
-              >
-                {composerTools.Knowledge ? <Check size={16} /> : <BookOpen size={16} />}
-                <span>
-                  <strong>Knowledge</strong>
-                  <small>
-                    {composerTools.Knowledge && selectedKnowledgeBase
-                      ? `${selectedKnowledgeBase.name} selected.`
-                      : "Use connected workspace sources."}
-                  </small>
-                </span>
-              </button>
-              {composerTools.Knowledge && knowledgePickerOpen && (
-                <KnowledgeSourcePicker
-                  knowledgeBases={enabledKnowledgeBases}
-                  selectedKnowledgeBaseId={selectedKnowledgeBase?.id ?? selectedKnowledgeBaseId}
-                  onSelect={setSelectedKnowledgeBaseId}
-                />
-              )}
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={composerTools.Web}
-                className="send-option"
-                disabled={!webSearchAvailable}
-                data-tooltip={
-                  webSearchAvailable
-                    ? composerTools.Web
-                      ? "Turn off public web search for this reply"
-                      : "Let the model search the public web for current information"
-                    : "Web search is turned off for this model by your workspace configuration"
-                }
-                onClick={() => toggleComposerTool("Web")}
-              >
-                {composerTools.Web ? <Check size={16} /> : <Globe2 size={16} />}
-                <span>
-                  <strong>Web</strong>
-                  <small>
-                    {composerTools.Web ? "Use public web search for this reply." : "Search current public web sources."}
-                  </small>
-                </span>
-              </button>
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={composerTools.Agent}
-                className="send-option"
-                data-tooltip={
-                  composerTools.Agent
-                    ? "Turn off agent mode and reply with the base model"
-                    : "Let an agent profile use its tools to answer this reply"
-                }
-                onClick={() => toggleComposerTool("Agent")}
-              >
-                {composerTools.Agent ? <Check size={16} /> : <Bot size={16} />}
-                <span>
-                  <strong>Agent</strong>
-                  <small>{selectedAgent ? selectedAgent.name : "Use enabled tools for this reply."}</small>
-                </span>
-              </button>
-              {composerTools.Agent && (
-                <div className="agent-profile-picker" role="group" aria-label="Agent profile">
-                  <label>
-                    Agent profile
-                    <SelectControl
-                      value={selectedAgentId ?? ""}
-                      data-tooltip="Choose which agent profile handles your next reply"
-                      onChange={(event) => setSelectedAgentId(event.target.value || null)}
-                    >
-                      {agentProfiles.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name}
-                        </option>
-                      ))}
-                      {lockedHermesAgents.map((agent) => (
-                        <option key={agent.id} value={agent.id} disabled>
-                          {agent.name} (needs Hermes approval)
-                        </option>
-                      ))}
-                    </SelectControl>
-                  </label>
-                  {selectedAgent ? (
-                    <small>
-                      {modelKnowledgeIds(selectedAgent).length} knowledge ·{" "}
-                      {agentKnowledgeDocumentCount(data, selectedAgent)} files · {modelToolIds(selectedAgent).length}{" "}
-                      tools
-                      {selectedAgent.agentic_companion === "hermes" ? " · Hermes" : ""}
-                    </small>
-                  ) : (
-                    <small>Create an agent profile in Agents to enable this mode.</small>
+                <h3 className="composer-options-group-title">Use in this chat</h3>
+                <div className="composer-option-group">
+                  <ToolSwitch
+                    icon={BookOpen}
+                    label="Knowledge"
+                    detail={knowledgeOptionDetail({ available: enabledKnowledgeBases.length > 0, on: composerTools.Knowledge, baseName: selectedKnowledgeBase?.name })}
+                    checked={composerTools.Knowledge}
+                    disabled={enabledKnowledgeBases.length === 0}
+                    expanded={composerTools.Knowledge && knowledgePickerOpen}
+                    onToggle={toggleKnowledgeTool}
+                  />
+                  {composerTools.Knowledge && knowledgePickerOpen && (
+                    <KnowledgeSourcePicker
+                      knowledgeBases={enabledKnowledgeBases}
+                      selectedKnowledgeBaseId={selectedKnowledgeBase?.id ?? selectedKnowledgeBaseId}
+                      onSelect={setSelectedKnowledgeBaseId}
+                    />
+                  )}
+                  <ToolSwitch
+                    icon={Globe2}
+                    label="Web"
+                    detail={webOptionDetail(webSearchAvailable)}
+                    checked={composerTools.Web}
+                    disabled={!webSearchAvailable}
+                    onToggle={() => toggleComposerTool("Web")}
+                  />
+                  <ToolSwitch
+                    icon={Bot}
+                    label="Agent"
+                    detail={agentOptionDetail(composerTools.Agent ? selectedAgent?.name : undefined)}
+                    checked={composerTools.Agent}
+                    onToggle={() => toggleComposerTool("Agent")}
+                  />
+                  {composerTools.Agent && (
+                    <div className="agent-profile-picker" role="group" aria-label="Agent profile">
+                      <label>
+                        Agent profile
+                        <SelectControl
+                          value={selectedAgentId ?? ""}
+                          data-tooltip="Choose which agent profile handles your next reply"
+                          onChange={(event) => setSelectedAgentId(event.target.value || null)}
+                        >
+                          {agentProfiles.map((agent) => (
+                            <option key={agent.id} value={agent.id}>
+                              {agent.name}
+                            </option>
+                          ))}
+                          {lockedHermesAgents.map((agent) => (
+                            <option key={agent.id} value={agent.id} disabled>
+                              {agent.name} (needs Hermes approval)
+                            </option>
+                          ))}
+                        </SelectControl>
+                      </label>
+                      {selectedAgent ? (
+                        <small>
+                          {modelKnowledgeIds(selectedAgent).length} knowledge ·{" "}
+                          {agentKnowledgeDocumentCount(data, selectedAgent)} files · {modelToolIds(selectedAgent).length}{" "}
+                          {modelToolIds(selectedAgent).length === 1 ? "tool" : "tools"}
+                          {selectedAgent.agentic_companion === "hermes" ? " · Hermes" : ""}
+                        </small>
+                      ) : (
+                        <small>Create an agent profile in Agents to enable this mode.</small>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-              <div className="attach-menu-divider" />
-              <div className="send-menu-reasoning" role="group" aria-label="Reasoning level">
-                <span className="send-menu-reasoning-label">Reasoning</span>
-                <ReasoningSlider
-                  level={reasoningLevel}
-                  supported={reasoningSupported}
-                  modelName={reasoningTargetModel?.name ?? "This model"}
-                  onChange={updateReasoningLevel}
-                />
-              </div>
-              <label
-                className="send-menu-stream"
-                data-tooltip={
-                  streamResponses
-                    ? "Show each reply only after it finishes"
-                    : "Write replies onto the page live as the model streams them"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={streamResponses}
-                  onChange={toggleStreamResponses}
-                />
-                <span>Stream replies</span>
-              </label>
-              <button type="button" className="send-option composer-browse-resources" onClick={() => { setSendMenuTab("resources"); setShortcutSection("MCP connections"); }}>
-                <Plug size={16} /><span><strong>MCP connections and resources</strong><small>Choose individual connections, prompts, agents, knowledge, skills, and automations.</small></span><ChevronRight size={16} />
-              </button>
+                <h3 className="composer-options-group-title">Reply style</h3>
+                <div className="composer-option-group">
+                  <div className="composer-option-row is-stacked" role="group" aria-label="Reasoning level">
+                    <OptionCopy
+                      icon={Brain}
+                      title="Reasoning"
+                      detail={reasoningHelp(reasoningLevel, reasoningSupported, reasoningTargetModel?.name ?? "This model")}
+                    />
+                    <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
+                  </div>
+                  <StreamSwitch checked={streamResponses} onToggle={toggleStreamResponses} />
+                </div>
               </div> : <div className="composer-options-resources">
-                <input aria-label="Find a resource" placeholder="Search resources by name…" value={shortcutQuery}
-                  onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
-                  onChange={(event) => { setShortcutQuery(event.target.value); setShortcutSection(""); }} />
-                <div className="composer-shortcut-filters" aria-label="Resource categories">
-                  {["", "Knowledge bases", "Files in knowledge sources", "MCP connections", "Prompts", "Agents", "Skill files", "Automations"].map((section) => (
-                    <button type="button" key={section} aria-pressed={shortcutSection === section} onClick={() => setShortcutSection(section)}>{section || "All"}</button>
-                  ))}
-                </div>
-                <div className="composer-resource-results">
-                  {commandSections.map((section) => <section key={section.title} aria-label={section.title}>
-                    <h3 className="composer-command-section">{section.title}</h3>
-                    {section.items.map((item) => {
-                      const selected = item.kind === "mcp-tool" ? selectedToolIds.includes(item.tool.id)
-                        : item.kind === "automation" ? pendingAutomations.some((entry) => entry.id === item.automation.id)
-                        : item.kind === "agent" ? composerTools.Agent && selectedAgentId === item.agent.id
-                        : item.kind === "knowledge-base" ? composerTools.Knowledge && selectedKnowledgeBaseId === item.base.id : false;
-                      const toggleable = item.kind === "mcp-tool" || item.kind === "automation";
-                      return <button type="button" className="composer-command-item" key={item.id}
-                        aria-pressed={toggleable || item.kind === "agent" || item.kind === "knowledge-base" ? selected : undefined}
-                        onClick={() => {
-                          if (selected && item.kind === "mcp-tool") setSelectedToolIds((ids) => ids.filter((id) => id !== item.tool.id));
-                          else if (selected && item.kind === "automation") setPendingAutomations((entries) => entries.filter((entry) => entry.id !== item.automation.id));
-                          else applyCommandItem(item);
-                        }}>
-                        {selected ? <Check size={16} /> : item.kind === "mcp-tool" ? <Plug size={16} /> : item.kind === "agent" ? <Bot size={16} /> : <BookOpen size={16} />}
-                        <span><strong>{item.name}</strong><small>{item.detail}</small></span>
-                      </button>;
-                    })}
-                  </section>)}
-                  {knowledgeCommandOpen && knowledgeDocsStatus === "loading" && <p role="status">Loading knowledge files…</p>}
-                  {knowledgeCommandOpen && knowledgeDocsError && <button type="button" className="link-button" onClick={() => setKnowledgeDocsReload((value) => value + 1)}>Retry loading knowledge files</button>}
-                  {commandItems.length === 0 && <p role="status">No matching resources available.</p>}
-                </div>
-                <div className="composer-shortcut-guide" role="group" aria-label="Type shortcuts in chat">
-                  <p>Type a symbol directly in the chat message box, then choose a resource. Add its name to narrow the list.</p>
-                  <dl>
-                    {COMPOSER_SHORTCUTS.map(({ symbol, label }) => (
-                      <div key={symbol}><dt><code>{symbol}</code></dt><dd>{label}</dd></div>
-                    ))}
-                  </dl>
-                  <p className="composer-shortcut-example">For example, type <code>@</code> in chat to find an agent.</p>
-                </div>
+                <ResourceSearch value={shortcutQuery} onChange={searchResources} />
+                {resourceView === "tiles" ? <ResourceTiles inUse={resourcesInUse} onOpen={setResourceView} /> : <>
+                  <ResourceListHeader title={resourceViewTitle(resourceView, shortcutQuery)} focusBack={!shortcutQuery} onBack={showResourceTiles} />
+                  <div className="composer-resource-results">
+                    {commandSections.map((section) => <section key={section.title} aria-label={resourceSectionLabel(section.title)}>
+                      {resourceView === "all" && <h3 className="composer-command-section">{resourceSectionLabel(section.title)}</h3>}
+                      {section.items.map((item) => {
+                        const selected = item.kind === "mcp-tool" ? selectedToolIds.includes(item.tool.id)
+                          : item.kind === "automation" ? pendingAutomations.some((entry) => entry.id === item.automation.id)
+                          : item.kind === "agent" ? composerTools.Agent && selectedAgentId === item.agent.id
+                          : item.kind === "knowledge-base" ? composerTools.Knowledge && selectedKnowledgeBaseId === item.base.id : false;
+                        const toggleable = item.kind === "mcp-tool" || item.kind === "automation";
+                        const ItemIcon = selected ? Check : resourceSectionIcon(item.section);
+                        return <button type="button" className="composer-command-item" key={item.id}
+                          aria-pressed={toggleable || item.kind === "agent" || item.kind === "knowledge-base" ? selected : undefined}
+                          onClick={() => {
+                            if (selected && item.kind === "mcp-tool") setSelectedToolIds((ids) => ids.filter((id) => id !== item.tool.id));
+                            else if (selected && item.kind === "automation") setPendingAutomations((entries) => entries.filter((entry) => entry.id !== item.automation.id));
+                            else applyCommandItem(item);
+                          }}>
+                          <ItemIcon size={18} />
+                          <span><strong>{item.name}</strong><small>{item.detail}</small></span>
+                        </button>;
+                      })}
+                    </section>)}
+                    {knowledgeCommandOpen && knowledgeFiles.status === "loading" && <p role="status">Loading knowledge files…</p>}
+                    {knowledgeCommandOpen && knowledgeFiles.failed && <button type="button" className="link-button" onClick={knowledgeFiles.retry}>Retry loading knowledge files</button>}
+                    {commandItems.length === 0 && <p role="status">No matching resources available.</p>}
+                  </div>
+                </>}
+                <ShortcutGuide shortcuts={COMPOSER_SHORTCUTS} />
               </div>}
-              <p className="composer-options-footer">Enter sends · Shift + Enter adds a line</p>
+              </div>
+              <div className="composer-options-footer">
+                <small>Enter sends · Shift + Enter adds a line</small>
+                <button type="button" className="primary-button" disabled={!canSend} onClick={() => void submitDraft()}><Send size={16} /> Send now</button>
+              </div>
             </div>, document.body
           )}
         </div>
@@ -3447,6 +3289,11 @@ export function ChatWorkspace({
                     brandName={assistantBrandName}
                     brandIconSources={assistantIconSources}
                     carriesConversation={hasMessages}
+                    editFileName={
+                      pendingHandoff.kind === "edit"
+                        ? (editableAttachment(pendingHandoff.attachments, pendingHandoff.text) ?? threadEditableAttachment(messages))?.name ?? null
+                        : null
+                    }
                     nudged={handoffNudged}
                     chatDisabled={isSending}
                     onOpenDrafts={() => void openPendingHandoffInDrafts()}
@@ -3581,7 +3428,7 @@ export function ChatWorkspace({
 /** The inline "Drafts or chat?" offer that answers a held document or deck
  * request. It reads as the assistant's reply, not a dialog. */
 /** What the handoff card says for each Drafts editor. */
-const HANDOFF_COPY: Record<DraftHandoffKind, {
+const HANDOFF_COPY: Record<DraftHandoffOffer, {
   announce: string;
   heading: string;
   detail: string;
@@ -3611,6 +3458,16 @@ const HANDOFF_COPY: Record<DraftHandoffKind, {
     chat: "Draft slides in chat",
     chatTooltip: "Have the assistant write out the slides here in chat",
   },
+  edit: {
+    announce: "This looks like a change to a document. Choose Drafts or chat.",
+    heading: "Edit this document in Drafts?",
+    detail: "Drafts opens the file with its formatting and makes the change right in the document, so you can see each edit. Or have the assistant answer here in chat.",
+    open: "Edit in Drafts",
+    opening: "Opening the document…",
+    openTooltip: "Open this file in Drafts and make the change there",
+    chat: "Continue in chat",
+    chatTooltip: "Send this to the assistant here in chat",
+  },
   spreadsheet: {
     announce: "This looks like a spreadsheet. Choose the spreadsheet editor in Drafts or chat.",
     heading: "Build this as a spreadsheet?",
@@ -3628,6 +3485,7 @@ function DraftHandoffCard({
   brandName,
   brandIconSources,
   carriesConversation,
+  editFileName,
   nudged,
   chatDisabled,
   onOpenDrafts,
@@ -3638,6 +3496,8 @@ function DraftHandoffCard({
   brandName: string;
   brandIconSources: readonly string[];
   carriesConversation: boolean;
+  /** The file an edit opens, named so the person knows which one. */
+  editFileName: string | null;
   nudged: boolean;
   chatDisabled: boolean;
   onOpenDrafts: () => void;
@@ -3650,12 +3510,16 @@ function DraftHandoffCard({
   const sheet = handoff.kind === "spreadsheet";
   const copy = HANDOFF_COPY[handoff.kind];
   const busy = handoff.phase !== "choosing";
-  const KindIcon = deck ? Presentation : sheet ? SheetIcon : FileText;
+  const edit = handoff.kind === "edit";
+  const KindIcon = edit ? FilePenLine : deck ? Presentation : sheet ? SheetIcon : FileText;
   const fileCount = handoff.attachments.length;
   const carried = [
     fileCount ? `${fileCount === 1 ? "Your file" : `Your ${fileCount} files`}` : "",
     carriesConversation ? "this conversation" : "",
   ].filter(Boolean);
+  const carriedNote = editFileName
+    ? `${editFileName} opens in the editor${carriesConversation ? ", and this conversation comes along" : ""}.`
+    : `${carried.join(" and ")} ${carried.length > 1 || fileCount > 1 ? "come" : "comes"} along if you pick Drafts.`.replace(/^./, (letter) => letter.toUpperCase());
   return (
     <article className={`message assistant-message draft-handoff${nudged ? " is-nudged" : ""}`} data-kind={handoff.kind}>
       <div className="avatar aperture">
@@ -3718,7 +3582,7 @@ function DraftHandoffCard({
           </div>
           {carried.length > 0 && !handoff.error && (
             <p className="draft-handoff-note">
-              {`${carried.join(" and ")} ${carried.length > 1 || fileCount > 1 ? "come" : "comes"} along if you pick Drafts.`.replace(/^./, (letter) => letter.toUpperCase())}
+              {carriedNote}
             </p>
           )}
           {handoff.error && (
@@ -4098,8 +3962,17 @@ function isImageAttachment(attachment: ChatAttachment) {
   );
 }
 
-function AttachmentChip({ attachment, userId }: { attachment: ChatAttachment; userId: string }) {
-  const anchorRef = useRef<HTMLDivElement | null>(null);
+function AttachmentChip({
+  attachment,
+  userId,
+  onOpen,
+}: {
+  attachment: ChatAttachment;
+  userId: string;
+  /** Opens the file in the document viewer; absent when it has no stored id. */
+  onOpen?: () => void;
+}) {
+  const anchorRef = useRef<HTMLElement | null>(null);
   const previewId = useId();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewIntent, setPreviewIntent] = useState(false);
@@ -4178,38 +4051,65 @@ function AttachmentChip({ attachment, userId }: { attachment: ChatAttachment; us
       }
     : undefined;
 
+  const chipClass = `file-chip ${previewUrl ? "has-image-preview" : ""} ${onOpen ? "is-openable" : ""}`;
+  const chipEvents = {
+    onPointerEnter: () => setPreviewIntent(true),
+    onPointerLeave: () => setPreviewIntent(false),
+    onFocus: () => setPreviewIntent(true),
+    onBlur: () => setPreviewIntent(false),
+    onKeyDown: (event: ReactKeyboardEvent) => {
+      if (event.key === "Escape") setPreviewIntent(false);
+    },
+  };
+  const chipBody = (
+    <>
+      {previewUrl ? (
+        <span className="file-image-thumbnail" aria-hidden="true">
+          <img src={previewUrl} alt="" onError={() => setPreviewUrl(null)} />
+        </span>
+      ) : (
+        <span className={`file-icon ${fileIconClass(attachment.kind)}`}>
+          {attachment.kind[0]?.toUpperCase() ?? "F"}
+        </span>
+      )}
+      <span>
+        <strong>{attachment.name}</strong>
+        <small>{[attachment.size, attachment.kind].filter(Boolean).join(" · ")}</small>
+      </span>
+      <FileText size={16} />
+    </>
+  );
+
   return (
     <>
-      <div
-        ref={anchorRef}
-        className={`file-chip ${previewUrl ? "has-image-preview" : ""}`}
-        tabIndex={previewUrl ? 0 : undefined}
-        aria-describedby={previewIntent && previewUrl ? previewId : undefined}
-        onPointerEnter={() => setPreviewIntent(true)}
-        onPointerLeave={() => setPreviewIntent(false)}
-        onFocus={() => setPreviewIntent(true)}
-        onBlur={() => setPreviewIntent(false)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setPreviewIntent(false);
-        }}
-      >
-        {previewUrl ? (
-          <span className="file-image-thumbnail" aria-hidden="true">
-            <img src={previewUrl} alt="" onError={() => setPreviewUrl(null)} />
-          </span>
-        ) : (
-          <span className={`file-icon ${fileIconClass(attachment.kind)}`}>
-            {attachment.kind[0]?.toUpperCase() ?? "F"}
-          </span>
-        )}
-        <span>
-          <strong>{attachment.name}</strong>
-          <small>
-            {attachment.size} · {attachment.kind}
-          </small>
-        </span>
-        <FileText size={16} />
-      </div>
+      {onOpen ? (
+        <button
+          ref={anchorRef as RefObject<HTMLButtonElement>}
+          type="button"
+          className={chipClass}
+          aria-label={`Open ${attachment.name}`}
+          aria-describedby={previewIntent && previewUrl ? previewId : undefined}
+          data-tooltip={`See ${attachment.name} as it opens from a citation`}
+          onClick={(event) => {
+            // Safari leaves focus behind on click, and closing returns it here.
+            event.currentTarget.focus();
+            onOpen();
+          }}
+          {...chipEvents}
+        >
+          {chipBody}
+        </button>
+      ) : (
+        <div
+          ref={anchorRef as RefObject<HTMLDivElement>}
+          className={chipClass}
+          tabIndex={previewUrl ? 0 : undefined}
+          aria-describedby={previewIntent && previewUrl ? previewId : undefined}
+          {...chipEvents}
+        >
+          {chipBody}
+        </div>
+      )}
       {previewIntent && previewUrl && placement
         ? createPortal(
             <div
@@ -4582,6 +4482,11 @@ function MessageBubble({
           <AttachmentChip
             attachment={attachment}
             userId={userId}
+            onOpen={
+              attachment.id && onOpenDocument
+                ? () => onOpenDocument({ kind: "attachment", attachmentId: attachment.id as string, chunkId: null })
+                : undefined
+            }
             key={attachment.id ?? attachment.name}
           />
         ))}
@@ -5040,18 +4945,22 @@ function SessionSummary({
 
   return (
     <section className="audit-list">
-      <div className="audit-heading">
-        <h3>Session summary</h3>
-      </div>
-      {rows.map(([label, detail, time]) => (
-        <div className="audit-row" key={label}>
-          <span>
-            <strong>{label}</strong>
-            <small>{detail}</small>
-          </span>
-          <time>{time}</time>
+      <div className="session-section">
+        <div className="audit-heading">
+          <h3>Session summary</h3>
         </div>
-      ))}
+        <div className="session-slab">
+          {rows.map(([label, detail, time]) => (
+            <div className="audit-row" key={label}>
+              <span>
+                <strong>{label}</strong>
+                <small>{detail}</small>
+              </span>
+              <time>{time}</time>
+            </div>
+          ))}
+        </div>
+      </div>
       <ContextWindowDetails status={contextWindowStatus} />
       {showSources && (
         <SessionSources messages={messages} focusedMessageId={focusedCitationMessageId} onOpenDocument={onOpenDocument} />

@@ -53,6 +53,35 @@ function renderSources(fields: Partial<Parameters<typeof SessionSources>[0]> = {
 }
 
 describe("source rows", () => {
+  it("opens an attached file by name, as a knowledge document opens", () => {
+    const onOpenDocument = renderSources({
+      messages: [
+        assistant("m1", [
+          citation("lease", {
+            source_name: "HOA PMA.docx",
+            attachment_id: "upload-1",
+            snippet: "Uploaded Word file (81 KB), read in full.",
+          }),
+        ]),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open HOA PMA.docx" }));
+
+    expect(onOpenDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "attachment", attachmentId: "upload-1", chunkId: null }),
+    );
+  });
+
+  it("does not say a whole file opens at a passage", () => {
+    renderSources({
+      messages: [assistant("m1", [citation("lease", { attachment_id: "upload-1" })])],
+    });
+
+    const row = screen.getByRole("button", { name: /lease\.pdf/ });
+    expect(row).toHaveAttribute("data-tooltip", "Open this document");
+  });
+
   it("opens a knowledge citation in the viewer by its ids", () => {
     const onOpenDocument = renderSources({ messages: [assistant("m1", [knowledge("handbook")])] });
     fireEvent.click(screen.getByRole("button", { name: /handbook\.pdf/ }));

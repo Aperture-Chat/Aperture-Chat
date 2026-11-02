@@ -1,0 +1,757 @@
+/* Send options: the composer's one entry point for reply settings and resources.
+   Written for people who do not live in settings screens. It stays a small card
+   beside the conversation: text never drops below 13px, touch targets stay 44px
+   or taller, and state is shown in words as well as color.
+   Follows the tactile rules in tactile-controls.css: raised keys, recessed tracks
+   and wells, a lit thumb for what is on. */
+
+.send-options-menu.composer-options-panel {
+  --option-detail: color-mix(in srgb, var(--text) 92%, var(--surface));
+  --option-icon: color-mix(in srgb, var(--muted) 78%, var(--teal));
+  --option-accent: color-mix(in srgb, var(--teal-strong) 74%, #000);
+  position: fixed;
+  inset: auto;
+  top: 12px;
+  left: 12px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  padding: 12px;
+  overflow: hidden;
+  border-radius: 14px;
+  font-size: 14px;
+}
+
+/* --teal-strong is the same dark teal in both themes, so accent text needs its own value. */
+.theme-dark .send-options-menu.composer-options-panel {
+  --option-accent: color-mix(in srgb, var(--teal) 45%, #fff);
+}
+
+.composer-options-heading {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-options-heading strong {
+  color: var(--text-strong);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.composer-options-heading .icon-button {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+
+.composer-options-heading .icon-button svg,
+.composer-option-well svg,
+.composer-resource-search > svg,
+.composer-resource-header svg,
+.composer-resource-results .composer-command-item > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.composer-options-rail.rail-switch {
+  flex: none;
+}
+
+.composer-options-panel .rail-switch-option {
+  min-height: 34px;
+  font-size: 13.5px;
+}
+
+.composer-options-panel .rail-switch:not(.is-disabled) .rail-switch-option:not(.is-active) {
+  color: var(--text);
+}
+
+/* The heading, rail, and Send now stay put; only this part scrolls. */
+.composer-options-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-inline: -4px;
+  padding: 2px 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  animation: composer-options-fade 180ms var(--ease) both;
+}
+
+@keyframes composer-options-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.composer-options-group-title {
+  margin: 8px 2px 4px;
+  color: var(--option-detail);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.composer-options-group-title:first-child {
+  margin-top: 2px;
+}
+
+/* --- Rows ------------------------------------------------------------------ */
+
+.composer-option-group {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.composer-option-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed) var(--ease);
+}
+
+.composer-option-group > .composer-option-row:not(:first-child) {
+  border-top: 1px solid var(--border);
+}
+
+/* Hover waits for a real pointer: on a phone it would stick to the last row
+   tapped and read as selected. */
+@media (hover: hover) {
+  button.composer-option-row:hover:not(:disabled),
+  label.composer-option-row:hover {
+    background: var(--surface-soft);
+  }
+
+  .composer-resource-tile:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--tactile-raised-hover);
+  }
+
+  .composer-resource-results .composer-command-item:hover {
+    background: var(--surface-soft);
+  }
+}
+
+.composer-option-row:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.composer-option-row:disabled {
+  cursor: not-allowed;
+}
+
+/* What is on carries the accent in its icon as well as its switch. */
+.composer-option-row:is([aria-checked="true"], :has(.composer-switch-input:checked)) .composer-option-well {
+  color: var(--option-accent);
+}
+
+.composer-option-row:disabled .composer-option-copy strong {
+  color: var(--muted);
+}
+
+.composer-option-row:disabled :is(.composer-option-well, .composer-switch) {
+  opacity: 0.6;
+}
+
+.composer-option-row.is-stacked {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  row-gap: 8px;
+  cursor: default;
+}
+
+.composer-option-row.is-stacked .rail-switch {
+  grid-column: 1 / -1;
+}
+
+.composer-option-well {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 9px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+  color: var(--option-icon);
+}
+
+.composer-option-copy {
+  flex: 1 1 auto;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.composer-option-copy strong {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.composer-option-copy small {
+  color: var(--option-detail);
+  font-size: 13px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* --- On/off switch: a small rail with a thumb that lights when on ---------- */
+
+.composer-switch {
+  position: relative;
+  flex: none;
+  display: block;
+  width: 56px;
+  height: 28px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 9px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-track-shadow);
+}
+
+.composer-switch b {
+  position: absolute;
+  inset: 0 0 0 23px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.composer-switch.is-on b {
+  inset: 0 23px 0 0;
+  color: var(--text-strong);
+}
+
+.composer-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+  transition: transform 200ms cubic-bezier(.2, .8, .2, 1), background 160ms ease;
+}
+
+.theme-dark .composer-switch:not(.is-on)::after {
+  background: color-mix(in srgb, var(--text) 20%, var(--surface));
+}
+
+.composer-switch.is-on::after {
+  border-color: var(--tactile-lit-border);
+  background: var(--tactile-lit);
+  box-shadow: var(--tactile-lit-shadow);
+  transform: translateX(28px);
+}
+
+/* The real checkbox stays focusable; the switch beside it shows the state. */
+.composer-switch-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  opacity: 0;
+}
+
+.composer-switch-input:focus-visible + .composer-switch {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+/* --- Pickers that open under a switch -------------------------------------- */
+
+.composer-option-group .knowledge-source-picker {
+  gap: 2px;
+  max-height: 148px;
+  margin: 0;
+  padding: 0 10px 8px 50px;
+}
+
+.composer-option-group .knowledge-source-option {
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 9px;
+}
+
+.composer-option-group .knowledge-source-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.composer-option-group .knowledge-source-name {
+  font-size: 13.5px;
+  line-height: 1.3;
+}
+
+.composer-option-group .knowledge-source-option.is-selected .knowledge-source-name {
+  color: var(--option-accent);
+}
+
+.composer-option-group .knowledge-source-option small {
+  color: var(--option-detail);
+  font-size: 13px;
+}
+
+.composer-option-group .agent-profile-picker {
+  gap: 4px;
+  padding: 0 10px 10px 50px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.composer-option-group .agent-profile-picker label {
+  gap: 4px;
+  color: var(--option-detail);
+  font-size: 13px;
+}
+
+.composer-option-group .agent-profile-picker select {
+  height: 36px;
+  font-size: 13.5px;
+}
+
+.composer-option-group .agent-profile-picker small {
+  color: var(--option-detail);
+  font-size: 13px;
+}
+
+/* --- Resources ------------------------------------------------------------- */
+
+.composer-options-resources {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-resource-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.composer-resource-search > svg {
+  position: absolute;
+  left: 12px;
+  color: var(--option-icon);
+  pointer-events: none;
+}
+
+.composer-resource-search input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px 8px 36px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 10px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.composer-resource-search input::placeholder {
+  color: var(--option-detail);
+  opacity: 1;
+}
+
+.composer-resource-search input:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.composer-resource-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 6px;
+}
+
+.composer-resource-tile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--speed) var(--ease), box-shadow var(--speed) var(--ease), transform 120ms ease;
+}
+
+.composer-resource-tile:active {
+  box-shadow: var(--tactile-pressed-row);
+  transform: translateY(1px);
+}
+
+.composer-resource-tile:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.composer-resource-tile .composer-option-well {
+  width: 28px;
+  height: 28px;
+}
+
+.composer-resource-tile .composer-option-copy strong {
+  font-size: 13.5px;
+}
+
+.composer-resource-tile .composer-option-copy small {
+  font-size: 13px;
+}
+
+.composer-resource-tile.is-active {
+  border-color: color-mix(in srgb, var(--teal) 48%, var(--tactile-track-border));
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+}
+
+.composer-resource-tile.is-active small {
+  color: var(--option-accent);
+  font-weight: 700;
+}
+
+.composer-resource-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-resource-header .secondary-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 0 12px 0 6px;
+  font-size: 13.5px;
+}
+
+.composer-resource-header h3 {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.composer-resource-results {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-resource-results section {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-resource-results .composer-command-section {
+  position: static;
+  margin: 8px 2px 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--option-detail);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.composer-resource-results section:first-child .composer-command-section {
+  margin-top: 0;
+}
+
+.composer-resource-results .composer-command-item {
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  color: var(--option-icon);
+  transition: background var(--speed) var(--ease);
+}
+
+.composer-resource-results .composer-command-item:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.composer-resource-results .composer-command-item[aria-pressed="true"] {
+  color: var(--option-accent);
+}
+
+.composer-resource-results .composer-command-item > svg {
+  flex: none;
+}
+
+.composer-resource-results .composer-command-item > span {
+  min-width: 0;
+}
+
+.composer-resource-results .composer-command-item strong {
+  font-size: 14px;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.composer-resource-results .composer-command-item small {
+  color: var(--option-detail);
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.composer-resource-results > p {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--option-detail);
+  font-size: 13.5px;
+}
+
+/* --- Typing shortcuts: folded away until someone wants them ----------------- */
+
+.composer-shortcut-guide {
+  color: var(--option-detail);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.composer-shortcut-guide summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border-radius: 8px;
+  color: var(--text-strong);
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+
+.composer-shortcut-guide summary::-webkit-details-marker {
+  display: none;
+}
+
+.composer-shortcut-guide summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 3px 0 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--speed) var(--ease);
+}
+
+.composer-shortcut-guide[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.composer-shortcut-guide summary:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.composer-shortcut-guide p {
+  margin: 6px 0 0;
+}
+
+.composer-shortcut-guide dl {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.composer-shortcut-guide dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-shortcut-guide dt {
+  flex: 0 0 30px;
+  text-align: center;
+}
+
+.composer-shortcut-guide dt code {
+  display: block;
+  border-radius: 6px;
+  background: var(--teal-soft);
+  color: var(--option-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.composer-shortcut-guide dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer-shortcut-example code {
+  color: var(--option-accent);
+  font-weight: 700;
+}
+
+/* --- Footer: the keyboard hint and the one action --------------------------- */
+
+.composer-options-footer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.composer-options-footer small {
+  color: var(--option-detail);
+  font-size: 13px;
+}
+
+.composer-options-footer .primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 13.5px;
+}
+
+/* Nothing to send yet: it must not look ready. */
+.composer-options-footer .primary-button:disabled {
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  box-shadow: none;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* A finger sets these sizes, whatever the width: phones, landscape phones, tablets. */
+@media (max-width: 600px), (pointer: coarse) {
+  .composer-options-panel .rail-switch-option,
+  .composer-options-heading .icon-button,
+  .composer-resource-header .secondary-button,
+  .composer-options-footer .primary-button,
+  .composer-option-group .knowledge-source-option,
+  .composer-shortcut-guide summary,
+  .composer-resource-search input {
+    min-height: 44px;
+  }
+
+  .composer-options-heading .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer-option-group .agent-profile-picker select {
+    height: 44px;
+  }
+
+  .composer-resource-search input {
+    font-size: 16px;
+  }
+}
+
+/* A phone has less width, so every pixel the fixed parts give up goes back to
+   the text. A description on one line is what keeps the panel short here. */
+@media (max-width: 600px) {
+  .send-options-menu.composer-options-panel {
+    padding: 10px;
+  }
+
+  .composer-option-row {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .composer-options-footer .primary-button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  .composer-option-group .knowledge-source-picker,
+  .composer-option-group .agent-profile-picker {
+    padding-inline: 8px;
+  }
+}
+
+/* Touch screens have no Shift + Enter to explain. */
+@media (pointer: coarse) {
+  .composer-options-footer {
+    justify-content: flex-end;
+  }
+
+  .composer-options-footer small {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-options-body {
+    animation: none;
+  }
+
+  .composer-switch::after,
+  .composer-shortcut-guide summary::before,
+  .composer-resource-tile {
+    transition: none;
+  }
+}

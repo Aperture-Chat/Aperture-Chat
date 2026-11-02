@@ -45,8 +45,9 @@ characters, full-width digits, and Unicode dashes cannot hide a value.
 Limits: detection does not recognize names or free-text descriptions of health
 conditions. Drafts are documents of record and are not rewritten. Uploaded files
 are stored as uploaded, and the document viewer shows them that way to anyone
-who may read the knowledge base. Only the text extracted for the model is
-concealed.
+who may read the knowledge base. A file attached to a chat is kept the same way,
+and only the person who attached it can open it. Only the text extracted for the
+model is concealed.
 
 ### Hardening of existing controls
 
@@ -59,9 +60,9 @@ The same engine now backs the earlier pattern-based controls:
   Financial preset's card and routing rules are now checksum-verified.
 - **Evasion.** Filters match on the normalized copy, so look-alike characters
   cannot slip a value past a rule.
-- **Attachments.** Attached file text is screened by the model's input filters.
-  Before this change it reached the model through the runtime prompt without
-  any screening.
+- **Attachments.** Attached file text is screened by the model's input filters,
+  every passage of it, however much of a file a turn sends. Before this change
+  it reached the model through the runtime prompt without any screening.
 - **API streams.** Streaming `/v1/chat/completions` responses now pass through
   output filters and concealment. Tool-call deltas pass through unchanged.
 - **Alerts, tagging, and memory.** DLP alerts and sensitive-data retention
