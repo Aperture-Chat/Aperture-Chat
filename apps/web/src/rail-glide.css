@@ -258,21 +258,11 @@ body.is-resizing-rail .rail-seam {
 
 .app.rail-collapsed .primary-nav .nav-item > span,
 .app.rail-collapsed .primary-nav .nav-shortcut,
-.app.rail-collapsed .utility-rows .minor-row > span:not(.console-link-count),
+.app.rail-collapsed .utility-rows .minor-row > span,
 .app.rail-collapsed .account-card > div:not(.avatar),
 .app.rail-collapsed .account-card > svg {
   opacity: 0;
   transition: opacity var(--rail-leave);
-}
-
-.app.rail-collapsed .minor-row .console-link-count {
-  display: inline-flex;
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  min-width: 16px;
-  padding: 0 4px;
-  font-size: 10px;
 }
 
 /* ---------- Chat list: the rail closes over it ---------- */
@@ -393,4 +383,40 @@ body.is-resizing-rail .rail-seam {
 .app.rail-collapsed .account-card .avatar {
   width: 36px;
   height: 36px;
+}
+
+.app:not(.is-drawer) .account-card::before {
+  transition:
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease),
+    transform var(--speed) var(--ease),
+    border-radius var(--rail-glide);
+}
+
+.app.rail-collapsed .account-card::before {
+  border-radius: 999px;
+}
+
+/* Waiting model access requests. The badge shares the avatar's grid cell, so it
+ * rides along through the glide and stays inside the collapsed circle, which
+ * clips anything further out. `.account-card span` outranks .count-badge, and
+ * plain --orange is too light behind white text this small. */
+.account-card .avatar {
+  grid-area: 1 / 1;
+}
+
+.account-card .account-card-count {
+  grid-area: 1 / 1;
+  z-index: 1;
+  display: inline-flex;
+  justify-self: end;
+  align-self: start;
+  overflow: visible;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0 4px;
+  background: color-mix(in srgb, var(--orange) 80%, black);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
 }

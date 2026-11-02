@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { loadKnowledgeDocumentBytes } from "../lib/api/knowledge";
+import { loadKnowledgeDocumentBytes, viewAddress } from "../lib/api/knowledge";
 import { layerPieces, type MarkLevel } from "../lib/documentPassage";
 import { fileFailure, type ViewerFailure } from "../lib/documentViewerFailures";
 import {
@@ -220,7 +220,7 @@ function useImageFile(userId: string, view: ViewerPaneProps["view"], attempt: nu
     const { signal } = controller;
     let url: string | null = null;
     setLoad({ status: "loading" });
-    loadKnowledgeDocumentBytes(userId, view.knowledge_config_id, view.document_id, { signal }).then(
+    loadKnowledgeDocumentBytes(userId, viewAddress(view), { signal }).then(
       (blob) => {
         if (signal.aborted) return;
         url = URL.createObjectURL(blob);

@@ -130,8 +130,13 @@ const users = {
     await admin.locator(".auth-form button[type='submit']").click();
     await admin.getByRole("navigation", { name: "Primary" }).waitFor({ timeout: 30000 });
     await admin.waitForTimeout(1500);
-    if (await admin.getByRole("button", { name: /Platform console/ }).count()) throw new Error("An admin was offered the Platform console.");
-    await admin.getByText("Admin console").first().waitFor();
+    // Consoles live in Account: an admin gets the Admin console and no owner console.
+    await admin.getByRole("button", { name: /^Account:/ }).click();
+    const account = admin.getByRole("dialog", { name: "Account" });
+    await account.getByRole("button", { name: /Admin console/ }).waitFor();
+    if (await account.getByRole("button", { name: /Platform owner console/ }).count()) throw new Error("An admin was offered the Platform console.");
+    await admin.keyboard.press("Escape");
+    await account.waitFor({ state: "hidden" });
     await shot("ur-admin-signed-in");
   },
 };

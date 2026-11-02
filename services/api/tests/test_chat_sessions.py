@@ -743,6 +743,91 @@ def test_chat_thread_save_validates_model_and_group_access() -> None:
     assert "Model access is restricted" in model_response.json()["detail"]
 
 
+def _save_jane_chat(**changes: object):
+    body = {
+        "title": "An older chat",
+        "model_id": "gpt-4.1",
+        "group_id": "group-litigation",
+        "pinned": True,
+        "messages": [],
+        **changes,
+    }
+    return client.put("/api/chat/threads/thread-older", json=body, headers=headers("user-jane"))
+
+
+def _jane_chat() -> dict:
+    listed = client.get("/api/chat/threads", headers=headers("user-jane")).json()
+    return next(thread for thread in listed if thread["id"] == "thread-older")
+
+
+def _retire_model(model_id: str) -> None:
+    store = get_store()
+    store.models[model_id] = store.models[model_id].model_copy(update={"platform_enabled": False})
+
+
+def test_a_retired_model_does_not_lock_its_chats_against_housekeeping() -> None:
+    assert _save_jane_chat().status_code == 200
+    _retire_model("gpt-4.1")
+
+    unpinned = _save_jane_chat(pinned=False)
+    assert unpinned.status_code == 200
+    assert _jane_chat()["pinned"] is False
+
+    assert _save_jane_chat(pinned=False, archived=True).status_code == 200
+    assert _jane_chat()["archived"] is True
+    assert _save_jane_chat(pinned=False, archived=False).status_code == 200
+    assert _jane_chat()["archived"] is False
+
+
+def test_a_deleted_model_does_not_lock_its_chats_against_housekeeping() -> None:
+    assert _save_jane_chat().status_code == 200
+    del get_store().models["gpt-4.1"]
+
+    assert _save_jane_chat(pinned=False).status_code == 200
+    assert _jane_chat()["pinned"] is False
+
+
+def test_leaving_a_group_does_not_lock_its_chats_against_housekeeping() -> None:
+    assert _save_jane_chat().status_code == 200
+    get_store().users["user-jane"].group_ids = ["group-finance"]
+
+    assert _save_jane_chat(pinned=False).status_code == 200
+    assert _jane_chat()["pinned"] is False
+
+
+def test_moving_a_chat_onto_a_forbidden_model_or_group_is_still_refused() -> None:
+    assert _save_jane_chat().status_code == 200
+    _retire_model("gpt-4o")
+
+    retired = _save_jane_chat(model_id="gpt-4o")
+    assert retired.status_code == 403
+    assert "Model access is restricted" in retired.json()["detail"]
+
+    unknown = _save_jane_chat(model_id="no-such-model")
+    assert unknown.status_code == 404
+
+    outside = _save_jane_chat(group_id="group-hr")
+    assert outside.status_code == 403
+    assert outside.json()["detail"] == "Chat thread group is out of scope."
+
+    assert _jane_chat()["model_id"] == "gpt-4.1"
+    assert _jane_chat()["group_id"] == "group-litigation"
+
+
+def test_an_unchanged_model_gives_no_way_into_someone_elses_chat() -> None:
+    assert _save_jane_chat().status_code == 200
+    _retire_model("gpt-4.1")
+
+    other = client.put(
+        "/api/chat/threads/thread-older",
+        json={"title": "Taken over", "model_id": "gpt-4.1", "group_id": "group-litigation", "messages": []},
+        headers=headers("user-casey"),
+    )
+    assert other.status_code == 403
+    assert other.json()["detail"] == "Chat thread is out of scope."
+    assert _jane_chat()["title"] == "An older chat"
+
+
 def test_chat_folder_crud_is_owner_scoped_and_delete_unfiles_threads() -> None:
     create_folder = client.put(
         "/api/chat/folders",

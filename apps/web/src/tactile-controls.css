@@ -32,6 +32,8 @@
   --tactile-track: var(--surface-soft);
   --tactile-track-border: var(--border-strong);
   --tactile-track-shadow: inset 0 2px 5px #0003;
+  /* The floor of a carved area big enough to hold keys of its own. */
+  --tactile-floor: var(--tactile-track);
   --tactile-raised: 0 1px 2px #0000001a, inset 0 1px 0 #ffffffb3;
   --tactile-raised-hover: 0 2px 6px #0000001f, inset 0 1px 0 #ffffffb3;
   --tactile-pressed: inset 0 2px 4px #00000029;
@@ -55,6 +57,8 @@
   --tactile-track: color-mix(in srgb, var(--surface-soft) 72%, var(--surface-sunken));
   --tactile-track-border: color-mix(in srgb, var(--border-strong) 72%, #000);
   --tactile-track-shadow: inset 0 3px 9px #000000c2, inset 0 1px 2px #000000a6, inset 0 -1px 0 #ffffff12, 0 1px 0 #ffffff0f;
+  /* The track is within a shade of --surface here, so keys would melt into it. */
+  --tactile-floor: var(--surface-sunken);
   --tactile-raised: 0 1px 2px #0000004d, inset 0 1px 0 #ffffff14;
   --tactile-raised-hover: 0 2px 6px #00000059, inset 0 1px 0 #ffffff1f;
   --tactile-pressed: inset 0 2px 6px #000000b3;
@@ -161,8 +165,7 @@
 
 .ws-segmented,
 .segmented-control,
-.status-filter,
-.composer-options-tabs {
+.status-filter {
   border: 1px solid var(--tactile-track-border);
   background: var(--tactile-track);
   box-shadow: var(--tactile-track-shadow);
@@ -201,24 +204,10 @@
   border-radius: 9px;
 }
 
-.composer-options-tabs {
-  gap: 2px;
-  padding: 3px;
-  border-radius: 12px;
-}
-
-.composer-options-tabs button {
-  flex: 1 1 0;
-  padding: 5px 10px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-}
-
 .ws-segmented button[aria-pressed="true"],
 .library-page .ws-segmented [role="tab"][aria-selected="true"],
 .segmented-control .is-active,
-.status-filter-option.is-selected,
-.composer-options-tabs button[aria-pressed="true"] {
+.status-filter-option.is-selected {
   border-color: var(--tactile-lit-border);
   background: var(--tactile-lit);
   color: #fff;
@@ -241,7 +230,6 @@
 .library-page .ws-segmented [role="tab"][aria-selected="true"] > :is(svg, span),
 .segmented-control .is-active > :is(svg, span),
 .status-filter-option.is-selected > :is(svg, span),
-.composer-options-tabs button[aria-pressed="true"] > :is(svg, span),
 .ws-chip[aria-pressed="true"] > :is(svg, span),
 .datasets-chip[aria-pressed="true"] > :is(svg, span) {
   color: inherit;
@@ -686,8 +674,6 @@
 .audit-chart-toggle,
 .training-guide-tabs,
 .date-range-filter-presets,
-.composer-shortcut-filters,
-.composer-options-panel .composer-shortcut-filters,
 .weekday-picker {
   gap: 2px;
   padding: 3px;
@@ -707,7 +693,6 @@
   .datasets-segmented,
   .audit-chart-toggle,
   .training-guide-tabs,
-  .composer-shortcut-filters,
   .weekday-picker
 ) button,
 .date-range-filter-presets .secondary-button {
@@ -727,7 +712,6 @@
   .datasets-segmented,
   .audit-chart-toggle,
   .training-guide-tabs,
-  .composer-shortcut-filters,
   .weekday-picker
 ) button:hover:not(:disabled):not([aria-pressed="true"]):not([aria-selected="true"]):not(.is-active):not(.is-selected),
 .date-range-filter-presets .secondary-button:hover:not(:disabled) {
@@ -739,7 +723,7 @@
 
 .document-assistant-page .draft-template-tabs button.is-active,
 .draft-template-tabs button.is-active,
-:is(.draft-history-filter, .deck-design-tabs, .document-image-sizes, .auth-method-switch, .datasets-segmented, .composer-shortcut-filters, .weekday-picker) button[aria-pressed="true"],
+:is(.draft-history-filter, .deck-design-tabs, .document-image-sizes, .auth-method-switch, .datasets-segmented, .weekday-picker) button[aria-pressed="true"],
 .document-assistant-page :is(.draft-history-filter, .deck-design-tabs) button[aria-pressed="true"],
 .auth-refresh .auth-method-switch button[aria-pressed="true"],
 .ai-composer-view button[aria-selected="true"],
@@ -758,7 +742,6 @@
   .document-image-sizes button[aria-pressed="true"],
   .auth-method-switch button[aria-pressed="true"],
   .datasets-segmented button[aria-pressed="true"],
-  .composer-shortcut-filters button[aria-pressed="true"],
   .weekday-picker button[aria-pressed="true"],
   .ai-composer-view button[aria-selected="true"],
   .audit-chart-toggle button.is-selected,
@@ -961,14 +944,9 @@ span.mini-avatar.avatar-initials,
 .model-option.is-selected,
 .apx-select-option.is-selected,
 .knowledge-source-option.is-selected,
-.send-option[aria-checked="true"],
 .composer-resource-results .composer-command-item[aria-pressed="true"] {
   background: var(--tactile-track);
   box-shadow: var(--tactile-pressed-row);
-}
-
-.send-option[aria-checked="true"] strong {
-  color: var(--teal-strong);
 }
 
 /* --- Pressed toggles in dense toolbars: the key stays pressed in ------------------------------- */
@@ -1190,8 +1168,11 @@ span.mini-avatar.avatar-initials,
   width: 100%;
 }
 
+/* The global `*` border-box rule does not reach pseudo-elements. As content-box the
+   thumb ran 2px wider than a stop, so each step overshot and the last one left the rail. */
 .rail-switch::before {
   content: "";
+  box-sizing: border-box;
   position: absolute;
   z-index: -1;
   top: 4px;
@@ -1264,6 +1245,18 @@ span.mini-avatar.avatar-initials,
 
 .rail-switch-option.is-active .rail-switch-count {
   background: #ffffff2e;
+}
+
+/* A locked rail still shows its current stop, without the lit "on" look. */
+.rail-switch.is-disabled::before {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.rail-switch.is-disabled .rail-switch-option {
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .rail-switch.is-block .rail-switch-option {
@@ -1379,4 +1372,145 @@ span.mini-avatar.avatar-initials,
 
 .feedback-note-composer:focus-within {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* --- Carved trays: a panel is a raised chassis, its content sits in one recessed tray --------------- */
+
+/* The chassis holds still. Its header and footer stay on the raised surface and
+   the tray takes the height between them, scrolling on its own. */
+:is(.utility-drawer, .modal):has(> .carved-tray) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.utility-drawer:has(> .carved-tray) {
+  padding: 12px;
+}
+
+.utility-drawer:has(> .carved-tray) > header {
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+  padding-block: 2px 0;
+}
+
+.carved-tray {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: var(--radius);
+  background: var(--tactile-floor);
+}
+
+/* The rim's shadow is a layer above the rows, so they slide under the lip. A
+   shadow on the tray itself would disappear behind the first row that reaches it. */
+.carved-tray::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: -1px;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  box-shadow: var(--tactile-track-shadow);
+  pointer-events: none;
+}
+
+.carved-tray-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  border-radius: inherit;
+  /* The scrollbar's gutter is most of the right-hand margin. */
+  padding: 10px 4px 10px 10px;
+  scrollbar-gutter: stable;
+  outline: none;
+}
+
+/* Touch screens overlay their scrollbar and leave no gutter. */
+@media (pointer: coarse) {
+  .carved-tray-scroll {
+    padding-inline: 10px;
+  }
+}
+
+/* What you press stands raised on the floor. */
+.carved-tray :is(.drawer-row, .guide-pdf-download) {
+  box-shadow: var(--tactile-raised);
+}
+
+.carved-tray :is(.drawer-row, .guide-pdf-download):hover {
+  box-shadow: var(--tactile-raised-hover);
+}
+
+.carved-tray :is(.drawer-row, .guide-pdf-download):active {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+/* The tray narrows a row, and a lesson's name is the one thing not to cut off. */
+.carved-tray .user-guide-row strong {
+  white-space: normal;
+}
+
+/* What you only read lies on the floor, so a raised edge always means pressable. */
+.carved-tray .drawer-card {
+  border-color: transparent;
+  background: transparent;
+  padding: 2px 4px;
+}
+
+.carved-tray .guide-pdf-download {
+  margin-top: 0;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+/* A form is a slab on the floor, so its own carved fields have something to be cut into. */
+.carved-tray .issue-report-form {
+  background: var(--surface);
+  box-shadow: var(--tactile-slab);
+  padding: 12px;
+}
+
+/* Stops stay equal widths for the sliding thumb, so "Slows me down" sets the budget. */
+.carved-tray .issue-report-form .rail-switch.is-block .rail-switch-option {
+  padding-inline: 4px;
+}
+
+.carved-tray .owner-doc-grid {
+  margin-top: 12px;
+}
+
+.modal:has(> .carved-tray) > .carved-tray {
+  margin-top: 14px;
+}
+
+.modal:has(> .carved-tray) > .modal-foot {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  border-top: 0;
+  padding-top: 0;
+}
+
+@media (max-width: 640px) {
+  /* Full-height on a phone, so the tray's bottom rim must clear the home bar. */
+  .utility-drawer:has(> .carved-tray) {
+    padding: 12px 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  /* Height is scarce here. The icon is decoration, and dropping it lets the
+     heading take the full width, which leaves more of the screen to the tray. */
+  .modal:has(> .carved-tray) {
+    padding: 14px 12px 12px;
+  }
+
+  .modal:has(> .carved-tray) > .modal-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .modal:has(> .carved-tray) > .modal-head > .modal-icon {
+    display: none;
+  }
 }

@@ -20,6 +20,7 @@ from app.routes import (
     admin,
     agents,
     assets,
+    attachment_documents,
     auth,
     automations,
     bootstrap,
@@ -230,6 +231,7 @@ app.include_router(platform.router)
 app.include_router(platform_updates.router)
 app.include_router(admin.router)
 app.include_router(data_protection.router)
+app.include_router(attachment_documents.router)
 app.include_router(chat.router)
 app.include_router(issue_reports.router)
 app.include_router(support.router)

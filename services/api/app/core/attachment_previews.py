@@ -2,9 +2,11 @@
 
 Chat attachment metadata lives in the application store, while bounded image
 previews live beside ``runtime_state.json`` on the same persistent data volume.
-The original upload is never exposed directly: Pillow decodes, orients, strips
-metadata from, resizes, and re-encodes the first frame as WebP. Preview routes
-still enforce the attachment's normal owner and tenant scope.
+A preview is never the original upload: Pillow decodes, orients, strips metadata
+from, resizes, and re-encodes the first frame as WebP. Preview routes still
+enforce the attachment's normal owner and tenant scope. The original is kept
+separately (``attachment_documents``) and goes to the model only as text; a
+preview is what image-capable models see.
 """
 
 from __future__ import annotations
@@ -84,9 +86,8 @@ def save_attachment_preview(attachment_id: str, content: bytes, mime_type: str) 
 def delete_attachment_preview(attachment_id: str) -> None:
     """Remove a stored preview file; a missing file is already the goal.
 
-    The preview is the only stored copy of an uploaded image, so purging the
-    attachment record without this call would leave the user's image content
-    orphaned on the data volume forever.
+    Purging the attachment record without this call would leave the user's
+    image content orphaned on the data volume forever.
     """
 
     if not attachment_id:
@@ -111,8 +112,7 @@ def attachment_preview_file(attachment_id: str) -> tuple[Path, str] | None:
 def attachment_preview_data_url(attachment_id: str) -> str | None:
     """Base64 data URL of the sanitized preview, sized for provider vision input.
 
-    The preview is the only stored copy of an uploaded image (originals are
-    never persisted), so it is also what gets sent to image-capable models.
+    Models get this rather than the original, so metadata stays out of the request.
     """
 
     resolved = attachment_preview_file(attachment_id)

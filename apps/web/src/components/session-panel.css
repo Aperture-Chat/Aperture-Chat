@@ -1,0 +1,219 @@
+/* Session details: the same object as the Account blade (account-drawer.css).
+
+   A floor one step off the slabs lets them read as raised. Titled groups of
+   hairline-divided rows sit on that floor, read-only figures and the meter sit
+   in recessed wells, and a row that opens something behaves like the blade's
+   pressable rows. The classes underneath are shared with the audit consoles, so
+   everything here stays scoped to this panel. Loaded after tactile-controls.css. */
+
+.session-panel {
+  --session-floor: var(--surface-soft);
+  --session-slab: var(--surface);
+  --session-gutter: 14px;
+  --session-inset: 12px;
+  padding: 0;
+  background: var(--session-floor);
+  /* The sticky header covers this much; a scrolled-to source lands clear of it. */
+  scroll-padding-block: 72px 12px;
+}
+
+/* Dark surfaces climb in lightness, so the floor and slab swap to stay raised. */
+.theme-dark .session-panel {
+  --session-floor: var(--surface);
+  --session-slab: var(--surface-soft);
+}
+
+.session-panel > header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 14px var(--session-gutter) 10px;
+  padding-top: max(14px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--border);
+  background: var(--session-floor);
+}
+
+.session-panel > header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.session-panel .audit-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin: 0;
+  padding: 12px var(--session-gutter) var(--session-gutter);
+  padding-bottom: max(var(--session-gutter), env(safe-area-inset-bottom));
+}
+
+.session-panel .session-section,
+.session-panel .session-sources,
+.session-panel .session-shortcuts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+/* --- Headings -------------------------------------------------------------- */
+
+.session-panel .audit-heading {
+  margin: 0;
+  padding-inline: 4px;
+}
+
+.session-panel .audit-heading h3,
+.session-panel .session-source-label,
+.session-panel .session-source-divider {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.session-panel .session-source-label,
+.session-panel .session-source-divider {
+  padding-inline: 4px;
+}
+
+/* --- Slabs ----------------------------------------------------------------- */
+
+.session-panel .session-slab,
+.session-panel .session-source-group ul,
+.session-panel .session-shortcuts dl,
+.session-panel .context-window-detail {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--session-slab);
+  box-shadow: var(--tactile-slab);
+}
+
+.session-panel .audit-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 52px;
+  padding: 8px var(--session-inset);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-panel .session-slab > .audit-row:last-child {
+  border-bottom: 0;
+}
+
+/* --- The context window ---------------------------------------------------- */
+
+.session-panel .context-window-detail {
+  display: grid;
+  gap: 8px;
+  padding: var(--session-inset);
+}
+
+.session-panel .context-window-detail.is-danger,
+.session-panel .context-window-detail.is-full {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--border));
+}
+
+.session-panel .context-window-meter {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 5px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+}
+
+.session-panel .context-window-detail:not(.is-danger, .is-full) .context-window-meter span {
+  background: var(--tactile-lit);
+}
+
+.session-panel .context-window-detail p {
+  margin: 0;
+}
+
+/* --- Sources --------------------------------------------------------------- */
+
+.session-panel .session-source-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.session-panel .session-source-group ul {
+  gap: 0;
+  padding: 0;
+}
+
+.session-panel .session-source-group li {
+  padding: 9px var(--session-inset);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.session-panel .session-source-group li:last-child {
+  border-bottom: 0;
+}
+
+.session-panel .session-source-group li.is-document {
+  padding: 0;
+}
+
+.session-panel .session-source-open {
+  padding: 9px var(--session-inset);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: background 140ms ease;
+}
+
+.session-panel .session-source-open:hover {
+  background: color-mix(in srgb, var(--session-floor) 72%, transparent);
+}
+
+.session-panel .session-source-open:active {
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+  transform: none;
+}
+
+/* Inside the row, so a slab's rounded corner cannot clip it. */
+.session-panel .session-source-open:focus-visible {
+  outline-offset: -2px;
+}
+
+.session-panel .session-source-more {
+  justify-self: start;
+  margin: 0;
+  padding-inline: 4px;
+}
+
+/* --- Shortcuts ------------------------------------------------------------- */
+
+.session-panel .session-shortcuts > p {
+  margin: 0;
+  padding-inline: 4px;
+}
+
+.session-panel .session-shortcuts dl > div {
+  padding: 8px var(--session-inset);
+}
+
+.session-panel .session-shortcuts kbd {
+  border-color: var(--tactile-track-border);
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-engraved);
+}

@@ -415,6 +415,7 @@ export function normalizeBootstrap(data: BootstrapWireData): BootstrapData {
     memoryPolicy: data.memoryPolicy,
     authoringState: data.authoringState,
     dataProtection: data.dataProtection,
+    modelAccessRequestCount: data.modelAccessRequestCount,
   };
 }
 

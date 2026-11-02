@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { getKnowledgeDocumentView, locateKnowledgeChunk } from "../lib/api/knowledge";
+import { getKnowledgeDocumentView, locateKnowledgeChunk, type DocumentAddress } from "../lib/api/knowledge";
 import type { DocumentRequest } from "../lib/citationTargets";
 import { passageWithin } from "../lib/documentPassage";
 import { requestFailure, type ViewerFailure } from "../lib/documentViewerFailures";
@@ -9,6 +9,7 @@ import type { KnowledgeDocumentTarget, KnowledgeDocumentView } from "../lib/type
 import { useModalFocus } from "../lib/useModalFocus";
 import {
   DownloadOriginal,
+  ViewedDocument,
   ViewerFailureState,
   ViewerStatus,
   ViewerToolbar,
@@ -22,15 +23,13 @@ import { KnowledgeDocumentViewerImage, KnowledgeDocumentViewerText } from "./Kno
  * the person is told why it is slow. */
 const PREPARING_AFTER_MS = 900;
 
-type DocumentIds = { configId: string; documentId: string };
-
 type ViewerSession =
   | { phase: "opening"; slow: boolean }
   | { phase: "ready"; view: KnowledgeDocumentView }
-  | { phase: "failed"; failure: ViewerFailure; ids: DocumentIds | null };
+  | { phase: "failed"; failure: ViewerFailure; address: DocumentAddress | null };
 
-async function resolveIds(userId: string, request: DocumentRequest, signal: AbortSignal): Promise<DocumentIds> {
-  if (request.kind === "document") return request;
+async function resolveAddress(userId: string, request: DocumentRequest, signal: AbortSignal): Promise<DocumentAddress> {
+  if (request.kind !== "chunk") return request;
   const location = await locateKnowledgeChunk(userId, request.chunkId, { signal });
   return { configId: location.knowledge_config_id, documentId: location.document_id };
 }
@@ -41,7 +40,7 @@ function useDocumentSession(userId: string, request: DocumentRequest) {
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
-    let ids: DocumentIds | null = null;
+    let address: DocumentAddress | null = null;
     const settle = (next: ViewerSession) => {
       if (!signal.aborted) setSession(next);
     };
@@ -50,13 +49,13 @@ function useDocumentSession(userId: string, request: DocumentRequest) {
       setSession((current) => (current.phase === "opening" ? { phase: "opening", slow: true } : current));
     }, PREPARING_AFTER_MS);
     const open = async () => {
-      ids = await resolveIds(userId, request, signal);
-      return getKnowledgeDocumentView(userId, ids.configId, ids.documentId, { chunkId: request.chunkId, signal });
+      address = await resolveAddress(userId, request, signal);
+      return getKnowledgeDocumentView(userId, address, { chunkId: request.chunkId, signal });
     };
     open()
       .then(
         (view) => settle({ phase: "ready", view: viewWithPageHint(view, request.chunkId ? request.pageHint ?? null : null) }),
-        (error: unknown) => settle({ phase: "failed", failure: requestFailure(error, request.kind), ids }),
+        (error: unknown) => settle({ phase: "failed", failure: requestFailure(error, request.kind), address }),
       )
       .finally(() => window.clearTimeout(slowTimer));
     return () => {
@@ -95,7 +94,7 @@ function SessionBody({
     <ViewerFailureState
       failure={session.failure}
       onRetry={onRetry}
-      download={session.ids && <DownloadOriginal userId={userId} {...session.ids} labelled />}
+      download={session.address && <DownloadOriginal userId={userId} address={session.address} labelled />}
     />
   );
 }
@@ -130,13 +129,15 @@ export default function KnowledgeDocumentViewer({
     const { view } = session;
     return (
       <ViewerDialog label={view.name} onClose={onClose}>
-        <ReadyDocument
-          userId={userId}
-          view={view}
-          passage={checkedPassage(view.target, request.passage)}
-          passageMissing={Boolean(request.chunkId) && !view.target?.excerpt}
-          onClose={onClose}
-        />
+        <ViewedDocument view={view}>
+          <ReadyDocument
+            userId={userId}
+            view={view}
+            passage={checkedPassage(view.target, request.passage)}
+            passageMissing={Boolean(request.chunkId) && !view.target?.excerpt}
+            onClose={onClose}
+          />
+        </ViewedDocument>
       </ViewerDialog>
     );
   }

@@ -67,6 +67,7 @@ import { isBlankNewChat } from "../lib/chatStore";
 import { usableModels } from "../lib/modelAccess";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { useModalFocus } from "../lib/useModalFocus";
+import { CarvedTray, sendScrollKeysToTray } from "./CarvedTray";
 import { CommandPalette } from "./CommandPalette";
 import { ChatPreview } from "./ChatPreview";
 import { ThemeScheduleDialog } from "./ThemeScheduleDialog";
@@ -90,9 +91,17 @@ const nav = [
 ] as const;
 
 const consoleNav = [
-  { key: "admin", label: "Admin console", icon: ShieldCheck },
-  { key: "platform", label: "Platform console", icon: Building2 },
+  { key: "admin", icon: ShieldCheck },
+  { key: "platform", icon: Building2 },
 ] as const;
+
+function canOpenAdminConsole(role: Role) {
+  return role === "TENANT_ADMIN" || role === "PLATFORM_OWNER";
+}
+
+function pendingRequestsText(count: number) {
+  return `${count} pending model access ${count === 1 ? "request" : "requests"}`;
+}
 
 type ChatMenuAnchor = { top: number; bottom: number; right: number };
 
@@ -439,11 +448,9 @@ function UserAppShell({
     recentFitMeasured && recentChats.length > recentFitCount ? recentFitCount + 1 : recentFitCount;
   const visibleRecentChats = previewThreads(recentChats, recentRenderCount, activeChatId);
   const visibleRailWidth = collapsed ? 76 : railWidth;
-  const sidebarConsoles = consoleNav.filter(({ key }) =>
-    key === "platform"
-      ? data.me.role === "PLATFORM_OWNER"
-      : data.me.role === "TENANT_ADMIN" || data.me.role === "PLATFORM_OWNER",
-  );
+  // Consoles open from the account panel, so the account card carries the one
+  // signal admins need without opening it. Follows the effective (previewed) role.
+  const pendingRequests = canOpenAdminConsole(data.me.role) ? data.modelAccessRequestCount ?? 0 : 0;
 
   useEffect(() => {
     setFolders(loadChatFolders(data.me.id));
@@ -1354,41 +1361,6 @@ function UserAppShell({
                 onOpenDrafts={() => handleSelectView("drafts")}
               />
             )}
-            {/* Management consoles follow the effective (previewed) role, the
-             * same rule the account panel and route guard apply. */}
-            {sidebarConsoles.map(({ key, label, icon: Icon }) => {
-              const pendingRequests =
-                key === "admin" && typeof data.modelAccessRequestCount === "number"
-                  ? data.modelAccessRequestCount
-                  : 0;
-              return (
-                <a
-                  key={key}
-                  className={clsx("minor-row console-link", currentView === key && "is-selected")}
-                  href={routeToPath(defaultRouteForView(key))}
-                  aria-label={label}
-                  aria-current={currentView === key ? "page" : undefined}
-                  data-tooltip={NAV_TOOLTIPS[key]}
-                  onClick={(event) => {
-                    if (event.defaultPrevented || event.button !== 0) return;
-                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                    event.preventDefault();
-                    handleSelectView(key);
-                  }}
-                >
-                  <Icon size={16} />
-                  <span>{label}</span>
-                  {pendingRequests > 0 && (
-                    <span
-                      className="pill pill-warning console-link-count"
-                      aria-label={`${pendingRequests} pending model access ${pendingRequests === 1 ? "request" : "requests"}`}
-                    >
-                      {pendingRequests}
-                    </span>
-                  )}
-                </a>
-              );
-            })}
             <div className="theme-mode-row help-row">
               <button
                 className="minor-row"
@@ -1439,11 +1411,20 @@ function UserAppShell({
           <button
             className="account-card account-button"
             type="button"
-            aria-label={`Account: ${data.me.display_name}, ${roleLabel(data.me.role)}`}
-            data-tooltip="Open your account to edit your profile, password, and usage"
+            aria-label={[
+              `Account: ${data.me.display_name}`,
+              roleLabel(data.me.role),
+              ...(pendingRequests > 0 ? [pendingRequestsText(pendingRequests)] : []),
+            ].join(", ")}
+            data-tooltip={
+              pendingRequests > 0
+                ? `${pendingRequestsText(pendingRequests)}. Open your account to reach the Admin console.`
+                : "Open your account to edit your profile, password, and usage"
+            }
             onClick={() => openUtilityDrawer("account")}
           >
             <UserAvatar user={data.me} />
+            {pendingRequests > 0 && <span className="count-badge account-card-count">{pendingRequests}</span>}
             <div>
               <strong>{data.me.display_name}</strong>
               <span>{viewAsRole ? `${roleLabel(data.me.role)} preview` : roleLabel(data.me.role)}</span>
@@ -1652,6 +1633,7 @@ function UtilityDrawer({
   // Personal daily token caps (only finite ones are ever returned). Fetched
   // when the account drawer opens so the meter reflects today's usage.
   const drawerRef = useRef<HTMLElement>(null);
+  const trayRef = useRef<HTMLDivElement>(null);
   // Open layers inside a drawer take Escape first, wherever focus happens to be.
   const escapeLayers = useRef<EscapeLayer[]>([]);
   useModalFocus(drawerRef, true, () => {
@@ -1676,7 +1658,7 @@ function UtilityDrawer({
               ? "All folders"
               : "All chats";
   const availableModels = useMemo(() => usableModels(data), [data]);
-  const canOpenAdmin = data.me.role === "TENANT_ADMIN" || data.me.role === "PLATFORM_OWNER";
+  const canOpenAdmin = canOpenAdminConsole(data.me.role);
   const canOpenPlatform = data.me.role === "PLATFORM_OWNER";
   const accountConsoles = consoleNav
     .filter(({ key }) => (key === "platform" ? canOpenPlatform : canOpenAdmin))
@@ -1831,6 +1813,7 @@ function UtilityDrawer({
             event.stopPropagation();
           }
         }}
+        onKeyDown={(event) => sendScrollKeysToTray(event, trayRef.current)}
       >
         <header>
           <h2>{title}</h2>
@@ -1846,181 +1829,185 @@ function UtilityDrawer({
           </button>
         </header>
 
-        {drawer === "all-chats" && (
-          <div className="drawer-list">
-            <div className="search-box" style={{ flex: "none", width: "100%", maxWidth: "none" }}>
-              <Search size={15} aria-hidden="true" />
-              <input
-                aria-label="Filter chats by title"
-                placeholder="Filter chats"
-                autoComplete="off"
-                spellCheck={false}
-                value={chatFilterText}
-                onChange={(event) => setChatFilterText(event.target.value)}
+        {drawer !== "account" && (
+          <CarvedTray ref={trayRef}>
+          {drawer === "all-chats" && (
+            <div className="drawer-list">
+              <div className="search-box" style={{ flex: "none", width: "100%", maxWidth: "none" }}>
+                <Search size={15} aria-hidden="true" />
+                <input
+                  aria-label="Filter chats by title"
+                  placeholder="Filter chats"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={chatFilterText}
+                  onChange={(event) => setChatFilterText(event.target.value)}
+                />
+              </div>
+              {filteredActiveThreads.map((thread) => renderDrawerChatRow(thread))}
+              {activeThreads.length > 0 && filteredActiveThreads.length === 0 && (
+                <div className="drawer-card">
+                  <strong>No chats match</strong>
+                  <span>No chat titles contain “{chatFilterText.trim()}”.</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {drawer === "all-pinned" && (
+            <div className="drawer-list">
+              {pinnedThreads.length > 0 ? (
+                pinnedThreads.map((thread) => renderDrawerChatRow(thread))
+              ) : (
+                <div className="drawer-card">
+                  <strong>No pinned chats</strong>
+                  <span>Pin a chat from the sidebar to keep it here.</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {drawer === "all-folders" && (
+            <div className="drawer-list">
+              {folders.length > 0 ? (
+                flattenFolderTree(folders).map(({ folder, depth }) => {
+                  const folderThreads = activeThreads.filter((thread) => thread.folder_id === folder.id);
+                  return (
+                    <div
+                      className={clsx("drawer-card drawer-folder-card", depth > 0 && "is-subfolder")}
+                      style={depth > 0 ? { marginLeft: depth * 18 } : undefined}
+                      key={folder.id}
+                    >
+                      <strong>{folder.name}</strong>
+                      <span>{folderThreads.length} {folderThreads.length === 1 ? "chat" : "chats"}</span>
+                      {folderThreads.length > 0 && (
+                        <div className="drawer-folder-chat-list">
+                          {folderThreads.map((thread) => renderDrawerChatRow(thread))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="drawer-card">
+                  <strong>No folders</strong>
+                  <span>Create a folder from the sidebar to organize chats.</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {drawer === "help" && (
+            <div className="help-drawer-content">
+              <button
+                className="drawer-row report-problem-entry"
+                type="button"
+                onClick={onOpenIssueReport}
+              >
+                <Bug size={18} />
+                <span>
+                  <strong>Report a problem</strong>
+                  <small>Report an issue, share an idea, or ask a question.</small>
+                </span>
+              </button>
+              {myReportsApi && (
+                <button
+                  className="drawer-row my-reports-entry"
+                  type="button"
+                  onClick={() => onOpenMyReports()}
+                >
+                  <ListChecks size={18} />
+                  <span>
+                    <strong>My reports</strong>
+                    <small>Track status and replies on reports you've sent.</small>
+                  </span>
+                  {reportsUnread > 0 && (
+                    <span className="count-badge" aria-label={`${reportsUnread} with new updates`}>
+                      {reportsUnread}
+                    </span>
+                  )}
+                </button>
+              )}
+              <LazyChunkBoundary label="The user guide">
+                <Suspense
+                  fallback={
+                    <div className="drawer-list">
+                      <div className="drawer-card">
+                        <strong>Loading the user guide…</strong>
+                        <span>Preparing the walkthrough videos.</span>
+                      </div>
+                    </div>
+                  }
+                >
+                  <UserGuidePlaylist brandName={data.currentTenant.chat_brand_name} />
+                </Suspense>
+              </LazyChunkBoundary>
+            </div>
+          )}
+
+          {drawer === "report" && (
+            <div className="issue-report-drawer">
+              <button className="back-link-button" type="button" onClick={onBackToHelp}>
+                <ArrowLeft size={15} /> Back to Help
+              </button>
+              <IssueReportForm
+                onSubmit={onSubmitIssueReport}
+                onViewReport={myReportsApi ? (reportId) => onOpenMyReports(reportId) : undefined}
               />
             </div>
-            {filteredActiveThreads.map((thread) => renderDrawerChatRow(thread))}
-            {activeThreads.length > 0 && filteredActiveThreads.length === 0 && (
-              <div className="drawer-card">
-                <strong>No chats match</strong>
-                <span>No chat titles contain “{chatFilterText.trim()}”.</span>
-              </div>
-            )}
-          </div>
-        )}
+          )}
 
-        {drawer === "all-pinned" && (
-          <div className="drawer-list">
-            {pinnedThreads.length > 0 ? (
-              pinnedThreads.map((thread) => renderDrawerChatRow(thread))
-            ) : (
-              <div className="drawer-card">
-                <strong>No pinned chats</strong>
-                <span>Pin a chat from the sidebar to keep it here.</span>
-              </div>
-            )}
-          </div>
-        )}
+          {drawer === "my-reports" && myReportsApi && (
+            <div className="issue-report-drawer">
+              <MyReportsPanel
+                api={myReportsApi}
+                focusReportId={myReportsFocusId}
+                onNewReport={onOpenIssueReport}
+                onBackToHelp={onBackToHelp}
+                onUnreadChange={onReportsUnreadChange}
+              />
+            </div>
+          )}
 
-        {drawer === "all-folders" && (
-          <div className="drawer-list">
-            {folders.length > 0 ? (
-              flattenFolderTree(folders).map(({ folder, depth }) => {
-                const folderThreads = activeThreads.filter((thread) => thread.folder_id === folder.id);
-                return (
-                  <div
-                    className={clsx("drawer-card drawer-folder-card", depth > 0 && "is-subfolder")}
-                    style={depth > 0 ? { marginLeft: depth * 18 } : undefined}
-                    key={folder.id}
-                  >
-                    <strong>{folder.name}</strong>
-                    <span>{folderThreads.length} {folderThreads.length === 1 ? "chat" : "chats"}</span>
-                    {folderThreads.length > 0 && (
-                      <div className="drawer-folder-chat-list">
-                        {folderThreads.map((thread) => renderDrawerChatRow(thread))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              <div className="drawer-card">
-                <strong>No folders</strong>
-                <span>Create a folder from the sidebar to organize chats.</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {drawer === "help" && (
-          <div className="help-drawer-content">
-            <button
-              className="drawer-row report-problem-entry"
-              type="button"
-              onClick={onOpenIssueReport}
-            >
-              <Bug size={18} />
-              <span>
-                <strong>Report a problem</strong>
-                <small>Report an issue, share an idea, or ask a question.</small>
-              </span>
-            </button>
-            {myReportsApi && (
-              <button
-                className="drawer-row my-reports-entry"
-                type="button"
-                onClick={() => onOpenMyReports()}
-              >
-                <ListChecks size={18} />
-                <span>
-                  <strong>My reports</strong>
-                  <small>Track status and replies on reports you've sent.</small>
-                </span>
-                {reportsUnread > 0 && (
-                  <span className="count-badge" aria-label={`${reportsUnread} with new updates`}>
-                    {reportsUnread}
-                  </span>
-                )}
-              </button>
-            )}
-            <LazyChunkBoundary label="The user guide">
-              <Suspense
-                fallback={
-                  <div className="drawer-list">
-                    <div className="drawer-card">
-                      <strong>Loading the user guide…</strong>
-                      <span>Preparing the walkthrough videos.</span>
-                    </div>
-                  </div>
-                }
-              >
-                <UserGuidePlaylist brandName={data.currentTenant.chat_brand_name} />
-              </Suspense>
-            </LazyChunkBoundary>
-          </div>
-        )}
-
-        {drawer === "report" && (
-          <div className="issue-report-drawer">
-            <button className="back-link-button" type="button" onClick={onBackToHelp}>
-              <ArrowLeft size={15} /> Back to Help
-            </button>
-            <IssueReportForm
-              onSubmit={onSubmitIssueReport}
-              onViewReport={myReportsApi ? (reportId) => onOpenMyReports(reportId) : undefined}
-            />
-          </div>
-        )}
-
-        {drawer === "my-reports" && myReportsApi && (
-          <div className="issue-report-drawer">
-            <MyReportsPanel
-              api={myReportsApi}
-              focusReportId={myReportsFocusId}
-              onNewReport={onOpenIssueReport}
-              onBackToHelp={onBackToHelp}
-              onUnreadChange={onReportsUnreadChange}
-            />
-          </div>
-        )}
-
-        {drawer === "settings" && (
-          <div className="drawer-list">
-            <button
-              className="drawer-row"
-              type="button"
-              data-tooltip="Switch between light and dark appearance"
-              onClick={onToggleDarkMode}
-            >
-              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-              <span>
-                <strong>{darkMode ? "Light mode" : "Dark mode"}</strong>
-                <small>Switch interface theme.</small>
-              </span>
-            </button>
-            {memoryAvailable && onOpenMemory && (
+          {drawer === "settings" && (
+            <div className="drawer-list">
               <button
                 className="drawer-row"
                 type="button"
-                data-tooltip="Review, correct, or delete what the assistant remembers about you"
-                onClick={onOpenMemory}
+                data-tooltip="Switch between light and dark appearance"
+                onClick={onToggleDarkMode}
               >
-                <Brain size={16} />
+                {darkMode ? <Sun size={16} /> : <Moon size={16} />}
                 <span>
-                  <strong>Memory</strong>
-                  <small>{memoryDrawerHint(data)}</small>
+                  <strong>{darkMode ? "Light mode" : "Dark mode"}</strong>
+                  <small>Switch interface theme.</small>
                 </span>
               </button>
-            )}
-            <div className="drawer-card">
-              <strong>Default model</strong>
-              <span>{availableModels[0]?.name ?? "No connected model"}</span>
+              {memoryAvailable && onOpenMemory && (
+                <button
+                  className="drawer-row"
+                  type="button"
+                  data-tooltip="Review, correct, or delete what the assistant remembers about you"
+                  onClick={onOpenMemory}
+                >
+                  <Brain size={16} />
+                  <span>
+                    <strong>Memory</strong>
+                    <small>{memoryDrawerHint(data)}</small>
+                  </span>
+                </button>
+              )}
+              <div className="drawer-card">
+                <strong>Default model</strong>
+                <span>{availableModels[0]?.name ?? "No connected model"}</span>
+              </div>
+              <div className="drawer-card">
+                <strong>Enabled connectors</strong>
+                <span>{data.connectors.filter((connector) => connector.tenant_enabled).length} tenant connectors</span>
+              </div>
             </div>
-            <div className="drawer-card">
-              <strong>Enabled connectors</strong>
-              <span>{data.connectors.filter((connector) => connector.tenant_enabled).length} tenant connectors</span>
-            </div>
-          </div>
+          )}
+          </CarvedTray>
         )}
 
         {drawer === "account" && (

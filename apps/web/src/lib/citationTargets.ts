@@ -9,7 +9,11 @@ export type OpeningHints = { passage?: string | null; pageHint?: number | null }
 /** What the viewer needs to open a document. The ids go to the server, which
  * authorizes each one on its own. */
 export type DocumentRequest = OpeningHints &
-  ({ kind: "document"; configId: string; documentId: string; chunkId: string | null } | { kind: "chunk"; chunkId: string });
+  (
+    | { kind: "document"; configId: string; documentId: string; chunkId: string | null }
+    | { kind: "chunk"; chunkId: string }
+    | { kind: "attachment"; attachmentId: string; chunkId: string | null }
+  );
 
 export type CitationDestination =
   | { kind: "viewer"; request: DocumentRequest }
@@ -21,6 +25,15 @@ const LIVE_CHUNK_PREFIX = "live-";
 
 function storedId(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
+}
+
+/** Uploads have always been addressed `upload://{id}`, so a file cited before
+ * citations carried its id still opens. Older names (`upload://report.pdf`)
+ * never had an id to find. */
+const UPLOAD_ID_ADDRESS = /^upload:\/\/(upload-[^/]+)$/;
+
+function attachmentId(citation: ChatCitation): string | null {
+  return storedId(citation.attachment_id) ?? UPLOAD_ID_ADDRESS.exec(citation.source_uri)?.[1] ?? null;
 }
 
 /** The host of an http(s) address; null for every other scheme. */
@@ -50,6 +63,8 @@ function openingHints(citation: ChatCitation): Required<OpeningHints> {
 function viewerRequest(citation: ChatCitation): DocumentRequest | null {
   const chunkId = storedId(citation.chunk_id);
   if (chunkId?.startsWith(LIVE_CHUNK_PREFIX)) return null;
+  const attached = attachmentId(citation);
+  if (attached) return { kind: "attachment", attachmentId: attached, chunkId, ...openingHints(citation) };
   const configId = storedId(citation.knowledge_config_id);
   const documentId = storedId(citation.document_id);
   if (configId && documentId) return { kind: "document", configId, documentId, chunkId, ...openingHints(citation) };

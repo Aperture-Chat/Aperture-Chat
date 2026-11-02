@@ -703,6 +703,12 @@ export async function uploadChatAttachment(
   return (await response.json()) as ChatAttachment;
 }
 
+/** Takes back a file staged but never sent. The server refuses once a chat
+ * holds the file, so a saved message cannot lose it from here. */
+export function deleteChatAttachment(userId: string, attachmentId: string): Promise<unknown> {
+  return apiRequest<unknown>(userId, `/api/chat/attachments/${pathId(attachmentId)}`, { method: "DELETE" });
+}
+
 export async function loadChatAttachmentPreview(
   userId: string,
   attachmentId: string,
@@ -789,6 +795,20 @@ export function importCloudAttachments(
   options: ApiMutationOptions = {},
 ): Promise<ChatAttachment[]> {
   return apiRequest<ChatAttachment[]>(userId, `/api/chat/cloud-attachments/${pathId(connectorId)}/attachments`, {
+    method: "POST",
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+/** Brings a knowledge document, or with no document_id a whole base, into the
+ * chat as an attachment that points at it. */
+export function attachKnowledge(
+  userId: string,
+  payload: { knowledge_config_id: string; document_id?: string },
+  options: ApiMutationOptions = {},
+): Promise<ChatAttachment> {
+  return apiRequest<ChatAttachment>(userId, "/api/chat/attachments/knowledge", {
     method: "POST",
     body: payload,
     signal: options.signal,

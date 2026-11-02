@@ -21,8 +21,10 @@ import "./spreadsheet.css";
 // Last: the shared tactile button and toggle language (see the file header).
 import "./tactile-controls.css";
 import "./rail-glide.css";
+import "./composer-options.css";
 import "./components/account-drawer.css";
 import "./components/document-viewer.css";
+import "./components/session-panel.css";
 // After the tactile layer: phone-width layout and touch-target adjustments.
 import "./mobile.css";
 
