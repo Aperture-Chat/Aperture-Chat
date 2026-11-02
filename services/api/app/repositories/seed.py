@@ -19,7 +19,7 @@ import threading
 import time
 import weakref
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Iterable, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -249,6 +249,8 @@ def _generated_image_audit_links(content: str) -> list[str]:
 # Durable usage records are capped so runtime_state.json stays bounded; the
 # oldest records are trimmed first.
 USAGE_RECORDS_MAX = 20_000
+# Keeps one lookup inside the URL length proxies allow; the consoles send batches.
+THREAD_TITLE_LOOKUP_LIMIT = 100
 RUNTIME_STATE_FLUSH_DEBOUNCE_SECONDS = 2.0
 
 
@@ -5621,6 +5623,25 @@ class SeedStore:
             for row in rows
             if tenant_id is None or row.tenant_id == tenant_id
         ]
+
+    def chat_thread_titles(
+        self,
+        thread_ids: Iterable[str],
+        *,
+        tenant_id: str | None,
+        visible_user_ids: Collection[str] | None = None,
+    ) -> dict[str, str]:
+        """Names of the threads a viewer may audit, concealed like their prompts."""
+
+        titles: dict[str, str] = {}
+        for thread_id in set(thread_ids):
+            thread = self.chat_threads.get(thread_id)
+            if thread is None or (tenant_id is not None and thread.tenant_id != tenant_id):
+                continue
+            if visible_user_ids is not None and thread.owner_user_id not in visible_user_ids:
+                continue
+            titles[thread_id] = conceal_thread(thread, privacy_policy_for(self, thread.tenant_id))[0].title
+        return titles
 
     def user_prompt_records(
         self,

@@ -103,6 +103,7 @@ from app.models.schemas import (
 )
 from app.repositories.deps import get_store, get_usage_budget_repository
 from app.repositories.seed import (
+    THREAD_TITLE_LOOKUP_LIMIT,
     FinalTenantDeletionError,
     SeedStore,
     TenantConflictError,
@@ -1439,7 +1440,7 @@ def audit_events(
 
 @router.get("/usage-summary")
 def platform_usage_summary(
-    user_id: str | None = Query(default=None),
+    user_id: list[str] | None = Query(default=None),
     from_date: str | None = Query(default=None),
     through_date: str | None = Query(default=None),
     actor: User = Depends(current_user),
@@ -1449,7 +1450,7 @@ def platform_usage_summary(
     # surface tracks owner, admin, and user activity alike.
     require_platform_owner(actor)
     records = store.usage_records_filtered(
-        user_id=user_id,
+        visible_user_ids=set(user_id) if user_id else None,
         from_date=from_date,
         through_date=through_date,
     )
@@ -1458,14 +1459,14 @@ def platform_usage_summary(
 
 @router.get("/usage-records")
 def platform_usage_records(
-    user_id: str | None = Query(default=None),
+    user_id: list[str] | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=2000),
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[UsageRecord]:
     require_platform_owner(actor)
     return store.usage_records_filtered(
-        user_id=user_id,
+        visible_user_ids=set(user_id) if user_id else None,
         newest_first=True,
         limit=limit,
     )
@@ -1835,6 +1836,16 @@ def prompt_activity(
         None, user_id=user_id, thread_id=thread_id, limit=None
     )
     return [record for record in records if record.user_id in visible_user_ids][:limit]
+
+
+@router.get("/thread-titles")
+def thread_titles(
+    thread_id: list[str] = Query(default_factory=list, max_length=THREAD_TITLE_LOOKUP_LIMIT),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, str]:
+    require_platform_owner(actor)
+    return store.chat_thread_titles(thread_id, tenant_id=None)
 
 
 @router.get("/security-alerts")
