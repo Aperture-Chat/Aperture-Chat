@@ -5,7 +5,7 @@
 # Aperture Chat
 
 **The self-hosted AI workspace for your organization.**<br>
-Chat, documents, slide decks, agents, automations, and knowledge, on infrastructure you control.
+Chat, documents, slide decks, spreadsheets, agents, automations, and knowledge, on infrastructure you control.
 
 [![Latest release](https://img.shields.io/github/v/release/Aperture-Chat/Aperture-Chat?style=flat-square&color=0f766e&label=release)](https://github.com/Aperture-Chat/Aperture-Chat/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-475569?style=flat-square)](LICENSE.md)
@@ -19,7 +19,7 @@ Chat, documents, slide decks, agents, automations, and knowledge, on infrastruct
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-tour-light.png">
-  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, a structure diagram, a colored code block, Agents, Automations, a knowledge base showing a file's properties and ethical wall, the document editor, the slide editor, and the Admin Console" width="100%">
+  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, a structure diagram, a colored code block, Agents, Automations, a knowledge base showing a file's properties and ethical wall, the document editor, the slide editor, a spreadsheet with a table, formulas, and a chart, and the Admin Console" width="100%">
 </picture>
 
 <sub>The current interface in a synthetic organization, answered by an open model (Qwen 3.5 9B) running locally.
@@ -63,12 +63,12 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.19](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.19)**:
-> Files attached to a chat are kept, indexed, and opened in the document viewer;
-> `#` brings a real document into the message; the Drafts assistant matches chat;
-> Send options is redesigned; and the consoles open from your Account panel.
-> v0.5.18 added the document viewer and used-only citations.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0518) and
+> **Current release: [v0.5.20](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.20)**:
+> The consoles fit every window size; every console export offers an Excel workbook
+> or a CSV file; console filters take one person or several; a runtime record opens
+> the conversation behind it; and usage cards show full names and what each count means.
+> v0.5.19 kept files attached to a chat and brought real documents in with `#`.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0519) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -93,13 +93,18 @@ policies appropriate for your organization's data.
 <img src="docs/images/chat-mobile.png" alt="A cited Policy Assistant answer on a phone-sized screen with the compact composer" width="320">
 </details>
 
-### Documents and slide decks
+### Documents, slide decks, and spreadsheets
 
 | Document editor | Slide editor |
 | --- | --- |
 | ![Document editor with a project brief, compact formatting toolbar, save status, and drafting assistant](docs/images/drafts-light.png) | ![Slide editor in dark mode: the project brief rebuilt as a deck in the Editorial design, with a big-number slide, theme choices, and the slide panel](docs/images/deck-dark.png) |
 
+| Spreadsheet | Pivot table |
+| --- | --- |
+| ![Spreadsheet editor with a synthetic budget workbook: a department table, a SUM formula in the formula bar, and a stacked column chart](docs/images/spreadsheet-light.png) | ![Spreadsheet editor in dark mode: a pivot table of spending by office and category, a formula reading its totals, and a bar chart](docs/images/spreadsheet-dark.png) |
+
 - **One workspace, three formats.** Switch between **Document**, **Deck**, and **Spreadsheet** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
+- **Spreadsheets.** Build multi-sheet workbooks with Excel-style formulas, tables, pivot tables, and charts, open and export `.xlsx` and `.csv` files, and ask the **Spreadsheet Assistant** to edit a selection or build whole tables.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
 - **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
@@ -143,7 +148,7 @@ policies appropriate for your organization's data.
 
 | Admin Console | Platform Owner Console |
 | --- | --- |
-| ![Admin Console user list with roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local model provider and three agents](docs/images/platform-dark.png) |
+| ![Admin Console user list with names and email addresses, roles, groups, and status](docs/images/admin-light.png) | ![Platform Owner Console model availability for a local model provider and three agents](docs/images/platform-dark.png) |
 
 | Role | Responsibilities |
 | --- | --- |
@@ -155,7 +160,7 @@ policies appropriate for your organization's data.
 - **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing provider secrets requires platform-owner authorization; workspace admins can replace their own connectors' credentials but never read them back.
 - **Personal data.** Optionally conceal Social Security, card, and account numbers, contact details, health identifiers, and secrets wherever chats are stored, shown, or exported, and keep them from the model. Detection runs inside your deployment.
 - **Training datasets.** Optionally capture de-identified ratings and corrections, route them by practice area and department, review them, and download fine-tuning datasets for an open-weight model.
-- **Oversight.** Administrative actions and chat activity feed audit and analytics views with CSV export. Audit dashboards group signals by what needs attention and chart trends, and every number opens its records. Alert rules can email on matching activity, including chosen prompt detections such as prompt injection. Owners can send audit, usage, chats, documents, and users to Elastic for Kibana. Tenant administrators see prompt activity only for the users they administer.
+- **Oversight.** Administrative actions and chat activity feed audit and analytics views that fit the window you have. Filter each section to one person or several, export what you see as an Excel workbook or a CSV file, and open the conversation behind a runtime record. Audit dashboards group signals by what needs attention and chart trends, and every number opens its records. Alert rules can email on matching activity, including chosen prompt detections such as prompt injection. Owners can send audit, usage, chats, documents, and users to Elastic for Kibana. Tenant administrators see prompt activity only for the users they administer.
 - **Support tickets.** Problem reports become tickets that admins work in a Reports tab and reporters follow in **Help › My reports**. Owners can share a redacted copy with the maintainers, who track it as a GitHub issue. See [support tickets](docs/SUPPORT_TICKETS.md).
 - **Training.** Role-specific Help includes narrated walkthroughs and downloadable guides, with fullscreen playback on desktop and mobile.
 
@@ -170,7 +175,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.19
+#   APERTURE_IMAGE_TAG=v0.5.20
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -191,7 +196,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.19 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.20 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -226,10 +231,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.19` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.20` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.19-dev`, `v0.5.19-test`, `v0.5.19-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.20-dev`, `v0.5.20-test`, `v0.5.20-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
