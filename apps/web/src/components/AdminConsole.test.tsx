@@ -731,7 +731,7 @@ test("admin console exposes phone-ready section tabs and labeled record cards", 
   const userRow = screen.getByRole("row", { name: /Select Alex Morgan/ });
   expect(within(userRow).getByText("alex.morgan@example.com").closest("td")).toHaveAttribute(
     "data-label",
-    "Email",
+    "Name",
   );
   expect(within(userRow).getByRole("combobox", { name: "Role for Alex Morgan" }).closest("td")).toHaveAttribute(
     "data-label",
@@ -840,13 +840,9 @@ test("admin analytics and audit monitors hide platform owner prompt records", as
   expect(screen.getAllByText("Jane Smith").length).toBeGreaterThan(0);
   expect(screen.queryByText("Owner private platform query.")).not.toBeInTheDocument();
   // The section user filter never lists platform owners.
-  const analyticsUserFilter = screen.getByLabelText("Model activity filter user");
-  expect(
-    within(analyticsUserFilter).queryByRole("option", { name: /Aperture Platform Owner/ }),
-  ).not.toBeInTheDocument();
-  expect(
-    within(analyticsUserFilter).getByRole("option", { name: /Jane Smith/ }),
-  ).toBeInTheDocument();
+  const analyticsUserNames = filterUserNames("Model activity filter user");
+  expect(analyticsUserNames).not.toContain("Aperture Platform Owner");
+  expect(analyticsUserNames).toContain("Jane Smith");
 
   selectTab("Audit");
   expect(await screen.findByText("User Prompt Activity")).toBeInTheDocument();
@@ -867,11 +863,12 @@ test("admin analytics and audit monitors hide platform owner prompt records", as
   expect(screen.getByText("Sensitive identifier")).toBeInTheDocument();
   expect(screen.queryByText("Owner private governance")).not.toBeInTheDocument();
   expect(screen.queryByText("Owner private alert")).not.toBeInTheDocument();
-  expect(screen.queryByRole("option", { name: /Aperture Platform Owner/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole("option", { name: /Drew Parker/ })).not.toBeInTheDocument();
+  const promptFilterNames = filterUserNames("Prompt activity filter user");
+  expect(promptFilterNames).not.toContain("Aperture Platform Owner");
+  expect(promptFilterNames).not.toContain("Drew Parker");
   // Both the prompt drilldown and the new audit user filter list these users.
-  expect(screen.getAllByRole("option", { name: /Alex Morgan/ }).length).toBeGreaterThan(0);
-  expect(screen.getAllByRole("option", { name: /Jane Smith/ }).length).toBeGreaterThan(0);
+  expect(promptFilterNames).toContain("Alex Morgan");
+  expect(promptFilterNames).toContain("Jane Smith");
   fireEvent.click(screen.getByRole("button", { name: "Preview prompt and model output: Matter intake DLP check" }));
   const previewDialog = screen.getByRole("dialog", { name: "Prompt and model output" });
   expect(within(previewDialog).getByText(/SSN exposure/)).toBeInTheDocument();
@@ -951,11 +948,15 @@ test("audit and analytics user filters narrow records and exports to one user", 
   expect(screen.getByText("Casey thread")).toBeInTheDocument();
 
   // Filter to Jane: Casey's records disappear from the audit surfaces.
-  fireEvent.change(screen.getByLabelText("Prompt activity filter user"), {
-    target: { value: "user-jane" },
-  });
+  pickFilterUsers("Prompt activity filter user", "Jane Smith");
   expect(screen.getByText("Jane thread")).toBeInTheDocument();
   expect(screen.queryByText("Casey thread")).not.toBeInTheDocument();
+
+  // A second tick brings Casey back alongside Jane.
+  pickFilterUsers("Prompt activity filter user", "Casey Doe");
+  expect(screen.getByText("Jane thread")).toBeInTheDocument();
+  expect(screen.getByText("Casey thread")).toBeInTheDocument();
+  pickFilterUsers("Prompt activity filter user", "Casey Doe");
 
   // The date range still applies on top of the user filter.
   fireEvent.change(screen.getByLabelText("Prompt activity filter start date"), {
@@ -1655,6 +1656,25 @@ function renderAdmin(adminApi: AdminConsoleApi, initialData = cloneData(), conne
   return render(<Harness />);
 }
 
+/** Ticks people in a section's user filter, then closes it. */
+function pickFilterUsers(filter: string, ...names: string[]) {
+  fireEvent.click(screen.getByRole("button", { name: filter }));
+  const panel = screen.getByRole("dialog", { name: filter });
+  for (const name of names) fireEvent.click(within(panel).getByRole("checkbox", { name }));
+  fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+}
+
+/** The names a section's user filter offers. */
+function filterUserNames(filter: string) {
+  fireEvent.click(screen.getByRole("button", { name: filter }));
+  const panel = screen.getByRole("dialog", { name: filter });
+  const names = within(panel)
+    .getAllByRole("checkbox")
+    .map((box) => box.closest("label")?.textContent ?? "");
+  fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+  return names;
+}
+
 function selectTab(name: string, options: { last?: boolean } = {}) {
   const tabs = screen.getAllByRole("tab", { name });
   const tab = options.last ? tabs[tabs.length - 1] : tabs[0];
@@ -1911,12 +1931,12 @@ test("user usage panel renders honest token dashes and never lists platform owne
     within(totalTokensTile as HTMLElement).getByText("0 of 3 messages reported tokens"),
   ).toBeInTheDocument();
 
-  const usagePicker = screen.getByLabelText("Usage filter user");
+  const usageFilterNames = filterUserNames("Usage filter user");
   const ownerNames = data.users
     .filter((user) => user.role === "PLATFORM_OWNER")
     .map((user) => user.display_name);
   for (const ownerName of ownerNames) {
-    expect(within(usagePicker).queryByText(ownerName)).not.toBeInTheDocument();
+    expect(usageFilterNames).not.toContain(ownerName);
   }
 });
 

@@ -4,7 +4,6 @@ import {
   ArchiveRestore,
   BellRing,
   Bug,
-  Download,
   ListChecks,
   Mail,
   Pencil,
@@ -15,6 +14,8 @@ import {
   ShieldX,
   Trash2,
 } from "lucide-react";
+import type { ExportColumn } from "../lib/tabularExport";
+import { DataExportControl } from "./DataExportControl";
 import { Panel, Pill } from "./Primitives";
 import { SelectControl } from "./SelectControl";
 import type {
@@ -241,9 +242,9 @@ function formatTimestamp(value: string | null | undefined): string {
   });
 }
 
-const NOTIFICATION_CSV_COLUMNS: Array<{ header: string; value: (item: AlertNotification) => string | number }> = [
+const NOTIFICATION_EXPORT_COLUMNS: Array<ExportColumn<AlertNotification>> = [
   { header: "id", value: (item) => item.id },
-  { header: "created_at", value: (item) => item.created_at },
+  { header: "created_at", kind: "datetime", value: (item) => item.created_at },
   { header: "rule_id", value: (item) => item.rule_id },
   { header: "rule_name", value: (item) => item.rule_name },
   { header: "scope", value: (item) => item.scope },
@@ -258,30 +259,6 @@ const NOTIFICATION_CSV_COLUMNS: Array<{ header: string; value: (item: AlertNotif
   { header: "attempts", value: (item) => item.attempts },
   { header: "delivered_at", value: (item) => item.delivered_at ?? "" },
 ];
-
-function notificationsToCsv(items: AlertNotification[]): string {
-  const escape = (value: string | number) => {
-    const text = String(value);
-    return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  };
-  const header = NOTIFICATION_CSV_COLUMNS.map((column) => escape(column.header)).join(",");
-  const rows = items.map((item) =>
-    NOTIFICATION_CSV_COLUMNS.map((column) => escape(column.value(item))).join(","),
-  );
-  return [header, ...rows].join("\n");
-}
-
-function downloadNotificationsCsv(items: AlertNotification[], variant: "admin" | "owner") {
-  const blob = new Blob([notificationsToCsv(items)], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `aperture-${variant}-alert-deliveries.csv`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
 
 type SettingsDraft = {
   host: string;
@@ -1098,15 +1075,13 @@ export function AlertsConsole({
                 {showArchived ? "Hide archived" : `Show archived (${archivedNotificationCount})`}
               </button>
             )}
-            <button
-              className="secondary-button compact"
-              type="button"
-              disabled={notificationRows.length === 0}
-              data-tooltip="Download the loaded alert deliveries as CSV, archived included"
-              onClick={() => downloadNotificationsCsv(notificationRows, variant)}
-            >
-              <Download size={14} /> CSV
-            </button>
+            <DataExportControl
+              label="alert deliveries"
+              filenameBase={`aperture-${variant}-alert-deliveries`}
+              items={notificationRows}
+              getTimestamp={(item) => item.created_at}
+              columns={NOTIFICATION_EXPORT_COLUMNS}
+            />
             <button
               className="secondary-button compact"
               type="button"

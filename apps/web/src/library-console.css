@@ -503,7 +503,7 @@
   font-weight: 700;
 }
 .library-page .lib-fieldset > legend { margin-bottom: 6px; padding: 0; }
-.library-page .lib-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.library-page .lib-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; }
 .library-page .lib-field-row.is-wide-second { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
 @media (max-width: 760px) { .library-page .lib-field-row.is-wide-second { grid-template-columns: minmax(0, 1fr); } }
 .library-page .lib-field-label-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 22px; }

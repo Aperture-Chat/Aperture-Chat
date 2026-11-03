@@ -462,9 +462,18 @@
     align-self: stretch;
   }
 
-  .managed-group-card > input[type="checkbox"] {
+  .managed-group-card > input[type="checkbox"],
+  .user-filter-row input {
     width: 24px;
     height: 24px;
+  }
+
+  .user-filter-row {
+    min-height: 44px;
+  }
+
+  .compact-select-field.user-filter-trigger {
+    min-height: 44px;
   }
 
   .document-page-navigator button {

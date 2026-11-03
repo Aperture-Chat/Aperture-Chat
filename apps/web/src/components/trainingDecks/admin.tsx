@@ -338,8 +338,8 @@ export const ADMIN_FOCUS_REGIONS: Record<AdminFocus, FocusRegion> = {
   cnBoxShown: { frame: "training/admin/cn-box-shown.png", rect: { x: 282, y: 402, w: 847, h: 51 } },
   cnOffForAll: { frame: "training/admin/cn-off-for-all.png", rect: { x: 282, y: 399, w: 847, h: 51 } },
   anSections: { frame: "training/admin/an-sections.png", rect: { x: 261, y: 271, w: 889, h: 584 } },
-  anFilters: { frame: "training/admin/an-runtime.png", rect: { x: 276, y: 98, w: 859, h: 160 } },
-  anCsv: { frame: "training/admin/an-csv.png", rect: { x: 774, y: 67, w: 307, h: 235 } },
+  anFilters: { frame: "training/admin/an-runtime.png", rect: { x: 276, y: 118, w: 859, h: 356 } },
+  anCsv: { frame: "training/admin/an-csv.png", rect: { x: 774, y: 77, w: 307, h: 306 } },
   anActivity: { frame: "training/admin/an-activity.png", rect: { x: 262, y: 251, w: 887, h: 277 } },
   anUsageCards: { frame: "training/admin/an-usage.png", rect: { x: 262, y: 291, w: 887, h: 156 } },
   anBudget: { frame: "training/admin/an-budget.png", rect: { x: 261, y: 391, w: 889, h: 314 } },
@@ -2912,10 +2912,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     id: "admin-analytics",
     audioSrc: "training/admin/admin-analytics.mp3",
     title: "Tenant analytics",
-    description: "Scope each analytics section to a person and dates, export CSV, read usage and the workspace budget, and set a token cap that people actually hit.",
+    description: "Scope each analytics section to people and dates, export to Excel or CSV, read usage and the workspace budget, and set a token cap that people actually hit.",
     icon: "analytics",
     track: "Oversight and compliance",
-    outcomes: ["Sections scoped by person and date", "CSV exported", "Usage and budget read", "Token cap set and enforced"],
+    outcomes: ["Sections scoped by person and date", "Excel or CSV exported", "Usage and budget read", "Token cap set and enforced"],
     prerequisites: [
       "An Admin account.",
       "Some real activity: chats, drafts, or automations from people in your organization.",
@@ -2923,8 +2923,8 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
     ],
     setupSteps: [
       "Choose Admin console › Analytics. Every section starts collapsed.",
-      "Expand Runtime Clock Metadata. Choose a person and dates, or All, Today, Week, or 30 days.",
-      "Choose CSV, pick dates or All dates, and choose Download N rows.",
+      "Expand Runtime Clock Metadata. Tick one or more people, then choose dates, or All, Today, Week, or 30 days.",
+      "Choose Export, pick Excel workbook or CSV file, pick dates or All dates, and choose Download N rows.",
       "Expand Model Activity, User Usage, and Workspace Usage Budget to read volume, tokens, and the ceiling.",
       "Expand Token Allocations. Choose a person or group in the first menu, enter the Token cap, choose Per day, Per week, or Per month, and choose Set cap.",
       "The row shows the cap and a meter of tokens used in the current UTC period.",
@@ -2948,14 +2948,14 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       {
         label: "Export other sections",
         steps: [
-          "Chat Feedback and User Usage have their own CSV buttons with the same date choice.",
-          "Choosing one person in a section's filter adds them to the file name.",
+          "Chat Feedback and User Usage have their own Export buttons with the same choices.",
+          "Ticking one person in a section's filter adds them to the file name; ticking several adds the count.",
         ],
       },
     ],
     verify: [
       "Each filter shows \"N of M records\" for its own section only.",
-      "The CSV downloads with the section and person in its file name, such as aperture-admin-runtime-analytics-….",
+      "The file downloads with the section and person in its file name, such as aperture-admin-runtime-analytics-….",
       "The cap row shows used and capped tokens, and a capped person's next message is refused with the budget message.",
     ],
     troubleshooting: [
@@ -2977,18 +2977,18 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "Scope a section",
-        caption: "Each section has its own person picker, dates, and All, Today, Week, 30 days.",
+        caption: "Each section has its own user checkboxes, dates, and All, Today, Week, 30 days.",
         narration:
-          "Expand Runtime Clock Metadata. Every section has its own filter: a person, a date range, and the All, Today, Week, and thirty days shortcuts. Here, Jane Smith over thirty days. Filtering one section never changes another.",
-        durationSeconds: 17,
+          "Expand Runtime Clock Metadata. Every section has its own filter: checkboxes for one person or several, a date range, and the All, Today, Week, and thirty days shortcuts. Here, Jane Smith is ticked, over thirty days. Filtering one section never changes another.",
+        durationSeconds: 19,
         focus: "anFilters",
       },
       {
-        title: "Export CSV",
-        caption: "CSV › choose dates or All dates › Download N rows.",
+        title: "Export the section",
+        caption: "Export › Excel workbook or CSV file › dates or All dates › Download N rows.",
         narration:
-          "Choose C S V. Pick a date range, or All dates, and choose Download. The file name carries the section, the person, and the dates.",
-        durationSeconds: 10,
+          "Choose Export, and pick Excel workbook or C S V file. Pick a date range, or All dates, and choose Download. The file name carries the section, the person, and the dates.",
+        durationSeconds: 13,
         focus: "anCsv",
       },
       {
@@ -3063,7 +3063,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       "In Audit Insights, choose 7, 14, or 30 days, then select a bar or point to list the records behind it.",
       "Expand User Prompt Activity, search for the prompt, and open it to read the prompt and the model's reply.",
       "Expand Security Alerts and choose Acknowledge once you have reviewed the alert.",
-      "Expand Audit Trail. Filter by severity, category, and text, then choose CSV to export what you see.",
+      "Expand Audit Trail. Filter by severity, category, and text, then choose Export to download what you see.",
     ],
     paths: [
       {
@@ -3076,7 +3076,7 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       {
         label: "Export evidence",
         steps: [
-          "User Prompt Activity and Audit Trail each have a CSV button. The trail export carries exactly the filtered rows.",
+          "User Prompt Activity and Audit Trail each have an Export button. The trail export carries exactly the filtered rows.",
         ],
       },
     ],
@@ -3145,10 +3145,10 @@ export const ADMIN_TRAINING_VIDEOS: AdminTrainingVideo[] = [
       },
       {
         title: "The audit trail",
-        caption: "Severity, category, and text filters. CSV exports exactly what you see.",
+        caption: "Severity, category, and text filters. Export carries exactly what you see.",
         narration:
-          "Expand Audit Trail, the append-only record, newest first. Filter by severity, category, and text; here, security dot prompt flagged. C S V exports exactly the rows you see.",
-        durationSeconds: 14,
+          "Expand Audit Trail, the append-only record, newest first. Filter by severity, category, and text; here, security dot prompt flagged. Export writes exactly the rows you see, to Excel or C S V.",
+        durationSeconds: 15,
         captionPlacement: "top",
         focus: "auTrailFilters",
       },
