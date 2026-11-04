@@ -32,7 +32,7 @@ from app.models.schemas import (
 from app.repositories.application_state import ApplicationStateRepository
 from app.repositories.deps import get_store
 from app.repositories.draft_collaboration import DraftCollaborationRepository
-from app.repositories.matters import MatterDraftRepository, MatterPersistenceUnavailable
+from app.repositories.matters import MatterPersistenceUnavailable
 from app.routes.dependencies import current_user
 from app.routes.matters import (
     ReviewMatterService,

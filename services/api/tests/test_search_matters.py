@@ -21,7 +21,6 @@ from app.models.schemas import Role, Tenant, User
 from app.repositories.deps import get_store
 from app.repositories.draft_collaboration import DraftCollaborationRepository
 from app.repositories.matters import (
-    MatterDraftRepository,
     MatterPersistenceUnavailable,
 )
 from app.repositories.review_deps import get_review_store

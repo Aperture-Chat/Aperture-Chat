@@ -748,4 +748,3 @@ async def draft_live_events(
             hub.unsubscribe(subscription)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=_SSE_HEADERS)
-
