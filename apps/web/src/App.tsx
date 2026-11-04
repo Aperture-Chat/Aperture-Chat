@@ -207,6 +207,7 @@ import type {
   User,
 } from "./lib/types";
 import { ConnectorUpdateError, type ConnectorsPanelApi } from "./components/ConnectorsPanel";
+import { useFolderSyncWatcher } from "./components/KnowledgeFolders";
 import { applyBrandTheme, cacheBrandBoot, type BrandBootCache } from "./lib/brandTheme";
 import {
   DEFAULT_BRAND_NAME,
@@ -322,6 +323,8 @@ export function App() {
   const chat = useChatStore(sessionUserId ?? "signed-out", effectiveData, {
     enabled: Boolean(sessionUserId),
   });
+  // Folders kept in sync from Library > Knowledge keep adding new files while Aperture is open.
+  useFolderSyncWatcher(sessionUserId && sessionHydrated ? data.me.id : null);
 
   const queueFirstRunGuide = useCallback((user: User) => {
     if (user.first_run_guide_seen_at) return;

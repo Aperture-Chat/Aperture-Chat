@@ -19,8 +19,8 @@ from app.db import (
 from app.db.orm import SearchIndexEntryRow
 from app.models.schemas import Role, Tenant, User
 from app.repositories.deps import get_store
+from app.repositories.draft_collaboration import DraftCollaborationRepository
 from app.repositories.matters import (
-    MatterDraftRepository,
     MatterPersistenceUnavailable,
 )
 from app.repositories.review_deps import get_review_store
@@ -85,7 +85,7 @@ def matter_search_api(tmp_path: Path):
             SearchIndexEntryRow.__table__,
         ],
     )
-    repository = MatterDraftRepository(engine)
+    repository = DraftCollaborationRepository(engine)
     directory = SearchDirectory()
     actor = {"value": _user("user-one")}
     application = FastAPI()

@@ -34,6 +34,7 @@ from app.routes import (
     issue_reports,
     knowledge,
     matters,
+    draft_collaboration,
     memory,
     model_access,
     platform,
@@ -242,6 +243,7 @@ app.include_router(tools.router)
 app.include_router(agents.router)
 app.include_router(automations.router)
 app.include_router(matters.router)
+app.include_router(draft_collaboration.router)
 app.include_router(deck_templates.router)
 app.include_router(document_import.router)
 app.include_router(draft_pdf_export.router)

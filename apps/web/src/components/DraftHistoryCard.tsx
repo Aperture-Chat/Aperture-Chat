@@ -7,7 +7,8 @@ type Props = {
   archived: boolean; disabled: boolean; opening?: boolean; archiveDisabled?: boolean;
   /** Decks and documents can share a title; the icon tells them apart. */
   kind?: "document" | "deck" | "spreadsheet";
-  onRestore: () => void; onArchive: () => void; onDelete: () => void;
+  /** Omitted for drafts someone else owns (shared with this person). */
+  onRestore: () => void; onArchive?: () => void; onDelete?: () => void;
   loadPreview: () => Promise<string>;
 };
 
@@ -56,7 +57,7 @@ export function DraftHistoryCard(props: Props) {
           <span className="sr-only">{[props.summary, props.source].filter(Boolean).join(". ")}</span>
         </span>
       </button>
-      <div className="draft-history-actions">
+      {props.onArchive && props.onDelete && <div className="draft-history-actions">
         <button type="button" disabled={props.archiveDisabled ?? props.disabled} onClick={props.onArchive}
           aria-label={`${props.archived ? "Unarchive" : "Archive"} ${props.title}`}
           data-tooltip={props.archived ? "Move back to active drafts" : "Archive this draft"}>
@@ -66,7 +67,7 @@ export function DraftHistoryCard(props: Props) {
           data-tooltip="Delete this draft">
           <Trash2 size={14} />
         </button>
-      </div>
+      </div>}
       {expanded && createPortal(<div style={position} className="draft-history-preview" role="status" aria-label={`Preview of ${props.title}`}>
         <span className="eyebrow">Preview</span>
         {(props.summary || props.source) && <small className="draft-history-preview-meta">{[props.summary, props.source].filter(Boolean).join(" · ")}</small>}
@@ -77,7 +78,7 @@ export function DraftHistoryCard(props: Props) {
 }
 
 function historyStatusTone(status: string) {
-  if (status === "Saved") return "saved";
+  if (status === "Saved" || status.startsWith("Shared by")) return "saved";
   if (status === "Drafting") return "running";
   if (status === "Needs attention") return "failed";
   return "local";

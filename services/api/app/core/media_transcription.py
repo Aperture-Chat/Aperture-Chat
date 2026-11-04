@@ -1,11 +1,17 @@
-"""Transcribe uploaded audio/video with the platform's Gemini Flash models.
+"""Transcribe dictation and uploaded audio/video with the platform's models.
 
-Composer dictation already posts WAV/MP3 to ``/api/chat/transcriptions``.
-File uploads reuse that same gateway path after ``app.core.media`` prepares
+Composer dictation posts WAV/MP3 to ``/api/chat/transcriptions``. File
+uploads reuse the same gateway path after ``app.core.media`` prepares
 speech-sized chunks and video stills. A video with no audio still yields
 visual notes from those stills. Nothing here invents a transcript: missing
 models, missing ffmpeg, or a file with neither speech nor describable frames
 fail honestly.
+
+Two kinds of model can transcribe. Gemini Flash and other audio-input chat
+models take the audio as an ``input_audio`` chat part. Dedicated
+speech-to-text models (Whisper, gpt-4o-transcribe) answer on the provider's
+``/audio/transcriptions`` route instead: Groq, OpenAI, Azure OpenAI, and an
+Azure AI Foundry resource all serve them.
 """
 
 from __future__ import annotations
@@ -13,7 +19,9 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from itertools import islice
 from typing import Any, Mapping, cast
 
 from app.core.media import (
@@ -28,8 +36,10 @@ from app.core.model_gateway import (
     ModelGatewayError,
     ModelGatewayRoute,
     get_model_gateway_client,
+    is_speech_to_text_model_id,
     resolve_model_route,
     supports_image_input,
+    supports_speech_transcription,
 )
 from app.core.usage_budget import UsageBudgetError, new_accounting_id
 from app.core.usage_budget_runtime import (
@@ -63,11 +73,16 @@ _VISION_SYSTEM_PROMPT = (
     "or unreadable, say so in one clause."
 )
 _GEMINI_VERSION_RE = re.compile(r"gemini-(?:(\d+)(?:\.(\d+))?)?", re.IGNORECASE)
-_MISSING_FLASH_DETAIL = (
-    "No configured Gemini Flash model is available to transcribe this file. "
-    "Sync a provider catalog that includes a Gemini Flash model "
-    "(for example google/gemini-3.5-flash or google/gemini-3-flash-preview)."
+_FAST_MODEL_RE = re.compile(r"flash|lite|mini|turbo|nano|small|haiku")
+_PRO_MODEL_RE = re.compile(r"(?:^|[^a-z])pro(?:[^a-z]|$)")
+MISSING_TRANSCRIPTION_MODEL_DETAIL = (
+    "No speech model is configured to transcribe audio. Add a speech-to-text "
+    "model such as Whisper or gpt-4o-mini-transcribe (on Groq, OpenAI, or an "
+    "Azure OpenAI or Azure AI Foundry deployment), or sync a provider catalog "
+    "that includes a Gemini Flash model (for example google/gemini-3.5-flash)."
 )
+# A rate-limited or unreachable model hands dictation to the next candidate.
+DICTATION_MAX_ATTEMPTS = 3
 
 
 class MediaTranscriptionError(RuntimeError):
@@ -76,6 +91,32 @@ class MediaTranscriptionError(RuntimeError):
     def __init__(self, message: str, *, status_code: int = 503) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class TranscriptionFailure(RuntimeError):
+    """The gateway error from the last model tried, with that model's route."""
+
+    def __init__(
+        self,
+        error: ModelGatewayError,
+        *,
+        model: ModelConfig,
+        route: ModelGatewayRoute,
+        attempts: int,
+    ) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.model = model
+        self.route = route
+        self.attempts = attempts
+
+
+@dataclass(frozen=True, slots=True)
+class DictationTranscript:
+    text: str
+    model: ModelConfig
+    route: ModelGatewayRoute
+    skipped_models: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,53 +140,163 @@ def resolve_transcription_model(
     tenant_id: str | None,
     prefer_fast: bool = False,
 ) -> tuple[ModelConfig, ModelGatewayRoute] | None:
-    """Pick a Gemini Flash catalog model for transcription and stills.
+    """The best configured transcription model, or None when there is none."""
 
-    Newer Flash IDs win over older ones, full Flash over lite, and GA over
-    preview at the same version. GPT-4o is not preferred; it is only eligible
-    as a last-resort audio-capable fallback when no Gemini Flash is configured.
-    Dictation and file uploads do not need the model to be user-enabled for
-    chat, but a candidate only qualifies when the gateway can resolve a
-    configured credential for this exact request tenant. Dictation can prefer
-    Flash Lite for lower latency; file and video uploads keep the default ranking.
+    return next(transcription_candidates(store, tenant_id=tenant_id, prefer_fast=prefer_fast), None)
+
+
+def transcription_candidates(
+    store: SeedStore,
+    *,
+    tenant_id: str | None,
+    prefer_fast: bool,
+) -> Iterator[tuple[ModelConfig, ModelGatewayRoute]]:
+    """Configured transcription models, best first.
+
+    Gemini Flash leads: newer over older, full over lite, GA over preview.
+    Dictation (``prefer_fast``) tries Flash Lite first, skips batch routes,
+    and takes a dedicated speech-to-text model before Gemini Pro; file
+    uploads keep Pro first because it can also describe video stills. Any
+    other audio-input chat model comes last, fast tiers before pro ones.
+    Models do not need to be user-enabled for chat, but a candidate only
+    counts when the gateway can resolve a configured credential for this
+    exact request tenant. Credentials are resolved lazily, one candidate at
+    a time, so the first answer costs one lookup.
     """
-    flash = [
-        model
-        for model in store.models.values()
-        if is_gemini_flash_upstream(model.upstream_model_id)
-    ]
-    if prefer_fast:
-        # Batch routes are unsuitable for an interactive microphone control.
-        flash = [model for model in flash if ":batch" not in (model.upstream_model_id or "")]
-        fast = [model for model in flash if "lite" in (model.upstream_model_id or "")]
-        selection = _configured_selection(
-            store, fast, tenant_id=tenant_id, rank_key=_gemini_flash_rank
-        )
-        if selection is not None:
-            return selection
-    selection = _configured_selection(
-        store, flash, tenant_id=tenant_id, rank_key=_gemini_flash_rank
+
+    seen: set[str] = set()
+    for tier in _candidate_tiers(store, prefer_fast=prefer_fast):
+        for model in tier:
+            if model.id in seen:
+                continue
+            seen.add(model.id)
+            route = _configured_route(store, model, tenant_id=tenant_id)
+            if route is not None:
+                yield model, route
+
+
+def _candidate_tiers(store: SeedStore, *, prefer_fast: bool) -> Iterator[list[ModelConfig]]:
+    models = list(store.models.values())
+    yield from _gemini_flash_tiers(models, prefer_fast=prefer_fast)
+    speech = _ranked([model for model in models if _is_speech_candidate(store, model)], _speech_rank)
+    pro = _ranked(
+        [model for model in models if is_gemini_pro_upstream(model.upstream_model_id)],
+        _gemini_version_rank,
     )
-    if selection is not None:
-        return selection
-    pro = [
-        model
-        for model in store.models.values()
-        if is_gemini_pro_upstream(model.upstream_model_id)
-    ]
-    selection = _configured_selection(
-        store, pro, tenant_id=tenant_id, rank_key=_gemini_version_rank
+    yield from (speech, pro) if prefer_fast else (pro, speech)
+    yield _ranked([model for model in models if _is_audio_chat_candidate(model)], _audio_chat_rank)
+
+
+def _gemini_flash_tiers(models: list[ModelConfig], *, prefer_fast: bool) -> list[list[ModelConfig]]:
+    flash = [model for model in models if is_gemini_flash_upstream(model.upstream_model_id)]
+    if not prefer_fast:
+        return [_ranked(flash, _gemini_flash_rank)]
+    # Batch routes are unsuitable for an interactive microphone control.
+    interactive = [model for model in flash if ":batch" not in (model.upstream_model_id or "")]
+    lite = [model for model in interactive if "lite" in (model.upstream_model_id or "")]
+    return [_ranked(lite, _gemini_flash_rank), _ranked(interactive, _gemini_flash_rank)]
+
+
+def is_speech_model(model: ModelConfig) -> bool:
+    """True for a dedicated speech-to-text model (Whisper, gpt-4o-transcribe).
+
+    Azure deployments carry whatever name the admin gave them, so a provider
+    model's display name counts too; a custom preset is judged by its upstream.
+    """
+
+    return is_speech_to_text_model_id(_speech_label(model))
+
+
+def _speech_label(model: ModelConfig) -> str:
+    upstream = model.upstream_model_id or ""
+    return upstream if model.is_custom else f"{upstream} {model.name or ''}"
+
+
+def _is_speech_candidate(store: SeedStore, model: ModelConfig) -> bool:
+    # Diarization models want chunking settings and label speakers; dictation needs neither.
+    if not is_speech_model(model) or "diarize" in _speech_label(model).lower():
+        return False
+    provider = store.providers.get(model.provider_id)
+    return provider is not None and supports_speech_transcription(
+        provider.kind, provider.auth_metadata
     )
-    if selection is not None:
-        return selection
-    audio_capable = [
-        model
-        for model in store.models.values()
-        if model.capabilities
-        and "audio" in model.capabilities.input_modalities
-        and "image" not in (model.capabilities.output_modalities or [])
-    ]
-    return _configured_selection(store, audio_capable, tenant_id=tenant_id)
+
+
+def _is_audio_chat_candidate(model: ModelConfig) -> bool:
+    capabilities = model.capabilities
+    return bool(
+        capabilities
+        and "audio" in capabilities.input_modalities
+        and "image" not in capabilities.output_modalities
+        and not is_speech_model(model)
+    )
+
+
+def _ranked(models: list[ModelConfig], rank_key) -> list[ModelConfig]:
+    # Stable sort keeps the old first-candidate tie behavior.
+    return sorted(models, key=rank_key, reverse=True)
+
+
+def _speech_rank(model: ModelConfig) -> tuple:
+    """gpt-4o transcribe over Whisper, then the faster turbo/mini variants."""
+
+    label = _speech_label(model).lower()
+    return (
+        "transcribe" in label,
+        bool(_FAST_MODEL_RE.search(label)),
+        model.upstream_model_id or "",
+    )
+
+
+def _audio_chat_rank(model: ModelConfig) -> tuple:
+    """Fast tiers first and pro tiers last, so dictation avoids slow models."""
+
+    upstream = (model.upstream_model_id or "").lower()
+    return (
+        bool(_FAST_MODEL_RE.search(upstream)),
+        not _PRO_MODEL_RE.search(upstream),
+        upstream,
+    )
+
+
+def transcribe_with_fallback(
+    candidates: Iterable[tuple[ModelConfig, ModelGatewayRoute]],
+    *,
+    audio: bytes,
+    audio_format: str,
+    usage_context: UsageBudgetRequestContext,
+    client: Any,
+    max_attempts: int = DICTATION_MAX_ATTEMPTS,
+) -> DictationTranscript:
+    """Transcribe with the first candidate that answers.
+
+    A rate limit, outage, or network failure (``retryable``) moves on to the
+    next candidate, up to ``max_attempts``. Any other failure, such as a
+    rejected key or a malformed request, stops at once.
+    """
+
+    skipped: list[str] = []
+    failure: TranscriptionFailure | None = None
+    for model, route in islice(candidates, max_attempts):
+        try:
+            text = transcribe_audio_bytes(
+                audio=audio,
+                audio_format=audio_format,
+                model=model,
+                route=route,
+                usage_context=usage_context,
+                client=client,
+            )
+        except ModelGatewayError as exc:
+            failure = TranscriptionFailure(exc, model=model, route=route, attempts=len(skipped) + 1)
+            if not exc.retryable:
+                raise failure from exc
+            skipped.append(route.upstream_model)
+            continue
+        return DictationTranscript(text, model, route, tuple(skipped))
+    if failure is None:
+        raise MediaTranscriptionError(MISSING_TRANSCRIPTION_MODEL_DETAIL)
+    raise failure from failure.error
 
 
 def transcribe_audio_bytes(
@@ -159,12 +310,39 @@ def transcribe_audio_bytes(
 ) -> str:
     """Send one WAV/MP3 payload to the transcription model.
 
-    Raises the same gateway and usage errors as composer dictation so existing
-    HTTP mapping in the dictation route stays valid. Callers that already
-    resolved a gateway client (the dictation route) pass it so tests that
-    patch ``app.routes.chat.get_model_gateway_client`` keep working.
+    Speech-to-text models get the provider's speech route; every other model
+    gets an ``input_audio`` chat completion. Raises the same gateway and usage
+    errors either way, so the dictation route's HTTP mapping stays valid.
+    Callers that already resolved a gateway client (the dictation route) pass
+    it so tests that patch ``app.routes.chat.get_model_gateway_client`` keep
+    working.
     """
     gateway = client or get_model_gateway_client()
+    completion_id = new_accounting_id()
+    speech = is_speech_model(model)
+    if speech:
+        payload = gateway.transcribe_speech(route=route, audio=audio, audio_format=audio_format)
+    else:
+        payload = _complete_chat_transcription(
+            gateway, audio=audio, audio_format=audio_format, route=route
+        )
+    usage_context.settle_provider_child(
+        completion_id=completion_id,
+        usage=_raw_provider_usage(payload),
+        attribution=ProviderUsageAttribution(
+            model_id=model.id,
+            provider_name=route.provider_name,
+            surface="transcription",
+            message_count=1,
+        ),
+    )
+    text = payload.get("text") if speech else _chat_message_text(payload)
+    return text.strip() if isinstance(text, str) else ""
+
+
+def _complete_chat_transcription(
+    gateway: Any, *, audio: bytes, audio_format: str, route: ModelGatewayRoute
+) -> Any:
     encoded = base64.b64encode(audio).decode("ascii")
     messages: list[dict[str, object]] = [
         {"role": "system", "content": _TRANSCRIPTION_SYSTEM_PROMPT},
@@ -176,29 +354,18 @@ def transcribe_audio_bytes(
             ],
         },
     ]
-    completion_id = new_accounting_id()
     options: dict[str, Any] = {"temperature": 0}
     if route.provider_kind.strip().lower() == "openrouter" and is_gemini_flash_upstream(route.upstream_model):
         # Verbatim speech does not need the default reasoning budget. Gemini
         # 3+ still requires thinking, so request minimal rather than disabling it.
         options["reasoning"] = {"effort": "minimal"}
         options["provider"] = {"sort": "latency"}
-    payload = gateway.complete(
-        route=route, messages=messages, max_tokens=2048, options=options
-    )
-    usage_context.settle_provider_child(
-        completion_id=completion_id,
-        usage=_raw_provider_usage(payload),
-        attribution=ProviderUsageAttribution(
-            model_id=model.id,
-            provider_name=route.provider_name,
-            surface="transcription",
-            message_count=1,
-        ),
-    )
+    return gateway.complete(route=route, messages=messages, max_tokens=2048, options=options)
+
+
+def _chat_message_text(payload: Any) -> Any:
     message = ((payload.get("choices") or [{}])[0] or {}).get("message") or {}
-    text = message.get("content")
-    return text.strip() if isinstance(text, str) else ""
+    return message.get("content")
 
 
 def transcribe_media_file(
@@ -220,7 +387,7 @@ def transcribe_media_file(
         )
     selection = resolve_transcription_model(store, tenant_id=tenant_id)
     if selection is None:
-        raise MediaTranscriptionError(_MISSING_FLASH_DETAIL)
+        raise MediaTranscriptionError(MISSING_TRANSCRIPTION_MODEL_DETAIL)
     model, route = selection
     try:
         prepared = prepare_media_audio(
@@ -363,8 +530,7 @@ def _describe_frames(
             message_count=1,
         ),
     )
-    message = ((payload.get("choices") or [{}])[0] or {}).get("message") or {}
-    text = message.get("content")
+    text = _chat_message_text(payload)
     return text.strip() if isinstance(text, str) else ""
 
 
@@ -465,28 +631,19 @@ def _gemini_flash_rank(model: ModelConfig) -> tuple:
     )
 
 
-def _configured_selection(
-    store: SeedStore,
-    candidates: list[ModelConfig],
-    *,
-    tenant_id: str | None,
-    rank_key=None,
-) -> tuple[ModelConfig, ModelGatewayRoute] | None:
-    # Resolve credentials only until the highest-ranked usable model is found.
-    # Sorting is stable, preserving the old first-candidate tie behavior without
-    # decrypting credentials for every lower-ranked model on each recording.
-    key = rank_key or (lambda item: item.upstream_model_id or "")
-    for model in sorted(candidates, key=key, reverse=True):
-        try:
-            route = resolve_model_route(store, model, tenant_id=tenant_id)
-        except ModelGatewayConfigurationError:
-            continue
-        if route.configured:
-            return model, route
-    return None
+def _configured_route(
+    store: SeedStore, model: ModelConfig, *, tenant_id: str | None
+) -> ModelGatewayRoute | None:
+    try:
+        route = resolve_model_route(store, model, tenant_id=tenant_id)
+    except ModelGatewayConfigurationError:
+        return None
+    return route if route.configured else None
 
 
 def _model_accepts_images(model: ModelConfig) -> bool:
+    if is_speech_model(model):
+        return False
     modalities = model.capabilities.input_modalities if model.capabilities else ()
     return supports_image_input(model.upstream_model_id, modalities)
 

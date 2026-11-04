@@ -2660,6 +2660,113 @@ class DraftRevisionRow(Base):
         )
 
 
+class DraftRevisionAuthorRow(Base):
+    """Who saved one version. A version without a row was saved by the owner
+    (as every version written before collaboration existed was)."""
+
+    __tablename__ = "draft_revision_authors"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["draft_id", "revision"],
+            ["draft_revisions.draft_id", "draft_revisions.revision"],
+            name="fk_draft_revision_authors_draft_revision",
+            ondelete="CASCADE",
+        ),
+    )
+
+    draft_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    revision: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Null once the author's account is permanently purged.
+    author_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class DraftShareRow(Base):
+    """One person or one group the owner shared a draft with.
+
+    Sharing never broadens matter access: a collaborator on a matter-bound
+    draft must also be a member of that matter (checked on every request).
+    """
+
+    __tablename__ = "draft_shares"
+    __table_args__ = (
+        CheckConstraint("principal_kind IN ('group', 'user')", name="principal_kind_valid"),
+        ForeignKeyConstraint(
+            ["draft_id", "tenant_id", "owner_user_id"],
+            [
+                "draft_documents.id",
+                "draft_documents.tenant_id",
+                "draft_documents.owner_user_id",
+            ],
+            name="fk_draft_shares_draft_tenant_owner_documents",
+            ondelete="CASCADE",
+        ),
+        Index("ix_draft_shares_tenant_principal", "tenant_id", "principal_kind", "principal_id"),
+    )
+
+    draft_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    principal_kind: Mapped[str] = mapped_column(String(8), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class DraftLiveStateRow(Base):
+    """The shared working copy everyone editing a draft saves into.
+
+    Live saves replace this one row (compare-and-set on ``seq``), so constant
+    autosaving never spends the draft's bounded version history. Saving a
+    version copies this content into ``draft_revisions``.
+    """
+
+    __tablename__ = "draft_live_states"
+    __table_args__ = (
+        CheckConstraint("seq >= 1", name="seq_positive"),
+        CheckConstraint(
+            "base_revision >= 1 AND base_revision <= 200",
+            name="base_revision_bounded",
+        ),
+        CheckConstraint(
+            "length(trim(title)) >= 1 AND length(title) <= 240",
+            name="title_bounded",
+        ),
+        CheckConstraint(
+            "octet_length(content) <= 8000000",
+            name="content_utf8_bytes_ceiling",
+        ),
+        CheckConstraint("length(content_sha256) = 64", name="content_sha256_length"),
+        CheckConstraint(
+            "sanitizer_version IN ('sanitized-html-v1', 'deck-json-v1', 'sheet-json-v1')",
+            name="sanitizer_version_known",
+        ),
+        ForeignKeyConstraint(
+            ["draft_id", "tenant_id", "owner_user_id"],
+            [
+                "draft_documents.id",
+                "draft_documents.tenant_id",
+                "draft_documents.owner_user_id",
+            ],
+            name="fk_draft_live_states_draft_tenant_owner_documents",
+            ondelete="CASCADE",
+        ),
+    )
+
+    draft_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    base_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    sanitizer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_by_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_by_client: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class TenantRow(Base):
     """Authoritative tenant configuration, preserving its validated v4 payload."""
 

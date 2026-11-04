@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   BookOpen,
+  Briefcase,
   CheckCircle2,
   ChevronDown,
   Cloud,
@@ -30,7 +31,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type FormEvent,
   type ReactNode,
   type MouseEvent,
@@ -41,7 +41,19 @@ import { useKnowledgeDocumentViewer } from "./KnowledgeDocumentViewerHost";
 import { RailSwitch, type RailSwitchOption } from "./RailSwitch";
 import { StableLabel, Toggle } from "./Primitives";
 import { SelectControl } from "./SelectControl";
-import { MEDIA_UPLOAD_EXTENSIONS } from "../lib/mediaUploads";
+import { MatterField } from "./MatterPicker";
+import { useKnowledgeMatterFiling, useMatterDraft } from "./useKnowledgeMatter";
+import { cleanMatterLabel } from "../lib/matters";
+import type { SavedMatters } from "../lib/useSavedMatters";
+import {
+  KnowledgeDropZone,
+  KnowledgeFolderList,
+  confirmLargeFolder,
+  useFolderSyncEvents,
+  useFolderSyncService,
+} from "./KnowledgeFolders";
+import type { FolderSource } from "../lib/folderAccess";
+import { knowledgeFileSkipReason } from "../lib/knowledgeFiles";
 import {
   addKnowledgeApiSource,
   addKnowledgeWebSource,
@@ -67,6 +79,7 @@ import type {
   BootstrapData,
   KnowledgeBase,
   KnowledgeDocument,
+  KnowledgeFolderFileResult,
   KnowledgeIndexStatus,
   KnowledgeLinkedSource,
   KnowledgeSyncResult,
@@ -87,7 +100,14 @@ type UploadItem = {
 };
 type Health = { label: string; tone: "ok" | "warn" | "danger" | "muted" };
 /** Settings the form changed; unchanged options are left out of the save. */
-type SettingsPatch = { name: string; groupIds: string[]; visionOcr?: boolean; wallFields?: string[] };
+type SettingsPatch = {
+  name: string;
+  groupIds: string[];
+  visionOcr?: boolean;
+  wallFields?: string[];
+  /** Present only when the client-matter number changed; blank removes it. */
+  matterLabel?: string;
+};
 type DocumentAccess = {
   groups: BootstrapData["groups"];
   overrides: NonNullable<KnowledgeBase["document_walls"]>;
@@ -98,35 +118,6 @@ type DocumentAccess = {
 };
 
 const CONNECTOR_TYPES = new Set(["box", "microsoft-graph", "google-drive", "imanage"]);
-/** Files the indexer can read; everything else would only be searchable by name. */
-const KNOWLEDGE_FILE_EXTENSIONS = [
-  ".pdf",
-  ".docx",
-  ".xlsx",
-  ".pptx",
-  ".eml",
-  ".msg",
-  ".txt",
-  ".md",
-  ".csv",
-  ".json",
-  ".xml",
-  ".log",
-  ".rtf",
-  ".htm",
-  ".html",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".bmp",
-  ".tif",
-  ".tiff",
-  ".webp",
-  ...MEDIA_UPLOAD_EXTENSIONS,
-] as const;
-const KNOWLEDGE_FILE_ACCEPT = KNOWLEDGE_FILE_EXTENSIONS.join(",");
-const LEGACY_OFFICE = new Set([".doc", ".xls", ".ppt"]);
 const PARALLEL_UPLOADS = 2;
 const INDEX_POLL_MS = 3000;
 
@@ -167,6 +158,7 @@ export function KnowledgeLibrary({
     }),
     [data.connectorConfigs, data.connectors, data.groups, data.users, data.visibleUsers],
   );
+  const { savedMatters, fileUnderMatter, fileNewBase } = useKnowledgeMatterFiling(userId, data, canCreate);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -221,7 +213,7 @@ export function KnowledgeLibrary({
       setDocumentErrors((current) => omitKey(current, id));
       onDataChange((current) => ({
         ...current,
-        knowledgeBases: current.knowledgeBases.map((item) => (item.id === id ? saved : item)),
+        knowledgeBases: current.knowledgeBases.map((item) => (item.id === id ? withKnownMatterLabel(item, saved) : item)),
       }));
     },
     [mappingContext, onDataChange],
@@ -238,6 +230,24 @@ export function KnowledgeLibrary({
     },
     [userId],
   );
+
+  // Folder files arrive one at a time from the shared folder engine, which
+  // keeps running when this page is closed; merge each into the open list.
+  const folderSync = useFolderSyncService();
+  const addFolderDocument = useCallback(
+    (knowledgeId: string, result: KnowledgeFolderFileResult) => {
+      const saved = mapKnowledgeConfigRecordToKnowledgeBase(result.config, mappingContext);
+      setDocuments((current) =>
+        current[knowledgeId] ? { ...current, [knowledgeId]: withDocument(current[knowledgeId], result.document) } : current,
+      );
+      onDataChange((current) => ({
+        ...current,
+        knowledgeBases: current.knowledgeBases.map((item) => (item.id === knowledgeId ? withKnownMatterLabel(item, saved) : item)),
+      }));
+    },
+    [mappingContext, onDataChange],
+  );
+  useFolderSyncEvents(addFolderDocument, refreshIndexStatus);
 
   const loadDocuments = useCallback(
     async (id: string) => {
@@ -328,22 +338,10 @@ export function KnowledgeLibrary({
 
   function queueFiles(item: KnowledgeBase, files: File[]) {
     const skipped: string[] = [];
-    const maxBytes = (limits?.upload_max_mb ?? Number.POSITIVE_INFINITY) * 1024 * 1024;
     const accepted = files.filter((file) => {
-      const extension = extensionOf(file.name);
-      if (LEGACY_OFFICE.has(extension)) {
-        skipped.push(`${file.name} (save it as ${extension}x first)`);
-        return false;
-      }
-      if (!isReadableKnowledgeFile(file)) {
-        skipped.push(`${file.name} (unsupported type)`);
-        return false;
-      }
-      if (file.size > maxBytes) {
-        skipped.push(`${file.name} (larger than ${limits?.upload_max_mb} MB)`);
-        return false;
-      }
-      return true;
+      const reason = knowledgeFileSkipReason(file, limits?.upload_max_mb ?? null);
+      if (reason) skipped.push(`${file.name} (${reason})`);
+      return !reason;
     });
     if (accepted.length) {
       setUploads((current) => [
@@ -362,6 +360,13 @@ export function KnowledgeLibrary({
         tone: "warning",
         message: `Skipped ${skipped.length} file${skipped.length === 1 ? "" : "s"}: ${skipped.join(", ")}.`,
       });
+    }
+  }
+
+  /** Each folder syncs by its name: only files the base lacks or that changed are sent. */
+  function queueFolders(item: KnowledgeBase, folders: FolderSource[]) {
+    for (const source of folders) {
+      void folderSync.sync({ userId, knowledgeId: item.id, source, confirmLarge: confirmLargeFolder(source.name) });
     }
   }
 
@@ -394,7 +399,7 @@ export function KnowledgeLibrary({
     try {
       // Only the switch changes; status and last-sync time stay as they are.
       const record = await updateAdminKnowledgeConfig(userId, item.id, { enabled });
-      replaceBase(item.id, mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext));
+      replaceBase(item.id, withKnownMatterLabel(item, mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext)));
       setNotice({
         tone: "success",
         message: enabled
@@ -450,14 +455,19 @@ export function KnowledgeLibrary({
   async function deleteAllBases() {
     const count = knowledgeBases.length;
     if (!count) return;
-    const confirmed = window.confirm(
+    await deleteBases(
+      knowledgeBases,
       `Delete all ${count} knowledge base${count === 1 ? "" : "s"}? Every document and search index is removed, and agents stop using them. This can't be undone.`,
     );
+  }
+
+  async function deleteBases(items: KnowledgeBase[], prompt: string) {
+    const confirmed = window.confirm(prompt);
     if (!confirmed) return;
     setPending("delete-all");
     const deleted = new Set<string>();
     const failures: string[] = [];
-    for (const item of knowledgeBases) {
+    for (const item of items) {
       try {
         await deleteAdminKnowledgeConfig(userId, item.id);
         deleted.add(item.id);
@@ -535,17 +545,15 @@ export function KnowledgeLibrary({
           last_sync: "Not synced",
         },
       });
-      const saved = mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext);
+      const filed = await fileNewBase(mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext), draft.matterLabel);
+      const saved = filed.base;
       onDataChange((current) => ({ ...current, knowledgeBases: [...current.knowledgeBases, saved] }));
       setDocuments((current) => ({ ...current, [saved.id]: [] }));
       setCreating(null);
       setOpenId(saved.id);
       setDetailTab(draft.startWith);
       void refreshIndexStatus(saved.id);
-      setNotice({
-        tone: "success",
-        message: `${saved.name} was created. ${START_OPTIONS[draft.startWith].next}`,
-      });
+      setNotice(createdNotice(saved, START_OPTIONS[draft.startWith].next, draft.matterLabel, filed.refusal));
       return true;
     } catch (error) {
       setNotice({ tone: "danger", message: `The knowledge base was not created: ${errorText(error)}` });
@@ -568,7 +576,16 @@ export function KnowledgeLibrary({
         ...(canConfigure ? { acl_group_ids: patch.groupIds } : {}),
         ...settingsPatch(patch, canConfigure),
       });
-      replaceBase(item.id, mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext));
+      const updated = withKnownMatterLabel(item, mapKnowledgeConfigRecordToKnowledgeBase(record, mappingContext));
+      replaceBase(item.id, updated);
+      if (patch.matterLabel !== undefined) {
+        try {
+          replaceBase(item.id, await fileUnderMatter(updated, patch.matterLabel));
+        } catch (error) {
+          setNotice({ tone: "danger", message: `${name} settings saved, but the client-matter number was not: ${errorText(error)}` });
+          return;
+        }
+      }
       setNotice({ tone: "success", message: `${name} settings saved.` });
     } catch (error) {
       setNotice({ tone: "danger", message: `Settings were not saved: ${errorText(error)}` });
@@ -699,6 +716,7 @@ export function KnowledgeLibrary({
       apiAllowed={apiSourcesAllowed}
       initialStart={creating}
       saving={pending === "create"}
+      savedMatters={savedMatters}
       onCancel={() => setCreating(null)}
       onCreate={createBase}
     />
@@ -731,6 +749,8 @@ export function KnowledgeLibrary({
           onDelete={() => void deleteBase(openBase)}
           onRetryDocuments={() => void loadDocuments(openBase.id)}
           onFiles={(files) => queueFiles(openBase, files)}
+          onFolders={(folders) => queueFolders(openBase, folders)}
+          onNotice={(message) => setNotice({ tone: "warning", message })}
           onCancelUpload={cancelUpload}
           onRetryUpload={retryUpload}
           onClearUploads={() => clearFinishedUploads(openBase.id)}
@@ -740,6 +760,7 @@ export function KnowledgeLibrary({
           onAddApi={(payload) => addApi(openBase, payload)}
           onAuthorize={() => void authorizeApi(openBase)}
           onSaveSettings={(patch) => void saveSettings(openBase, patch)}
+          savedMatters={savedMatters}
         />
         </OpenDocumentContext.Provider>
         {documentViewerLayer}
@@ -760,7 +781,9 @@ export function KnowledgeLibrary({
     if (filter === "attention" && !(item.enabled && (health.tone === "warn" || health.tone === "danger"))) return false;
     if (filter === "off" && item.enabled) return false;
     if (!needle) return true;
-    return [item.name, item.source, item.acl, item.description].some((value) => value?.toLowerCase().includes(needle));
+    return [item.name, item.source, item.acl, item.description, item.matter_label].some((value) =>
+      value?.toLowerCase().includes(needle),
+    );
   });
 
   return (
@@ -824,6 +847,20 @@ export function KnowledgeLibrary({
             )}
             {canConfigure && (
               <OverflowMenu id="toolbar" label="More knowledge actions" openMenu={openMenu} setOpenMenu={setOpenMenu}>
+                {visible.length > 0 && visible.length < knowledgeBases.length && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="is-danger"
+                    disabled={pending === "delete-all"}
+                    onClick={() => {
+                      setOpenMenu(null);
+                      void deleteBases(visible, shownDeletePrompt(visible));
+                    }}
+                  >
+                    <Trash2 size={15} /> {pending === "delete-all" ? "Deleting..." : `Delete the ${visible.length} shown`}
+                  </button>
+                )}
                 <button
                   type="button"
                   role="menuitem"
@@ -973,6 +1010,7 @@ function KnowledgeCard({
           <li className="ws-fact">
             <RefreshCw size={13} /> {lastUpdatedLabel(item)}
           </li>
+          <MatterFact label={item.matter_label} />
         </ul>
         {attention && item.provider_message && <p className="knowledge-card-issue">{item.provider_message}</p>}
       </div>
@@ -1055,6 +1093,8 @@ function KnowledgeDetail({
   onDelete,
   onRetryDocuments,
   onFiles,
+  onFolders,
+  onNotice,
   onCancelUpload,
   onRetryUpload,
   onClearUploads,
@@ -1064,6 +1104,7 @@ function KnowledgeDetail({
   onAddApi,
   onAuthorize,
   onSaveSettings,
+  savedMatters,
 }: {
   item: KnowledgeBase;
   data: BootstrapData;
@@ -1086,6 +1127,8 @@ function KnowledgeDetail({
   onDelete: () => void;
   onRetryDocuments: () => void;
   onFiles: (files: File[]) => void;
+  onFolders: (folders: FolderSource[]) => void;
+  onNotice: (message: string) => void;
   onCancelUpload: (id: string) => void;
   onRetryUpload: (id: string) => void;
   onClearUploads: () => void;
@@ -1099,6 +1142,7 @@ function KnowledgeDetail({
   onAddApi: (payload: KnowledgeApiSourcePayload) => Promise<boolean>;
   onAuthorize: () => void;
   onSaveSettings: (patch: SettingsPatch) => void;
+  savedMatters: SavedMatters;
 }) {
   const health = baseHealth(item);
   const access: DocumentAccess = {
@@ -1148,6 +1192,7 @@ function KnowledgeDetail({
             <p>
               {kindLabel(item)} · {accessLabel(item, viewerId)} · {item.document_count.toLocaleString()}{" "}
               {plural(item.document_count, "document")} · {lastUpdatedLabel(item)}
+              {filedUnder(item)}
             </p>
           </div>
         </div>
@@ -1256,13 +1301,14 @@ function KnowledgeDetail({
             ) : (
               canManage && (
                 <>
-                  <DropZone limits={limits} onFiles={onFiles} />
+                  <KnowledgeDropZone limits={limits} onFiles={onFiles} onFolders={onFolders} onNotice={onNotice} />
                   <UploadQueue
                     items={uploads}
                     onCancel={onCancelUpload}
                     onRetry={onRetryUpload}
                     onClear={onClearUploads}
                   />
+                  <KnowledgeFolderList userId={viewerId} knowledgeId={item.id} documents={byKind.files} />
                 </>
               )
             )}
@@ -1276,7 +1322,7 @@ function KnowledgeDetail({
               emptyText={
                 connector
                   ? "Nothing has been synced yet. Use Sync now to pull files from the connected source."
-                  : "No files yet. Drop files above to add them."
+                  : "No files yet. Drop files or folders above to add them."
               }
               onRetry={onRetryDocuments}
               onRemove={onRemoveDocument}
@@ -1371,6 +1417,7 @@ function KnowledgeDetail({
                 item={item}
                 data={data}
                 limits={limits}
+                savedMatters={savedMatters}
                 canShare={canShare}
                 saving={pending === `settings:${item.id}`}
                 onSave={onSaveSettings}
@@ -1405,68 +1452,6 @@ function SemanticIndexLine({ status }: { status: KnowledgeIndexStatus | undefine
 }
 
 // ================================================================ uploading
-
-function DropZone({ limits, onFiles }: { limits: KnowledgeLimits | null; onFiles: (files: File[]) => void }) {
-  const [dragging, setDragging] = useState(false);
-  const inputId = useId();
-  const depth = useRef(0);
-  function handleDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    depth.current = 0;
-    setDragging(false);
-    const files = Array.from(event.dataTransfer.files ?? []);
-    if (files.length) onFiles(files);
-  }
-  return (
-    <div
-      className={`knowledge-dropzone ${dragging ? "is-dragging" : ""}`}
-      onDragEnter={(event) => {
-        event.preventDefault();
-        depth.current += 1;
-        setDragging(true);
-      }}
-      onDragOver={(event) => event.preventDefault()}
-      onDragLeave={() => {
-        depth.current = Math.max(0, depth.current - 1);
-        if (depth.current === 0) setDragging(false);
-      }}
-      onDrop={handleDrop}
-    >
-      <span className="knowledge-dropzone-icon" aria-hidden="true">
-        <Upload size={20} />
-      </span>
-      <div>
-        <strong>Drag files here</strong> or{" "}
-        <label className="knowledge-browse" htmlFor={inputId}>
-          browse your computer
-        </label>
-        <input
-          id={inputId}
-          className="knowledge-file-input"
-          type="file"
-          multiple
-          accept={KNOWLEDGE_FILE_ACCEPT}
-          aria-label="Choose files to add"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            if (files.length) onFiles(files);
-          }}
-        />
-        <small>
-          PDF, Word, Excel, PowerPoint, email, images, text, audio, and video
-          {limits ? ` · up to ${limits.upload_max_mb.toLocaleString()} MB each` : ""}. Files are searchable as soon as
-          they finish.
-          {limits?.ocr_enabled ? ` Scanned pages are read with OCR (first ${limits.ocr_max_pages.toLocaleString()} pages).` : ""}
-          {limits?.vision_ocr?.available
-            ? ` Handwriting, stamps, and pictures are read by ${limits.vision_ocr.model_name}.`
-            : ""}
-          {" "}File properties such as author, dates, labels, and custom fields are kept and searchable.
-        </small>
-      </div>
-    </div>
-  );
-}
 
 function UploadQueue({
   items,
@@ -1596,7 +1581,9 @@ function DocumentList({
   }
   if (!documents.length) return <p className="knowledge-empty-list">{emptyText}</p>;
   const needle = query.trim().toLowerCase();
-  const shown = needle ? documents.filter((document) => document.name.toLowerCase().includes(needle)) : documents;
+  const shown = needle
+    ? documents.filter((document) => (document.folder_file?.path ?? document.name).toLowerCase().includes(needle))
+    : documents;
   return (
     <section className="knowledge-documents" aria-label={`Indexed ${label}`}>
       <div className="knowledge-list-head">
@@ -1756,8 +1743,15 @@ function documentSummary(
       : `${document.chunk_count.toLocaleString()} ${plural(document.chunk_count, "passage")}`;
   const when = describe
     ? describe(document)
-    : `${label === "files" && document.source_type !== "upload" ? "Updated" : "Added"} ${document.updated_at}`;
-  return `${size} · ${when}${waiting > 0 ? " · improving search" : ""}`;
+    : `${documentDateVerb(document, label)} ${document.updated_at}`;
+  const folder = document.folder_file ? `In ${document.folder_file.path.split("/").slice(0, -1).join("/")} · ` : "";
+  return `${folder}${size} · ${when}${waiting > 0 ? " · improving search" : ""}`;
+}
+
+/** Folder files are added and later updated by syncs; plain uploads are only ever added. */
+function documentDateVerb(document: KnowledgeDocument, label: string): string {
+  if (document.folder_file) return "Synced";
+  return label === "files" && document.source_type !== "upload" ? "Updated" : "Added";
 }
 
 function DocumentKindIcon({ sourceType }: { sourceType: string }) {
@@ -2207,6 +2201,7 @@ function SettingsForm({
   item,
   data,
   limits,
+  savedMatters,
   canShare,
   saving,
   onSave,
@@ -2215,6 +2210,7 @@ function SettingsForm({
   item: KnowledgeBase;
   data: BootstrapData;
   limits: KnowledgeLimits | null;
+  savedMatters: SavedMatters;
   canShare: boolean;
   saving: boolean;
   onSave: (patch: SettingsPatch) => void;
@@ -2224,6 +2220,7 @@ function SettingsForm({
   const initialWallFields = (item.wall_fields ?? []).join(", ");
   const initialVision = item.vision_ocr !== false;
   const [name, setName] = useState(item.name);
+  const matter = useMatterDraft(item.matter_label ?? "");
   const [groupIds, setGroupIds] = useState<string[]>(initialGroups);
   const [visionOcr, setVisionOcr] = useState(initialVision);
   const [wallFields, setWallFields] = useState(initialWallFields);
@@ -2235,14 +2232,16 @@ function SettingsForm({
   }, [initialGroups, initialVision, initialWallFields, item.name]);
   const changes = settingsChanges({ visionOcr, wallFields }, { visionOcr: initialVision, wallFields: initialWallFields });
   const dirty =
-    name.trim() !== item.name || groupIds.join("|") !== initialGroups.join("|") || Object.keys(changes).length > 0;
+    name.trim() !== item.name ||
+    groupIds.join("|") !== initialGroups.join("|") ||
+    Object.keys({ ...changes, ...matter.patch }).length > 0;
   return (
     <form
       className="knowledge-settings"
       aria-label={`${item.name} settings`}
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ name, groupIds, ...changes });
+        onSave({ name, groupIds, ...changes, ...matter.patch });
       }}
     >
       <div className="knowledge-form-grid">
@@ -2250,6 +2249,13 @@ function SettingsForm({
           Name
           <input value={name} required onChange={(event) => setName(event.target.value)} />
         </label>
+        <MatterField
+          value={matter.value}
+          onChange={matter.setValue}
+          saved={savedMatters}
+          disabled={saving}
+          emptyHint="Files every file, page, and API result here under one number. Clear it to remove the tag."
+        />
       </div>
       <fieldset className="knowledge-access">
         <legend>Who can search it</legend>
@@ -2365,7 +2371,7 @@ function WallFieldsFieldset({ value, onChange }: { value: string; onChange: (val
 const API_SOURCES_LOCKED_MESSAGE =
   "Connecting APIs needs approval. Ask your administrator to turn on Can add API sources for one of your groups.";
 
-type CreateDraft = { name: string; description: string; startWith: StartWith; groupIds: string[] };
+type CreateDraft = { name: string; description: string; startWith: StartWith; groupIds: string[]; matterLabel: string };
 
 const START_OPTIONS: Record<StartWith, { label: string; helper: string; icon: ReactNode; source: string; description: string; next: string }> = {
   files: {
@@ -2400,6 +2406,7 @@ function CreateKnowledgeDialog({
   apiAllowed,
   initialStart,
   saving,
+  savedMatters,
   onCancel,
   onCreate,
 }: {
@@ -2408,6 +2415,7 @@ function CreateKnowledgeDialog({
   apiAllowed: boolean;
   initialStart: StartWith;
   saving: boolean;
+  savedMatters: SavedMatters;
   onCancel: () => void;
   onCreate: (draft: CreateDraft) => Promise<boolean>;
 }) {
@@ -2418,6 +2426,7 @@ function CreateKnowledgeDialog({
     description: "",
     startWith: initialStart === "api" && !apiAllowed ? "files" : initialStart,
     groupIds: [],
+    matterLabel: "",
   });
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLInputElement>("input")?.focus();
@@ -2465,6 +2474,13 @@ function CreateKnowledgeDialog({
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
             />
           </label>
+          <MatterField
+            value={draft.matterLabel}
+            onChange={(matterLabel) => setDraft((current) => ({ ...current, matterLabel }))}
+            saved={savedMatters}
+            disabled={saving}
+            emptyHint="Files every file, page, and API result in this base under one number, so it can be found and cleared by matter."
+          />
           <fieldset className="knowledge-start-options">
             <legend>Start with</legend>
             <div className="ws-segmented" role="group" aria-label="Start with">
@@ -2524,6 +2540,51 @@ function CreateKnowledgeDialog({
 }
 
 // ==================================================================== helpers
+
+/**
+ * Keeps the matter's name when a fresh server copy of a base carries only the
+ * link: configuration responses name no matter, the workspace payload does.
+ */
+function withKnownMatterLabel(previous: KnowledgeBase, next: KnowledgeBase): KnowledgeBase {
+  if (next.matter_label != null) return next;
+  // Filed somewhere else since: the old name no longer applies.
+  return { ...next, matter_label: next.matter_id === previous.matter_id ? (previous.matter_label ?? null) : null };
+}
+
+/** The card's line naming the client-matter number everything in the base is filed under. */
+function MatterFact({ label }: { label: string | null | undefined }) {
+  if (!label) return null;
+  return (
+    <li className="ws-fact knowledge-matter-fact" title="Everything in this base is filed under this client-matter number">
+      <Briefcase size={13} /> {label}
+    </li>
+  );
+}
+
+function filedUnder(item: KnowledgeBase): string {
+  return item.matter_label ? ` · Filed under ${item.matter_label}` : "";
+}
+
+/** Says the base was created and where it is filed, or why filing it was refused. */
+function createdNotice(base: KnowledgeBase, next: string, typedLabel: string, refusal: unknown): Notice {
+  if (refusal) {
+    return {
+      tone: "warning",
+      message: `${base.name} was created, but it is not filed under ${cleanMatterLabel(typedLabel)}: ${errorText(refusal)} Add the number in Settings.`,
+    };
+  }
+  const filed = base.matter_label ? ` and filed under ${base.matter_label}` : "";
+  return { tone: "success", message: `${base.name} was created${filed}. ${next}` };
+}
+
+/** Names every base a narrowed delete removes, so nothing outside the search goes by surprise. */
+function shownDeletePrompt(items: KnowledgeBase[]): string {
+  const names = items.slice(0, 8).map((item) => (item.matter_label ? `${item.name} (${item.matter_label})` : item.name));
+  const rest = items.length - names.length;
+  const more = rest > 0 ? `, and ${rest} more` : "";
+  const noun = `knowledge base${items.length === 1 ? "" : "s"}`;
+  return `Delete ${items.length === 1 ? "this" : `these ${items.length}`} ${noun}: ${names.join(", ")}${more}? Every document and search index in ${items.length === 1 ? "it" : "them"} is removed, and agents stop using ${items.length === 1 ? "it" : "them"}. This can't be undone.`;
+}
 
 function KindIcon({ item }: { item: KnowledgeBase }) {
   const kind = baseKind(item);
@@ -2655,18 +2716,6 @@ function uploadStateLabel(item: UploadItem): string {
   return "Failed";
 }
 
-function isReadableKnowledgeFile(file: File): boolean {
-  const extension = extensionOf(file.name);
-  if ((KNOWLEDGE_FILE_EXTENSIONS as readonly string[]).includes(extension)) return true;
-  const type = file.type.toLowerCase();
-  return type.startsWith("text/") || type.startsWith("image/") || type.startsWith("audio/") || type.startsWith("video/");
-}
-
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
-}
-
 function formatFileSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -2699,6 +2748,12 @@ function splitFieldNames(value: string): string[] {
 
 function plural(count: number, noun: string): string {
   return count === 1 ? noun : `${noun}s`;
+}
+
+function withDocument(documents: KnowledgeDocument[], document: KnowledgeDocument): KnowledgeDocument[] {
+  return documents.some((item) => item.id === document.id)
+    ? documents.map((item) => (item.id === document.id ? document : item))
+    : [...documents, document];
 }
 
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {

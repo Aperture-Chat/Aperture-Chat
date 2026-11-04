@@ -466,7 +466,7 @@ def test_dictation_resolves_only_the_request_tenant_credential(monkeypatch) -> N
         headers=headers("user-admin"),
     )
     assert unavailable.status_code == 503
-    assert "No configured Gemini Flash model" in unavailable.json()["detail"]
+    assert "No speech model is configured" in unavailable.json()["detail"]
     assert authorization_headers == []
 
     tenant_key = store.create_provider_key(

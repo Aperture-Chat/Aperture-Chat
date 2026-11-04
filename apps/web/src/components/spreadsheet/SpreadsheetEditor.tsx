@@ -75,6 +75,8 @@ export type SpreadsheetEditorProps = {
   workbook: Workbook;
   /** Changing this resets undo history (a version was restored or opened). */
   historyKey: string;
+  /** Changing it clears undo/redo only (a colleague's change on a shared workbook). */
+  undoResetKey?: string;
   onChange: (workbook: Workbook, summary: string) => void;
   readOnly?: boolean;
   saveStatus?: ReactNode;
@@ -142,6 +144,16 @@ export function SpreadsheetEditor(props: SpreadsheetEditorProps) {
     setEditing(null);
     setAiState((state) => ({ ...state, phase: "idle", preview: undefined }));
   }, [props.historyKey]);
+
+  // A colleague's change on a shared workbook: undo restarts (so it can never
+  // take back their work) while a cell being typed in stays open.
+  const undoResetKeyRef = useRef(props.undoResetKey);
+  useEffect(() => {
+    if (undoResetKeyRef.current === props.undoResetKey) return;
+    undoResetKeyRef.current = props.undoResetKey;
+    setUndo([]);
+    setRedo([]);
+  }, [props.undoResetKey]);
 
   // Keep the active sheet valid when the workbook changes underneath us.
   useEffect(() => {
