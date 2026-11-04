@@ -3978,3 +3978,62 @@ test("the normal composer is not scrolled by the menu", async () => {
   await screen.findByRole("listbox", { name: "Knowledge commands" });
   expect(textarea.scrollTop).toBe(0);
 });
+
+test("a new chat filed under a typed client-matter number is linked once its first message is saved", async () => {
+  const sse = stagedSseResponse();
+  const matterCalls: string[] = [];
+  let linkedMatter: string | null = null;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? "GET";
+      const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+      if (url.includes("/api/chat/complete")) return sse.response;
+      if (url.includes("/api/matters")) {
+        matterCalls.push(`${method} ${url.slice(url.indexOf("/api/matters"))}`);
+        if (method === "GET") return json([]);
+        if (method === "POST") {
+          const { name } = JSON.parse(String(init?.body));
+          return json({ id: "matter-new", tenant_id: "tenant-example", name, created_by_user_id: "user-admin", version: 1, created_at: "2026-11-03T00:00:00Z", updated_at: "2026-11-03T00:00:00Z" }, 201);
+        }
+        linkedMatter = "matter-new";
+        return json({ resource_type: "chat-threads", matter_id: "matter-new" });
+      }
+      if (url.includes("/api/chat/threads/") && method === "PUT") {
+        const id = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+        // Like the server, a save keeps whatever link the chat has.
+        return json({ id, ...JSON.parse(String(init?.body)), matter_id: linkedMatter });
+      }
+      return new Response("unavailable", { status: 500 });
+    }),
+  );
+  await renderApp();
+
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Matter Add a client-matter number." }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Client-matter number" }), { target: { value: "100234-0001" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  // The choice shows at once; the unsent chat is not linked until it exists.
+  expect(await screen.findByRole("menuitem", { name: "Matter Filed under 100234-0001 when you send." })).toBeInTheDocument();
+  expect(matterCalls).toEqual(["GET /api/matters?limit=200", "POST /api/matters"]);
+  fireEvent.keyDown(document, { key: "Escape" });
+
+  sendFromComposer("Summarize the lease terms.");
+  sse.push('data: {"delta":"The lease runs five years."}\n\n');
+  sse.push('data: {"done":true,"citations":[],"usage":null}\n\n');
+  sse.push("data: [DONE]\n\n");
+  sse.close();
+  expect(await screen.findByText(/The lease runs five years\./)).toBeInTheDocument();
+
+  await waitFor(() =>
+    expect(matterCalls.some((call) => /^PUT \/api\/matters\/matter-new\/resources\/chat-threads\/.+/.test(call))).toBe(true),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  expect(await screen.findByRole("menuitem", { name: "Matter Filed under 100234-0001." })).toBeInTheDocument();
+  expect(matterCalls.filter((call) => call.startsWith("PUT"))).toHaveLength(1);
+});

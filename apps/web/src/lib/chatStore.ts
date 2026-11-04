@@ -5,6 +5,7 @@ import {
   generateChatThreadTitle,
   listChatThreads,
   markChatThreadRead,
+  matterTenantSlug,
   renameChatThread,
   runAutomation,
   saveChatThread,
@@ -22,6 +23,7 @@ import type {
   ModelConfig,
 } from "./types";
 import { laterReadMarker, readableMessageId } from "./chatReadState";
+import { useThreadMatterSync } from "./useThreadMatterSync";
 import type { ChatStreamActivity } from "./streamActivity";
 import { advanceTrace, finishTrace, recordActivity, startTrace, type TraceStart } from "./workTrace";
 import { replaceCodeFence, replaceDiagramFence, replaceMarkdownTable, type MarkdownTable } from "./markdown";
@@ -768,6 +770,11 @@ export type ChatStore = {
   /** Rejects with the server's reason when it refuses; the chat then stays. */
   deleteThread: (chatId: string) => Promise<void>;
   moveThreadToFolder: (chatId: string, folderId: string | null) => void;
+  /**
+   * Files a chat under a matter, or removes its tag with null. The choice
+   * shows at once; a new chat is linked on the server after its first save.
+   */
+  setThreadMatter: (chatId: string, matterId: string | null) => Promise<void>;
   branchFromMessage: (messageId: string) => ChatThread | null;
   regenerateResponse: (messageId: string) => boolean;
   /**
@@ -939,11 +946,22 @@ export function useChatStore(
       : fallbackModel;
   const isSending = activeThread ? sendingThreadIds.includes(activeThread.id) : false;
 
+  const { syncThreadMatter, setThreadMatter, matterChangeCount } = useThreadMatterSync({
+    persona,
+    tenantSlug: matterTenantSlug(data),
+    threadsRef,
+    setThreads,
+    isUnsaved: isBlankNewChat,
+  });
+
   const persistThread = useCallback(
     (thread: ChatThread): Promise<ChatThread | null> => {
       if (!enabled || isBlankNewChat(thread)) return Promise.resolve(null);
+      const matterChangesAtSend = matterChangeCount(thread.id);
       return saveChatThread(persona, thread)
         .then((saved) => {
+          // A save sent before the latest matter change carries the old link.
+          const matterChangedSince = matterChangeCount(saved.id) !== matterChangesAtSend;
           // The reply may have been read after this save was sent; once the
           // message is stored, the server can accept that read position.
           const local = threadsRef.current.find((item) => item.id === saved.id);
@@ -958,11 +976,19 @@ export function useChatStore(
           setThreads((current) =>
             current.map((item) =>
               item.id === saved.id
-                ? { ...preservePendingTraceState(item, saved), syncPending: false }
+                ? {
+                    ...preservePendingTraceState(item, saved),
+                    syncPending: false,
+                    ...(matterChangedSince ? { matter_id: item.matter_id } : {}),
+                    // A matter chosen before this save is still this browser's to send.
+                    pendingMatterId: item.pendingMatterId,
+                    matterError: item.matterError,
+                  }
                 : item,
             ),
           );
           notifyChatSyncChanged();
+          if (local?.pendingMatterId !== undefined) void syncThreadMatter(saved.id, true);
           return saved;
         })
         .catch(() => {
@@ -975,7 +1001,7 @@ export function useChatStore(
           return null;
         });
     },
-    [enabled, persona],
+    [enabled, matterChangeCount, persona, syncThreadMatter],
   );
 
   /** Re-sends every thread whose last save failed; resolves when all settle. */
@@ -2209,6 +2235,7 @@ export function useChatStore(
     restoreThread,
     deleteThread,
     moveThreadToFolder,
+    setThreadMatter,
     branchFromMessage,
     regenerateResponse,
     editUserMessage,

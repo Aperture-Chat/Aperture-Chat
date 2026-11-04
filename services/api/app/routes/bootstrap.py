@@ -13,7 +13,7 @@ from app.core.policy import (
     model_access_allowed,
     tool_authoring_allowed,
 )
-from app.models.schemas import ChatSession, Role, User
+from app.models.schemas import ChatSession, KnowledgeConfig, Role, User
 from app.repositories.deps import get_store
 from app.repositories.seed import SeedStore
 from app.routes.dependencies import current_user
@@ -134,7 +134,37 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
     # Every role goes through the same visibility filter so each automation
     # carries its computed next run (owners see all of them).
     snapshot["automations"] = visible_automations_for(actor, store)
+    snapshot["knowledgeConfigs"] = _with_matter_labels(store, snapshot.get("knowledgeConfigs", []))
     return snapshot
+
+
+class KnowledgeConfigView(KnowledgeConfig):
+    """A knowledge base as the workspace shows it, with its matter's name."""
+
+    matter_label: str | None = None
+
+
+def _with_matter_labels(store: SeedStore, records: list[KnowledgeConfig]) -> list[KnowledgeConfigView]:
+    """Name the matter each visible base is filed under.
+
+    Only bases the actor can already see reach this point, so the label adds
+    nothing beyond what that base belongs to. It lets the owner see the tag and
+    lets records staff find a matter's bases by its client-matter number, while
+    the matter's members and settings stay behind the matter router's gate.
+    """
+
+    labels_by_tenant: dict[str, dict[str, str]] = {}
+    views: list[KnowledgeConfigView] = []
+    for record in records:
+        label = None
+        if record.matter_id:
+            if record.tenant_id not in labels_by_tenant:
+                labels_by_tenant[record.tenant_id] = (
+                    store.application_state_repository.matter_labels_for_tenant(record.tenant_id)
+                )
+            label = labels_by_tenant[record.tenant_id].get(record.matter_id)
+        views.append(KnowledgeConfigView.model_validate({**record.model_dump(), "matter_label": label}))
+    return views
 
 
 def _data_protection_state(actor: User, store: SeedStore) -> dict[str, object]:

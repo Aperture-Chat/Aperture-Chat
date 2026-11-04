@@ -1137,6 +1137,10 @@ export type KnowledgeBase = {
   wall_fields?: string[];
   /** Administrator wall overrides keyed by document id. */
   document_walls?: Record<string, KnowledgeDocumentWallOverride>;
+  /** The matter every file, page, and API result in this base is filed under. */
+  matter_id?: string | null;
+  /** That matter's name, such as a client-matter number. */
+  matter_label?: string | null;
 };
 
 export type KnowledgeDocumentWallOverride = { mode: "restricted" | "open" | string; group_ids?: string[] };
@@ -1169,6 +1173,30 @@ export type KnowledgeDocument = {
   /** Properties the file or its source system carries (author, dates, labels, custom fields). */
   metadata?: Record<string, string>;
   wall?: KnowledgeDocumentWall | null;
+  /** Set for files uploaded with their folder. */
+  folder_file?: KnowledgeFolderFile | null;
+};
+
+/**
+ * Where a file uploaded with its folder sits on the person's computer. `path`
+ * starts with the folder's name ("Matter 12/Pleadings/brief.pdf") and is the
+ * file's identity in its knowledge base; `size` and `modified` (milliseconds)
+ * tell an unchanged file from an edited one.
+ */
+export type KnowledgeFolderFile = { path: string; size: number; modified: number };
+
+/** One uploaded folder as the server holds it, plus the files removed from it in Aperture. */
+export type KnowledgeFolderManifest = {
+  name: string;
+  files: Array<KnowledgeFolderFile & { document_id: string }>;
+  removed: string[];
+};
+
+export type KnowledgeFolderFileResult = {
+  config: KnowledgeConfigRecord;
+  document: KnowledgeDocument;
+  action: "added" | "updated" | "unchanged";
+  provider_message: string;
 };
 
 export type KnowledgeSyncResult = {
@@ -1440,6 +1468,10 @@ export type KnowledgeConfigRecord = TenantScopedConfigRecord & {
   connector_config_id?: string | null;
   acl_group_ids: string[];
   owner_user_id?: string | null;
+  /** Matter link, set only through the matters API. */
+  matter_id?: string | null;
+  /** The linked matter's name, filled in by the workspace payload. */
+  matter_label?: string | null;
 };
 
 export type ToolConfigRecord = TenantScopedConfigRecord & {
@@ -1664,6 +1696,9 @@ export type ChatSession = {
   pinned: boolean;
   archived?: boolean;
   folder_id?: string | null;
+  /** The matter this chat is filed under, as the server last confirmed it.
+   * Only the matters API changes it; a workspace save never does. */
+  matter_id?: string | null;
   used_agent: boolean;
   updated_at: string;
 };
@@ -1835,6 +1870,11 @@ export type ChatThread = ChatSession & {
   /** Client-only: the last server save of this thread failed, so the newest
    * messages exist only in this browser until a retry succeeds. Never sent. */
   syncPending?: boolean;
+  /** Client-only: the matter just chosen (null removes the tag) that the
+   * server has not confirmed yet. A new chat keeps it until its first save. Never sent. */
+  pendingMatterId?: string | null;
+  /** Client-only: why the last matter change was refused. Never sent. */
+  matterError?: string;
 };
 
 export type AgentRun = {

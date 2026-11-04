@@ -244,7 +244,19 @@ export function mapKnowledgeConfigRecordToKnowledgeBase(
     vision_ocr: record.settings.vision_ocr !== false,
     wall_fields: stringArraySetting(record.settings, "wall_fields"),
     document_walls: documentWallsSetting(record.settings),
+    ...knowledgeMatterFields(record),
   };
+}
+
+/**
+ * A base's matter link, and the matter's name when the record carries one.
+ * Only the workspace payload names the matter, so the key is left out
+ * otherwise and a partial update keeps the name already shown.
+ */
+function knowledgeMatterFields(record: KnowledgeConfigRecord): Pick<KnowledgeBase, "matter_id" | "matter_label"> {
+  const fields: Pick<KnowledgeBase, "matter_id" | "matter_label"> = { matter_id: record.matter_id ?? null };
+  if (record.matter_label !== undefined) fields.matter_label = record.matter_label;
+  return fields;
 }
 
 function documentWallsSetting(settings: ConfigSettings): Record<string, KnowledgeDocumentWallOverride> {

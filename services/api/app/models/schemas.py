@@ -1311,6 +1311,21 @@ class KnowledgeDocumentWall(BaseModel):
     unresolved: list[str] = Field(default_factory=list)
 
 
+class KnowledgeFolderFile(BaseModel):
+    """Where a file uploaded with its folder sits on the person's computer.
+
+    ``path`` starts with the folder's own name ("Matter 12/Pleadings/brief.pdf")
+    and is the file's identity in its knowledge base, so uploading or syncing the
+    folder again updates this document instead of adding a copy. ``size`` (bytes
+    received) and ``modified`` (milliseconds since the epoch, as the browser
+    reports it) tell an unchanged file from an edited one.
+    """
+
+    path: str
+    size: int = Field(ge=0)
+    modified: int = Field(ge=0)
+
+
 class KnowledgeDocument(BaseModel):
     id: str
     knowledge_config_id: str
@@ -1327,6 +1342,8 @@ class KnowledgeDocument(BaseModel):
     # and cloud metadata, sensitivity labels. Bounded when extracted.
     metadata: dict[str, str] = Field(default_factory=dict)
     wall: KnowledgeDocumentWall | None = None
+    # Set only for files uploaded as part of a folder.
+    folder_file: KnowledgeFolderFile | None = None
 
 
 class KnowledgeChunk(BaseModel):
@@ -1420,6 +1437,15 @@ class KnowledgeSyncResponse(BaseModel):
     synced_at: str
     provider_status: str = "cached"
     provider_message: str | None = None
+
+
+class KnowledgeFolderFileResponse(BaseModel):
+    """One folder file after a sync: what happened to it and the base it is in."""
+
+    config: KnowledgeConfig
+    document: KnowledgeDocument
+    action: Literal["added", "updated", "unchanged"]
+    provider_message: str
 
 
 class KnowledgeSearchResponse(BaseModel):

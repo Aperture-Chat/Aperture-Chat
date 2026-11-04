@@ -6,9 +6,11 @@ import {
   ResourceTiles,
   ShortcutGuide,
   StreamSwitch,
+  MatterOptionRow,
   ToolSwitch,
   agentOptionDetail,
   knowledgeOptionDetail,
+  matterOptionDetail,
   resourceListShows,
   resourceSectionIcon,
   resourceSectionLabel,
@@ -322,5 +324,36 @@ describe("ReasoningRail", () => {
     expect(reasoningHelp("balanced", true, "Model")).toBe("The model's usual pace.");
     expect(reasoningHelp("smart", true, "Model")).toBe("Takes longer and thinks it through.");
     expect(reasoningHelp("smart", false, "GPT Mini")).toBe("GPT Mini does not support reasoning levels.");
+  });
+});
+
+describe("Matter row", () => {
+  test("says in words whether and where the chat is filed", () => {
+    expect(matterOptionDetail({ matterId: null, label: null })).toBe("Add a client-matter number.");
+    expect(matterOptionDetail({ matterId: "matter-1", label: "100234-0001" })).toBe("Filed under 100234-0001.");
+    expect(matterOptionDetail({ matterId: "matter-1", label: "100234-0001", waiting: true })).toBe(
+      "Filed under 100234-0001 when you send.",
+    );
+    expect(matterOptionDetail({ matterId: "matter-1", label: null, loading: true })).toBe("Filed under a matter.");
+    expect(matterOptionDetail({ matterId: "matter-1", label: null })).toBe("Filed under a matter you can no longer open.");
+    expect(matterOptionDetail({ matterId: null, label: null, error: "This matter is being deleted." })).toBe(
+      "Not filed: This matter is being deleted.",
+    );
+  });
+
+  test("opens its chooser from the whole row and names the next step", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <MatterOptionRow detail="Add a client-matter number." filed={false} expanded={false} onToggle={onToggle} />,
+    );
+    const row = screen.getByRole("menuitem", { name: "Matter Add a client-matter number." });
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    expect(row).toHaveTextContent("Add");
+    fireEvent.click(row);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    rerender(<MatterOptionRow detail="Filed under 100234-0001." filed expanded onToggle={onToggle} />);
+    const open = screen.getByRole("menuitem", { name: "Matter Filed under 100234-0001." });
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    expect(open).toHaveTextContent("Change");
   });
 });

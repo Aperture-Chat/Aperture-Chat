@@ -19,6 +19,8 @@ import type {
   KnowledgeDocumentTarget,
   KnowledgeDocumentView,
   KnowledgeDocumentViewMode,
+  KnowledgeFolderFileResult,
+  KnowledgeFolderManifest,
   KnowledgeIndexStatus,
   KnowledgeSyncResult,
 } from "../types";
@@ -211,53 +213,100 @@ export function getKnowledgeOAuthAuthorizeUrl(
   );
 }
 
-/**
- * Upload one file with byte-level progress. fetch() cannot report upload
- * progress, so this uses XMLHttpRequest; the request and error handling
- * otherwise match the other knowledge calls.
- */
+type UploadOptions = { signal?: AbortSignal; onUploadProgress?: (fraction: number) => void };
+
+/** Upload one file to a knowledge base, with byte-level progress. */
 export function uploadKnowledgeFile(
   userId: string,
   configId: string,
   file: File,
-  options: { signal?: AbortSignal; onUploadProgress?: (fraction: number) => void } = {},
+  options: UploadOptions = {},
 ): Promise<KnowledgeSyncResult> {
+  const form = new FormData();
+  form.append("files", file);
+  return sendKnowledgeUpload<KnowledgeSyncResult>(userId, `/api/knowledge/${pathId(configId)}/documents`, form, options);
+}
+
+/**
+ * Send one file of a folder with its folder path ("Matter 12/Pleadings/brief.pdf").
+ * The server adds it, updates the document already at that path, or reports it unchanged.
+ */
+export function uploadKnowledgeFolderFile(
+  userId: string,
+  configId: string,
+  file: File,
+  path: string,
+  options: UploadOptions = {},
+): Promise<KnowledgeFolderFileResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("path", path);
+  form.append("modified", String(Math.max(0, Math.trunc(file.lastModified || 0))));
+  return sendKnowledgeUpload<KnowledgeFolderFileResult>(
+    userId,
+    `/api/knowledge/${pathId(configId)}/folder-files`,
+    form,
+    options,
+  );
+}
+
+/** Each folder uploaded to a knowledge base, with the files the server holds for it. */
+export async function listKnowledgeFolders(
+  userId: string,
+  configId: string,
+  options: ApiMutationOptions = {},
+): Promise<KnowledgeFolderManifest[]> {
+  const body = await apiRequest<{ folders: KnowledgeFolderManifest[] }>(
+    userId,
+    `/api/knowledge/${pathId(configId)}/folders`,
+    { signal: options.signal },
+  );
+  return body.folders;
+}
+
+/**
+ * POST a multipart upload with byte-level progress. fetch() cannot report
+ * upload progress, so this uses XMLHttpRequest; the request and error
+ * handling otherwise match the other knowledge calls.
+ */
+function sendKnowledgeUpload<T>(userId: string, path: string, form: FormData, options: UploadOptions): Promise<T> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new ChatRequestError("Upload cancelled."));
+      return;
+    }
     const request = new XMLHttpRequest();
-    request.open("POST", `${apiBase}/api/knowledge/${pathId(configId)}/documents`);
+    request.open("POST", `${apiBase}${path}`);
     Object.entries(authHeaders(userId)).forEach(([name, value]) => request.setRequestHeader(name, value));
     request.responseType = "text";
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) {
-        options.onUploadProgress?.(Math.min(1, event.loaded / event.total));
-      }
-    };
-    request.upload.onload = () => options.onUploadProgress?.(1);
-    request.onload = () => {
-      if (request.status >= 200 && request.status < 300) {
-        try {
-          resolve(JSON.parse(request.responseText) as KnowledgeSyncResult);
-        } catch {
-          reject(new ChatRequestError("The server finished the upload but sent an unreadable reply.", request.status));
-        }
-        return;
-      }
-      reject(new ChatRequestError(xhrErrorDetail(request), request.status));
-    };
+    reportUploadProgress(request, options.onUploadProgress);
+    request.onload = () => settleUpload(request, resolve, reject);
     request.onerror = () =>
       reject(new ChatRequestError("Could not upload the file. Check your connection and try again."));
     request.onabort = () => reject(new ChatRequestError("Upload cancelled."));
-    if (options.signal) {
-      if (options.signal.aborted) {
-        reject(new ChatRequestError("Upload cancelled."));
-        return;
-      }
-      options.signal.addEventListener("abort", () => request.abort(), { once: true });
-    }
-    const form = new FormData();
-    form.append("files", file);
+    options.signal?.addEventListener("abort", () => request.abort());
     request.send(form);
   });
+}
+
+function reportUploadProgress(request: XMLHttpRequest, onProgress: UploadOptions["onUploadProgress"]): void {
+  if (!onProgress) return;
+  request.upload.onprogress = (event) => {
+    if (event.lengthComputable && event.total > 0) onProgress(Math.min(1, event.loaded / event.total));
+  };
+  request.upload.onload = () => onProgress(1);
+}
+
+function settleUpload<T>(request: XMLHttpRequest, resolve: (value: T) => void, reject: (error: Error) => void): void {
+  if (request.status < 200 || request.status >= 300) {
+    reject(new ChatRequestError(xhrErrorDetail(request), request.status));
+    return;
+  }
+  try {
+    resolve(JSON.parse(request.responseText) as T);
+  } catch {
+    reject(new ChatRequestError("The server finished the upload but sent an unreadable reply.", request.status));
+  }
 }
 
 function xhrErrorDetail(request: XMLHttpRequest): string {

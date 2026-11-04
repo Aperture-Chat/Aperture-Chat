@@ -549,3 +549,131 @@ test("deleting the open chat lands on a blank one, and a blank chat needs no ser
   });
   expect(remove).toHaveBeenCalledTimes(1);
 });
+
+test("filing a stored chat under a matter shows at once and links it without resaving the chat", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread()]);
+  const save = vi.spyOn(api, "saveChatThread");
+  let finishLink!: () => void;
+  const change = vi.spyOn(api, "changeResourceMatter").mockImplementation(
+    () => new Promise<void>((resolve) => { finishLink = resolve; }),
+  );
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  let linked!: Promise<void>;
+  act(() => { linked = view.result.current.setThreadMatter("thread-read-sync", "matter-a"); });
+  const chosen = view.result.current.threads.find((thread) => thread.id === "thread-read-sync");
+  expect(chosen?.pendingMatterId).toBe("matter-a");
+  expect(chosen?.matter_id ?? null).toBeNull();
+
+  await act(async () => {
+    await vi.waitFor(() => expect(change).toHaveBeenCalled());
+    finishLink();
+    await linked;
+  });
+  const settled = view.result.current.threads.find((thread) => thread.id === "thread-read-sync");
+  expect(settled?.matter_id).toBe("matter-a");
+  expect(settled?.pendingMatterId).toBeUndefined();
+  expect(change).toHaveBeenCalledWith(data.me.id, "chat-threads", "thread-read-sync", null, "matter-a", { tenantSlug: undefined });
+  expect(save).not.toHaveBeenCalled();
+});
+
+test("a new chat keeps its matter until it is first saved, then links it", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const change = vi.spyOn(api, "changeResourceMatter").mockResolvedValue(undefined);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  const blankId = view.result.current.activeId;
+
+  await act(async () => { await view.result.current.setThreadMatter(blankId, "matter-a"); });
+  expect(change).not.toHaveBeenCalled();
+  expect(view.result.current.activeThread?.pendingMatterId).toBe("matter-a");
+});
+
+test("a chat whose first save is still on its way is linked right after that save", async () => {
+  const data = firstUseData();
+  const unsaved = readThread({ id: "thread-first-save" });
+  window.localStorage.setItem(`aperture-chats-v2-${data.me.id}`, JSON.stringify([unsaved]));
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  const change = vi
+    .spyOn(api, "changeResourceMatter")
+    .mockRejectedValueOnce(new api.ChatRequestError("Unknown private matter resource.", 404))
+    .mockResolvedValue(undefined);
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_user, thread) => ({ ...thread, matter_id: null }));
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  await act(async () => { await view.result.current.setThreadMatter("thread-first-save", "matter-a"); });
+  expect(view.result.current.threads.find((thread) => thread.id === "thread-first-save")?.pendingMatterId).toBe("matter-a");
+
+  await act(async () => { view.result.current.togglePin("thread-first-save"); });
+  await act(async () => {});
+  const settled = view.result.current.threads.find((thread) => thread.id === "thread-first-save");
+  expect(change).toHaveBeenCalledTimes(2);
+  expect(settled?.matter_id).toBe("matter-a");
+  expect(settled?.pendingMatterId).toBeUndefined();
+  expect(settled?.pinned).toBe(true);
+});
+
+test("a refused matter change says why and keeps the matter the server has", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread({ matter_id: "matter-a" })]);
+  vi.spyOn(api, "changeResourceMatter").mockRejectedValue(
+    new api.ChatRequestError("This matter is being deleted and cannot accept assignments.", 409),
+  );
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  await act(async () => { await view.result.current.setThreadMatter("thread-read-sync", "matter-b"); });
+  const thread = view.result.current.threads.find((item) => item.id === "thread-read-sync");
+  expect(thread?.matter_id).toBe("matter-a");
+  expect(thread?.pendingMatterId).toBeUndefined();
+  expect(thread?.matterError).toBe("This matter is being deleted and cannot accept assignments.");
+});
+
+test("a chat's own matter bookkeeping is never sent with a save", async () => {
+  const fetchMock = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+  vi.stubGlobal("fetch", fetchMock);
+  await api.saveChatThread("fresh-user", { ...readThread(), pendingMatterId: "matter-a", matterError: "Refused.", syncPending: true });
+  const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+  expect(body).not.toHaveProperty("pendingMatterId");
+  expect(body).not.toHaveProperty("matterError");
+  expect(body).not.toHaveProperty("syncPending");
+  vi.unstubAllGlobals();
+});
+
+test("a save sent before a matter change cannot undo it when its reply arrives late", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread()]);
+  let finishSave!: () => void;
+  vi.spyOn(api, "saveChatThread").mockImplementation(
+    (_user, thread) => new Promise((resolve) => { finishSave = () => resolve({ ...thread, matter_id: null }); }),
+  );
+  vi.spyOn(api, "changeResourceMatter").mockResolvedValue(undefined);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+
+  act(() => view.result.current.togglePin("thread-read-sync"));
+  await act(async () => { await view.result.current.setThreadMatter("thread-read-sync", "matter-a"); });
+  await act(async () => { finishSave(); });
+
+  const thread = view.result.current.threads.find((item) => item.id === "thread-read-sync");
+  expect(thread?.matter_id).toBe("matter-a");
+  expect(thread?.pinned).toBe(true);
+});
+
+test("filing a chat that no longer exists changes nothing and asks the server nothing", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread()]);
+  const change = vi.spyOn(api, "changeResourceMatter").mockResolvedValue(undefined);
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  const before = view.result.current.threads;
+
+  await act(async () => { await view.result.current.setThreadMatter("thread-gone", "matter-a"); });
+  expect(change).not.toHaveBeenCalled();
+  expect(view.result.current.threads.map((thread) => thread.id)).toEqual(before.map((thread) => thread.id));
+  expect(view.result.current.threads.find((thread) => thread.id === "thread-read-sync")?.pendingMatterId).toBeUndefined();
+});

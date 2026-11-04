@@ -2,6 +2,7 @@ import clsx from "clsx";
 import {
   BookOpen,
   Bot,
+  Briefcase,
   CalendarClock,
   ChevronLeft,
   FileText,
@@ -78,6 +79,26 @@ export function agentOptionDetail(agentName?: string) {
   return agentName ? `Using ${agentName}.` : "Let a specialized assistant answer.";
 }
 
+/** Where the chat is filed, in words. `waiting`: a new chat, linked once it is sent. */
+export function matterOptionDetail({
+  matterId,
+  label,
+  waiting = false,
+  loading = false,
+  error,
+}: {
+  matterId: string | null;
+  label: string | null;
+  waiting?: boolean;
+  loading?: boolean;
+  error?: string;
+}) {
+  if (error) return `Not filed: ${error}`;
+  if (!matterId) return "Add a client-matter number.";
+  if (!label) return loading ? "Filed under a matter." : "Filed under a matter you can no longer open.";
+  return waiting ? `Filed under ${label} when you send.` : `Filed under ${label}.`;
+}
+
 /** Icon well, title, and one plain line: the anatomy every row and tile shares. */
 export function OptionCopy({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
   return (
@@ -124,6 +145,33 @@ export function ToolSwitch({
     >
       <OptionCopy icon={icon} title={label} detail={detail} />
       <SwitchFace on={checked} />
+    </button>
+  );
+}
+
+/** The Matter row: opens its chooser underneath, like Knowledge opens its list. */
+export function MatterOptionRow({
+  detail,
+  filed,
+  expanded,
+  onToggle,
+}: {
+  detail: string;
+  filed: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      aria-haspopup="true"
+      aria-expanded={expanded}
+      className="composer-option-row composer-matter-row"
+      onClick={onToggle}
+    >
+      <OptionCopy icon={Briefcase} title="Matter" detail={detail} />
+      <span className="composer-option-action" aria-hidden="true">{filed ? "Change" : "Add"}</span>
     </button>
   );
 }
