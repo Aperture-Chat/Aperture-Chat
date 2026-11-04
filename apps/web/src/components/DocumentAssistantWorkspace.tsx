@@ -68,6 +68,19 @@ import {
   topLevelEditorBlock,
 } from "../lib/editorRanges";
 import { DraftHistoryCard } from "./DraftHistoryCard";
+import { DraftShareDialog } from "./DraftShareDialog";
+import { DraftPresence } from "./DraftPresence";
+import { useDraftCollaboration, type CollabAdapter, type CollabTarget } from "../lib/useDraftCollaboration";
+import {
+  getDraftLive,
+  getDraftVersion,
+  listDraftVersions,
+  listSharedWithMe,
+  type DraftVersionItem,
+  type SharedDraftItem,
+} from "../lib/api/draftCollab";
+import { shiftedCaretOffset } from "../lib/caretShift";
+import type { LiveDoc } from "../lib/draftLiveSession";
 import { DraftPencilMark } from "./DraftPencilMark";
 import { formatMlaDocument } from "../lib/draftMla";
 import { DictationControl } from "./DictationControl";
@@ -124,6 +137,7 @@ import {
   GraduationCap,
   Highlighter,
   History,
+  Users,
   Home,
   ImagePlus,
   Image as ImageIcon,
@@ -182,6 +196,7 @@ import {
   useRef,
   useEffect,
   useLayoutEffect,
+  useReducer,
   useState,
   type ChangeEvent,
   type CSSProperties,
@@ -191,7 +206,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import mammoth from "mammoth";
 import { importDocxDocument } from "../lib/docxImport";
 import { importPdfDocument } from "../lib/api/documentImport";
@@ -533,6 +548,10 @@ type DraftServerBinding = {
 // Background saves survive workspace remounts. Share only within the exact
 // tenant/user/history scope so reopening that draft joins its existing queue.
 const draftServerBindings = new Map<string, DraftServerBinding>();
+// Server drafts other people shared with this person. They stay in memory
+// only: never written to this browser's draft cache, so losing access to one
+// leaves no copy behind, and the History list shows them from the server.
+const sharedWithMeServerIds = new Set<string>();
 const draftCacheWriterId = crypto.randomUUID();
 
 type AssistantEvent = {
@@ -2558,6 +2577,49 @@ export function DocumentAssistantWorkspace({
   const lastDraftHistoryWriteSucceededRef = useRef(true);
   const documentHistoryRef = useRef(documentHistory);
   documentHistoryRef.current = documentHistory;
+  // Shared drafts (lib/useDraftCollaboration.ts). The workspace tells the
+  // live session how to read and replace the editor through this adapter.
+  const latestWorkbookRef = useRef(workbookState);
+  latestWorkbookRef.current = workbookState;
+  const [spreadsheetUndoResetKey, setSpreadsheetUndoResetKey] = useState("initial");
+  const [collabBindingVersion, bumpCollabBinding] = useReducer((value: number) => value + 1, 0);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [sharedWithMe, setSharedWithMe] = useState<SharedDraftItem[]>([]);
+  const [serverVersions, setServerVersions] = useState<DraftVersionItem[] | null>(null);
+  const [serverVersionToRestore, setServerVersionToRestore] = useState<DraftVersionItem | null>(null);
+  const serverVersionRestoreRef = useRef<HTMLElement | null>(null);
+  useModalFocus(serverVersionRestoreRef, serverVersionToRestore !== null, () => setServerVersionToRestore(null));
+  const [liveNotice, setLiveNotice] = useState<string | null>(null);
+  const collabAdapterRef = useRef<CollabAdapter>({
+    showing: () => null,
+    read: () => ({ title: "", content: "" }),
+    normalize: (value) => value,
+    apply: () => {},
+  });
+  const collabTarget = useMemo<CollabTarget | null>(() => {
+    const binding =
+      draftKind === "deck" ? deckServerRef.current : draftKind === "spreadsheet" ? spreadsheetServerRef.current : serverDraftRef.current;
+    return binding.id ? { id: binding.id, kind: draftKind } : null;
+    // collabBindingVersion changes whenever a binding gains or swaps its server id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKind, collabBindingVersion]);
+  const collabTargetRef = useRef(collabTarget);
+  collabTargetRef.current = collabTarget;
+  const collab = useDraftCollaboration({
+    userId: completionUserId,
+    tenantSlug: draftTenantSlug,
+    target: collabTarget,
+    adapter: collabAdapterRef,
+    onVersionSaved: (notice) => {
+      const binding = activeServerBinding();
+      if (binding.id === collabTargetRef.current?.id && (binding.revision ?? 0) < notice.revision) {
+        binding.revision = notice.revision;
+      }
+      refreshServerVersions();
+    },
+  });
+  const collabRef = useRef(collab);
+  collabRef.current = collab;
   const sheetHealRunRef = useRef(0);
   const diagramHydrationRunRef = useRef(0);
   const pageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2833,7 +2895,37 @@ export function DocumentAssistantWorkspace({
           ? serializedWorkbook !== null && selectedVersion.content !== serializedWorkbook
           : selectedVersion.content !== content)),
   );
-  hasUnsavedEditsRef.current = hasUnsavedEdits || serverSaveState.kind === "not-stored";
+  // A shared draft saves itself: only a save still on its way is unsaved.
+  hasUnsavedEditsRef.current = collab.live
+    ? (collab.status !== null && collab.status.kind !== "synced") || serverSaveState.kind === "not-stored"
+    : hasUnsavedEdits || serverSaveState.kind === "not-stored";
+  collabAdapterRef.current = {
+    showing: () => {
+      const binding = activeServerBinding();
+      return binding.id ? { id: binding.id, kind: draftKind } : null;
+    },
+    read: () => liveDocFromEditor(),
+    normalize: (value) => liveNormalize(value),
+    apply: (doc) => applyLiveDoc(doc),
+  };
+  useEffect(() => {
+    if (collab.live) collab.noteLocalChange();
+  }, [collab.live, collab.noteLocalChange, content, deckState, workbookState, documentTitle]);
+  useEffect(() => {
+    const change = collab.lastRemoteChange;
+    if (!change?.byName || change.byUserId === completionUserId) return undefined;
+    setLiveNotice(`${change.byName} just made changes`);
+    const timer = window.setTimeout(() => setLiveNotice(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [collab.lastRemoteChange, completionUserId]);
+  useEffect(() => {
+    if (!collab.accessLost) return;
+    setStatus(
+      collab.accessLost === "deleted"
+        ? "The owner deleted this shared draft. This window still shows the last copy, but it is no longer saved."
+        : "This draft is no longer shared with you. This window still shows the last copy, but changes are no longer saved.",
+    );
+  }, [collab.accessLost]);
   const exportSaveReceipt =
     !hasUnsavedEdits && exportSavedVersion?.id === selectedVersionId ? exportSavedVersion : null;
   useEffect(() => {
@@ -2850,7 +2942,10 @@ export function DocumentAssistantWorkspace({
     versions.length > 1 &&
     Boolean(latestSavedVersion) &&
     dismissedChangeSummaryVersionId !== latestSavedVersion.id;
-  const saveStatus = draftSaveStatus(hasUnsavedEdits, serverSaveState);
+  const saveStatus = draftSaveStatus(hasUnsavedEdits, serverSaveState, collab.live ? collab.status : null);
+  const visibleDocumentHistory = documentHistory.filter(
+    (item) => Boolean(item.archived) === showArchivedDrafts && !(item.serverId && sharedWithMeServerIds.has(item.serverId)),
+  );
   // Compare versions is honest only with two genuinely different saved
   // snapshots; identical restore copies do not count.
   // Spreadsheet mode compares workbook versions only; documents and decks
@@ -3711,6 +3806,14 @@ export function DocumentAssistantWorkspace({
   const requestDraftNavigation = useCallback<DraftNavigationGuard>((label, run) => {
     // A later navigation wins over any history request still loading.
     draftOpenRequestRef.current += 1;
+    if (collabRef.current.live) {
+      // A shared draft saves itself; finish its last save, then go.
+      void collabRef.current.flush().then(run, () => {
+        setDraftNavigationError(null);
+        setPendingDraftNavigation({ label, run });
+      });
+      return;
+    }
     if (!hasUnsavedEditsRef.current) {
       run();
       return;
@@ -7078,8 +7181,10 @@ export function DocumentAssistantWorkspace({
       // matter_id is deliberately never sent from this workspace: omitting the
       // field preserves any existing matter assignment on the server, and only
       // an explicit user action may ever send null to clear it.
-      const result =
-        binding.id && binding.revision !== null
+      const liveVersion = collabRef.current.live && binding.id !== null && collabTargetRef.current?.id === binding.id;
+      const result = liveVersion
+        ? await saveLiveVersionAfterCommit()
+        : binding.id && binding.revision !== null
           ? await updateDraft(
               completionUserId,
               binding.id,
@@ -7091,8 +7196,10 @@ export function DocumentAssistantWorkspace({
               { title, content: accountContent, kind },
               { tenantSlug: draftTenantSlug },
             );
+      const previousServerId = binding.id;
       binding.id = result.document.id;
       binding.revision = result.document.current_revision;
+      if (previousServerId !== binding.id) bumpCollabBinding();
       // If another version is already queued, retain that newest local content
       // while recording the acknowledged revision for the next serialized PUT.
       const latest = binding.lastSnapshot ?? snapshot;
@@ -7124,7 +7231,12 @@ export function DocumentAssistantWorkspace({
       setDocumentHistory(nextHistory);
       reportSaveState({ kind: "saved", revision: result.document.current_revision });
     } catch (error) {
-      if (isDraftConflictError(error) && binding.id) {
+      if (collabRef.current.live && binding.id !== null && collabTargetRef.current?.id === binding.id) {
+        reportSaveState({
+          kind: "local-only",
+          message: `This version could not be saved (${draftErrorText(error)}). Your changes are still saved for everyone; try Save version again.`,
+        });
+      } else if (isDraftConflictError(error) && binding.id) {
         reportSaveState({
           kind: "conflict",
           serverId: binding.id,
@@ -7134,6 +7246,163 @@ export function DocumentAssistantWorkspace({
       } else {
         reportUnstored(`Server save failed (${draftErrorText(error)})`);
       }
+    }
+  }
+
+  /** A version of a shared draft is the live copy at that moment. Waits one
+   * tick so a change that queued this save is in the editor first. */
+  async function saveLiveVersionAfterCommit() {
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    return collabRef.current.saveVersion();
+  }
+
+  /** The editor's content in the account's canonical form (merge space). */
+  function liveDocFromEditor(): LiveDoc {
+    const title = draftTitleForAccount(documentTitle) || EMPTY_DOCUMENT_TITLE;
+    if (draftKind === "deck") {
+      const deck = flushDeckTextEdits();
+      return { title, content: deck ? serializeSlideDeck(deck) : "" };
+    }
+    if (draftKind === "spreadsheet") {
+      const workbook = latestWorkbookRef.current;
+      return { title, content: workbook ? serializeWorkbook(workbook) : "" };
+    }
+    return { title, content: currentDocumentFlowHtml() };
+  }
+
+  /** Server content into the same form `liveDocFromEditor` reads, so page
+   * layout and serializer differences never look like someone's edit. */
+  function liveNormalize(value: string): string {
+    if (draftKind === "deck") {
+      const parsed = parseSlideDeck(value);
+      return parsed.ok ? serializeSlideDeck(parsed.deck) : value;
+    }
+    if (draftKind === "spreadsheet") {
+      const parsed = parseWorkbook(value);
+      return parsed.ok ? serializeWorkbook(parsed.workbook) : value;
+    }
+    const paged = paginateTransferredDocumentHtml(sanitizeDocumentHtml(value), "", { forceMarkerPages: true });
+    return sanitizeDocumentHtml(draftHtmlForAccount(paged));
+  }
+
+  /** Shows someone else's change (or a merge with it) right away, keeping the
+   * caret where this person was typing. Undo history restarts, so undo can
+   * never take back a colleague's work. */
+  function applyLiveDoc(doc: LiveDoc) {
+    if (draftKind === "deck") {
+      const parsed = parseSlideDeck(doc.content);
+      if (!parsed.ok) return;
+      latestDeckRef.current = parsed.deck;
+      flushSync(() => {
+        setDeckState(parsed.deck);
+        setDocumentTitle(doc.title);
+        if (!parsed.deck.slides.some((slide) => slide.id === selectedSlideId)) {
+          setSelectedSlideId(parsed.deck.slides[0]?.id ?? null);
+        }
+      });
+      // Text boxes are filled once and then owned by the DOM, so a change to
+      // the slide on screen is written into them here; otherwise the next
+      // read would flush the old text back over the colleague's change.
+      for (const { element, slideId, region } of deckBlockRefs.current.values()) {
+        const slide = parsed.deck.slides.find((item) => item.id === slideId);
+        if (!slide || !element.isConnected) continue;
+        if (deckSlidesEqual(deckSlideWithRegionFromElement(slide, region, element, parsed.deck.theme), slide)) continue;
+        const caret = caretTextOffset(element);
+        const oldText = element.textContent ?? "";
+        element.innerHTML = deckRegionHtml(slide, region);
+        if (caret !== null) placeCaretAtTextOffset(element, shiftedCaretOffset(caret, oldText, element.textContent ?? ""));
+      }
+      setDeckUndoStack([]);
+      setDeckRedoStack([]);
+      deckEditSessionUndoRef.current = null;
+      return;
+    }
+    if (draftKind === "spreadsheet") {
+      const parsed = parseWorkbook(doc.content);
+      if (!parsed.ok) return;
+      latestWorkbookRef.current = parsed.workbook;
+      flushSync(() => {
+        setWorkbookState(parsed.workbook);
+        setDocumentTitle(doc.title);
+        setSpreadsheetUndoResetKey(`live-${Date.now()}`);
+      });
+      return;
+    }
+    const html = paginateTransferredDocumentHtml(sanitizeDocumentHtml(doc.content), "", { forceMarkerPages: true });
+    const editor = editorRef.current;
+    if (editor && editor.innerHTML !== html) {
+      const caret = caretTextOffset(editor);
+      const oldText = editor.textContent ?? "";
+      editor.innerHTML = html;
+      if (caret !== null) placeCaretAtTextOffset(editor, shiftedCaretOffset(caret, oldText, editor.textContent ?? ""));
+    }
+    skipNextEditorSyncRef.current = html !== contentRef.current;
+    flushSync(() => {
+      setContent(html);
+      setDocumentTitle(doc.title);
+    });
+    skipNextEditorSyncRef.current = false;
+    clearEditHistory();
+    scheduleSheetOverflowHeal(html);
+  }
+
+  function refreshServerVersions() {
+    const target = collabTargetRef.current;
+    if (!target) {
+      setServerVersions(null);
+      return;
+    }
+    listDraftVersions(completionUserId, target.id, { tenantSlug: draftTenantSlug }).then(
+      (items) => {
+        if (collabTargetRef.current?.id === target.id) setServerVersions(items);
+      },
+      () => setServerVersions(null),
+    );
+  }
+
+  /** Makes this draft an account draft first if it is not one yet, so the
+   * Share dialog has something to share. */
+  function saveDraftForSharing() {
+    if (saveManualVersion()) return;
+    if (activeServerBinding().id) return;
+    if (draftKind === "deck") {
+      const deck = flushDeckTextEdits();
+      if (deck) rememberDeckSnapshot(documentTitle, serializeSlideDeck(deck), "Saved to share");
+    } else if (draftKind === "spreadsheet") {
+      if (workbookState) rememberSpreadsheetSnapshot(documentTitle, serializeWorkbook(workbookState), "Saved to share");
+    } else {
+      rememberDocumentSnapshot(documentTitle, content, "Saved to share");
+    }
+  }
+
+  function openShareDialog() {
+    setShareDialogOpen(true);
+    if (!activeServerBinding().id || (hasUnsavedEdits && !collab.live)) saveDraftForSharing();
+  }
+
+  /** Brings an earlier version back for everyone. The draft as it is now is
+   * saved as a version first, so nothing is lost. */
+  async function restoreServerVersionForEveryone(version: DraftVersionItem) {
+    setServerVersionToRestore(null);
+    const target = collabTargetRef.current;
+    if (!target) return;
+    try {
+      await collabRef.current.saveVersion();
+      const fetched = await getDraftVersion(completionUserId, target.id, version.revision, { tenantSlug: draftTenantSlug });
+      const restored: DraftVersion = {
+        id: `server-version-${version.revision}`,
+        label: `Version ${version.revision}`,
+        time: draftTimeLabel(version.created_at),
+        executedAt: version.created_at,
+        content: fetched.revision.content,
+        summary: `Saved by ${version.author_name}`,
+        ...(target.kind === "document" ? {} : { format: target.kind }),
+      };
+      setVersions((current) => [...current.filter((item) => item.id !== restored.id), restored]);
+      selectVersion(restored);
+      setStatus(`Version ${version.revision} is back for everyone. The draft as it was is saved as a version.`);
+    } catch (error) {
+      setStatus(`Version ${version.revision} could not be brought back (${draftErrorText(error)}). Nothing was changed.`);
     }
   }
 
@@ -7197,6 +7466,7 @@ export function DocumentAssistantWorkspace({
     try {
       const snapshot = await getDraft(completionUserId, serverId, { tenantSlug: draftTenantSlug });
       if (requestId !== draftOpenRequestRef.current) return;
+      if (snapshot.document.owner_user_id !== completionUserId) sharedWithMeServerIds.add(snapshot.document.id);
       const opened: DraftDocumentHistoryItem = {
         id: `server-${snapshot.document.id}`,
         title: snapshot.document.title,
@@ -7390,6 +7660,7 @@ export function DocumentAssistantWorkspace({
     options?: { fromLiveUpdate?: boolean },
   ) {
     clearDraftTimers();
+    bumpCollabBinding();
     const status = item.status ?? "complete";
     const executedAt = item.completedAt || item.updatedAt || draftNowIso();
     // Workbooks restore through the workbook validator, never innerHTML.
@@ -7580,6 +7851,39 @@ export function DocumentAssistantWorkspace({
             ? `${item.title} did not finish. Reopen the request details or start a new draft.`
             : `${item.title} restored from document history.`,
     );
+  }
+
+  useEffect(() => {
+    if (activeAssistantTool !== "history") return undefined;
+    let active = true;
+    listSharedWithMe(completionUserId, { tenantSlug: draftTenantSlug }).then(
+      (items) => {
+        if (active) setSharedWithMe(items);
+      },
+      () => {
+        if (active) setSharedWithMe([]);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [activeAssistantTool, completionUserId, draftTenantSlug]);
+
+  useEffect(() => {
+    if (collab.live) refreshServerVersions();
+    else setServerVersions(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch per shared draft
+  }, [collab.live, collabTarget?.id]);
+
+  async function previewSharedDraft(item: SharedDraftItem) {
+    const live = await getDraftLive(completionUserId, item.document.id, { tenantSlug: draftTenantSlug });
+    const html = live.live.content;
+    if (contentLooksLikeWorkbook(html)) {
+      const workbook = parseWorkbook(html);
+      if (workbook.ok) return workbookPlainText(workbook.workbook, computeWorkbook(workbook.workbook), 700) || "This workbook is empty.";
+    }
+    const parsed = parseSlideDeck(html);
+    return parsed.ok ? markdownOutlineFromDeck(parsed.deck).slice(0, 700) : documentHtmlToText(sanitizeDocumentHtml(html)).slice(0, 700) || "This draft has no content yet.";
   }
 
   const [historyOpenNotice, setHistoryOpenNotice] = useState<string | null>(null);
@@ -11217,6 +11521,37 @@ export function DocumentAssistantWorkspace({
           </section>
         </div>
       )}
+      {serverVersionToRestore && createPortal(
+        <div className="modal-backdrop" role="presentation" onClick={() => setServerVersionToRestore(null)}>
+          <section
+            ref={serverVersionRestoreRef}
+            tabIndex={-1}
+            className="modal confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Bring back Version ${serverVersionToRestore.revision}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>Bring back Version {serverVersionToRestore.revision}?</h2>
+            <p>
+              Everyone working on this draft will see Version {serverVersionToRestore.revision}, saved by{" "}
+              {serverVersionToRestore.author_name}. The draft as it is now is saved as a new version first, so you
+              can return to it.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" onClick={() => setServerVersionToRestore(null)}>Cancel</button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void restoreServerVersionForEveryone(serverVersionToRestore)}
+              >
+                Bring back Version {serverVersionToRestore.revision}
+              </button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
       {pendingDraftNavigation && createPortal(
         <div className="modal-backdrop" role="presentation" onClick={() => setPendingDraftNavigation(null)}>
           <section
@@ -12001,13 +12336,13 @@ export function DocumentAssistantWorkspace({
                         {serverListNotice}
                       </p>
                     )}
-                    {documentHistory.filter(item => Boolean(item.archived) === showArchivedDrafts).length === 0 ? (
+                    {visibleDocumentHistory.length === 0 ? (
                       <p className="draft-history-empty">
                         {showArchivedDrafts ? "No archived drafts." : "Saved documents will appear here after you draft or save them."}
                       </p>
                     ) : (
                       <div className="draft-document-history-list">
-                        {documentHistory.filter(item => Boolean(item.archived) === showArchivedDrafts).map((item) => (
+                        {visibleDocumentHistory.map((item) => (
                           <DraftHistoryCard key={`${item.id}:${item.updatedAt}:${item.serverContentStale}`}
                             title={item.title} summary={item.summary} source={item.sourceLabel}
                             time={formatHistoryTimestamp(item.updatedAt)} status={draftHistoryStatusLabel(item)}
@@ -12024,6 +12359,28 @@ export function DocumentAssistantWorkspace({
                       </div>
                     )}
                   </div>
+                  {!showArchivedDrafts && sharedWithMe.length > 0 && (
+                    <div className="draft-history-section" aria-label="Shared with you">
+                      <strong className="draft-history-section-title">Shared with you</strong>
+                      <div className="draft-document-history-list">
+                        {sharedWithMe.map((item) => (
+                          <DraftHistoryCard
+                            key={`shared:${item.document.id}:${item.last_edited_at}`}
+                            title={item.document.title}
+                            summary={`Shared by ${item.owner.display_name}`}
+                            source={item.shared_via === "group" ? "Shared with your group" : "Shared with you"}
+                            time={formatHistoryTimestamp(item.last_edited_at)}
+                            status={`Shared by ${item.owner.display_name}`}
+                            kind={item.document.kind ?? "document"}
+                            archived={false}
+                            disabled={assistantWorking}
+                            onRestore={() => void openServerDraftById(item.document.id)}
+                            loadPreview={() => previewSharedDraft(item)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {legacyDraftHistory.length > 0 && (
                     <div className="draft-history-section" aria-label="Legacy local drafts">
                       <strong className="draft-history-section-title">Legacy local drafts</strong>
@@ -12079,7 +12436,31 @@ export function DocumentAssistantWorkspace({
                       </div>
                     </div>
                   )}
-                  <div className="draft-history-section">
+                  {collab.live && serverVersions && serverVersions.length > 0 && (
+                    <div className="draft-history-section" aria-label="Saved versions">
+                      <strong className="draft-history-section-title">Saved versions</strong>
+                      <p className="draft-history-empty">Everyone sharing this draft sees these. Choose one to bring it back.</p>
+                      <div className="draft-version-list">
+                        {serverVersions.map((version) => (
+                          <button
+                            key={version.revision}
+                            type="button"
+                            className="draft-version-card"
+                            data-tooltip={`Bring back Version ${version.revision} for everyone`}
+                            disabled={assistantWorking}
+                            onClick={() => setServerVersionToRestore(version)}
+                          >
+                            <span>
+                              <strong>Version {version.revision}</strong>
+                              <small>Saved by {version.author_name}</small>
+                            </span>
+                            <time>{formatHistoryTimestamp(version.created_at)}</time>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!(collab.live && serverVersions && serverVersions.length > 0) && <div className="draft-history-section">
                     <strong className="draft-history-section-title">Versions of this draft</strong>
                     {versions.length === 1 ? (
                       <p className="draft-history-empty">
@@ -12116,7 +12497,7 @@ export function DocumentAssistantWorkspace({
                         ))}
                       </div>
                     )}
-                  </div>
+                  </div>}
                 </div>
               )}
             </section>
@@ -12516,11 +12897,47 @@ export function DocumentAssistantWorkspace({
                 </div>
               )}
             </div>
+            <div className="document-share-cluster">
+              <DraftPresence participants={collab.participants} meId={completionUserId} />
+              <span className="sr-only" aria-live="polite">{liveNotice ?? ""}</span>
+              <button
+                type="button"
+                className={`document-share-button${collab.live ? " is-shared" : ""}`}
+                aria-haspopup="dialog"
+                aria-expanded={shareDialogOpen}
+                data-tooltip={
+                  collab.sharing?.role === "collaborator"
+                    ? `${collab.sharing.owner.display_name} shared this draft with you`
+                    : collab.live
+                      ? "See or change who can open and edit this draft"
+                      : "Let people in your group open and edit this draft with you"
+                }
+                onClick={openShareDialog}
+              >
+                <Users size={16} aria-hidden="true" />
+                {collab.sharing?.role === "collaborator" ? "Shared with you" : collab.live ? "Shared" : "Share"}
+              </button>
+              {shareDialogOpen && (
+                <DraftShareDialog
+                  userId={completionUserId}
+                  tenantSlug={draftTenantSlug}
+                  title={documentTitle}
+                  sharing={collab.sharing}
+                  waitingMessage={
+                    !collabTarget && (serverSaveState.kind === "local-only" || serverSaveState.kind === "not-stored")
+                      ? `This draft could not be saved to your account yet. ${serverSaveState.message}`
+                      : null
+                  }
+                  onSave={collab.updateSharing}
+                  onClose={() => setShareDialogOpen(false)}
+                />
+              )}
+            </div>
             <span className="document-version-label">
               <History size={17} />
               <span className="document-version-text">
                 {versions.find((version) => version.id === selectedVersionId)?.label ?? "Version"}
-                {hasUnsavedEdits ? " + unsaved edits" : ""}
+                {hasUnsavedEdits ? (collab.live ? " + newer edits" : " + unsaved edits") : ""}
               </span>
             </span>
             <div className="document-top-actions">
@@ -14472,6 +14889,7 @@ export function DocumentAssistantWorkspace({
             <SpreadsheetEditor
               workbook={workbookState}
               historyKey={spreadsheetHistoryKey}
+              undoResetKey={spreadsheetUndoResetKey}
               title={documentTitle}
               onChange={(next) => setWorkbookState(next)}
               readOnly={assistantWorking}
@@ -17279,7 +17697,9 @@ function loadDraftDocumentHistory(scope: DraftCacheScope): DraftDocumentHistoryI
 
 function saveDraftDocumentHistory(scope: DraftCacheScope, items: DraftDocumentHistoryItem[]) {
   if (typeof window === "undefined") return false;
-  const nextItems = limitDraftCacheEntries(items);
+  const nextItems = limitDraftCacheEntries(
+    items.filter((item) => !item.serverId || !sharedWithMeServerIds.has(item.serverId)),
+  );
   const stored = saveScopedDraftCache(scope, nextItems);
   try {
     window.dispatchEvent(

@@ -1,0 +1,327 @@
+/* Shared drafts: the Share key, who-is-here chips, and the Share dialog.
+   Plain words, 44px touch targets on phones, 13px text floor. */
+
+:root {
+  /* One stable color per person (index from the server), readable under white initials. */
+  --presence-0: #0f766e;
+  --presence-1: #b45309;
+  --presence-2: #7c3aed;
+  --presence-3: #be123c;
+  --presence-4: #1d4ed8;
+  --presence-5: #4d7c0f;
+  --presence-6: #a21caf;
+  --presence-7: #475569;
+}
+
+.theme-dark {
+  --presence-0: #14b8a6;
+  --presence-1: #f59e0b;
+  --presence-2: #a78bfa;
+  --presence-3: #fb7185;
+  --presence-4: #60a5fa;
+  --presence-5: #a3e635;
+  --presence-6: #e879f9;
+  --presence-7: #94a3b8;
+}
+
+/* --- Top bar: chips and the Share key, between the title and the version --- */
+
+@media (min-width: 641px) {
+  .document-editor-topbar:has(> .document-share-cluster) {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+}
+
+.document-editor-topbar > .document-share-cluster {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.document-share-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-strong);
+  box-shadow: var(--tactile-raised);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 760;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.document-share-button:hover:not(:disabled) {
+  box-shadow: var(--tactile-raised-hover);
+}
+
+.document-share-button:active:not(:disabled) {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+.document-share-button:focus-visible {
+  outline: none;
+  box-shadow: var(--tactile-raised), inset 0 0 0 2px var(--teal);
+}
+
+.document-share-button.is-shared {
+  border-color: color-mix(in srgb, var(--teal-2) 45%, var(--border));
+  color: var(--accent-ink);
+}
+
+.document-share-button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.draft-presence {
+  display: inline-flex;
+  align-items: center;
+}
+
+.draft-presence-chip {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-left: -6px;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: var(--presence-7);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.draft-presence-chip:first-child {
+  margin-left: 0;
+}
+
+.theme-dark .draft-presence-chip {
+  color: #08130f;
+}
+
+.draft-presence-chip[data-presence-color="0"] { background: var(--presence-0); }
+.draft-presence-chip[data-presence-color="1"] { background: var(--presence-1); }
+.draft-presence-chip[data-presence-color="2"] { background: var(--presence-2); }
+.draft-presence-chip[data-presence-color="3"] { background: var(--presence-3); }
+.draft-presence-chip[data-presence-color="4"] { background: var(--presence-4); }
+.draft-presence-chip[data-presence-color="5"] { background: var(--presence-5); }
+.draft-presence-chip[data-presence-color="6"] { background: var(--presence-6); }
+.draft-presence-chip[data-presence-color="7"] { background: var(--presence-7); }
+
+.draft-presence-more {
+  background: var(--surface-soft);
+  color: var(--text-strong);
+}
+
+.theme-dark .draft-presence-more {
+  color: var(--text-strong);
+}
+
+@media (max-width: 640px) {
+  /* Phones: a row of its own under the action keys, outside their well. */
+  .document-assistant-page .document-editor-topbar > .document-share-cluster {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 4;
+    justify-self: stretch;
+  }
+
+  .document-assistant-page .document-editor-topbar .document-share-button {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+}
+
+/* --- Share dialog ------------------------------------------------------- */
+
+.draft-share-modal {
+  width: min(520px, 100%);
+}
+
+.draft-share-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.draft-share-sentence {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.draft-share-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.draft-share-matter {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--tactile-field);
+  color: var(--text);
+}
+
+.draft-share-groups,
+.draft-share-people {
+  display: grid;
+  gap: 10px;
+}
+
+.draft-share-chosen,
+.draft-share-matches {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Everyone you can add is listed; long lists scroll inside the dialog. */
+.draft-share-matches {
+  max-height: min(340px, 42dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.draft-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.draft-share-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.draft-share-row-text strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-share-row-text small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-share-add,
+.draft-share-remove {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+}
+
+.draft-share-search {
+  display: grid;
+  gap: 6px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.draft-share-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--tactile-field);
+  box-shadow: var(--tactile-field-shadow);
+  color: var(--muted);
+}
+
+.draft-share-search-field:focus-within {
+  border-color: var(--teal);
+  box-shadow: var(--tactile-field-shadow), var(--tactile-field-focus);
+}
+
+/* Specific enough to beat the platform's carved-field input styling: the
+   field around it is the well. */
+.draft-share-modal .draft-share-search-field input[type="search"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  box-shadow: none;
+  appearance: none;
+  background: transparent;
+  -webkit-appearance: none;
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.draft-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.draft-share-actions .primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.draft-share-problem {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .draft-share-actions > button {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+
+  .draft-share-add,
+  .draft-share-remove {
+    min-height: 44px;
+  }
+}

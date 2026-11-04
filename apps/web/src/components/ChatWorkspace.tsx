@@ -26,6 +26,7 @@ import {
   type ReasoningLevel,
 } from "./ReasoningSlider";
 import {
+  MatterOptionRow,
   OptionCopy,
   ResourceListHeader,
   ResourceSearch,
@@ -47,6 +48,8 @@ import {
   type SendMenuTab,
 } from "./ComposerOptions";
 import { RailSwitch } from "./RailSwitch";
+import { MatterChooser } from "./MatterPicker";
+import { useChatMatter } from "./useChatMatter";
 import {
   ArrowUpRight,
   BookOpen,
@@ -1117,6 +1120,7 @@ export function ChatWorkspace({
   const [cloudPicker, setCloudPicker] = useState<CloudPickerState | null>(null);
   const [sendMenuTab, setSendMenuTab] = useState<SendMenuTab>("settings");
   const resourceBrowserOpen = sendMenuOpen && sendMenuTab === "resources";
+  const chatMatter = useChatMatter(chat, data, sendMenuOpen);
   const [shortcutQuery, setShortcutQuery] = useState("");
   const [resourceView, setResourceView] = useState<ResourceView>("tiles");
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
@@ -2945,6 +2949,15 @@ export function ChatWorkspace({
                         <small>Create an agent profile in Agents to enable this mode.</small>
                       )}
                     </div>
+                  )}
+                  <MatterOptionRow
+                    detail={chatMatter.detail}
+                    filed={chatMatter.currentId !== null}
+                    expanded={chatMatter.open}
+                    onToggle={chatMatter.toggle}
+                  />
+                  {chatMatter.open && (
+                    <MatterChooser saved={chatMatter.saved} currentId={chatMatter.currentId} onChoose={chatMatter.choose} />
                   )}
                 </div>
                 <h3 className="composer-options-group-title">Reply style</h3>

@@ -22,9 +22,41 @@ export type DraftSaveStatus = {
   action: DraftSaveAction | null;
 };
 
+/** Autosave of a shared draft's live copy (lib/draftLiveSession.ts). */
+export type DraftLiveSaveState =
+  | { kind: "synced"; seq: number }
+  | { kind: "saving" }
+  | { kind: "offline"; message: string; retryInMs: number };
+
+function liveSaveStatus(live: DraftLiveSaveState): DraftSaveStatus {
+  if (live.kind === "saving") {
+    return { tone: "saving", label: "Saving…", detail: "Saving your changes for everyone sharing this draft.", action: null };
+  }
+  if (live.kind === "offline") {
+    const seconds = Math.max(1, Math.round(live.retryInMs / 1000));
+    return {
+      tone: "local-only",
+      label: "Not saved yet",
+      detail: `${live.message} Your changes are kept in this window and save again in ${seconds} seconds.`,
+      action: { kind: "retry" },
+    };
+  }
+  return {
+    tone: "saved",
+    label: "Saved",
+    detail: "Every change is saved to your account for everyone sharing this draft. Save a version to mark a point you can go back to.",
+    action: null,
+  };
+}
+
 /** An account copy that is behind outranks local edits: its warning and
- * recovery action stay visible while the user keeps typing. */
-export function draftSaveStatus(hasUnsavedEdits: boolean, server: DraftServerSaveState): DraftSaveStatus {
+ * recovery action stay visible while the user keeps typing. A shared draft
+ * autosaves, so its live state replaces "Editing". */
+export function draftSaveStatus(
+  hasUnsavedEdits: boolean,
+  server: DraftServerSaveState,
+  live: DraftLiveSaveState | null = null,
+): DraftSaveStatus {
   if (server.kind === "not-stored") {
     return { tone: "not-stored", label: "Not saved", detail: server.message, action: { kind: "retry" } };
   }
@@ -39,6 +71,7 @@ export function draftSaveStatus(hasUnsavedEdits: boolean, server: DraftServerSav
   if (server.kind === "local-only") {
     return { tone: "local-only", label: "Local only", detail: server.message, action: { kind: "retry" } };
   }
+  if (live) return liveSaveStatus(live);
   if (hasUnsavedEdits) {
     return {
       tone: "editing",

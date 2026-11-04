@@ -34,6 +34,16 @@ The export panel offers **Choose a location** and **Browser downloads** where a 
 - Delete asks for confirmation and permanently removes that draft's saved revisions. Server deletion and archiving check ownership, tenant, and the displayed revision. A conflicting edit prevents the mutation.
 - Deleting the open draft keeps its editor buffer as a working copy; saving it creates a new history entry.
 
+## Sharing and live co-editing
+
+- Every document, deck, and spreadsheet starts private. **Share** (top bar, beside the version label) offers three choices: **Only me**, **My group** (everyone in one or more of the owner's groups), or **Specific people**. Choosing Specific people lists, right away and searchable by name or email, everyone the owner may add: for most people, the members of their own groups (Default Users included); for an administrator, everyone in the organization except platform owners; for a platform owner, everyone. A draft that is not in the account yet is saved first.
+- Group shares follow current membership: leaving the group ends access. A draft in a matter can be shared only with people on that matter, and a group share never opens it to someone outside the matter.
+- Only the owner changes sharing, archives, deletes, or moves a draft to another matter. Collaborators open the draft from **Document history → Shared with you**, edit it, and save versions. Sharing changes record a `draft.sharing_updated` audit event.
+- A shared draft saves itself. Edits autosave into one live copy on the server (`draft_live_states`, compare-and-set on `seq`), so they never spend the 200-version history. When two people edit at once, the later save merges: documents by paragraph and then by word (markup stays whole), decks by slide and field, spreadsheets by cell. Where both changed the same words, the person saving last keeps their wording; two insertions at the same spot keep both. Colored initials show who else is in the draft.
+- **Save version** on a shared draft copies the live copy into the numbered history and records who saved it. **Document history → Saved versions** lists every version with its author for everyone sharing the draft; **Bring back** restores one for everyone after saving the current text as a version first.
+- Drafts shared with someone are never written to their browser's local draft cache, so losing access leaves no copy behind. Their open window says when the draft stopped being shared or was deleted.
+- Live updates use `GET /api/drafts/{id}/live/events` (server-sent events with a 15-second keep-alive, a 3-second database poll for saves made by other API processes, and an access and session re-check every 20 seconds). Other routes: `GET|PUT /api/drafts/{id}/sharing`, `GET|PUT /api/drafts/{id}/live`, `POST /api/drafts/{id}/live/version`, `PUT /api/drafts/{id}/live/presence`, `GET /api/drafts/{id}/versions[/{revision}]`, `GET /api/draft-sharing/directory`, `/shared-with-me`, and `/mine`.
+
 ## Coverage
 
 Automated component and package checks cover:
@@ -61,6 +71,8 @@ The deck editor exposes seven layout previews and five color palettes in the **L
 
 The deck-kind migration uses a direct SQLite column addition with an inline check. Rebuilding the parent draft table would trigger cascading deletion of revision rows. The migration regression test seeds two revisions and checks their exact preservation through upgrade and downgrade with foreign keys enabled.
 
+
+Migration `20261103_0029` adds `draft_shares`, `draft_live_states`, and `draft_revision_authors`. All three hang off their draft (or revision) with `ON DELETE CASCADE`; no existing table is rebuilt and no existing row changes, so a draft has no live copy until someone edits it while shared. Back up the database, deploy the API (the migration runs at startup), then rebuild the web client. Rolling back the containers is safe; the downgrade drops only the three new tables.
 
 ## Automatic document pagination
 

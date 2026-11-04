@@ -30,7 +30,10 @@ from app.db.orm import (
     ChatFolderRow,
     ChatThreadRow,
     DraftDocumentRow,
+    DraftLiveStateRow,
+    DraftRevisionAuthorRow,
     DraftRevisionRow,
+    DraftShareRow,
     MatterDeletionJobRow,
     MatterMembershipRow,
     MatterRow,
@@ -230,6 +233,7 @@ class MatterDraftRepository:
                 ).rowcount
                 or 0
             )
+            _forget_collaborator(session, tenant_id=tenant_id, user_id=user_id)
             session.flush()
             remaining_drafts = session.scalar(
                 select(func.count())
@@ -998,6 +1002,7 @@ class MatterDraftRepository:
                     MatterMembershipRow.member_user_id == user_id,
                 )
             )
+            _forget_collaborator(session, tenant_id=tenant_id, user_id=user_id)
             session.flush()
             if any(
                 self._permanent_user_lifecycle_counts(
@@ -1308,7 +1313,11 @@ class MatterDraftRepository:
         content: str | None = None,
         matter_id: str | None | object = _UNSET,
         now: datetime | None = None,
+        on_written: Callable[[Session, DraftSnapshot], None] | None = None,
     ) -> DraftSnapshot:
+        """CAS-update a draft. ``on_written`` runs inside the same transaction,
+        only when a new revision was written, so collaboration bookkeeping
+        commits or rolls back with the revision itself."""
         draft_id, tenant_id, owner_user_id = _scope(draft_id, tenant_id, owner_user_id)
         expected_revision = _positive_bigint(expected_revision, "expected_revision")
         normalized_title = None if title is None else normalize_draft_title(title)
@@ -1406,7 +1415,10 @@ class MatterDraftRepository:
                 updated_at=timestamp,
             )
             write_entry(session, entry_for_draft(document, revision))
-            return DraftSnapshot(document=document, revision=revision)
+            snapshot = DraftSnapshot(document=document, revision=revision)
+            if on_written is not None:
+                on_written(session, snapshot)
+            return snapshot
 
         try:
             return self._run_write(operation)
@@ -2066,6 +2078,35 @@ class MatterDraftRepository:
             except SQLAlchemyError as exc:
                 raise MatterPersistenceUnavailable("Matter persistence is unavailable.") from exc
         raise MatterPersistenceUnavailable("Matter persistence retry loop exited unexpectedly.")
+
+
+def _forget_collaborator(session: Session, *, tenant_id: str, user_id: str) -> None:
+    """Remove a departing person from other people's drafts: their personal
+    shares go, and versions or live edits they made no longer name them."""
+
+    session.execute(
+        delete(DraftShareRow).where(
+            DraftShareRow.tenant_id == tenant_id,
+            DraftShareRow.principal_kind == "user",
+            DraftShareRow.principal_id == user_id,
+        )
+    )
+    session.execute(
+        update(DraftRevisionAuthorRow)
+        .where(
+            DraftRevisionAuthorRow.tenant_id == tenant_id,
+            DraftRevisionAuthorRow.author_user_id == user_id,
+        )
+        .values(author_user_id=None)
+    )
+    session.execute(
+        update(DraftLiveStateRow)
+        .where(
+            DraftLiveStateRow.tenant_id == tenant_id,
+            DraftLiveStateRow.updated_by_user_id == user_id,
+        )
+        .values(updated_by_user_id=None, updated_by_client=None)
+    )
 
 
 def _scope(resource_id: str, tenant_id: str, actor_user_id: str) -> tuple[str, str, str]:

@@ -353,6 +353,101 @@
   font-size: 13px;
 }
 
+/* --- Matter: files this chat under a client-matter number ------------------ */
+
+/* The next step in words, on a small raised key: Add, or Change. */
+.composer-option-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--tactile-raised);
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.composer-matter-row[aria-expanded="true"] .composer-option-action {
+  border-color: var(--tactile-track-border);
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+}
+
+.composer-matter-row[aria-expanded="true"] .composer-option-well {
+  color: var(--option-accent);
+}
+
+.composer-option-group .matter-chooser {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 10px 10px 50px;
+}
+
+.matter-chooser-entry {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.matter-chooser-entry input {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--tactile-track-border);
+  border-radius: 10px;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-pressed-row);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.matter-chooser-entry input::placeholder {
+  color: var(--option-detail);
+  opacity: 1;
+}
+
+.matter-chooser-entry input:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+
+.matter-chooser-entry .secondary-button {
+  flex: none;
+  min-height: 36px;
+  padding-inline: 14px;
+  font-size: 13.5px;
+}
+
+/* The saved numbers reuse the knowledge list's rows, already indented by the chooser. */
+.composer-option-group .matter-chooser .knowledge-source-picker {
+  padding: 0;
+}
+
+.composer-option-group .matter-chooser > small {
+  color: var(--option-detail);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.composer-option-group .matter-chooser > .matter-chooser-problem {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.composer-option-group .matter-chooser > .link-button {
+  justify-self: start;
+  min-height: 32px;
+  font-size: 13px;
+}
+
 /* --- Resources ------------------------------------------------------------- */
 
 .composer-options-resources {
@@ -692,8 +787,15 @@
   .composer-options-footer .primary-button,
   .composer-option-group .knowledge-source-option,
   .composer-shortcut-guide summary,
-  .composer-resource-search input {
+  .composer-resource-search input,
+  .matter-chooser-entry input,
+  .matter-chooser-entry .secondary-button,
+  .composer-option-group .matter-chooser > .link-button {
     min-height: 44px;
+  }
+
+  .matter-chooser-entry input {
+    font-size: 16px;
   }
 
   .composer-options-heading .icon-button {
@@ -728,7 +830,8 @@
   }
 
   .composer-option-group .knowledge-source-picker,
-  .composer-option-group .agent-profile-picker {
+  .composer-option-group .agent-profile-picker,
+  .composer-option-group .matter-chooser {
     padding-inline: 8px;
   }
 }

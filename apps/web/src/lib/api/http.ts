@@ -164,6 +164,15 @@ export function pathId(id: string) {
   return encodeURIComponent(id);
 }
 
+/**
+ * Names the tenant a platform owner is working in (`X-Aperture-Tenant`).
+ * Tenant users send none: their own tenant always wins on the server.
+ */
+export function tenantHeaders(tenantSlug: string | undefined): Record<string, string> | undefined {
+  const slug = tenantSlug?.trim();
+  return slug ? { "X-Aperture-Tenant": slug } : undefined;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

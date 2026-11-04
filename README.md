@@ -19,7 +19,7 @@ Chat, documents, slide decks, spreadsheets, agents, automations, and knowledge, 
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/product-tour-light.png">
-  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, a structure diagram, a colored code block, Agents, Automations, a knowledge base showing a file's properties and ethical wall, the document editor, the slide editor, a spreadsheet with a table, formulas, and a chart, and the Admin Console" width="100%">
+  <img src="docs/images/product-tour-light.gif" alt="Tour of the current Aperture Chat interface: a cited agent answer in chat, a structure diagram, a colored code block, Agents, Automations, a knowledge base showing a file's properties and ethical wall, a folder kept in sync under a client-matter number, the document editor, sharing a draft with two colleagues, the slide editor, a spreadsheet with a table, formulas, and a chart, and the Admin Console" width="100%">
 </picture>
 
 <sub>The current interface in a synthetic organization, answered by an open model (Qwen 3.5 9B) running locally.
@@ -63,12 +63,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.20](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.20)**:
-> The consoles fit every window size; every console export offers an Excel workbook
-> or a CSV file; console filters take one person or several; a runtime record opens
-> the conversation behind it; and usage cards show full names and what each count means.
-> v0.5.19 kept files attached to a chat and brought real documents in with `#`.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0519) and
+> **Current release: [v0.5.21](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.21)**:
+> Share a document, deck, or spreadsheet with your group or chosen people and edit
+> it together at the same time; add whole folders to a knowledge base and keep them
+> in sync; file chats and knowledge bases under a client-matter number; and dictate
+> with Whisper or gpt-4o-transcribe speech models that hand off when one is busy.
+> v0.5.20 fitted the consoles to every window and added Excel exports.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0520) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -83,6 +84,8 @@ policies appropriate for your organization's data.
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
+- **Client-matter numbers.** File a chat under a client-matter number from the **Matter** row in **Send options**. Numbers you type are saved for reuse, and the same numbers tag knowledge bases, so records staff can find a matter's chats in retention and its knowledge bases in Library search.
+- **Dictation.** Speak into the composer's microphone. Transcription uses a Gemini Flash model or a speech model such as Whisper or gpt-4o-transcribe (on Groq, OpenAI, Azure OpenAI, or Azure AI Foundry), and a busy or unreachable model hands the recording to the next one.
 - **Work traces.** Review the steps, sources, and provider-reported usage behind each reply, live while it streams. Availability depends on the provider.
 - **Response actions.** Copy, share, regenerate, rate, and transfer an answer to Drafts.
 - **Organized history.** Search conversations and keep them tidy with folders, pins, and archives. Read state follows your account across browsers.
@@ -109,9 +112,14 @@ policies appropriate for your organization's data.
 - **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts (including statement, big-number, and picture-with-bullets), and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and seven theme designs, a slide sorter, snapping guides, and presenter view round it out.
-- **Versions you can trust.** Save versions, compare and return to versions while a draft is open, preview history, and archive drafts. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
+- **Share and edit together.** Every draft starts private. **Share** offers **Only me**, **My group**, or **Specific people**; group shares follow current group membership, and a draft in a matter is shared only with people on that matter. A shared draft saves itself into one live copy, two people can edit at once, and their changes merge (documents by paragraph and word, decks by slide, spreadsheets by cell) while colored initials show who else is in it. Only the owner changes sharing, archives, or deletes it.
+- **Versions you can trust.** Save versions, compare and return to versions while a draft is open, preview history, and archive drafts. On a shared draft every saved version records who saved it and **Bring back** restores it for everyone. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
 - **Export.** Download Word (`.docx`), Markdown (`.md`), PowerPoint (`.pptx`), or Excel (`.xlsx`), build an archival PDF/A file, or print.
+
+<p align="center">
+  <img src="docs/images/drafts-share-light.png" alt="The Share dialog on the project brief with Specific people chosen: Priya Shah and Marcus Lee added, and the rest of the organization listed to add" width="760">
+</p>
 
 <details>
 <summary><b>Document in dark mode, deck in light mode</b></summary>
@@ -139,7 +147,13 @@ policies appropriate for your organization's data.
 | --- | --- |
 | ![Company Policies knowledge base: a Word file's own properties, its sensitivity label, and the ethical wall that limits it to Finance](docs/images/knowledge-dark.png) | ![Tools library showing reusable prompt templates](docs/images/tools-dark.png) |
 
-- **Knowledge bases** combine uploaded files, web pages, and API sources. Uploads are keyword-searchable as soon as their text is extracted, and semantic vectors are added in the background. Extraction keeps what plain text extraction drops: Word headers, footers, footnotes and comments, slide speaker notes, PDF reviewer comments and filled form fields, and email attachments. Each file's own properties (title, author, dates, custom fields, Microsoft Purview sensitivity labels, Box metadata, SharePoint columns, Google Drive properties) are kept, searchable, and shown beside every cited passage. Handwriting, stamps, and pictures are read by the workspace's image-capable model (for example Gemini Flash on OpenRouter or GPT-4.1 on Azure AI Foundry), with local OCR as the fallback; each knowledge base can keep pages on the server instead. Web pages can bring in the linked pages of the same site (robots.txt and sign-in pages respected, up to 100 pages), cite each exact page, and, when a question needs a page that was not read up front, look it up on that site live (its links, its own search box) and cite it. An **ethical wall** in a file's metadata (an "Ethical wall" or "Information barrier" field naming a group) limits that file to the group's members, administrators included. Embeddings run locally; media transcription uses a configured provider.
+| Folder kept in sync | Filed under a matter |
+| --- | --- |
+| ![The Hartwell Acquisition knowledge base, filed under client-matter number 100482-0007, with its folder of five files kept in sync and each file listed under its subfolder](docs/images/knowledge-folders-light.png) | ![Send options in a chat with the Matter row open, offering the saved client-matter number 100482-0007](docs/images/chat-matter-light.png) |
+
+- **Knowledge bases** combine uploaded files, web pages, and API sources. Uploads are keyword-searchable as soon as their text is extracted, and semantic vectors are added in the background. Extraction keeps what plain text extraction drops: Word headers, footers, footnotes and comments, slide speaker notes, PDF reviewer comments and filled form fields, and email attachments. Each file's own properties (title, author, dates, custom fields, Microsoft Purview sensitivity labels, Box metadata, SharePoint columns, Google Drive properties) are kept, searchable, and shown beside every cited passage. Handwriting, stamps, and pictures are read by the workspace's image-capable model (for example Gemini Flash on OpenRouter or GPT-4.1 on Azure AI Foundry), with local OCR as the fallback; each knowledge base can keep pages on the server instead. Web pages can bring in the linked pages of the same site (robots.txt and sign-in pages respected, up to 100 pages), cite each exact page, and, when a question needs a page that was not read up front, look it up on that site live (its links, its own search box) and cite it. An **ethical wall** in a file's metadata (an "Ethical wall" or "Information barrier" field naming a group) limits that file to the group's members, administrators included. Embeddings run locally; audio and video are transcribed by a configured model.
+- **Folders.** Drag in whole folders, several at once, or choose one. Each file keeps its subfolder, and uploading the same folder again adds new files, updates changed ones in place, and skips the rest; files you delete in Aperture stay out. Turn on **Keep in sync** to add new and changed files every few minutes while Aperture is open in that browser (Chrome and Edge; other browsers ask you to choose the folder again with **Sync now**). Files deleted on the computer are never deleted in Aperture.
+- **Client-matter numbers.** Give a knowledge base an optional client-matter number when you create it or in its settings. The number shows on the card and in the header, and searching for it lists every base filed under it.
 - **Sync** re-fetches web pages and API sources and never touches uploaded files. API requests pass the outbound guards and refuse redirects.
 - **Cloud sources.** Connect Google Drive, Box, SharePoint, OneDrive, or iManage with the provider's credentials and permissions. A successful connection does not grant every user access to every document.
 - **Tools** hold MCP connections, prompt templates, and skills. Connections are tested before they are saved, and tool use remains subject to workspace policy.
@@ -175,7 +189,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.20
+#   APERTURE_IMAGE_TAG=v0.5.21
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -196,7 +210,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.20 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.21 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -231,10 +245,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.20` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.21` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.20-dev`, `v0.5.20-test`, `v0.5.20-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.21-dev`, `v0.5.21-test`, `v0.5.21-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

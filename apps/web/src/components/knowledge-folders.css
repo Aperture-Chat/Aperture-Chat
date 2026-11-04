@@ -1,0 +1,62 @@
+/* Knowledge > Files: folder uploads and folders kept in sync. Rows reuse the
+   upload-queue row layout from library-console.css. */
+
+.library-page .knowledge-browse-button {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+}
+.library-page .knowledge-browse-button:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 0;
+}
+
+.library-page .knowledge-folder-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  list-style: none;
+  overflow: hidden;
+}
+.library-page .knowledge-folder-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface);
+}
+.library-page .knowledge-folder-row + .knowledge-folder-row { border-top: 1px solid var(--border); }
+.library-page .knowledge-folder-row .knowledge-row-icon { color: var(--accent-ink); }
+.library-page .knowledge-folder-row.is-busy .knowledge-row-icon { background: var(--teal-soft); }
+.library-page .knowledge-folder-row.is-error .knowledge-row-icon { background: var(--red-soft); color: var(--red); }
+.library-page .knowledge-folder-row.is-paused .knowledge-row-icon { background: var(--orange-soft); color: var(--orange); }
+
+.library-page .knowledge-folder-row .knowledge-row-main small { font-size: 13px; }
+.library-page .knowledge-folder-status { color: var(--text) !important; }
+.library-page .knowledge-folder-row.is-error .knowledge-folder-status { color: var(--red) !important; }
+.library-page .knowledge-folder-message { color: var(--text) !important; font-weight: 600; }
+.library-page .knowledge-folder-problems { color: var(--text) !important; }
+.library-page .knowledge-folder-help { color: var(--muted); }
+
+.library-page .knowledge-folder-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px 14px;
+}
+.library-page .knowledge-folder-actions .knowledge-card-switch { font-size: 13px; }
+
+@media (max-width: 720px) {
+  .library-page .knowledge-folder-row { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+  .library-page .knowledge-folder-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}

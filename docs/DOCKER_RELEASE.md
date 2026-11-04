@@ -236,6 +236,60 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.20
+
+- **Share a draft and edit it together.** Documents, decks, and spreadsheets have
+  a **Share** button beside the version label. Every draft starts private; choose
+  **My group** (one or more of the owner's groups) or **Specific people**.
+  Regular users can add members of their own groups, tenant administrators
+  anyone in the organization except platform owners, and platform owners
+  anyone. Group shares follow current membership, and a draft in a matter is
+  shared only with people on that matter. Only the owner changes sharing,
+  archives, deletes, or moves a draft, and each change writes a
+  `draft.sharing_updated` audit event.
+- **One live copy, merged edits.** A shared draft autosaves into a single live
+  copy on the server, so its edits never spend the 200-version history. When two
+  people edit at once, the later save merges: documents by paragraph and then by
+  word, decks by slide and field, spreadsheets by cell. Where both changed the
+  same words, the person saving last keeps their wording. Colored initials show
+  who else is in the draft. **Save version** records who saved each version, and
+  **Bring back** restores one for everyone. Private drafts keep the explicit
+  Save version flow unchanged, and drafts shared with someone are never written
+  to that person's browser cache.
+- **Folders in Library > Knowledge.** Drop whole folders, several at once, or use
+  **choose a folder**. A file's folder path is its identity: adding the folder
+  again updates changed files in place (same document, so walls and citations
+  stay), skips unchanged ones, and never brings back a file deleted in Aperture.
+  Files deleted on the computer are not deleted in Aperture. **Keep in sync**
+  (off by default, remembered per browser profile) re-checks kept folders when
+  Aperture opens, every few minutes, and when the tab returns. Browsers without
+  the folder access API (Safari, Firefox) can upload folders, and **Sync now**
+  asks for the folder again. New routes: `POST /api/knowledge/{id}/folder-files`
+  and `GET /api/knowledge/{id}/folders`.
+- **Client-matter numbers.** A knowledge base takes an optional client-matter
+  number when it is created or in its settings, and a chat takes one from the
+  new **Matter** row in Send options. A number is an existing matter, so Data
+  Retention finds a matter's chats by number, and Library search lists its
+  knowledge bases. Typed numbers are saved for reuse.
+- **Dictation with speech models.** Dictation and audio transcription now use
+  `/audio/transcriptions` for Whisper and gpt-4o-transcribe models on
+  OpenAI-compatible providers (Groq, OpenAI), Azure OpenAI deployments, and
+  Azure AI Foundry's v1 route, alongside Gemini Flash models. Fast tiers are
+  tried first, and a rate-limited or unreachable model hands the recording to
+  the next one, up to three. Dictation had failed on OpenRouter's zero-data
+  retention catalog once it no longer listed Gemini models. Azure AI Foundry
+  speech is covered by tests but has not been run against a live Azure
+  resource; check it on yours.
+- **Migration 20261103_0029.** It adds `draft_shares`, `draft_live_states`, and
+  `draft_revision_authors`, rebuilds no existing table, and changes no existing
+  row. It runs when the API starts. Back up the data volume first; rolling back
+  the images does not undo the migration.
+- **Training and the README follow the changes.** The dictation lesson names the
+  new error messages. The README screenshots and tour are recaptured from this
+  interface and now show the Share dialog, a folder kept in sync, and the Matter
+  row. Training lessons and PDF guides do not yet picture sharing, folders, or
+  matter numbers, and the knowledge lessons still say to browse for files.
+
 ## New Since v0.5.19
 
 - **The consoles fit the window you have.** Layouts answered to the window's

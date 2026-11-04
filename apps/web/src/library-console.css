@@ -363,6 +363,70 @@
 }
 .library-page .knowledge-start-options small { color: var(--muted); font-size: 12.5px; }
 
+/* Client-matter number: type one, or pick one saved before (MatterPicker.tsx). */
+.library-page .matter-field { display: grid; gap: 6px; min-width: 0; }
+.library-page .matter-field > label {
+  color: var(--muted);
+  font-size: var(--control-label-size);
+  font-weight: 700;
+}
+.library-page .matter-field-control { position: relative; min-width: 0; }
+.library-page .matter-field-control input[role="combobox"] { padding-right: 42px; }
+.library-page .matter-field-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+.library-page .matter-field-toggle:hover:not(:disabled) { background: var(--surface-soft); color: var(--text-strong); }
+.library-page .matter-field-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: 5;
+  display: grid;
+  gap: 1px;
+  max-height: 228px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.library-page .matter-field-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.library-page .matter-field-list li:hover,
+.library-page .matter-field-list li.is-active { background: var(--surface-soft); }
+.library-page .matter-field-list li[aria-selected="true"] { color: var(--teal-strong); font-weight: 750; }
+.theme-dark .library-page .matter-field-list li[aria-selected="true"] { color: color-mix(in srgb, var(--teal) 45%, #fff); }
+.library-page .matter-option-check { display: grid; flex: none; place-items: center; width: 16px; height: 16px; }
+.library-page .matter-option-name { min-width: 0; overflow-wrap: anywhere; }
+
 @media (max-width: 720px) {
   .library-page .knowledge-index-line { grid-template-columns: auto minmax(0, 1fr); }
   .library-page .knowledge-index-line .knowledge-progress { grid-column: 1 / -1; }
@@ -370,6 +434,7 @@
   .library-page .knowledge-dropzone-icon { display: none; }
   .library-page .knowledge-upload,
   .library-page .knowledge-document-row-item { grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; }
+  .library-page .matter-field-list li { min-height: 44px; }
 }
 
 /* Single-column grids take the container's width, never their widest child

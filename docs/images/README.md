@@ -1,19 +1,22 @@
 # README interface captures
 
 The root README's screenshots and product tour were recaptured on
-November 2, 2026 from the v0.5.20 interface: the rail with its seam grip and
-without console links (the consoles open from the Account panel), the seated
-account key, spreadsheets as the third Drafts format, and the Admin Console
-user list at its fitted layout. They illustrate the current interface, not a
-claim that every pixel matches an older published image.
+November 3, 2026 from the v0.5.21 interface: the **Share** button in the Drafts
+top bar, the Share dialog, the folder drop zone and a folder kept in sync, a
+knowledge base filed under a client-matter number, and the **Matter** row in
+Send options. `chat-light.png`, `chat-dark.png`, `chat-mobile.png`, and
+`sign-in.png` came out identical to the November 2 captures and were kept. The
+images illustrate the current interface, not a claim that every pixel matches an
+older published image.
 
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
-  crossfaded slideshow of ten light-mode captures (a cited agent answer in
-  chat, a structure diagram, a code block, Agents, Automations, Knowledge, the
-  document editor, the slide editor, a spreadsheet, and the Admin Console),
-  with the first frame as the reduced-motion fallback.
+  crossfaded slideshow of twelve light-mode captures (a cited agent answer in
+  chat, a structure diagram, a code block, Agents, Automations, Knowledge, a
+  folder kept in sync, the document editor, the Share dialog, the slide editor,
+  a spreadsheet, and the Admin Console), with the first frame as the
+  reduced-motion fallback.
 - `chat-light.png`: a Policy Assistant answer citing the uploaded travel
   policy.
 - `chat-dark.png`: a colored Python code block with its Copy, Download,
@@ -23,6 +26,10 @@ claim that every pixel matches an older published image.
 - `chat-mobile.png`: the cited answer at a phone-sized breakpoint.
 - `drafts-light.png`, `drafts-dark.png`: a manually authored project brief in
   the document editor.
+- `drafts-share-light.png`: the Share dialog on that brief with **Specific
+  people** chosen, two colleagues added, and the rest of the organization
+  offered. The capture stops before **Save sharing**, so the brief stays
+  private.
 - `deck-light.png`, `deck-dark.png`: the same brief converted through the real
   Document/Deck switch and rebuilt by the deck assistant, shown in the Midnight
   (light interface) and Editorial (dark interface) designs on the big-number
@@ -38,6 +45,15 @@ claim that every pixel matches an older published image.
 - `knowledge-dark.png`, `tools-dark.png`: a knowledge base with a Word file's
   properties, sensitivity label, and ethical wall expanded, and the prompt
   templates in Tools.
+- `knowledge-folders-light.png`: the Hartwell Acquisition knowledge base,
+  created through the New knowledge base dialog with client-matter number
+  100482-0007, after its five-file folder was added with **choose a folder**
+  and **Keep in sync** was turned on. The folder was written to the capture
+  browser's origin-private file system and handed to the folder picker, because
+  an automated browser cannot open the system folder dialog; the upload, the
+  indexing, and the sync check are the application's own.
+- `chat-matter-light.png`: Send options in the London client workshop chat
+  with the **Matter** row open, offering the saved number.
 - `admin-light.png`, `platform-dark.png`: the Admin Console user list and the
   Platform Owner Console model availability table, both opened from the
   Account panel.
@@ -50,6 +66,9 @@ budget workbook, agents, automations, prompts, and skills are synthetic. The
 capture API ran the current source against an isolated local data store built
 for the October 28 captures and migrated forward, with no seeded demo data, no
 production configuration, and no private credentials.
+
+The Hartwell Acquisition folder holds five short synthetic Markdown notes
+written by the capture script.
 
 Model output is real. Chat replies, the code block, the structure diagram,
 automation runs, and the deck rebuild came from Qwen 3.5 9B, an open model served locally through an OpenAI-compatible

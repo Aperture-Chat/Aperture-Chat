@@ -12,7 +12,7 @@ from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -33,6 +33,18 @@ from app.core.api_source_fetch import (
     build_api_url,
     fetch_api_source,
     parse_header_lines,
+)
+from app.core.knowledge_folders import (
+    REMOVED_FOLDER_PATHS_KEY,
+    FolderPathError,
+    document_at_path,
+    file_name,
+    folder_change,
+    folder_manifest,
+    folder_of,
+    parse_folder_path,
+    remember_removed,
+    removed_paths,
 )
 from app.core.knowledge_originals import DocumentRef
 from app.core.knowledge_walls import (
@@ -112,6 +124,8 @@ from app.models.schemas import (
     KnowledgeDocumentAccessRequest,
     KnowledgeDocumentView,
     KnowledgeDocumentViewSegment,
+    KnowledgeFolderFile,
+    KnowledgeFolderFileResponse,
     KnowledgeIndexStatus,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
@@ -530,8 +544,10 @@ async def upload_documents(
     new_vision_reader = _vision_reader_factory(config, store, usage.get)
     with _metered_upload(usage):
         for file in files:
+            name = _safe_source_name(file.filename, fallback="uploaded-source")
             indexed = await _index_uploaded_file(
                 file,
+                _UploadPlacement(name, await _validated_upload_size(file, name)),
                 config=config,
                 actor=actor,
                 store=store,
@@ -588,6 +604,158 @@ async def upload_documents(
     )
 
 
+@router.get("/{config_id}/folders")
+def folders(
+    config_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> dict[str, Any]:
+    """Each uploaded folder with the files it holds, so a browser can send only what changed."""
+    config = _get_operable_config(config_id, actor, store)
+    return {
+        "folders": folder_manifest(
+            store.knowledge_documents_for(config.id), removed=removed_paths(config.settings)
+        )
+    }
+
+
+@router.post("/{config_id}/folder-files")
+async def sync_folder_file(
+    config_id: str,
+    file: UploadFile = File(...),
+    path: str = Form(...),
+    modified: int = Form(..., ge=0),
+    tenant_slug: str | None = Header(default=None, alias="X-Aperture-Tenant"),
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+    usage_orchestrator: TenantUsageBudgetOrchestrator = Depends(get_usage_budget_orchestrator),
+) -> KnowledgeFolderFileResponse:
+    """Add or update one file of an uploaded folder, keyed by its folder path.
+
+    Sending the same path again updates that document in place (its id, walls,
+    and citations stay); sending it unchanged does nothing.
+    """
+    config = _get_operable_config(config_id, actor, store)
+    folder_path = _parsed_folder_path(path)
+    name = file_name(folder_path)
+    byte_count = await _validated_upload_size(file, name)
+    existing = document_at_path(store.knowledge_documents_for(config.id), folder_path)
+    change = folder_change(existing, size=byte_count, modified=modified)
+    if existing is not None and change == "unchanged":
+        return KnowledgeFolderFileResponse(
+            config=config,
+            document=existing,
+            action=change,
+            provider_message=f"{folder_path} is already up to date.",
+        )
+    synced_at = _sync_time()
+    usage = _LazyUsage(
+        lambda: _begin_knowledge_media_usage(
+            usage_orchestrator,
+            actor=actor,
+            store=store,
+            tenant_id=config.tenant_id,
+            tenant_slug=tenant_slug,
+        )
+    )
+    placement = _UploadPlacement(
+        name,
+        byte_count,
+        folder_file=KnowledgeFolderFile(path=folder_path, size=byte_count, modified=modified),
+        document_id=existing.id if existing is not None else None,
+    )
+    with _metered_upload(usage):
+        indexed = await _index_uploaded_file(
+            file,
+            placement,
+            config=config,
+            actor=actor,
+            store=store,
+            usage=usage,
+            new_vision_reader=_vision_reader_factory(config, store, usage.get),
+            synced_at=synced_at,
+        )
+    message = _folder_file_message(change, folder_path, indexed)
+    config = await run_in_threadpool(
+        _store_folder_file,
+        store,
+        config,
+        indexed,
+        replace=existing is not None,
+        synced_at=synced_at,
+        message=message,
+    )
+    await run_in_threadpool(_retain_original, store, config, indexed.document.id, indexed.source)
+    await run_in_threadpool(
+        store.record_audit,
+        actor,
+        "knowledge.folder_file_synced",
+        config.id,
+        {
+            "action": change,
+            "document_id": indexed.document.id,
+            "chunk_count": len(indexed.chunks),
+            "source_type": config.source_type,
+            "uploaded_bytes": indexed.byte_count,
+        },
+    )
+    return KnowledgeFolderFileResponse(
+        config=config, document=indexed.document, action=change, provider_message=message
+    )
+
+
+def _parsed_folder_path(path: str) -> str:
+    try:
+        return parse_folder_path(path)
+    except FolderPathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This file could not be added from its folder: {exc}",
+        ) from exc
+
+
+def _folder_file_message(change: str, folder_path: str, indexed: "_IndexedUpload") -> str:
+    verb = "Updated" if change == "updated" else "Added"
+    passages = _passages_label(indexed.document.chunk_count)
+    return " ".join([f"{verb} {folder_path} ({passages}).", *indexed.notes])
+
+
+def _passages_label(count: int) -> str:
+    return f"{count:,} passage{'' if count == 1 else 's'}"
+
+
+def _store_folder_file(
+    store: SeedStore,
+    config: KnowledgeConfig,
+    indexed: "_IndexedUpload",
+    *,
+    replace: bool,
+    synced_at: str,
+    message: str,
+) -> KnowledgeConfig:
+    """Append a new folder file, or swap an existing one in place by document id."""
+    if replace:
+        store.replace_knowledge_document(config, indexed.document, indexed.chunks)
+        config, _documents, _synced = store.record_knowledge_sync(
+            config,
+            status=knowledge_sync_status("live"),
+            synced_at=synced_at,
+            provider_status="live",
+            provider_message=message,
+        )
+        return config
+    config, _documents, _synced = _append_indexed_sources(
+        store,
+        config,
+        [indexed.document],
+        indexed.chunks,
+        synced_at=synced_at,
+        provider_status="live",
+        provider_message=message,
+    )
+    return config
+
+
 @router.delete("/{config_id}/documents/{document_id}")
 def delete_document(
     config_id: str,
@@ -611,6 +779,7 @@ def delete_document(
     overrides = document_wall_overrides(config.settings)
     if overrides.pop(document_id, None) is not None:
         config.settings = {**config.settings, DOCUMENT_WALLS_SETTING: overrides}
+    _remember_removed_folder_file(config, store, document_id)
     result = store.delete_knowledge_document(config, document_id, synced_at=synced_at)
     if result is None:
         raise HTTPException(
@@ -638,6 +807,21 @@ def delete_document(
         provider_status="live",
         provider_message=provider_message,
     )
+
+
+def _remember_removed_folder_file(config: KnowledgeConfig, store: SeedStore, document_id: str) -> None:
+    """A folder file removed here stays out: later syncs of its folder skip its path."""
+    document = next(
+        (item for item in store.knowledge_documents_for(config.id) if item.id == document_id), None
+    )
+    if document is None or document.folder_file is None:
+        return
+    config.settings = {
+        **config.settings,
+        REMOVED_FOLDER_PATHS_KEY: remember_removed(
+            removed_paths(config.settings), document.folder_file.path
+        ),
+    }
 
 
 @router.put("/{config_id}/documents/{document_id}/access")
@@ -1368,6 +1552,29 @@ def _fail_upload_usage(usage: "_LazyUsage") -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class _UploadPlacement:
+    """What an upload becomes: its document name and size and, for a file sent
+    with its folder, where it sits and the document it updates."""
+
+    name: str
+    byte_count: int
+    folder_file: KnowledgeFolderFile | None = None
+    document_id: str | None = None
+
+
+async def _validated_upload_size(file: UploadFile, filename: str) -> int:
+    settings = get_settings()
+    return await validate_upload_within_limit(
+        file,
+        settings.knowledge_upload_max_bytes,
+        detail=(
+            f"'{filename}' exceeds the {settings.knowledge_upload_max_mb} MB "
+            "knowledge upload limit."
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class _IndexedUpload:
     document: KnowledgeDocument
     chunks: list[KnowledgeChunk]
@@ -1378,6 +1585,7 @@ class _IndexedUpload:
 
 async def _index_uploaded_file(
     file: UploadFile,
+    placement: _UploadPlacement,
     *,
     config: KnowledgeConfig,
     actor: User,
@@ -1386,17 +1594,10 @@ async def _index_uploaded_file(
     new_vision_reader: Callable[[], VisionPageReader | None],
     synced_at: str,
 ) -> _IndexedUpload:
-    """Validate, extract (or transcribe), and chunk one uploaded file."""
+    """Extract (or transcribe) and chunk one upload whose size was already checked."""
     settings = get_settings()
-    filename = _safe_source_name(file.filename, fallback="uploaded-source")
-    file_bytes = await validate_upload_within_limit(
-        file,
-        settings.knowledge_upload_max_bytes,
-        detail=(
-            f"'{filename}' exceeds the {settings.knowledge_upload_max_mb} MB "
-            "knowledge upload limit."
-        ),
-    )
+    filename = placement.name
+    file_bytes = placement.byte_count
     vision = None
     if is_media_upload(filename, file.content_type):
         content = await file.read()
@@ -1434,10 +1635,16 @@ async def _index_uploaded_file(
         source_uri=f"upload://knowledge/{config.id}/{uuid4()}-{filename}",
         segments=extracted.segments,
         synced_at=synced_at,
+        document_id=placement.document_id,
         metadata=_with_upload_properties(
-            extracted.metadata, file_bytes=file_bytes, actor=actor, synced_at=synced_at
+            extracted.metadata,
+            file_bytes=file_bytes,
+            actor=actor,
+            synced_at=synced_at,
+            folder=folder_of(placement.folder_file.path) if placement.folder_file else None,
         ),
     )
+    document.folder_file = placement.folder_file
     notes = _vision_notes(filename, vision) + _extraction_notes(
         filename, document, truncated=truncated, max_chars=settings.knowledge_max_extracted_chars
     )
@@ -1575,10 +1782,17 @@ def _vision_notes(filename: str, vision: VisionPageReader | None) -> list[str]:
 
 
 def _with_upload_properties(
-    metadata: dict[str, str], *, file_bytes: int, actor: User, synced_at: str
+    metadata: dict[str, str],
+    *,
+    file_bytes: int,
+    actor: User,
+    synced_at: str,
+    folder: str | None = None,
 ) -> dict[str, str]:
+    # The folder goes first so a file with many properties never crowds it out.
     return bounded_metadata(
         [
+            *([("Folder", folder)] if folder else []),
             *metadata.items(),
             ("File size", _file_size_label(file_bytes)),
             ("Uploaded by", actor.display_name or actor.email),

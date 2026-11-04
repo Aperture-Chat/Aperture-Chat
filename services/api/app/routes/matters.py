@@ -34,10 +34,13 @@ from app.models.matters import (
     max_content_bytes_for_kind,
     matter_now,
 )
+from app.core.draft_live_hub import DraftLiveHub, get_draft_live_hub
 from app.core.policy import knowledge_access_allowed
 from app.core.review_store import ReviewConflict
+from app.models.draft_collaboration import DraftAccess, DraftActor
 from app.models.schemas import Role, User
 from app.repositories.deps import get_store
+from app.repositories.draft_collaboration import DraftCollaborationRepository
 from app.repositories.matters import (
     DraftConflict,
     DraftRevisionLimitExceeded,
@@ -65,10 +68,10 @@ class MatterActorScope:
 
 def get_matter_draft_repository(
     store: SeedStore = Depends(get_store),
-) -> MatterDraftRepository:
+) -> DraftCollaborationRepository:
     """Bind M9 persistence to the same relational engine as chat state."""
 
-    return MatterDraftRepository(store.application_state_repository.engine)
+    return DraftCollaborationRepository(store.application_state_repository.engine)
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,13 +678,14 @@ def list_drafts(
 def get_draft(
     draft_id: str,
     scope: MatterActorScope = Depends(current_matter_scope),
-    repository: MatterDraftRepository = Depends(get_matter_draft_repository),
+    repository: DraftCollaborationRepository = Depends(get_matter_draft_repository),
 ) -> DraftSnapshot:
     with _repository_errors():
+        access = resolve_draft_access(scope, repository, draft_id)
         return repository.get_draft(
             draft_id,
             tenant_id=scope.tenant_id,
-            owner_user_id=scope.actor.id,
+            owner_user_id=access.owner_user_id,
         )
     raise AssertionError("unreachable")
 
@@ -712,45 +716,63 @@ def put_draft(
     draft_id: str,
     payload: DraftPutRequest,
     scope: MatterActorScope = Depends(current_matter_scope),
-    repository: MatterDraftRepository = Depends(get_matter_draft_repository),
+    repository: DraftCollaborationRepository = Depends(get_matter_draft_repository),
+    hub: DraftLiveHub = Depends(get_draft_live_hub),
 ) -> DraftSnapshot:
     if payload.content is not None:
         # The stored kind decides the exact bound inside the repository; this
         # is the outer ceiling that rejects absurd bodies before any work.
         _require_draft_content_bound(payload.content, "deck")
     with _repository_errors():
-        if "title" in payload.model_fields_set and payload.title is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Draft title cannot be null.",
-            )
-        if "content" in payload.model_fields_set and payload.content is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Draft content cannot be null.",
-            )
-        update_values: dict[str, object] = {}
-        if "matter_id" in payload.model_fields_set:
-            update_values["matter_id"] = payload.matter_id
-        if (
-            payload.title is None
-            and payload.content is None
-            and "matter_id" not in payload.model_fields_set
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Draft updates require title, content, or matter_id.",
-            )
-        return repository.update_draft(
+        _require_draft_put_fields(payload)
+        access = resolve_draft_access(scope, repository, draft_id)
+        update_values = _draft_matter_update(payload, access)
+        before = access.document.current_revision
+        snapshot = repository.update_draft_as(
             draft_id,
+            actor_user_id=scope.actor.id,
             tenant_id=scope.tenant_id,
-            owner_user_id=scope.actor.id,
+            owner_user_id=access.owner_user_id,
             expected_revision=payload.expected_revision,
             title=payload.title,
             content=payload.content,
             **update_values,
         )
+        if snapshot.document.current_revision != before:
+            publish_draft_written(hub, scope, repository, snapshot, client_id=None)
+        return snapshot
     raise AssertionError("unreachable")
+
+
+def _require_draft_put_fields(payload: DraftPutRequest) -> None:
+    if "title" in payload.model_fields_set and payload.title is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Draft title cannot be null.",
+        )
+    if "content" in payload.model_fields_set and payload.content is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Draft content cannot be null.",
+        )
+    if payload.title is None and payload.content is None and "matter_id" not in payload.model_fields_set:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Draft updates require title, content, or matter_id.",
+        )
+
+
+def _draft_matter_update(payload: DraftPutRequest, access: DraftAccess) -> dict[str, object]:
+    """Omitting matter_id keeps the binding; only the owner may change it."""
+
+    if "matter_id" not in payload.model_fields_set:
+        return {}
+    if not access.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the person who created this draft can move it to another matter.",
+        )
+    return {"matter_id": payload.matter_id}
 
 
 @router.patch("/api/drafts/{draft_id}/archive")
@@ -777,6 +799,7 @@ def delete_draft(
     ),
     scope: MatterActorScope = Depends(current_matter_scope),
     repository: MatterDraftRepository = Depends(get_matter_draft_repository),
+    hub: DraftLiveHub = Depends(get_draft_live_hub),
 ) -> DraftDocument:
     """Delete one of the caller's own drafts.
 
@@ -786,12 +809,14 @@ def delete_draft(
     discard an edit the caller has not seen.
     """
     with _repository_errors():
-        return repository.delete_draft(
+        deleted = repository.delete_draft(
             draft_id,
             tenant_id=scope.tenant_id,
             owner_user_id=scope.actor.id,
             expected_revision=expected_revision,
         )
+        hub.publish((scope.tenant_id, draft_id), {"event": "access", "data": {"state": "deleted"}})
+        return deleted
     raise AssertionError("unreachable")
 
 
@@ -799,15 +824,73 @@ def delete_draft(
 def get_draft_capacity(
     draft_id: str,
     scope: MatterActorScope = Depends(current_matter_scope),
-    repository: MatterDraftRepository = Depends(get_matter_draft_repository),
+    repository: DraftCollaborationRepository = Depends(get_matter_draft_repository),
 ) -> DraftRevisionCapacity:
     with _repository_errors():
+        access = resolve_draft_access(scope, repository, draft_id)
         return repository.draft_revision_capacity(
             draft_id,
             tenant_id=scope.tenant_id,
-            owner_user_id=scope.actor.id,
+            owner_user_id=access.owner_user_id,
         )
     raise AssertionError("unreachable")
+
+
+# Shared drafts -----------------------------------------------------------
+
+
+def actor_group_ids(scope: MatterActorScope, user: User | None = None) -> frozenset[str]:
+    """The actor's current groups inside the selected tenant."""
+
+    person = scope.actor if user is None else user
+    groups = getattr(scope.store, "groups", {}) or {}
+    return frozenset(
+        group_id
+        for group_id in person.group_ids
+        if (group := groups.get(group_id)) is not None and group.tenant_id == scope.tenant_id
+    )
+
+
+def draft_actor(scope: MatterActorScope) -> DraftActor:
+    return DraftActor(user_id=scope.actor.id, group_ids=actor_group_ids(scope))
+
+
+def resolve_draft_access(
+    scope: MatterActorScope,
+    repository: DraftCollaborationRepository,
+    draft_id: str,
+) -> DraftAccess:
+    """The one place that decides whether the actor may open a draft."""
+
+    return repository.draft_access(draft_id, tenant_id=scope.tenant_id, actor=draft_actor(scope))
+
+
+def publish_draft_written(
+    hub: DraftLiveHub,
+    scope: MatterActorScope,
+    repository: DraftCollaborationRepository,
+    snapshot: DraftSnapshot,
+    *,
+    client_id: str | None,
+) -> None:
+    """Tell everyone in the draft that a version was saved (a PUT may also
+    have moved the live copy, so the event carries the live seq too)."""
+
+    document = snapshot.document
+    marker = repository.live_marker(document.id, tenant_id=scope.tenant_id)
+    hub.publish(
+        (scope.tenant_id, document.id),
+        {
+            "event": "version",
+            "data": {
+                "revision": document.current_revision,
+                "current_revision": document.current_revision if marker is None else marker[1],
+                "seq": 0 if marker is None else marker[0],
+                "author_user_id": scope.actor.id,
+                "updated_by_client": client_id,
+            },
+        },
+    )
 
 
 def _require_draft_content_bound(content: str, kind: DraftKind) -> None:
