@@ -31,7 +31,8 @@ from app.models.schemas import (
 )
 from app.repositories.application_state import ApplicationStateRepository
 from app.repositories.deps import get_store
-from app.repositories.matters import MatterDraftRepository, MatterPersistenceUnavailable
+from app.repositories.draft_collaboration import DraftCollaborationRepository
+from app.repositories.matters import MatterPersistenceUnavailable
 from app.routes.dependencies import current_user
 from app.routes.matters import (
     ReviewMatterService,
@@ -125,7 +126,7 @@ def _folder(folder_id: str, *, owner_user_id: str) -> ChatFolder:
 def matters_api(tmp_path: Path):
     engine = create_application_engine(f"sqlite:///{tmp_path / 'matters-routes.sqlite3'}")
     upgrade_database(engine)
-    repository = MatterDraftRepository(engine)
+    repository = DraftCollaborationRepository(engine)
     application = ApplicationStateRepository(engine)
     actor = {"value": _user("user-one")}
     directory = RouteDirectory()
@@ -836,7 +837,7 @@ def test_expired_deletion_lease_is_reclaimed_after_repository_restart(matters_ap
     )
     assert first_attempt.attempt_count == 1
 
-    restarted = MatterDraftRepository(engine)
+    restarted = DraftCollaborationRepository(engine)
     route_app.dependency_overrides[get_matter_draft_repository] = lambda: restarted
     actor["value"] = _user("user-one")
     reclaimed = client.delete(

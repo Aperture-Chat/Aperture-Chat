@@ -158,6 +158,10 @@ def default_provider_base_url(kind: str) -> str | None:
 # the model in the body (unlike azure-openai's per-deployment URLs) but keeps
 # Azure's api-key header and api-version query parameter.
 DEFAULT_AZURE_FOUNDRY_API_VERSION = "2024-05-01-preview"
+DEFAULT_AZURE_OPENAI_API_VERSION = "2024-10-21"
+# Azure OpenAI documents its v1 speech route with api-version "preview".
+AZURE_OPENAI_V1_SPEECH_API_VERSION = "preview"
+AZURE_GPT4O_TRANSCRIBE_MIN_API_VERSION = "2025-03-01-preview"
 
 # OpenAI serves some model families only on the Responses API; sending them
 # to /chat/completions returns HTTP 404 ("This is not a chat model"). The
@@ -242,10 +246,19 @@ def supports_image_input(
     if reported:
         return "image" in reported
     model = (upstream_model_id or "").strip().lower()
-    if not model:
+    if not model or is_speech_to_text_model_id(model):
         return False
     tail = model.rsplit("/", 1)[-1]
     return bool(_VISION_INPUT_MODELS.search(tail))
+
+
+# Dedicated speech-to-text families: Whisper and the gpt-4o transcribe models.
+_SPEECH_TO_TEXT_MODELS = re.compile(r"whisper|transcribe")
+
+
+def is_speech_to_text_model_id(model_id: str | None) -> bool:
+    """True for ids or labels that name a speech-to-text model."""
+    return bool(_SPEECH_TO_TEXT_MODELS.search((model_id or "").strip().lower()))
 
 
 class ModelGatewayError(RuntimeError):
@@ -574,13 +587,47 @@ class ModelGatewayClient:
             "modalities": ["image", "text"],
         }
         _apply_completion_token_budget(payload, route, max_tokens)
+        return self._post_for_json(
+            route, _chat_completions_url(route), headers=_headers(route), json=payload
+        )
+
+    def transcribe_speech(
+        self,
+        *,
+        route: ModelGatewayRoute,
+        audio: bytes,
+        audio_format: str,
+    ) -> dict[str, Any]:
+        """Send audio to a dedicated speech-to-text model (Whisper, gpt-4o-transcribe).
+
+        These models answer only on ``/audio/transcriptions`` (multipart), not
+        chat completions. The reply is ``{"text": ...}``, plus ``usage`` when
+        the provider reports it.
+        """
+        if not route.configured:
+            raise ModelGatewayConfigurationError(route.status_message)
+        url, model_in_body = _audio_transcriptions_target(route)
+        fields = {"response_format": "json"}
+        if model_in_body:
+            fields["model"] = route.upstream_model
+        # httpx sets the multipart boundary itself; the JSON default would break it.
+        headers = {
+            name: value for name, value in _headers(route).items() if name != "Content-Type"
+        }
+        upload = (f"dictation.{audio_format}", audio, f"audio/{audio_format}")
+        return self._post_for_json(
+            route, url, headers=headers, data=fields, files={"file": upload}
+        )
+
+    def _post_for_json(
+        self, route: ModelGatewayRoute, url: str, **request: Any
+    ) -> Any:
+        """POST one non-streaming request and map failures to gateway errors."""
         try:
             with httpx.Client(
                 timeout=self._completion_timeout(), transport=self._transport
             ) as client:
-                response = client.post(
-                    _chat_completions_url(route), headers=_headers(route), json=payload
-                )
+                response = client.post(url, **request)
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as exc:
@@ -615,21 +662,9 @@ class ModelGatewayClient:
             payload["plugins"] = plugins
         _apply_reasoning_effort(payload, route)
         _apply_completion_token_budget(payload, route, max_tokens)
-        try:
-            with httpx.Client(
-                timeout=self._completion_timeout(), transport=self._transport
-            ) as client:
-                response = client.post(
-                    _chat_completions_url(route), headers=_headers(route), json=payload
-                )
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as exc:
-            raise _status_error_from_exc(route, exc) from exc
-        except httpx.HTTPError as exc:
-            raise ModelGatewayError(
-                f"{route.provider_name} request failed: {type(exc).__name__}"
-            ) from exc
+        return self._post_for_json(
+            route, _chat_completions_url(route), headers=_headers(route), json=payload
+        )
 
     def _stream_openai_compatible(
         self,
@@ -802,21 +837,10 @@ class ModelGatewayClient:
             tool_choice=tool_choice,
             options=options,
         )
-        try:
-            with httpx.Client(
-                timeout=self._completion_timeout(), transport=self._transport
-            ) as client:
-                response = client.post(
-                    _anthropic_messages_url(route), headers=_headers(route), json=payload
-                )
-                response.raise_for_status()
-                return _translate_anthropic_response(response.json(), route)
-        except httpx.HTTPStatusError as exc:
-            raise _status_error_from_exc(route, exc) from exc
-        except httpx.HTTPError as exc:
-            raise ModelGatewayError(
-                f"{route.provider_name} request failed: {type(exc).__name__}"
-            ) from exc
+        body = self._post_for_json(
+            route, _anthropic_messages_url(route), headers=_headers(route), json=payload
+        )
+        return _translate_anthropic_response(body, route)
 
     def _stream_anthropic_events(
         self,
@@ -961,21 +985,10 @@ class ModelGatewayClient:
             tool_choice=tool_choice,
             options=options,
         )
-        try:
-            with httpx.Client(
-                timeout=self._completion_timeout(), transport=self._transport
-            ) as client:
-                response = client.post(
-                    _openai_responses_url(route), headers=_headers(route), json=payload
-                )
-                response.raise_for_status()
-                return _translate_openai_responses_payload(response.json(), route)
-        except httpx.HTTPStatusError as exc:
-            raise _status_error_from_exc(route, exc) from exc
-        except httpx.HTTPError as exc:
-            raise ModelGatewayError(
-                f"{route.provider_name} request failed: {type(exc).__name__}"
-            ) from exc
+        body = self._post_for_json(
+            route, _openai_responses_url(route), headers=_headers(route), json=payload
+        )
+        return _translate_openai_responses_payload(body, route)
 
     def _stream_openai_responses_events(
         self,
@@ -1345,12 +1358,8 @@ def _chat_completions_url(route: ModelGatewayRoute) -> str:
         raise ModelGatewayConfigurationError("Provider base URL is missing.")
 
     if _provider_kind(route.provider_kind) == "azure-openai":
-        api_version = str(route.auth_metadata.get("api_version") or "2024-10-21")
-        deployment = str(
-            route.auth_metadata.get("deployment_id")
-            or route.auth_metadata.get("deployment")
-            or route.upstream_model
-        )
+        api_version = _azure_openai_api_version(route)
+        deployment = _azure_openai_deployment(route)
         return f"{base_url}/deployments/{deployment}/chat/completions?{urlencode({'api-version': api_version})}"
 
     if _provider_kind(route.provider_kind) == "azure-foundry":
@@ -1365,6 +1374,70 @@ def _chat_completions_url(route: ModelGatewayRoute) -> str:
     if base_url.endswith("/chat/completions"):
         return base_url
     return f"{base_url}/chat/completions"
+
+
+def _azure_openai_api_version(route: ModelGatewayRoute) -> str:
+    return str(route.auth_metadata.get("api_version") or DEFAULT_AZURE_OPENAI_API_VERSION)
+
+
+def _azure_openai_deployment(route: ModelGatewayRoute) -> str:
+    return str(
+        route.auth_metadata.get("deployment_id")
+        or route.auth_metadata.get("deployment")
+        or route.upstream_model
+    )
+
+
+def supports_speech_transcription(kind: str, auth_metadata: dict[str, Any] | None = None) -> bool:
+    """True when the provider serves ``/audio/transcriptions`` for speech models.
+
+    OpenAI-dialect providers (OpenAI, Groq and other compatibles) and both Azure
+    dialects do. OpenRouter and Anthropic have no speech route.
+    """
+    if _provider_kind(kind) == "openrouter":
+        return False
+    return provider_dialect(kind, auth_metadata) in {"openai", "azure-openai", "azure-foundry"}
+
+
+def _audio_transcriptions_target(route: ModelGatewayRoute) -> tuple[str, bool]:
+    """The speech URL for a route, and whether the model goes in the body."""
+    if not supports_speech_transcription(route.provider_kind, route.auth_metadata):
+        raise ModelGatewayConfigurationError(
+            f"{route.provider_name} has no speech-to-text route for {route.upstream_model}."
+        )
+    base_url = _strip_suffix((route.base_url or "").rstrip("/"), "/chat/completions")
+    if not base_url:
+        raise ModelGatewayConfigurationError("Provider base URL is missing.")
+    kind = _provider_kind(route.provider_kind)
+    if kind == "azure-openai":
+        query = urlencode({"api-version": _azure_speech_api_version(route)})
+        deployment = _azure_openai_deployment(route)
+        return f"{base_url}/deployments/{deployment}/audio/transcriptions?{query}", False
+    if kind == "azure-foundry":
+        # The Foundry /models inference endpoint has no audio route; the same
+        # resource serves speech deployments on its OpenAI v1 route instead.
+        root = _strip_suffix(base_url, "/models")
+        if not root.endswith("/openai/v1"):
+            root = f"{root}/openai/v1"
+        query = urlencode({"api-version": AZURE_OPENAI_V1_SPEECH_API_VERSION})
+        return f"{root}/audio/transcriptions?{query}", True
+    return f"{base_url}/audio/transcriptions", True
+
+
+def _azure_speech_api_version(route: ModelGatewayRoute) -> str:
+    """gpt-4o transcribe deployments need 2025-03-01-preview or newer.
+
+    Dated versions sort as strings, so an older configured version is raised
+    to the first one that serves those models. Whisper keeps the configured one.
+    """
+    configured = _azure_openai_api_version(route)
+    if "transcribe" not in route.upstream_model.lower():
+        return configured
+    return max(configured, AZURE_GPT4O_TRANSCRIBE_MIN_API_VERSION)
+
+
+def _strip_suffix(value: str, suffix: str) -> str:
+    return value[: -len(suffix)].rstrip("/") if value.endswith(suffix) else value
 
 
 def _openai_responses_url(route: ModelGatewayRoute) -> str:

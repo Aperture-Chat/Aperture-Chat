@@ -210,8 +210,8 @@ test("creating a knowledge base opens it ready for files and sends no fake conte
   const create = requests.find((request) => request.method === "POST");
   expect(create?.body).toMatchObject({ name: "Deal Room", source_type: "upload", acl_group_ids: [], enabled: true });
   expect(view.data().knowledgeBases).toHaveLength(1);
-  expect(screen.getByText(/Drag files here/)).toBeInTheDocument();
-  expect(await screen.findByText("No files yet. Drop files above to add them.")).toBeInTheDocument();
+  expect(screen.getByText(/Drag files or folders here/)).toBeInTheDocument();
+  expect(await screen.findByText("No files yet. Drop files or folders above to add them.")).toBeInTheDocument();
 });
 
 test("uploads run one file per request with progress, skip unreadable types, and report results", async () => {
@@ -228,7 +228,7 @@ test("uploads run one file per request with progress, skip unreadable types, and
   uploadMock.mockRejectedValueOnce(new Error("'huge.pdf' exceeds the 250 MB knowledge upload limit."));
   renderLibrary([base]);
   fireEvent.click(screen.getByRole("button", { name: "Open" }));
-  await screen.findByText(/Drag files here/);
+  await screen.findByText(/Drag files or folders here/);
 
   fireEvent.change(screen.getByLabelText("Choose files to add"), {
     target: {
@@ -479,7 +479,7 @@ test("syncing a connector knowledge base posts force and shows the provider's ow
   renderLibrary([base]);
   fireEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(await screen.findByRole("tab", { name: /Synced files/ })).toBeInTheDocument();
-  expect(screen.queryByText(/Drag files here/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Drag files or folders here/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
 
   expect(await screen.findByText("Box returned 1 file records from folder 12345.")).toBeInTheDocument();
@@ -500,7 +500,7 @@ test("removing a document and deleting knowledge bases call the real endpoints",
   fireEvent.click(screen.getAllByRole("button", { name: "Open" })[0]);
   fireEvent.click(await screen.findByRole("button", { name: "Remove brief.pdf" }));
   expect(await screen.findByText("brief.pdf was removed from Synthetic Matter Files.")).toBeInTheDocument();
-  expect(screen.getByText("No files yet. Drop files above to add them.")).toBeInTheDocument();
+  expect(screen.getByText("No files yet. Drop files or folders above to add them.")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "All knowledge bases" }));
   fireEvent.click(screen.getByRole("button", { name: "More knowledge actions" }));
@@ -544,7 +544,7 @@ test("people without authoring rights see shared knowledge read-only", async () 
   expect(screen.getByRole("switch", { name: "Assistants can search Synthetic Matter Files" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(await screen.findByText("brief.pdf")).toBeInTheDocument();
-  expect(screen.queryByText(/Drag files here/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Drag files or folders here/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove brief.pdf" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: /Settings/ })).not.toBeInTheDocument();
 });
@@ -751,4 +751,257 @@ test("the upload area names the model that reads handwriting", async () => {
   renderLibrary([knowledgeBase()]);
   fireEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(await screen.findByText(/Handwriting, stamps, and pictures are read by Gemini Flash\./)).toBeInTheDocument();
+});
+
+// ------------------------------------------------------------- client-matter tags
+
+function matterRecord(id: string, name: string) {
+  return {
+    id,
+    tenant_id: "tenant-example",
+    name,
+    retention_days: null,
+    created_by_user_id: sampleData.me.id,
+    version: 1,
+    created_at: "2026-11-03T00:00:00Z",
+    updated_at: "2026-11-03T00:00:00Z",
+  };
+}
+
+/** A matters API that remembers what it created; `refuseLink` fails every link. */
+function mattersApi(saved: Array<ReturnType<typeof matterRecord>>, refuseLink?: string): FetchHandler {
+  return (url, init) => {
+    if (!url.includes("/api/matters")) return undefined;
+    const method = init?.method ?? "GET";
+    if (method === "GET") return json(saved);
+    if (method === "POST") {
+      const created = matterRecord("matter-new", JSON.parse(String(init?.body)).name);
+      saved.unshift(created);
+      return json(created, 201);
+    }
+    if (refuseLink && method === "PUT") return json({ detail: refuseLink }, 409);
+    return json({ resource_type: "knowledge-configs" });
+  };
+}
+
+function matterRequests() {
+  return requests
+    .filter((request) => request.url.includes("/api/matters") && request.method !== "GET")
+    .map((request) => `${request.method} ${request.url.slice(request.url.indexOf("/api/matters"))}`);
+}
+
+const createdBaseHandler: FetchHandler = (url, init) => {
+  if (url.endsWith("/api/admin/knowledge-configs") && init?.method === "POST") {
+    return json({ ...JSON.parse(String(init.body)), id: "kb-deal-room", tenant_id: "tenant-example", secret_set: false }, 201);
+  }
+  if (url.includes("/documents")) return json([]);
+  return undefined;
+};
+
+test("a new knowledge base can be filed under a new client-matter number, which is saved for next time", async () => {
+  stubFetch(mattersApi([]), createdBaseHandler);
+  const view = renderLibrary([]);
+  fireEvent.click(screen.getByRole("button", { name: /Upload files/ }));
+  const dialog = screen.getByRole("dialog", { name: "New knowledge base" });
+  fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Deal Room" } });
+  const field = within(dialog).getByRole("combobox", { name: /Client-matter number/ });
+  fireEvent.change(field, { target: { value: " 100234-0001 " } });
+  expect(within(dialog).getByText("A new number. It is saved for next time.")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+
+  expect(await screen.findByText(/Deal Room was created and filed under 100234-0001\./)).toBeInTheDocument();
+  expect(matterRequests()).toEqual([
+    "POST /api/matters",
+    "PUT /api/matters/matter-new/resources/knowledge-configs/kb-deal-room",
+  ]);
+  expect(requests.find((request) => request.url.endsWith("/api/matters") && request.method === "POST")?.body).toEqual({
+    name: "100234-0001",
+  });
+  expect(view.data().knowledgeBases[0]).toMatchObject({ matter_id: "matter-new", matter_label: "100234-0001" });
+  expect(screen.getByText(/Filed under 100234-0001/)).toBeInTheDocument();
+});
+
+test("a saved client-matter number is offered when creating and reused, never duplicated", async () => {
+  stubFetch(mattersApi([matterRecord("matter-1", "100234-0001"), matterRecord("matter-2", "100234-0002")]), createdBaseHandler);
+  renderLibrary([]);
+  fireEvent.click(screen.getByRole("button", { name: /Upload files/ }));
+  const dialog = screen.getByRole("dialog", { name: "New knowledge base" });
+  fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Deal Room" } });
+  const field = within(dialog).getByRole("combobox", { name: /Client-matter number/ });
+  fireEvent.focus(field);
+  fireEvent.mouseDown(await within(dialog).findByRole("option", { name: "100234-0002" }));
+  expect(field).toHaveValue("100234-0002");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+
+  expect(await screen.findByText(/filed under 100234-0002/)).toBeInTheDocument();
+  expect(matterRequests()).toEqual(["PUT /api/matters/matter-2/resources/knowledge-configs/kb-deal-room"]);
+});
+
+test("a knowledge base still opens when filing it is refused, and the notice says how to fix it", async () => {
+  stubFetch(mattersApi([], "This matter is being deleted and cannot accept assignments."), createdBaseHandler);
+  const view = renderLibrary([]);
+  fireEvent.click(screen.getByRole("button", { name: /Upload files/ }));
+  const dialog = screen.getByRole("dialog", { name: "New knowledge base" });
+  fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Deal Room" } });
+  fireEvent.change(within(dialog).getByRole("combobox", { name: /Client-matter number/ }), { target: { value: "100234-0003" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+
+  expect(
+    await screen.findByText(
+      "Deal Room was created, but it is not filed under 100234-0003: This matter is being deleted and cannot accept assignments. Add the number in Settings.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Deal Room" })).toBeInTheDocument();
+  expect(view.data().knowledgeBases[0].matter_id ?? null).toBeNull();
+});
+
+test("records staff find a matter's bases by number and delete only those", async () => {
+  const filed = { matter_id: "matter-1", matter_label: "100234-0001" };
+  stubFetch(
+    mattersApi([]),
+    (url, init) => {
+      if (url.includes("/api/admin/knowledge-configs/kb-lease") && init?.method === "PATCH") {
+        return json({ ...configRecord(knowledgeBase({ id: "kb-lease", name: "Lease Review" })), enabled: false, matter_id: "matter-1" });
+      }
+      if (url.includes("/api/admin/knowledge-configs/") && init?.method === "DELETE") return json({ status: "deleted" });
+      return undefined;
+    },
+  );
+  const view = renderLibrary([
+    knowledgeBase({ id: "kb-lease", name: "Lease Review", ...filed }),
+    knowledgeBase({ id: "kb-closing", name: "Closing Binder", ...filed }),
+    knowledgeBase({ id: "kb-policies", name: "Firm Policies" }),
+  ]);
+  const lease = screen.getByRole("article", { name: "Lease Review" });
+  expect(within(lease).getByText("100234-0001")).toBeInTheDocument();
+  expect(within(screen.getByRole("article", { name: "Firm Policies" })).queryByText("100234-0001")).not.toBeInTheDocument();
+
+  // A fresh server copy without the matter's name keeps the name on the card.
+  fireEvent.click(within(lease).getByRole("switch", { name: "Assistants can search Lease Review" }));
+  expect(await screen.findByText(/Lease Review is off/)).toBeInTheDocument();
+  expect(within(screen.getByRole("article", { name: "Lease Review" })).getByText("100234-0001")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Search knowledge bases"), { target: { value: "100234-0001" } });
+  expect(screen.queryByRole("article", { name: "Firm Policies" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "More knowledge actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Delete the 2 shown/ }));
+
+  expect(window.confirm).toHaveBeenCalledWith(
+    "Delete these 2 knowledge bases: Lease Review (100234-0001), Closing Binder (100234-0001)? Every document and search index in them is removed, and agents stop using them. This can't be undone.",
+  );
+  expect(await screen.findByText("Deleted 2 knowledge bases.")).toBeInTheDocument();
+  const deleted = requests.filter((request) => request.method === "DELETE").map((request) => request.url.split("/").pop());
+  expect(deleted).toEqual(["kb-lease", "kb-closing"]);
+  expect(view.data().knowledgeBases.map((base) => base.id)).toEqual(["kb-policies"]);
+});
+
+test("the menu offers no partial delete when nothing is narrowed", () => {
+  stubFetch(mattersApi([]));
+  renderLibrary([knowledgeBase(), knowledgeBase({ id: "kb-two", name: "Second Base" })]);
+  fireEvent.click(screen.getByRole("button", { name: "More knowledge actions" }));
+  expect(screen.queryByRole("menuitem", { name: /shown/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: /Delete all knowledge bases/ })).toBeInTheDocument();
+});
+
+test("settings move a base to another client-matter number or remove its tag", async () => {
+  const base = knowledgeBase({ matter_id: "matter-1", matter_label: "100234-0001" });
+  // Like the server, the configuration reports whatever matter the base is linked to now.
+  let linked: string | null = "matter-1";
+  const matters = mattersApi([matterRecord("matter-1", "100234-0001"), matterRecord("matter-2", "100234-0002")]);
+  stubFetch(
+    (url, init) => {
+      const link = url.match(/\/api\/matters\/([^/]+)\/resources\//);
+      if (link) linked = init?.method === "PUT" ? link[1] : null;
+      return matters(url, init);
+    },
+    (url, init) => {
+      if (url.includes("/api/admin/knowledge-configs/kb-synthetic") && init?.method === "PATCH") {
+        return json({ ...configRecord(base), matter_id: linked });
+      }
+      return undefined;
+    },
+  );
+  const view = renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.mouseDown(await screen.findByRole("tab", { name: /Settings/ }));
+  const settings = screen.getByRole("form", { name: "Synthetic Matter Files settings" });
+  const field = within(settings).getByRole("combobox", { name: /Client-matter number/ });
+  expect(field).toHaveValue("100234-0001");
+  expect(within(settings).getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+  fireEvent.change(field, { target: { value: "100234-0002" } });
+  fireEvent.click(within(settings).getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByText("Synthetic Matter Files settings saved.")).toBeInTheDocument();
+  expect(matterRequests()).toEqual([
+    "DELETE /api/matters/matter-1/resources/knowledge-configs/kb-synthetic",
+    "PUT /api/matters/matter-2/resources/knowledge-configs/kb-synthetic",
+  ]);
+  await waitFor(() => expect(view.data().knowledgeBases[0]).toMatchObject({ matter_id: "matter-2", matter_label: "100234-0002" }));
+
+  requests = [];
+  fireEvent.change(within(screen.getByRole("form", { name: "Synthetic Matter Files settings" })).getByRole("combobox", { name: /Client-matter number/ }), {
+    target: { value: "" },
+  });
+  fireEvent.click(within(screen.getByRole("form", { name: "Synthetic Matter Files settings" })).getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(view.data().knowledgeBases[0].matter_id).toBeNull());
+  expect(matterRequests()).toEqual(["DELETE /api/matters/matter-2/resources/knowledge-configs/kb-synthetic"]);
+  expect(view.data().knowledgeBases[0].matter_label).toBeNull();
+});
+
+test("a narrowed delete names one base in the singular and cuts a long list short", async () => {
+  stubFetch(mattersApi([]), (url, init) =>
+    url.includes("/api/admin/knowledge-configs/") && init?.method === "DELETE" ? json({ status: "deleted" }) : undefined,
+  );
+  const many = Array.from({ length: 9 }, (_, index) =>
+    knowledgeBase({ id: `kb-m${index}`, name: `Matter Base ${index}`, matter_id: "matter-9", matter_label: "200001-0009" }),
+  );
+  renderLibrary([...many, knowledgeBase({ id: "kb-solo", name: "Solo Base", matter_label: "300003-0003", matter_id: "matter-3" }), knowledgeBase({ id: "kb-other", name: "Other" })]);
+
+  fireEvent.change(screen.getByLabelText("Search knowledge bases"), { target: { value: "no such matter" } });
+  fireEvent.click(screen.getByRole("button", { name: "More knowledge actions" }));
+  expect(screen.queryByRole("menuitem", { name: /shown/ })).not.toBeInTheDocument();
+  fireEvent.keyDown(window.document, { key: "Escape" });
+
+  fireEvent.change(screen.getByLabelText("Search knowledge bases"), { target: { value: "200001-0009" } });
+  fireEvent.click(screen.getByRole("button", { name: "More knowledge actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Delete the 9 shown/ }));
+  expect(window.confirm).toHaveBeenLastCalledWith(
+    `Delete these 9 knowledge bases: ${many.slice(0, 8).map((base) => `${base.name} (200001-0009)`).join(", ")}, and 1 more? Every document and search index in them is removed, and agents stop using them. This can't be undone.`,
+  );
+  expect(await screen.findByText("Deleted 9 knowledge bases.")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Search knowledge bases"), { target: { value: "300003" } });
+  fireEvent.click(screen.getByRole("button", { name: "More knowledge actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Delete the 1 shown/ }));
+  expect(window.confirm).toHaveBeenLastCalledWith(
+    "Delete this knowledge base: Solo Base (300003-0003)? Every document and search index in it is removed, and agents stop using it. This can't be undone.",
+  );
+});
+
+test("renaming a tagged base keeps its number, and a server copy filed elsewhere drops the old name", async () => {
+  const base = knowledgeBase({ matter_id: "matter-1", matter_label: "100234-0001" });
+  let reported: string | null = "matter-1";
+  stubFetch(mattersApi([matterRecord("matter-1", "100234-0001")]), (url, init) => {
+    if (url.includes("/api/admin/knowledge-configs/kb-synthetic") && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body));
+      return json({ ...configRecord(base), name: body.name, matter_id: reported });
+    }
+    return undefined;
+  });
+  const view = renderLibrary([base]);
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.mouseDown(await screen.findByRole("tab", { name: /Settings/ }));
+  const settings = () => screen.getByRole("form", { name: /settings$/ });
+  fireEvent.change(within(settings()).getByLabelText("Name"), { target: { value: "Lease Review" } });
+  fireEvent.click(within(settings()).getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByText("Lease Review settings saved.")).toBeInTheDocument();
+  expect(matterRequests()).toEqual([]);
+  expect(view.data().knowledgeBases[0]).toMatchObject({ name: "Lease Review", matter_id: "matter-1", matter_label: "100234-0001" });
+
+  reported = "matter-elsewhere";
+  fireEvent.change(within(settings()).getByLabelText("Name"), { target: { value: "Lease Review 2" } });
+  fireEvent.click(within(settings()).getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByText("Lease Review 2 settings saved.")).toBeInTheDocument();
+  expect(view.data().knowledgeBases[0].matter_id).toBe("matter-elsewhere");
+  expect(view.data().knowledgeBases[0].matter_label ?? null).toBeNull();
 });

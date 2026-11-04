@@ -2004,7 +2004,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     track: "Chat",
     outcomes: ["Dictation and its requirement understood", "Image downloaded", "Diagram code viewed and downloaded"],
     prerequisites: [
-      "For dictation: a microphone, permission for this site to use it, and a transcription model (a Gemini Flash model) set up by your platform owner.",
+      "For dictation: a microphone, permission for this site to use it, and a transcription model (Gemini Flash, or a speech model such as Whisper) set up by your platform owner.",
       "For images: an image-generation model available to you in the model selector.",
       "For diagrams: any available model. Ask for a diagram, flowchart, or process. Mermaid, Graphviz, PlantUML, arrow chains, numbered step or layer lists, and box drawings all render as figures.",
     ],
@@ -2042,7 +2042,8 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       "Diagrams: the figure renders in the reply, and PNG downloads it as a picture file.",
     ],
     troubleshooting: [
-      { symptom: "\"No configured Gemini Flash model is available for dictation. …\"", fix: "Your workspace has no transcription model. Type your message, and ask your platform owner to set one up." },
+      { symptom: "\"No speech model is configured to transcribe audio. …\"", fix: "Your workspace has no transcription model. Type your message, and ask your platform owner to set one up." },
+      { symptom: "\"Dictation is busy right now: … Try the microphone again in a moment.\"", fix: "The transcription service is briefly overloaded. Wait a few seconds, then press the microphone again." },
       { symptom: "\"Microphone access was denied. Allow microphone use for this site to dictate.\"", fix: "Allow the microphone in your browser's site settings, then try again." },
       { symptom: "\"Microphone capture is not available in this browser.\"", fix: "Use a current browser on a device with a microphone." },
       { symptom: "\"No audio was captured. Check the selected microphone and try again.\" or \"The dictation model heard no speech in the recording.\"", fix: "Check which microphone your device uses and speak closer to it." },

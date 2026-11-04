@@ -10,7 +10,7 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
-from itertools import groupby
+from itertools import chain, groupby
 from io import BytesIO
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -122,11 +122,13 @@ from app.core.generated_images import (
 from app.core.knowledge_ingestion import extract_text
 from app.core.media import classify_media
 from app.core.media_transcription import (
+    MISSING_TRANSCRIPTION_MODEL_DETAIL,
     MediaTranscriptionError,
+    TranscriptionFailure,
     is_media_upload,
-    resolve_transcription_model,
-    transcribe_audio_bytes,
     transcribe_media_file,
+    transcribe_with_fallback,
+    transcription_candidates,
 )
 from app.core.mcp_runtime import call_mcp_tool, check_mcp_server, mcp_env_from_auth
 from app.core.memory import (
@@ -3435,6 +3437,8 @@ async def transcribe_dictation(
 
     There is no on-device fallback here: if no audio-capable model is
     reachable, the endpoint fails honestly instead of returning guessed text.
+    A rate-limited or unreachable model hands the audio to the next
+    configured candidate (see ``transcribe_with_fallback``).
     """
     content = await read_upload_within_limit(
         file,
@@ -3453,17 +3457,13 @@ async def transcribe_dictation(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Dictation audio was empty."
         )
     gateway_tenant_id = _gateway_tenant_id(store, actor, tenant_slug)
-    selection = resolve_transcription_model(store, tenant_id=gateway_tenant_id, prefer_fast=True)
-    if selection is None:
+    candidates = transcription_candidates(store, tenant_id=gateway_tenant_id, prefer_fast=True)
+    first = next(candidates, None)
+    if first is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "No configured Gemini Flash model is available for dictation. "
-                "Sync a provider catalog that includes a Gemini Flash model "
-                "(for example google/gemini-3.5-flash or google/gemini-3-flash-preview)."
-            ),
+            detail=MISSING_TRANSCRIPTION_MODEL_DETAIL,
         )
-    model, route = selection
 
     usage_context = _begin_transcription_usage_request(
         usage_orchestrator,
@@ -3474,49 +3474,60 @@ async def transcribe_dictation(
     try:
         # Temperature 0 is applied inside transcribe_audio_bytes so an
         # audio-capable chat model transcribes instead of conversing.
-        transcript = transcribe_audio_bytes(
+        result = transcribe_with_fallback(
+            chain([first], candidates),
             audio=content,
             audio_format=audio_format,
-            model=model,
-            route=route,
             usage_context=usage_context,
             client=get_model_gateway_client(),
         )
         store.record_audit(
             actor,
             "chat.dictation_transcribed",
-            model.id,
+            result.model.id,
             {
-                **route.audit_metadata(),
+                **result.route.audit_metadata(),
                 "audio_bytes": len(content),
                 "audio_format": audio_format,
-                "transcript_chars": len(transcript),
+                "transcript_chars": len(result.text),
+                **({"skipped_models": list(result.skipped_models)} if result.skipped_models else {}),
             },
         )
         usage_context.complete_success()
     except UsageBudgetError as exc:
         close_error = _fail_usage_request(usage_context)
         raise _usage_budget_http_exception(close_error or exc) from exc
-    except ModelGatewayAuthError as exc:
+    except TranscriptionFailure as failure:
         close_error = _fail_usage_request(usage_context)
         if close_error is not None:
-            raise _usage_budget_http_exception(close_error) from exc
-        detail = _handle_gateway_auth_failure(store, actor, route, exc)
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail) from exc
-    except ModelGatewayError as exc:
-        close_error = _fail_usage_request(usage_context)
-        if close_error is not None:
-            raise _usage_budget_http_exception(close_error) from exc
+            raise _usage_budget_http_exception(close_error) from failure
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"{route.provider_name} could not transcribe the dictation: {exc}",
-        ) from exc
+            detail=_dictation_failure_detail(store, actor, failure),
+        ) from failure
     except Exception:
         close_error = _fail_usage_request(usage_context)
         if close_error is not None:
             raise _usage_budget_http_exception(close_error) from None
         raise
-    return {"text": transcript, "model_id": model.id, "model_name": model.name}
+    return {"text": result.text, "model_id": result.model.id, "model_name": result.model.name}
+
+
+def _dictation_failure_detail(
+    store: SeedStore, actor: User, failure: TranscriptionFailure
+) -> str:
+    """Say in plain words why the microphone produced no text."""
+
+    if isinstance(failure.error, ModelGatewayAuthError):
+        return _handle_gateway_auth_failure(store, actor, failure.route, failure.error)
+    if failure.error.status_code == 429:
+        source = (
+            "every speech model it tried is rate-limited by its provider"
+            if failure.attempts > 1
+            else f"{failure.route.provider_name} is rate-limiting {failure.model.name}"
+        )
+        return f"Dictation is busy right now: {source}. Try the microphone again in a moment."
+    return f"{failure.route.provider_name} could not transcribe the dictation: {failure.error}"
 
 
 def _attach_platform_web_search(

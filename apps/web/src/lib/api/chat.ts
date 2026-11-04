@@ -146,8 +146,9 @@ export function saveChatThread(
   thread: ChatThread,
   options: ApiMutationOptions = {},
 ): Promise<ChatThread> {
-  // syncPending is browser-side bookkeeping and must never reach the API.
-  const { id, syncPending: _syncPending, ...payload } = thread;
+  // syncPending and the matter choice are browser-side bookkeeping and must
+  // never reach the API; only the matters API files a chat under a matter.
+  const { id, syncPending: _syncPending, pendingMatterId: _pendingMatterId, matterError: _matterError, ...payload } = thread;
   return apiRequest<ChatThread>(userId, `/api/chat/threads/${pathId(id)}`, {
     method: "PUT",
     body: payload,
