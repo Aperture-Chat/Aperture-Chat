@@ -6,9 +6,10 @@ import mimetypes
 import re
 import time
 import zipfile
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from html import unescape
 from itertools import chain, groupby
 from io import BytesIO
@@ -34,7 +35,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.repositories.application_state import RetentionDeletedError
 from app.core import clock, hermes
-from app.core.stream_activity import context_activity, hermes_activity, requirement_checks
+from app.core.stream_activity import ask_activity, context_activity, hermes_activity, requirement_checks
 from app.core.retention import (
     SUBJECT_TAG_NAMESPACE,
     apply_attachment_runtime_tags,
@@ -165,6 +166,22 @@ from app.core.usage_budget_runtime import (
     map_usage_budget_error,
 )
 from app.core.citation_use import citations_used, screened_fields, strip_citation_markers
+from app.core.chat_run_replies import (
+    ReplyOutcome,
+    keep_settled_replies,
+    pending_run_ids,
+    reply_outcome,
+    settle_messages,
+)
+from app.core.chat_runs import ChatRun, ChatRunConflict, ChatRunRegistry, get_chat_run_registry
+from app.core.clarifying_questions import (
+    AskBlock,
+    AskGate,
+    AskSplit,
+    ClarifyMode,
+    clarify_prompt_line,
+    split_reply,
+)
 from app.core.knowledge_ingestion import DEFAULT_CHUNK_CHARS
 from app.core.live_site_lookup import live_site_hits
 from app.core.web_fetch import WebFetchError, fetch_web_source
@@ -801,38 +818,68 @@ def import_cloud_attachments(
     return saved_attachments
 
 
+def _with_finished_runs(
+    messages: list[ChatMessage], registry: ChatRunRegistry, actor: User
+) -> list[ChatMessage]:
+    """A save's messages with replies whose runs already ended settled.
+
+    A page's first save of a chat can arrive after its reply's run ended
+    (it was offline and retried), when the run had nowhere to save.
+    """
+    for run_id in pending_run_ids(messages):
+        run = registry.find(run_id, actor.id)
+        if run is None or not run.finished:
+            continue
+        settled = settle_messages(
+            messages, run_id, _run_outcome(run), completed_at=run.ended_at or clock.now()
+        )
+        messages = settled if settled is not None else messages
+    return messages
+
+
 @router.put("/api/chat/threads/{thread_id}")
 def save_thread(
     thread_id: str,
     payload: ChatThreadUpsertRequest,
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
+    registry: ChatRunRegistry = Depends(get_chat_run_registry),
 ) -> ChatThread:
-    existing = store.chat_threads.get(thread_id)
-    _assert_thread_write_scope(existing, actor)
-    _assert_thread_assignments(store, existing, payload, actor)
-    tenant_id = _thread_tenant_id(actor, payload)
-    thread = ChatThread(
-        id=thread_id,
-        tenant_id=tenant_id,
-        owner_user_id=existing.owner_user_id if existing is not None else actor.id,
-        title=payload.title.strip() or "New chat",
-        model_id=payload.model_id,
-        group_id=payload.group_id,
-        pinned=payload.pinned,
-        archived=payload.archived,
-        folder_id=payload.folder_id,
-        # Matter binding has its own membership gate. Ordinary thread saves
-        # cannot assign it, but they must not silently erase an existing link.
-        matter_id=existing.matter_id if existing is not None else None,
-        used_agent=payload.used_agent,
-        updated_at=_format_upload_time(clock.now()),
-        messages=_normalize_thread_message_times(payload.messages),
-        # Forward-only merge with the stored position happens in the repository.
-        last_read_message_id=payload.last_read_message_id,
-    )
+    def revise(existing: ChatThread | None) -> ChatThread:
+        _assert_thread_write_scope(existing, actor)
+        _assert_thread_assignments(store, existing, payload, actor)
+        return ChatThread(
+            id=thread_id,
+            tenant_id=_thread_tenant_id(actor, payload),
+            owner_user_id=existing.owner_user_id if existing is not None else actor.id,
+            title=payload.title.strip() or "New chat",
+            model_id=payload.model_id,
+            group_id=payload.group_id,
+            pinned=payload.pinned,
+            archived=payload.archived,
+            folder_id=payload.folder_id,
+            # Matter binding has its own membership gate. Ordinary thread saves
+            # cannot assign it, but they must not silently erase an existing link.
+            matter_id=existing.matter_id if existing is not None else None,
+            used_agent=payload.used_agent,
+            updated_at=_format_upload_time(clock.now()),
+            # A reply the server already finished stays finished even when a
+            # page saved its in-flight copy just before closing.
+            messages=_with_finished_runs(
+                keep_settled_replies(
+                    _normalize_thread_message_times(payload.messages),
+                    existing.messages if existing is not None else [],
+                ),
+                registry,
+                actor,
+            ),
+            # Forward-only merge with the stored position happens in the repository.
+            last_read_message_id=payload.last_read_message_id,
+        )
+
     try:
-        saved = store.save_chat_thread(thread)
+        # revise always returns a thread, so the save always happens.
+        saved = cast(ChatThread, store.revise_chat_thread(thread_id, revise))
     except RetentionDeletedError as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
     store.record_audit(
@@ -1347,7 +1394,14 @@ def complete(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
     usage_orchestrator: TenantUsageBudgetOrchestrator = Depends(get_usage_budget_orchestrator),
+    registry: ChatRunRegistry = Depends(get_chat_run_registry),
 ) -> ChatCompletionResponse | StreamingResponse:
+    if _runs_on_server(request):
+        # A repeated request for a run already under way follows it; it
+        # never starts a second generation.
+        existing = registry.find(cast(str, request.run_id), actor.id)
+        if existing is not None:
+            return _follow_response(registry.follow(existing))
     model = _resolve_model(store, request.model)
     assert_model_access(actor, model)
     assert_group_permission(actor, store.groups, "chat_access", "Chat access")
@@ -1362,6 +1416,7 @@ def complete(
     if request.reasoning_effort == "minimal" and request.surface == "chat":
         runtime_context["fast_mode"] = True
     runtime_context["earlier_markers_stale"] = request.surface == "chat"
+    runtime_context["clarify_mode"] = _clarify_mode(request)
     route = _resolve_gateway_route(
         store,
         model,
@@ -1407,6 +1462,17 @@ def complete(
     )
     _schedule_memory_followup(background_tasks, store, actor, request, route, runtime_context)
     _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
+    if _runs_on_server(request):
+        return _run_streaming_response(
+            request,
+            model,
+            route,
+            runtime_context,
+            store=store,
+            actor=actor,
+            usage_context=usage_context,
+            registry=registry,
+        )
     if request.stream:
         return _streaming_response(
             request,
@@ -1426,6 +1492,147 @@ def complete(
         actor=actor,
         usage_context=usage_context,
     )
+
+
+@router.get("/api/chat/runs/{run_id}/events")
+def chat_run_events(
+    run_id: str,
+    after: int = Query(default=0, ge=0),
+    actor: User = Depends(current_user),
+    registry: ChatRunRegistry = Depends(get_chat_run_registry),
+) -> StreamingResponse:
+    """Follow a chat reply the server is generating, from frame ``after`` on.
+
+    A page that reloads or reopens a chat starts from 0 and receives the
+    reply so far as one snapshot; a dropped connection passes the id of the
+    last frame it saw and continues from there.
+    """
+    run = _own_run(registry, run_id, actor)
+    return _follow_response(registry.follow(run, after=after, snapshot=True))
+
+
+@router.post("/api/chat/runs/{run_id}/cancel")
+def cancel_chat_run(
+    run_id: str,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+    registry: ChatRunRegistry = Depends(get_chat_run_registry),
+) -> dict[str, str]:
+    """Stop a reply. Closing the page never does; this is the only way.
+
+    A stop for a reply that has not started yet (its request is still
+    gathering context) keeps it from generating once it does.
+    """
+    run = registry.cancel(run_id, actor.id)
+    store.record_audit(
+        actor,
+        "chat.reply_stopped",
+        run_id,
+        {"thread_id": run.thread_id if run is not None else None, "started": run is not None},
+        runtime_state_changed=False,
+    )
+    return {"id": run_id, "status": "stopping" if run is not None else "stopped"}
+
+
+def _clarify_mode(request: ChatCompletionRequest) -> ClarifyMode | None:
+    """Only chat replies may pause to ask: no one answers a draft or an API
+    client, and the questions travel on the reply's stream."""
+    if request.surface != "chat" or (request.clarify_mode == "ask" and not request.stream):
+        return None
+    return request.clarify_mode
+
+
+def _runs_on_server(request: ChatCompletionRequest) -> bool:
+    """Chat replies tagged with a run and a thread outlive their request."""
+    return bool(request.stream and request.run_id and request.thread_id and request.surface == "chat")
+
+
+def _own_run(registry: ChatRunRegistry, run_id: str, actor: User) -> ChatRun:
+    run = registry.find(run_id, actor.id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This reply is no longer running.")
+    return run
+
+
+def _follow_response(frames: Iterator[str]) -> StreamingResponse:
+    return StreamingResponse(frames, media_type="text/event-stream", headers=_SSE_RESPONSE_HEADERS)
+
+
+def _run_streaming_response(
+    request: ChatCompletionRequest,
+    model_config: ModelConfig,
+    route: ModelGatewayRoute,
+    runtime_context: dict[str, object],
+    *,
+    store: SeedStore,
+    actor: User,
+    usage_context: UsageBudgetRequestContext,
+    registry: ChatRunRegistry,
+) -> StreamingResponse:
+    """Start the reply as a server-owned run and follow it from the start."""
+    try:
+        run, started = registry.start(
+            cast(str, request.run_id),
+            owner_id=actor.id,
+            thread_id=cast(str, request.thread_id),
+            base_text=_resumed_partial(request.messages),
+            frames=lambda: _stream_events(
+                request,
+                model_config,
+                route,
+                runtime_context,
+                store=store,
+                actor=actor,
+                usage_context=usage_context,
+            ),
+            on_finish=lambda finished: _finish_run(store, actor, usage_context, finished),
+        )
+    except ChatRunConflict as exc:
+        _abandon_usage_request(usage_context)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This reply id is already in use."
+        ) from exc
+    if not started:
+        # Another request started this run a moment earlier; this one only follows.
+        _abandon_usage_request(usage_context)
+    return _follow_response(registry.follow(run))
+
+
+def _finish_run(
+    store: SeedStore, actor: User, usage_context: UsageBudgetRequestContext, run: ChatRun
+) -> None:
+    # A run stopped before it started never opened its stream, so the usage
+    # reservation is released here. After a generation this is a no-op.
+    _abandon_usage_request(usage_context)
+    _settle_run_reply(store, actor, run)
+
+
+def _run_outcome(run: ChatRun) -> ReplyOutcome:
+    return reply_outcome(run.transcript(), base_text=run.base_text, cancelled=run.cancel_requested)
+
+
+def _settle_run_reply(store: SeedStore, actor: User, run: ChatRun) -> None:
+    """Save a finished run's reply into its chat, unless the page already did."""
+    outcome = _run_outcome(run)
+    completed_at = run.ended_at or clock.now()
+
+    def settle(stored: ChatThread | None) -> ChatThread | None:
+        if stored is None or stored.owner_user_id != actor.id:
+            return None
+        messages = settle_messages(stored.messages, run.id, outcome, completed_at=completed_at)
+        if messages is None:
+            return None
+        return stored.model_copy(update={"messages": messages, "updated_at": _format_upload_time(completed_at)})
+
+    saved = store.revise_chat_thread(run.thread_id, settle)
+    if saved is not None:
+        store.record_audit(
+            actor,
+            "chat.reply_settled",
+            saved.id,
+            {"run_id": run.id, "status": outcome.status},
+            runtime_state_changed=False,
+        )
 
 
 @router.get("/v1/models")
@@ -4100,6 +4307,8 @@ def _stream_events(
     round_settled = True
     privacy_categories: list[str] | None = None
     concealer: StreamingConcealer | None = None
+    ask_gate = AskGate(enabled=runtime_context.get("clarify_mode") == "ask")
+    asked: AskBlock | None = None
     try:
         client = get_model_gateway_client()
         gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
@@ -4111,6 +4320,11 @@ def _stream_events(
         # redact/block rule exists to stop. The response is held until the
         # provider finishes, then delivered screened.
         buffer_output = filters_have_output_rules(output_filters)
+        screen = (
+            partial(_filtered_output_text, store, actor, request, model_config, output_filters)
+            if buffer_output
+            else None
+        )
         privacy_categories = _privacy_output_categories(runtime_context)
         # Concealment streams with a short hold-back instead of buffering the
         # whole reply (see StreamingConcealer); full buffering still wins when
@@ -4167,25 +4381,21 @@ def _stream_events(
                     delta = f"\n\n{delta}"
                 first_delta_of_round = False
                 accumulated += delta
-                if buffer_output:
-                    # Nothing user-visible can flow until screening, but the
-                    # wire must not look dead while the response builds.
+                # Nothing user-visible flows until screening when output rules
+                # apply; otherwise a possible ask block and text held for
+                # concealment wait back.
+                visible = "" if buffer_output else ask_gate.feed(delta)
+                if concealer is not None and visible:
+                    visible = concealer.feed(visible)
+                if not visible:
+                    # Keep the wire alive so the client's stall watchdog never
+                    # mistakes held-back text for a drop.
                     now = time.monotonic()
                     if now - last_wire_activity >= KEEPALIVE_INTERVAL_SECONDS:
                         yield ": keep-alive\n\n"
                         last_wire_activity = now
                     continue
-                if concealer is not None:
-                    delta = concealer.feed(delta)
-                    if not delta:
-                        # Held back for concealment; keep the wire alive so the
-                        # client's stall watchdog never mistakes it for a drop.
-                        now = time.monotonic()
-                        if now - last_wire_activity >= KEEPALIVE_INTERVAL_SECONDS:
-                            yield ": keep-alive\n\n"
-                            last_wire_activity = now
-                        continue
-                yield _sse_data({"delta": delta})
+                yield _sse_data({"delta": visible})
                 last_wire_activity = time.monotonic()
             round_annotations = usage_sink.get("annotations")
             if isinstance(round_annotations, list):
@@ -4227,25 +4437,20 @@ def _stream_events(
                 {"role": "assistant", "content": accumulated.rstrip()},
                 {"role": "user", "content": CONTINUATION_PROMPT},
             ]
-        if privacy_categories is not None:
-            if concealer is not None:
-                tail = concealer.flush()
-                if tail:
-                    yield _sse_data({"delta": tail})
-            accumulated = conceal(accumulated, privacy_categories).text
-        delivered = accumulated
-        if buffer_output:
-            yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
-            delivered = _filtered_output_text(
-                store, actor, request, model_config, output_filters, accumulated
-            )
-            yield _sse_data({"delta": delivered})
-        hermes_summary = hermes.capture_artifacts(
+        delivery = yield from _deliver_output(
+            accumulated,
+            ask_gate=ask_gate,
+            concealer=concealer,
+            privacy_categories=privacy_categories,
+            screen=screen,
+        )
+        delivered, asked = delivery.text, delivery.asked
+        hermes_summary = None if asked else hermes.capture_artifacts(
             store,
             actor,
             profile_id=str(runtime_context.get("hermes_profile_id") or ""),
             source_thread_id=request.thread_id,
-            full_text=accumulated,
+            full_text=delivery.full_text,
         )
         usage_context.complete_success()
         completed = True
@@ -4337,26 +4542,21 @@ def _stream_events(
                     logger.exception(
                         "Failed to settle provider usage for a failed continuation round"
                     )
-            if privacy_categories is not None:
-                if concealer is not None:
-                    tail = concealer.flush()
-                    if tail:
-                        yield _sse_data({"delta": tail})
-                accumulated = conceal(accumulated, privacy_categories).text
-            delivered = accumulated
-            if buffer_output:
-                yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
-                delivered = _filtered_output_text(
-                    store, actor, request, model_config, output_filters, accumulated
-                )
-                yield _sse_data({"delta": delivered})
+            delivery = yield from _deliver_output(
+                accumulated,
+                ask_gate=ask_gate,
+                concealer=concealer,
+                privacy_categories=privacy_categories,
+                screen=screen,
+            )
+            delivered, asked = delivery.text, delivery.asked
             try:
-                hermes_summary = hermes.capture_artifacts(
+                hermes_summary = None if asked else hermes.capture_artifacts(
                     store,
                     actor,
                     profile_id=str(runtime_context.get("hermes_profile_id") or ""),
                     source_thread_id=request.thread_id,
-                    full_text=accumulated,
+                    full_text=delivery.full_text,
                 )
             except Exception:
                 hermes_summary = None
@@ -4389,14 +4589,7 @@ def _stream_events(
     finally:
         _abandon_usage_request(usage_context)
     if completed:
-        # The finished reply is checked against this turn's verifiable
-        # requirements, and Hermes reports what it saved, before closing.
-        for activity in (
-            requirement_checks(runtime_context, delivered),
-            hermes_activity(hermes_summary),
-        ):
-            if activity is not None:
-                yield _sse_data({"activity": activity})
+        yield from _closing_frames(runtime_context, delivered, asked, hermes_summary)
         done_payload: dict[str, Any] = {
             "done": True,
             "citations": [
@@ -4426,6 +4619,87 @@ def _stream_events(
         yield _sse_data(done_payload)
     if not accounting_failed:
         yield "data: [DONE]\n\n"
+
+
+@dataclass(frozen=True)
+class _Delivery:
+    """How a finished stream ended for the person reading it."""
+
+    # What they received, after concealment and screening.
+    text: str
+    # The whole reply after concealment, an ask block included.
+    full_text: str
+    # The questions the reply paused on, screened like the text.
+    asked: AskBlock | None
+
+
+def _deliver_output(
+    accumulated: str,
+    *,
+    ask_gate: AskGate,
+    concealer: StreamingConcealer | None,
+    privacy_categories: list[str] | None,
+    screen: Callable[[str], str] | None,
+) -> Generator[str, None, _Delivery]:
+    """Send what a finished stream still owes, then say what was delivered.
+
+    Streamed replies owe only text held back while they streamed. A screened
+    reply was held whole, so it is delivered here, and an ask block in it is
+    read from the screened text, so its questions are screened too.
+    """
+    tail = _held_back_tail(ask_gate, concealer)
+    if tail:
+        yield _sse_data({"delta": tail})
+    full_text = _concealed(accumulated, privacy_categories)
+    if screen is not None:
+        return (yield from _deliver_screened(full_text, screen, may_ask=ask_gate.enabled))
+    block = ask_gate.block
+    asked = block.map_text(lambda text: _concealed(text, privacy_categories)) if block else None
+    return _Delivery(asked.intro if asked else full_text, full_text, asked)
+
+
+def _held_back_tail(ask_gate: AskGate, concealer: StreamingConcealer | None) -> str:
+    """Text the stream held back and still owes: a line that only looked like
+    an ask block, or a block that did not parse, then what concealment held."""
+    tail = ask_gate.finish()
+    if concealer is None:
+        return tail
+    return (concealer.feed(tail) if tail else "") + concealer.flush()
+
+
+def _concealed(text: str, privacy_categories: list[str] | None) -> str:
+    return conceal(text, privacy_categories).text if privacy_categories is not None else text
+
+
+def _deliver_screened(
+    full_text: str, screen: Callable[[str], str], *, may_ask: bool
+) -> Generator[str, None, _Delivery]:
+    """A reply held whole for screening, delivered once screened. An ask block
+    is read from the screened text, so its questions are screened too."""
+    yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
+    screened = screen(full_text)
+    split = split_reply(screened) if may_ask else AskSplit(screened, None)
+    if split.text:
+        yield _sse_data({"delta": split.text})
+    return _Delivery(split.text, full_text, split.block)
+
+
+def _closing_frames(
+    runtime_context: dict[str, object],
+    delivered: str,
+    asked: AskBlock | None,
+    hermes_summary: dict[str, Any] | None,
+) -> Iterator[str]:
+    """What the trace learns as the reply closes. A reply that paused says
+    what it asked; a finished one is checked against this turn's verifiable
+    requirements, and Hermes reports what it saved."""
+    if asked is not None:
+        yield _sse_data({"activity": ask_activity(len(asked.questions))})
+        yield _sse_data({"questions": asked.payload()})
+        return
+    for activity in (requirement_checks(runtime_context, delivered), hermes_activity(hermes_summary)):
+        if activity is not None:
+            yield _sse_data({"activity": activity})
 
 
 def _stream_usage_payload(usage: dict[str, Any]) -> dict[str, int] | None:
@@ -4981,7 +5255,7 @@ def _resolve_runtime_context(
     retrieval_query = (
         inline_edit_query
         or document_patch_instruction(request)
-        or _retrieval_question(request.messages)
+        or _retrieval_question(request.messages, answered=_clarify_mode(request) == "answered")
     )
     web_enabled = request.web_enabled or inline_edit_query is not None
     knowledge_hits = _dedupe_knowledge_hits(
@@ -5066,9 +5340,7 @@ def _resolve_runtime_context(
         directives: list[Directive] = []
     else:
         extract = extract_draft_directives if request.surface == "draft" else extract_directives
-        directives = extract(
-            _latest_user_message(request.messages), memory_context["standing_instructions"]
-        )
+        directives = extract(_asked_this_turn(request), memory_context["standing_instructions"])
     return {
         "surface": request.surface if request.surface in {"chat", "draft"} else "chat",
         "thread_id": request.thread_id,
@@ -6047,12 +6319,32 @@ def _resumed_partial(messages: list[dict[str, Any]]) -> str:
     return _message_content_text(messages[-2].get("content"))
 
 
-def _retrieval_question(messages: list[dict[str, Any]]) -> str:
+def _retrieval_question(messages: list[dict[str, Any]], *, answered: bool = False) -> str:
     """What this turn is asking. A resume asks what the dropped attempt asked,
     so it retrieves the same indexed excerpts and the partial's [K#] numbers
-    still hold. Live pages and web results are fetched again and may differ."""
+    still hold. Live pages and web results are fetched again and may differ.
+    After the user answers clarifying questions, the turn asks the question
+    the reply paused on, as the answers narrowed it."""
     resumed = _resumes_dropped_stream(messages)
-    return _latest_user_message(messages[:-2] if resumed else messages)
+    turn = messages[:-2] if resumed else messages
+    return _question_with_answers(turn) if answered else _latest_user_message(turn)
+
+
+def _asked_this_turn(request: ChatCompletionRequest) -> str:
+    """What the user asked this turn: after answering clarifying questions,
+    the question the reply paused on, then the answers."""
+    if _clarify_mode(request) == "answered":
+        return _question_with_answers(request.messages)
+    return _latest_user_message(request.messages)
+
+
+def _question_with_answers(turn: list[dict[str, Any]]) -> str:
+    """The question a reply paused on, then the user's answers to it: the turn
+    ends with the user's question, the assistant's questions, and the answers."""
+    asked_at = len(turn) - 2
+    if asked_at < 1 or turn[asked_at].get("role") != "assistant":
+        return _latest_user_message(turn)
+    return f"{_latest_user_message(turn[:asked_at])}\n{_latest_user_message(turn)}"
 
 
 def _message_content_text(content: object) -> str:
@@ -7459,6 +7751,9 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             "diagrams or tables unless the user asked for them. Only go long when the user "
             "explicitly requests a long-form deliverable."
         )
+    context_lines.extend(
+        filter(None, [clarify_prompt_line(cast(ClarifyMode | None, runtime_context.get("clarify_mode")))])
+    )
     if runtime_context.get("web_enabled"):
         # Recency questions ("how did X do in the World Cup?") fail without an
         # anchor date: the model otherwise weighs its training-era prior over

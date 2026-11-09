@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { saveChatThread, sendChatStream } from "./chat";
+import { cancelChatRun, saveChatThread, sendChatStream } from "./chat";
 import { ChatRequestError } from "./http";
 
 
@@ -310,6 +310,368 @@ describe("sendChatStream resume hardening", () => {
 });
 
 
+describe("sendChatStream server runs", () => {
+  const sse = (body: string) => new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+  const done = (position: number) =>
+    `id: ${position}\ndata: {"done":true,"citations":[],"usage":null}\n\nid: ${position + 1}\ndata: [DONE]\n\n`;
+  const url = (call: unknown[]) => String(call[0]);
+
+  test("follows its run again after a dropped connection, from the last frame it saw", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse('id: 1\ndata: {"delta":"First half."}\n\n'))
+      .mockResolvedValueOnce(sse(`id: 2\ndata: {"delta":" Second half."}\n\n${done(3)}`));
+    vi.stubGlobal("fetch", fetchMock);
+    const onRun = vi.fn();
+
+    const reply = await sendChatStream("user-1", { ...request, runId: "run-1", onRun, resumeDelaysMs: [0] });
+
+    expect(reply.content).toBe("First half. Second half.");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).run_id).toBe("run-1");
+    expect(url(fetchMock.mock.calls[1])).toMatch(/\/api\/chat\/runs\/run-1\/events\?after=1$/);
+    expect(fetchMock.mock.calls[1][1].method).toBeUndefined();
+    expect(onRun).not.toHaveBeenCalled();
+  });
+
+  test("a frame cut off before its data arrived is read again", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse('id: 1\ndata: {"delta":"A"}\n\nid: 2\n'))
+      .mockResolvedValueOnce(sse(`id: 2\ndata: {"delta":"B"}\n\n${done(3)}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await sendChatStream("user-1", { ...request, runId: "run-1", resumeDelaysMs: [0] });
+
+    expect(reply.content).toBe("AB");
+    expect(url(fetchMock.mock.calls[1])).toMatch(/after=1$/);
+  });
+
+  test("a page that comes back follows the run, starting from the reply so far", async () => {
+    const snapshot = {
+      snapshot: {
+        base: "",
+        text: "First half.",
+        activities: [{ kind: "web", results: 2, engine: "searxng" }],
+        concealed_prompt: null,
+      },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse(`id: 2\ndata: ${JSON.stringify(snapshot)}\n\nid: 3\ndata: {"delta":" More."}\n\n${done(4)}`));
+    vi.stubGlobal("fetch", fetchMock);
+    const order: string[] = [];
+    const onDelta = vi.fn();
+
+    const reply = await sendChatStream("user-1", {
+      ...request,
+      runId: "run-1",
+      attach: true,
+      initialText: "Fir",
+      onDelta,
+      onSnapshot: () => order.push("snapshot"),
+      onActivity: (activity) => order.push(activity.kind),
+    });
+
+    expect(reply.content).toBe("First half. More.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(url(fetchMock.mock.calls[0])).toMatch(/\/api\/chat\/runs\/run-1\/events\?after=0$/);
+    expect(order).toEqual(["snapshot", "web"]);
+    expect(onDelta).toHaveBeenNthCalledWith(1, "First half.");
+  });
+
+  test("a resumed run's snapshot carries the text it continued", async () => {
+    const snapshot = { snapshot: { base: "Earlier part", text: "next part", activities: [], concealed_prompt: null } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(sse(`id: 1\ndata: ${JSON.stringify(snapshot)}\n\n${done(2)}`)),
+    );
+
+    const reply = await sendChatStream("user-1", { ...request, runId: "run-1", attach: true, initialText: "Earl" });
+
+    expect(reply.content).toBe("Earlier part\n\nnext part");
+  });
+
+  test("a run the server no longer has continues as a new run from the text so far", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "This reply is no longer running." }), { status: 404 }))
+      .mockResolvedValueOnce(sse(`id: 1\ndata: {"delta":"Second half."}\n\n${done(2)}`));
+    vi.stubGlobal("fetch", fetchMock);
+    const onRun = vi.fn();
+
+    const reply = await sendChatStream("user-1", {
+      ...request,
+      runId: "run-1",
+      attach: true,
+      initialText: "First half.",
+      newRunId: () => "run-2",
+      onRun,
+      resumeDelaysMs: [60_000],
+    });
+
+    expect(reply.content).toBe("First half.\n\nSecond half.");
+    expect(onRun).toHaveBeenCalledWith("run-2");
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.run_id).toBe("run-2");
+    expect(body.messages.at(-1).content).toContain("Continue exactly where the previous answer stopped");
+  });
+
+  test("a failure the API marks retryable starts a new run instead of following the failed one", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse('id: 1\ndata: {"error":"HTTP 529","retryable":true}\n\n'))
+      .mockResolvedValueOnce(sse(`id: 1\ndata: {"delta":"Recovered"}\n\n${done(2)}`));
+    vi.stubGlobal("fetch", fetchMock);
+    const onRun = vi.fn();
+
+    const reply = await sendChatStream("user-1", {
+      ...request,
+      runId: "run-1",
+      newRunId: () => "run-2",
+      onRun,
+      resumeDelaysMs: [0],
+    });
+
+    expect(reply.content).toBe("Recovered");
+    expect(onRun).toHaveBeenCalledWith("run-2");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ run_id: "run-2", messages: request.messages });
+  });
+
+  test("requests without a run send no run id", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(sse(`data: {"delta":"Hi"}\n\n${done(1)}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChatStream("user-1", request);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty("run_id");
+  });
+});
+
+describe("sendChatStream reading and retrying", () => {
+  const sse = (body: string) => new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+  const finished = 'data: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n';
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  test("gives up after twenty attempts in a row without progress, counting from the last that made some", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse('data: {"delta":"a"}\n\n'))
+      .mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChatStream("user-1", { ...request, resumeDelaysMs: [0] }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ChatRequestError);
+    expect(error.message).toBe("Could not reach the model. Check your connection and try again.");
+    expect(error.partialText).toBe("a");
+    expect(fetchMock).toHaveBeenCalledTimes(21);
+  });
+
+  test("a silent connection with no stop is reported as stalled, not cancelled", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChatStream("user-1", { ...request, resumeDelaysMs: [0], stallTimeoutMs: 2 }).catch(
+      (caught) => caught,
+    );
+
+    expect(error.message).toBe("The chat stream stalled before the completion marker arrived.");
+    expect(error.resumable).toBe(true);
+  });
+
+  test("a zero stall timeout lets a slow first byte take as long as it needs", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockImplementation(
+        (_url: string, init?: RequestInit) =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(() => resolve(sse(`data: {"delta":"Slow"}\n\n${finished}`)), 60_000);
+            init?.signal?.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const reply = sendChatStream("user-1", { ...request, stallTimeoutMs: 0 });
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await expect(reply).resolves.toMatchObject({ content: "Slow" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test.each([500, 503, 429])("retries a %i from the API", async (status) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(status, { detail: "Try again" }))
+      .mockResolvedValueOnce(sse(`data: {"delta":"Recovered"}\n\n${finished}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await sendChatStream("user-1", { ...request, resumeDelaysMs: [0] });
+
+    expect(reply.content).toBe("Recovered");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([400, 404, 499])("a %i refusal ends the reply at once", async (status) => {
+    const fetchMock = vi.fn().mockResolvedValue(json(status, { detail: "Not allowed" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChatStream("user-1", { ...request, resumeDelaysMs: [0] }).catch((caught) => caught);
+
+    expect(error.message).toBe("Not allowed");
+    expect(error.resumable).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a whole JSON reply works with or without a concealed-prompt listener", async () => {
+    const completion = {
+      id: "c",
+      model: "model-1",
+      choices: [{ index: 0, message: { role: "assistant", content: "Whole reply" } }],
+      usage: {},
+      concealed_prompt: "Email [EMAIL_1]",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json(200, completion)));
+    const onConcealedPrompt = vi.fn();
+
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ content: "Whole reply" });
+    await sendChatStream("user-1", { ...request, onConcealedPrompt });
+
+    expect(onConcealedPrompt).toHaveBeenCalledWith("Email [EMAIL_1]");
+  });
+
+  test("a response with no content type is refused as unsupported", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChatStream("user-1", request).catch((caught) => caught);
+
+    expect(error.message).toBe("The chat API returned an unsupported content type: unknown.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a new run counts its frames from zero and needs no run listener", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse('id: 4\ndata: {"error":"HTTP 529","retryable":true}\n\n'))
+      .mockResolvedValueOnce(sse(""))
+      .mockResolvedValueOnce(sse(`id: 1\ndata: {"delta":"Fresh"}\n\nid: 2\n${finished}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await sendChatStream("user-1", { ...request, runId: "run-1", newRunId: () => "run-2", resumeDelaysMs: [0] });
+
+    expect(reply.content).toBe("Fresh");
+    expect(String(fetchMock.mock.calls[2][0])).toMatch(/\/api\/chat\/runs\/run-2\/events\?after=0$/);
+  });
+
+  test("lines ending in CRLF read the same as plain newlines", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sse('data: {"delta":"Hi"}\r\n\r\ndata: [DONE]\r\n\r\n')));
+
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ content: "Hi" });
+  });
+
+  test("a character split across two chunks arrives whole", async () => {
+    const bytes = new TextEncoder().encode(`data: {"delta":"café"}\n\n${finished}`);
+    const cut = bytes.indexOf(0xc3) + 1;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, cut));
+        controller.enqueue(bytes.slice(cut));
+        controller.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { headers: { "Content-Type": "text/event-stream" } })));
+
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ content: "café" });
+  });
+
+  test("a final marker without a trailing newline still ends the reply, and nothing after it counts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sse('data: {"delta":"Hi"}\n\ndata: [DONE]'));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ content: "Hi" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sse('data: {"delta":"Hi"}\ndata: [DONE]\ndata: {"delta":" extra"}')));
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ content: "Hi" });
+  });
+
+  test("an empty completion is tried again", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse(finished))
+      .mockResolvedValueOnce(sse(`data: {"delta":"Second try"}\n\n${finished}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendChatStream("user-1", { ...request, resumeDelaysMs: [0] })).resolves.toMatchObject({
+      content: "Second try",
+    });
+  });
+
+  test("empty frames, empty deltas, and malformed snapshots change nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sse(`data:\n\ndata: {"delta":"Hi"}\n\ndata: {"delta":""}\n\ndata: {"snapshot":"nope"}\n\ndata: "text"\n\n${finished}`),
+      ),
+    );
+    const onDelta = vi.fn();
+    const onSnapshot = vi.fn();
+
+    const reply = await sendChatStream("user-1", { ...request, onDelta, onSnapshot });
+
+    expect(reply.content).toBe("Hi");
+    expect(onDelta).toHaveBeenCalledTimes(1);
+    expect(onSnapshot).not.toHaveBeenCalled();
+  });
+
+  test("memory notes arrive with the completion, and default to none", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(sse('data: {"delta":"Hi"}\n\ndata: {"done":true,"memory_used":3}\n\ndata: [DONE]\n\n'))
+        .mockResolvedValueOnce(sse(`data: {"delta":"Hi"}\n\n${finished}`)),
+    );
+
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ memoryUsed: 3 });
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ memoryUsed: 0 });
+  });
+
+  test("a concealed prompt is shown once, needs no listener, and an empty one is ignored", async () => {
+    const body = `data: {"privacy":{"concealed_prompt":""}}\n\ndata: {"privacy":{"concealed_prompt":"Call [PHONE_1]"}}\n\ndata: {"delta":"Hi"}\n\n${finished}`;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => sse(body)));
+    const onConcealedPrompt = vi.fn();
+
+    await expect(sendChatStream("user-1", request)).resolves.toMatchObject({ concealedPrompt: "Call [PHONE_1]" });
+    await sendChatStream("user-1", { ...request, onConcealedPrompt });
+
+    expect(onConcealedPrompt.mock.calls).toEqual([["Call [PHONE_1]"]]);
+  });
+});
+
+describe("cancelChatRun", () => {
+  test("asks the server to stop the run", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "run-1", status: "stopping" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await cancelChatRun("user-1", "run-1");
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/api\/chat\/runs\/run-1\/cancel$/);
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+  });
+});
+
 describe("saveChatThread", () => {
   test("never sends the browser-only syncPending flag", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -331,5 +693,68 @@ describe("saveChatThread", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as Record<string, unknown>;
     expect("syncPending" in body).toBe(false);
     expect("id" in body).toBe(false);
+  });
+});
+
+describe("sendChatStream clarifying questions", () => {
+  const sse = (body: string) => new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+  const questions = {
+    intro: "One question first.",
+    questions: [
+      { id: "q1", question: "Which state?", options: [{ label: "CA" }, { label: "NY" }], multiple: false, recommended: 0 },
+    ],
+  };
+  const finished = 'data: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n';
+
+  test("a reply that pauses to ask ends with its questions and no text of its own", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sse(
+          'data: {"delta":"One question first.\\n\\n"}\n\n' +
+            'data: {"activity":{"kind":"ask","questions":1}}\n\n' +
+            `data: ${JSON.stringify({ questions })}\n\n${finished}`,
+        ),
+      ),
+    );
+    const activities: string[] = [];
+
+    const reply = await sendChatStream("user-1", { ...request, onActivity: (activity) => activities.push(activity.kind) });
+
+    expect(reply.content).toBe("");
+    expect(reply.questions).toEqual(questions);
+    expect(activities).toEqual(["ask"]);
+  });
+
+  test("a page that comes back to a paused reply gets the questions from the snapshot", async () => {
+    const snapshot = { snapshot: { base: "", text: "One question first.", activities: [], concealed_prompt: null, questions } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sse(`id: 3\ndata: ${JSON.stringify(snapshot)}\n\n${finished}`)));
+
+    const reply = await sendChatStream("user-1", { ...request, runId: "run-1", attach: true });
+
+    expect(reply).toMatchObject({ content: "", questions });
+  });
+
+  test("questions that cannot be shown leave an ordinary reply", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(sse(`data: {"delta":"Plain answer"}\n\ndata: {"questions":{"questions":[]}}\n\n${finished}`)),
+    );
+
+    const reply = await sendChatStream("user-1", request);
+
+    expect(reply.content).toBe("Plain answer");
+    expect(reply.questions).toBeUndefined();
+  });
+
+  test("the request says whether the assistant may stop to ask", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => sse(`data: {"delta":"Hi"}\n\n${finished}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChatStream("user-1", { ...request, runtime: { clarifyMode: "ask" } });
+    await sendChatStream("user-1", request);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).clarify_mode).toBe("ask");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).clarify_mode).toBeNull();
   });
 });

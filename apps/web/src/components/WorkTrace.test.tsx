@@ -468,3 +468,39 @@ describe("WorkTraceStreamStatus under the streaming reply", () => {
     expect(within(status).getByText("Writing html · 2 lines")).toHaveAttribute("aria-hidden", "true");
   });
 });
+
+describe("WorkTrace for a reply that paused to ask", () => {
+  const asked: ChatMessage["activityTrace"] = [
+    { id: "route:model", label: "Routed to GPT-6 Astra" },
+    { id: "memory:recall", label: "Recalled 5 memories" },
+    { id: "ask:questions", label: "Paused to ask you 2 questions", detail: "So the reply fits what you need" },
+  ];
+
+  test("while it waits, it says it is waiting for the user's answer", () => {
+    render(
+      <WorkTrace
+        brandName="Aperture Chat"
+        message={message({ status: "ok", durationMs: 9_000, activityTrace: asked })}
+        state="complete"
+        awaitingAnswer
+      />,
+    );
+
+    const trace = screen.getByRole("region", { name: "Aperture Chat activity trace" });
+    expect(within(trace).getByText("Waiting for your answer")).toBeInTheDocument();
+    expect(trace.querySelector(".work-trace-bar .work-trace-glyph")).toHaveAttribute("data-kind", "ask");
+  });
+
+  test("once answered, the run picks up after the answer instead of replaying its steps", () => {
+    vi.useFakeTimers();
+    try {
+      const answered = [...asked, { id: "answer:reply", label: "You answered 2 questions", detail: "California · The client" }];
+      render(<WorkTrace brandName="Aperture Chat" message={message({ activityTrace: answered })} state="pending" />);
+
+      const steps = screen.getByRole("list", { name: "Steps so far" });
+      expect(kinds(steps)).toEqual(["route", "memory", "ask", "answer", "think", "next"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

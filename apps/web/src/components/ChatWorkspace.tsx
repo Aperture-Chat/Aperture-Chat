@@ -33,6 +33,7 @@ import {
   ResourceTiles,
   SEND_MENU_TABS,
   ShortcutGuide,
+  AskSwitch,
   StreamSwitch,
   ToolSwitch,
   agentOptionDetail,
@@ -176,7 +177,14 @@ import { formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { feedbackRatingForMessage, recordChatFeedback } from "../lib/chatFeedback";
 import { markdownToPlainText } from "../lib/markdown";
 import { splitAssistantThinking } from "../lib/assistantThinking";
-import { loadLiveStreamPreference, storeLiveStreamPreference } from "../lib/streamPreference";
+import {
+  loadAskPreference,
+  loadLiveStreamPreference,
+  storeAskPreference,
+  storeLiveStreamPreference,
+} from "../lib/streamPreference";
+import { readClarification, type ClarifyResponse } from "../lib/clarify";
+import { ClarifyCard, type ClarifyCardState } from "./ClarifyCard";
 import { BREAKPOINTS, useViewportWidth } from "../lib/useViewport";
 import { DictationControl } from "./DictationControl";
 import { isMediaUploadFile } from "../lib/mediaUploads";
@@ -1089,6 +1097,8 @@ export function ChatWorkspace({
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(() => loadReasoningLevel(data.me.id));
   // Show replies as they stream in; sticky per user, display-only.
   const [streamResponses, setStreamResponses] = useState(() => loadLiveStreamPreference(data.me.id));
+  const [askWhenUnclear, setAskWhenUnclear] = useState(() => loadAskPreference(data.me.id));
+  const clarifyMode = askWhenUnclear ? "ask" : "decide";
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const stagedAttachmentsRef = useRef(attachments);
   stagedAttachmentsRef.current = attachments;
@@ -1721,6 +1731,21 @@ export function ChatWorkspace({
     storeLiveStreamPreference(data.me.id, next);
   }
 
+  function setAskPreference(enabled: boolean) {
+    setAskWhenUnclear(enabled);
+    storeAskPreference(data.me.id, enabled);
+  }
+
+  function answerQuestions(message: ChatMessage, response: ClarifyResponse) {
+    chat.answerQuestions(message.id, response);
+  }
+
+  /** "Always decide for me": no more questions, and this one is decided too. */
+  function alwaysDecide(message: ChatMessage) {
+    setAskPreference(false);
+    chat.answerQuestions(message.id, { kind: "decide" });
+  }
+
   async function submitDraft(toolOverrides?: Partial<ComposerTools>, approvedToolConfigIds: string[] = []) {
     const text = draft.trim();
     const queuedAutomations = pendingAutomations;
@@ -1838,6 +1863,7 @@ export function ChatWorkspace({
       if (fetchUrls.length > 0) {
         runtime.fetchUrls = [...fetchUrls];
       }
+      runtime.clarifyMode = clarifyMode;
       const approvedRuntimeToolIds = (runtime.toolConfigIds ?? []).filter((toolId) => approvedToolIds.has(toolId));
       runtime.approvedToolConfigIds = approvedRuntimeToolIds;
       // Exchange each user approval for a signed token the backend trusts; the
@@ -1930,6 +1956,7 @@ export function ChatWorkspace({
       );
       runtime.approvedToolConfigIds = [];
       runtime.approvalTokens = [];
+      runtime.clarifyMode = clarifyMode;
       setPendingHandoff(null);
       chat.sendMessage(pending.text, uploaded, runtime);
     } catch (error) {
@@ -2971,6 +2998,7 @@ export function ChatWorkspace({
                     <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
                   </div>
                   <StreamSwitch checked={streamResponses} onToggle={toggleStreamResponses} />
+                  <AskSwitch checked={askWhenUnclear} onToggle={() => setAskPreference(!askWhenUnclear)} />
                 </div>
               </div> : <div className="composer-options-resources">
                 <ResourceSearch value={shortcutQuery} onChange={searchResources} />
@@ -3246,6 +3274,9 @@ export function ChatWorkspace({
                   onBranchFromMessage={(targetMessage) => chat.branchFromMessage(targetMessage.id)}
                   onRegenerateResponse={(targetMessage) => chat.regenerateResponse(targetMessage.id)}
                   onStopResponse={() => void chat.stopResponse()}
+                  clarifyState={index === messages.length - 1 ? (isSending ? "busy" : "open") : "passed"}
+                  onAnswerQuestions={answerQuestions}
+                  onAlwaysDecide={alwaysDecide}
                   onSelectResponseVersion={(targetMessage, versionIndex) =>
                     chat.selectResponseVersion(targetMessage.id, versionIndex)
                   }
@@ -4156,6 +4187,9 @@ function MessageBubble({
   onBranchFromMessage,
   onRegenerateResponse,
   onStopResponse,
+  clarifyState = "passed",
+  onAnswerQuestions,
+  onAlwaysDecide,
   onSelectResponseVersion,
   onUpdateDiagram,
   onUpdateCode,
@@ -4186,6 +4220,10 @@ function MessageBubble({
   onBranchFromMessage?: (message: ChatMessage) => ChatThread | null;
   onRegenerateResponse?: (message: ChatMessage) => boolean;
   onStopResponse?: () => void;
+  /** Whether questions this reply paused on can be answered here and now. */
+  clarifyState?: ClarifyCardState;
+  onAnswerQuestions?: (message: ChatMessage, response: ClarifyResponse) => void;
+  onAlwaysDecide?: (message: ChatMessage) => void;
   onSelectResponseVersion?: (message: ChatMessage, versionIndex: number) => boolean;
   onUpdateDiagram?: (message: ChatMessage, previousSource: string, nextSource: string) => boolean;
   onUpdateCode?: (message: ChatMessage, previousSource: string, nextSource: string, occurrence: number) => boolean;
@@ -4224,7 +4262,9 @@ function MessageBubble({
     !isUser && displayMessage.status === "pending" && !/^\s*<(think|thinking)>/i.test(assistantContent.visibleContent)
       ? assistantContent.visibleContent
       : "";
-  const traceState = replyTraceState(displayMessage, assistantContent.thinkingTraces);
+  const clarification = isUser ? null : readClarification(displayMessage.metadata);
+  const waitingClarification = clarification?.state === "waiting" && displayMessage.status === "ok" ? clarification : null;
+  const traceState = replyTraceState(displayMessage, assistantContent.thinkingTraces, Boolean(waitingClarification));
   // A failed reply that streamed real text keeps that text as the reply and
   // shows the failure as a compact note instead of one giant error block.
   const failureNotice =
@@ -4361,6 +4401,16 @@ function MessageBubble({
             state={traceState}
             onStop={traceState === "pending" ? onStopResponse : undefined}
             thinkingTraces={traceState === "complete" ? assistantContent.thinkingTraces : undefined}
+            awaitingAnswer={Boolean(waitingClarification) && clarifyState !== "passed"}
+          />
+        )}
+        {waitingClarification && (
+          <ClarifyCard
+            clarification={waitingClarification}
+            brandName={brandName}
+            state={onAnswerQuestions ? clarifyState : "passed"}
+            onRespond={(response) => onAnswerQuestions?.(message, response)}
+            onAlwaysDecide={onAlwaysDecide ? () => onAlwaysDecide(message) : undefined}
           />
         )}
         {isUser && isEditingPrompt ? (
@@ -4732,10 +4782,15 @@ function requestBefore(messages: ChatMessage[], index: number): string | null {
 
 /** Whether a reply shows its work trace, and in which phase: always while it
  * runs, and once finished when there is a trace or exposed thinking to show. */
-function replyTraceState(message: ChatMessage, thinkingTraces: string[]): "pending" | "complete" | null {
+function replyTraceState(
+  message: ChatMessage,
+  thinkingTraces: string[],
+  paused = false,
+): "pending" | "complete" | null {
   if (message.role === "user") return null;
   if (message.status === "pending") return "pending";
-  if (message.status === "error" || !message.content) return null;
+  // A reply waiting on its questions has no text yet, but its trace shows the pause.
+  if (message.status === "error" || (!message.content && !paused)) return null;
   return (message.activityTrace?.length ?? 0) > 0 || thinkingTraces.length > 0 ? "complete" : null;
 }
 
