@@ -22,6 +22,7 @@ import "./spreadsheet.css";
 import "./tactile-controls.css";
 import "./rail-glide.css";
 import "./composer-options.css";
+import "./clarify-card.css";
 import "./components/account-drawer.css";
 import "./components/document-viewer.css";
 import "./components/session-panel.css";

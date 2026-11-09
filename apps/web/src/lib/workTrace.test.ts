@@ -5,6 +5,7 @@ import {
   finishTrace,
   formatTraceDuration,
   liveTraceView,
+  pausedTrace,
   readTrace,
   recordActivity,
   selfChecks,
@@ -700,5 +701,36 @@ describe("formatTraceDuration", () => {
     [3_720_000, "1h 02m"],
   ])("%d ms reads as %s", (ms, text) => {
     expect(formatTraceDuration(ms)).toBe(text);
+  });
+});
+
+describe("clarifying questions", () => {
+  test("a pause and the user's answers become steps of the same reply", () => {
+    const asked = recordActivity([], { kind: "ask", questions: 2 });
+    const answered = recordActivity(asked, { kind: "answered", questions: 2, summary: "California · The client", delegated: false });
+
+    expect(readTrace(answered)).toEqual([
+      { id: "ask:questions", kind: "ask", label: "Paused to ask you 2 questions", detail: "So the reply fits what you need" },
+      { id: "answer:reply", kind: "answer", label: "You answered 2 questions", detail: "California · The client" },
+    ]);
+  });
+
+  test("leaving the choices to the assistant says so", () => {
+    const trace = recordActivity([], { kind: "answered", questions: 1, summary: "", delegated: true });
+
+    expect(trace).toEqual([
+      { id: "answer:reply", label: "You left the choices to the assistant", detail: "It picks what it judges best and says what it chose." },
+    ]);
+  });
+
+  test("a paused reply keeps what it gathered and drops steps read from its lead-in", () => {
+    const trace = advanceTrace(recordActivity([], { kind: "memory", recalled: 1, companion: 0 }), {
+      content: "Two quick questions first.",
+      startedAtMs: T0,
+      nowMs: T0 + 4000,
+      final: false,
+    });
+
+    expect(ids(pausedTrace(trace))).toEqual(["memory:recall", "think:first-token"]);
   });
 });

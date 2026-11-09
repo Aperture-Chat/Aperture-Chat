@@ -74,3 +74,9 @@ describe("parseStreamActivity", () => {
     expect(parseStreamActivity({ kind: "memory", recalled: 2 })).toEqual({ kind: "memory", recalled: 2, companion: 0 });
   });
 });
+
+test("a reply that paused to ask says how many questions it asked", () => {
+  expect(parseStreamActivity({ kind: "ask", questions: 2 })).toEqual({ kind: "ask", questions: 2 });
+  expect(parseStreamActivity({ kind: "ask", questions: 0 })).toBeNull();
+  expect(parseStreamActivity({ kind: "ask" })).toBeNull();
+});
