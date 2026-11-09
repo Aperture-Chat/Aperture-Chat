@@ -134,6 +134,11 @@ def requirement_checks(runtime_context: Mapping[str, object], text: str) -> dict
     }
 
 
+def ask_activity(question_count: int) -> dict[str, Any]:
+    """The reply paused to ask the user this many questions."""
+    return {"kind": "ask", "questions": question_count}
+
+
 def hermes_activity(summary: Mapping[str, object] | None) -> dict[str, Any] | None:
     """What the Hermes companion saved from this reply."""
     if not summary:

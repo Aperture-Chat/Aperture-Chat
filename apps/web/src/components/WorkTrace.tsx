@@ -8,12 +8,14 @@ import {
   CircleCheck,
   CircleDashed,
   Code2,
+  CornerDownRight,
   EyeOff,
   Globe2,
   Image,
   Layers,
   Link2,
   ListChecks,
+  MessageCircleQuestion,
   Paperclip,
   PenLine,
   Puzzle,
@@ -64,6 +66,8 @@ const KIND_ICONS: Record<TraceKind | "next", LucideIcon> = {
   image: Image,
   continue: Repeat,
   resume: RefreshCw,
+  ask: MessageCircleQuestion,
+  answer: CornerDownRight,
   check: BadgeCheck,
   flag: TriangleAlert,
   save: BookmarkCheck,
@@ -211,8 +215,13 @@ type Reveal = {
   shown: number;
 };
 
-function freshReveal(pending: boolean, runStartedAt: number | undefined, total: number): Reveal {
-  return { runStartedAt, live: pending, expanded: pending, shown: pending ? Math.min(total, 1) : total };
+/** A run starts its reveal from the first step, or, when it carries on after
+ * the user answered its questions, from just after that answer: the steps
+ * before it already played. */
+function freshReveal(pending: boolean, runStartedAt: number | undefined, steps: TraceStep[]): Reveal {
+  const total = steps.length;
+  const resumeAt = steps.findIndex((step) => step.kind === "answer") + 1;
+  return { runStartedAt, live: pending, expanded: pending, shown: pending ? Math.max(Math.min(total, 1), resumeAt) : total };
 }
 
 /** "Thought for 4s" is the Thinking row finishing, not a new step: when
@@ -227,10 +236,10 @@ function throughThinking(shown: number, steps: TraceStep[]): number {
  * above both the running and the finished views. */
 function useTraceReveal(pending: boolean, runStartedAt: number | undefined, steps: TraceStep[]) {
   const total = steps.length;
-  const [reveal, setReveal] = useState(() => freshReveal(pending, runStartedAt, total));
+  const [reveal, setReveal] = useState(() => freshReveal(pending, runStartedAt, steps));
   let current = reveal;
   if (pending && (!reveal.live || reveal.runStartedAt !== runStartedAt)) {
-    current = freshReveal(true, runStartedAt, total);
+    current = freshReveal(true, runStartedAt, steps);
     setReveal(current);
   }
   const shown = current.live ? Math.min(throughThinking(current.shown, steps), total) : total;
@@ -325,11 +334,13 @@ function RunningBar({
 
 function FinishedBar({
   title,
+  glyph,
   summary,
   expanded,
   onToggle,
 }: {
   title: string;
+  glyph: TraceKind;
   summary: TraceSummary & { thinking: boolean };
   expanded: boolean;
   onToggle: () => void;
@@ -337,12 +348,19 @@ function FinishedBar({
   return (
     <div className="work-trace-bar">
       <ToggleButton expanded={expanded} onToggle={onToggle}>
-        <TraceGlyph kind={summary.flags ? "flag" : "done"} />
+        <TraceGlyph kind={glyph} />
         <span className="work-trace-title">{title}</span>
         <span className="work-trace-summary">{summaryText(summary, summary.thinking)}</span>
       </ToggleButton>
     </div>
   );
+}
+
+/** What the finished bar says: a reply waiting on the user's answer says so;
+ * otherwise how long it worked, and whether its checks flagged anything. */
+function finishedFace(message: ChatMessage, steps: TraceStep[], flags: number, awaitingAnswer: boolean) {
+  if (awaitingAnswer) return { title: "Waiting for your answer", glyph: "ask" as const };
+  return { title: completeTitle(message, isAgentRun(message, steps)), glyph: flags ? ("flag" as const) : ("done" as const) };
 }
 
 function traceClassName(pending: boolean, flags: number, expanded: boolean): string {
@@ -413,6 +431,7 @@ export function WorkTrace({
   onStop,
   thinkingTraces = [],
   upNext,
+  awaitingAnswer = false,
 }: {
   message: ChatMessage;
   brandName: string;
@@ -421,6 +440,8 @@ export function WorkTrace({
   thinkingTraces?: string[];
   /** A run with a planned path says what comes next instead of the reply's default. */
   upNext?: string;
+  /** The reply paused to ask, and its questions are still open to answer. */
+  awaitingAnswer?: boolean;
 }) {
   const assistantName = brandName || "The assistant";
   const pending = state === "pending";
@@ -450,7 +471,7 @@ export function WorkTrace({
         />
       ) : (
         <FinishedBar
-          title={completeTitle(message, isAgentRun(message, steps))}
+          {...finishedFace(message, steps, summary.flags, awaitingAnswer)}
           summary={{ ...summary, thinking: thinkingTraces.length > 0 }}
           expanded={reveal.expanded}
           onToggle={reveal.toggle}

@@ -2,6 +2,7 @@ import {
   apiBase,
   authHeaders,
   apiRequest,
+  isRecord,
   readApiError,
   pathId,
   ChatRequestError,
@@ -20,6 +21,7 @@ import type {
   MemorySavedNotice,
 } from "../types";
 import { parseStreamActivity, type ChatStreamActivity } from "../streamActivity";
+import { parseClarifyQuestions, type ClarifyMode, type ClarifyQuestions } from "../clarify";
 
 export type ChatWireMessage = { role: ChatRole; content: string };
 
@@ -65,6 +67,9 @@ export type ChatRuntimeOptions = {
    * Omitted = provider default.
    */
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | null;
+  /** Chat only: whether the assistant may pause to ask clarifying questions,
+   * must make the choices itself, or is continuing with the user's answers. */
+  clarifyMode?: ClarifyMode | null;
 };
 
 export type ChatCompletionResponse = {
@@ -89,6 +94,8 @@ export type ChatAssistantReply = {
   memorySaved?: MemorySavedNotice[];
   /** Set when personal-data protection concealed part of the prompt. */
   concealedPrompt?: string;
+  /** Set when the reply paused to ask: it has no text until the user answers. */
+  questions?: ClarifyQuestions;
 };
 
 /** Keep only real, positive token counts; drop all-zero usage blocks so the
@@ -313,8 +320,10 @@ function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Aborts reject with a DOMException, which is not an Error in every
+ * environment; its name is what identifies it. */
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+  return isRecord(error) && error.name === "AbortError";
 }
 
 /** Watchdog for a silent TCP/SSE socket. Any received chunk, including
@@ -364,85 +373,201 @@ function throwIfStopped(signal: AbortSignal | undefined, partialText: string) {
   if (signal?.aborted) throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, partialText);
 }
 
-export async function sendChatStream(
-  userId: string,
-  options: {
-    model: string;
-    messages: ChatWireMessage[];
-    runtime?: ChatRuntimeOptions;
-    signal?: AbortSignal;
-    onDelta?: (fullText: string) => void;
-    /** Called when the API reports the prompt as stored with personal data
-     * concealed, so the bubble can show the same text immediately. */
-    onConcealedPrompt?: (concealed: string) => void;
-    /** What the API reports doing for this reply (context gathered,
-     * continuation rounds, screening, checks), plus reconnects made here. */
-    onActivity?: (activity: ChatStreamActivity) => void;
-    /**
-     * Already-streamed assistant text, used after a page reload or a dropped
-     * connection so the next attempt continues instead of starting over.
-     */
-    initialText?: string;
-    /** Test hook: overrides the reconnect backoff schedule. */
-    resumeDelaysMs?: number[];
-    /** Test hook: overrides the no-bytes stall timeout. 0 disables it. */
-    stallTimeoutMs?: number;
-  },
-): Promise<ChatAssistantReply> {
-  const {
-    model,
-    messages,
-    runtime,
-    signal,
-    onDelta,
-    onConcealedPrompt,
-    onActivity,
-    initialText = "",
-    resumeDelaysMs = STREAM_RESUME_BACKOFF_MS,
-    stallTimeoutMs = STREAM_STALL_MS,
-  } = options;
-  let fullText = initialText;
-  let stalledAttempts = 0;
-  let reconnects = 0;
+/** A new id for a server-owned run: what the API calls `run_id`. */
+export function newChatRunId(): string {
+  return `run-${crypto.randomUUID()}`;
+}
 
-  // A generation ends when the completion marker arrives, the provider
-  // reports a non-retryable failure, or the user hits stop. Thinking time
-  // with keep-alives is not a stall. A socket that goes silent — no deltas
-  // and no keep-alives — is aborted and resumed with the partial text.
-  while (true) {
-    const progressBefore = fullText.length;
-    try {
-      return await streamChatOnce(userId, {
-        model,
-        messages: fullText
-          ? [
-              ...messages,
-              { role: "assistant", content: fullText },
-              { role: "user", content: STREAM_CONTINUATION_PROMPT },
-            ]
-          : messages,
-        runtime,
-        signal,
-        baseText: fullText,
-        stallTimeoutMs,
-        onText: (text) => {
-          fullText = text;
-        },
-        onDelta,
-        onConcealedPrompt,
-        onActivity,
-      });
-    } catch (error) {
-      throwIfStopped(signal, fullText);
-      if (!(error instanceof ChatRequestError) || !error.resumable) throw error;
-      stalledAttempts = fullText.length > progressBefore ? 1 : stalledAttempts + 1;
-      if (stalledAttempts > MAX_STREAM_RESUME_ATTEMPTS) throw error;
-      await abortableDelay(resumeBackoff(stalledAttempts, resumeDelaysMs), signal);
-      throwIfStopped(signal, fullText);
-      reconnects += 1;
-      onActivity?.({ kind: "resume", attempt: reconnects });
+/** The connection dropped while the reply may still be generating on the
+ * server; following its run again picks up where this one stopped. */
+class StreamDropError extends ChatRequestError {
+  constructor(message: string, partialText: string) {
+    super(message, undefined, partialText, true);
+  }
+}
+
+/** The server no longer has the run (it restarted, or the run is long past),
+ * so the reply continues as a new run from the text already received. */
+class RunGoneError extends ChatRequestError {
+  constructor(message: string, partialText: string) {
+    super(message, 404, partialText, true);
+  }
+}
+
+export type SendChatStreamOptions = {
+  model: string;
+  messages: ChatWireMessage[];
+  runtime?: ChatRuntimeOptions;
+  signal?: AbortSignal;
+  onDelta?: (fullText: string) => void;
+  /** Called when the API reports the prompt as stored with personal data
+   * concealed, so the bubble can show the same text immediately. */
+  onConcealedPrompt?: (concealed: string) => void;
+  /** What the API reports doing for this reply (context gathered,
+   * continuation rounds, screening, checks), plus reconnects made here. */
+  onActivity?: (activity: ChatStreamActivity) => void;
+  /**
+   * Already-streamed assistant text, used after a page reload or a dropped
+   * connection so the next attempt continues instead of starting over.
+   */
+  initialText?: string;
+  /** The server-owned run generating this reply. With one, the reply keeps
+   * generating when this page goes away, and a dropped connection follows
+   * the same run again instead of asking the model to continue. */
+  runId?: string;
+  /** Start by following `runId` (a page that came back) instead of
+   * starting it. */
+  attach?: boolean;
+  /** Called when the reply continues under a new run, so the caller can
+   * record which run to follow after a reload. */
+  onRun?: (runId: string) => void;
+  /** Called just before the reply so far arrives in one piece, when a
+   * page that came back starts following a run. Activities follow it. */
+  onSnapshot?: () => void;
+  /** Test hook: how new run ids are made. */
+  newRunId?: () => string;
+  /** Test hook: overrides the reconnect backoff schedule. */
+  resumeDelaysMs?: number[];
+  /** Test hook: overrides the no-bytes stall timeout. 0 disables it. */
+  stallTimeoutMs?: number;
+};
+
+export function sendChatStream(userId: string, options: SendChatStreamOptions): Promise<ChatAssistantReply> {
+  return new ResumableReply(userId, options).finish();
+}
+
+/** The run being followed, and the last frame position received from it. */
+type FollowedRun = { id: string; position: number; follow: boolean };
+
+/**
+ * One reply, carried to its end across failures. A generation ends when the
+ * completion marker arrives, the provider reports a non-retryable failure, or
+ * the user hits stop. Thinking time with keep-alives is not a stall. A socket
+ * that goes silent — no deltas and no keep-alives — is aborted; a server run
+ * is then followed again, and a reply without one is resumed with the
+ * partial text.
+ */
+class ResumableReply {
+  private fullText: string;
+  private stalledAttempts = 0;
+  private reconnects = 0;
+  private run: FollowedRun | null;
+
+  constructor(
+    private readonly userId: string,
+    private readonly options: SendChatStreamOptions,
+  ) {
+    this.fullText = options.initialText || "";
+    this.run = options.runId ? { id: options.runId, position: 0, follow: Boolean(options.attach) } : null;
+  }
+
+  async finish(): Promise<ChatAssistantReply> {
+    while (true) {
+      const progressBefore = this.fullText.length;
+      try {
+        return await this.attempt();
+      } catch (error) {
+        await this.recover(error, progressBefore);
+      }
     }
   }
+
+  private attempt(): Promise<ChatAssistantReply> {
+    const { model, messages, runtime, onDelta, onConcealedPrompt, onActivity, onSnapshot, signal } = this.options;
+    const attempt: StreamAttempt = {
+      signal,
+      baseText: this.fullText,
+      stallTimeoutMs: this.options.stallTimeoutMs ?? STREAM_STALL_MS,
+      onText: (text) => {
+        this.fullText = text;
+      },
+      onPosition: (position) => {
+        if (this.run) this.run.position = position;
+      },
+      onDelta,
+      onConcealedPrompt,
+      onActivity,
+      onSnapshot,
+    };
+    if (this.run?.follow) {
+      return followRunOnce(this.userId, { ...attempt, runId: this.run.id, after: this.run.position });
+    }
+    return streamChatOnce(this.userId, {
+      ...attempt,
+      model,
+      messages: continuationOf(messages, this.fullText),
+      runtime,
+      runId: this.run?.id,
+    });
+  }
+
+  /** Waits out a resumable failure and chooses the next attempt; any other
+   * failure, a stop, or too many attempts without progress ends the reply. */
+  private async recover(error: unknown, progressBefore: number): Promise<void> {
+    const { signal } = this.options;
+    throwIfStopped(signal, this.fullText);
+    this.countAttempt(error, progressBefore);
+    if (error instanceof RunGoneError) {
+      this.startNewRun();
+      return;
+    }
+    await abortableDelay(resumeBackoff(this.stalledAttempts, this.options.resumeDelaysMs || STREAM_RESUME_BACKOFF_MS), signal);
+    throwIfStopped(signal, this.fullText);
+    if (this.run && error instanceof StreamDropError) this.run.follow = true;
+    else this.startNewRun();
+    this.reconnects += 1;
+    this.options.onActivity?.({ kind: "resume", attempt: this.reconnects });
+  }
+
+  /** The counter resets whenever an attempt made progress, so only a
+   * connection that is repeatedly dead with no progress ends the run. */
+  private countAttempt(error: unknown, progressBefore: number) {
+    if (!(error instanceof ChatRequestError) || !error.resumable) throw error;
+    this.stalledAttempts = this.fullText.length > progressBefore ? 1 : this.stalledAttempts + 1;
+    if (this.stalledAttempts > MAX_STREAM_RESUME_ATTEMPTS) throw error;
+  }
+
+  private startNewRun() {
+    if (!this.run) return;
+    this.run = { id: (this.options.newRunId || newChatRunId)(), position: 0, follow: false };
+    this.options.onRun?.(this.run.id);
+  }
+}
+
+/** The conversation for an attempt: with text so far, ask to continue it. */
+function continuationOf(messages: ChatWireMessage[], fullText: string): ChatWireMessage[] {
+  if (!fullText) return messages;
+  return [
+    ...messages,
+    { role: "assistant", content: fullText },
+    { role: "user", content: STREAM_CONTINUATION_PROMPT },
+  ];
+}
+
+/** Asks the server to stop a run. Closing the page never stops one. */
+export function cancelChatRun(userId: string, runId: string): Promise<{ id: string; status: string }> {
+  return apiRequest<{ id: string; status: string }>(userId, `/api/chat/runs/${pathId(runId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+/** What one streaming request reports back while it reads. */
+type StreamAttempt = {
+  signal?: AbortSignal;
+  /** The reply text before this request: continued, never repeated. */
+  baseText: string;
+  stallTimeoutMs: number;
+  onText: (fullText: string) => void;
+  /** The position of the last frame fully read, for following a run again. */
+  onPosition: (position: number) => void;
+  onDelta?: (fullText: string) => void;
+  onConcealedPrompt?: (concealed: string) => void;
+  onActivity?: (activity: ChatStreamActivity) => void;
+  onSnapshot?: () => void;
+};
+
+function retryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
 }
 
 /** One streaming attempt. Resumability is decided per failure: transport
@@ -450,182 +575,290 @@ export async function sendChatStream(
  * deterministic failures surface immediately. */
 async function streamChatOnce(
   userId: string,
-  options: {
+  options: StreamAttempt & {
     model: string;
     messages: ChatWireMessage[];
     runtime?: ChatRuntimeOptions;
-    signal?: AbortSignal;
-    baseText: string;
-    stallTimeoutMs: number;
-    onText: (fullText: string) => void;
-    onDelta?: (fullText: string) => void;
-    onConcealedPrompt?: (concealed: string) => void;
-    onActivity?: (activity: ChatStreamActivity) => void;
+    runId?: string;
   },
 ): Promise<ChatAssistantReply> {
-  const { model, messages, runtime, signal, baseText, stallTimeoutMs, onText, onDelta, onConcealedPrompt, onActivity } =
-    options;
-  const controller = new AbortController();
-  if (signal) {
-    if (signal.aborted) controller.abort();
-    else signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
-  const watchdog = createStallWatchdog(stallTimeoutMs, () => controller.abort());
-  let fullText = baseText;
-  // Prepended to the first delta of a resumed attempt; empty on a fresh run.
-  let joiner = segmentJoiner(baseText);
-  const joinNonStreamContent = (content: string) =>
-    baseText ? `${baseText}${segmentJoiner(baseText)}${content}` : content;
-
-  try {
+  const { model, messages, runtime, runId } = options;
+  return runStreamAttempt(options, 0, async (requestSignal, reader) => {
     const response = await fetch(`${apiBase}/api/chat/complete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders(userId),
       },
-      body: JSON.stringify(chatRequestBody(model, messages, runtime, true)),
-      signal: controller.signal,
+      body: JSON.stringify(chatRequestBody(model, messages, runtime, true, runId)),
+      signal: requestSignal,
     });
-    watchdog.bump();
-
-    if (!response.ok) {
-      const detail = await readApiError(response);
-      if (
-        response.status === 400 &&
-        /image models return complete responses; retry without streaming/i.test(detail)
-      ) {
-        const reply = await sendChat(userId, { model, messages, runtime, signal });
-        return { ...reply, content: joinNonStreamContent(reply.content) };
-      }
-      throw new ChatRequestError(
-        detail,
-        response.status,
-        fullText,
-        response.status === 429 || response.status >= 500,
-      );
-    }
-
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (contentType.includes("application/json")) {
+    if (!response.ok) return completeAfterRefusal(userId, options, response, reader);
+    if ((response.headers.get("content-type") || "").toLowerCase().includes("application/json")) {
       const reply = chatReplyFromCompletion((await response.json()) as ChatCompletionResponse);
-      if (reply.concealedPrompt) onConcealedPrompt?.(reply.concealedPrompt);
-      return { ...reply, content: joinNonStreamContent(reply.content) };
+      if (reply.concealedPrompt) options.onConcealedPrompt?.(reply.concealedPrompt);
+      return { ...reply, content: reader.joinWhole(reply.content) };
     }
-    if (!contentType.includes("text/event-stream")) {
-      throw new ChatRequestError(`The chat API returned an unsupported content type: ${contentType || "unknown"}.`);
-    }
-    if (!response.body) {
-      throw new ChatRequestError("The chat API opened a stream without a response body.");
-    }
+    return reader.read(response);
+  });
+}
 
-    const reader = response.body.getReader();
+/** Image models answer whole, never streamed: that one refusal is retried
+ * without streaming. Every other refusal ends the attempt. */
+async function completeAfterRefusal(
+  userId: string,
+  options: { model: string; messages: ChatWireMessage[]; runtime?: ChatRuntimeOptions; signal?: AbortSignal },
+  response: Response,
+  reader: EventStreamReader,
+): Promise<ChatAssistantReply> {
+  const detail = await readApiError(response);
+  if (response.status === 400 && /image models return complete responses; retry without streaming/i.test(detail)) {
+    const { model, messages, runtime, signal } = options;
+    const reply = await sendChat(userId, { model, messages, runtime, signal });
+    return { ...reply, content: reader.joinWhole(reply.content) };
+  }
+  throw new ChatRequestError(detail, response.status, reader.text(), retryableStatus(response.status));
+}
+
+/** Follows a server run from frame `after` on: a page that came back, or a
+ * connection that dropped while the run kept generating. */
+async function followRunOnce(
+  userId: string,
+  options: StreamAttempt & { runId: string; after: number },
+): Promise<ChatAssistantReply> {
+  const { runId, after } = options;
+  return runStreamAttempt(options, after, async (requestSignal, reader) => {
+    const response = await fetch(`${apiBase}/api/chat/runs/${pathId(runId)}/events?after=${after}`, {
+      headers: authHeaders(userId),
+      signal: requestSignal,
+    });
+    if (response.status === 404) throw new RunGoneError(await readApiError(response), reader.text());
+    if (!response.ok) {
+      throw new ChatRequestError(await readApiError(response), response.status, reader.text(), retryableStatus(response.status));
+    }
+    return reader.read(response);
+  });
+}
+
+/** Runs one request with a stall watchdog, turning transport failures into
+ * drops that carry the text received so far. */
+async function runStreamAttempt(
+  attempt: StreamAttempt,
+  after: number,
+  request: (signal: AbortSignal, reader: EventStreamReader) => Promise<ChatAssistantReply>,
+): Promise<ChatAssistantReply> {
+  const { signal, stallTimeoutMs } = attempt;
+  const controller = new AbortController();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  const watchdog = createStallWatchdog(stallTimeoutMs, () => controller.abort());
+  const reader = new EventStreamReader(attempt, after, watchdog);
+  try {
+    return await request(controller.signal, reader);
+  } catch (error) {
+    throw transportFailure(error, signal, reader.text());
+  } finally {
+    watchdog.stop();
+  }
+}
+
+function transportFailure(error: unknown, signal: AbortSignal | undefined, partialText: string): ChatRequestError {
+  if (error instanceof ChatRequestError) return error;
+  if (!isAbortError(error)) {
+    return new StreamDropError("Could not reach the model. Check your connection and try again.", partialText);
+  }
+  if (signal?.aborted) return new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, partialText);
+  return new StreamDropError("The chat stream stalled before the completion marker arrived.", partialText);
+}
+
+/** An event field that is a plain object, else null. */
+function objectField(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = record[key];
+  return isRecord(value) ? value : null;
+}
+
+function parseEventData(data: string, partialText: string): unknown {
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw new ChatRequestError("The chat API returned a malformed streaming event.", undefined, partialText);
+  }
+}
+
+function framePositionOf(line: string): number | null {
+  const position = Number.parseInt(line.slice(3).trim(), 10);
+  return Number.isFinite(position) ? position : null;
+}
+
+function eventStreamBody(response: Response): ReadableStream<Uint8Array> {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("text/event-stream")) {
+    throw new ChatRequestError(`The chat API returned an unsupported content type: ${contentType || "unknown"}.`);
+  }
+  if (!response.body) {
+    throw new ChatRequestError("The chat API opened a stream without a response body.");
+  }
+  return response.body;
+}
+
+/** Reads the API's Server-Sent Events into the reply. A follow that resumes
+ * mid-run (`after` > 0) continues the same text; a new request or a fresh
+ * follow starts a new segment after the text before it. */
+class EventStreamReader {
+  private fullText: string;
+  /** Prepended to the first delta of a new segment; empty mid-run. */
+  private joiner: string;
+  private doneEventSeen = false;
+  private citations: ChatCitation[] = [];
+  private usage: ChatTokenUsage | undefined;
+  private memoryUsed = 0;
+  private memorySaved: MemorySavedNotice[] = [];
+  private concealedPrompt: string | undefined;
+  private questions: ClarifyQuestions | null = null;
+  /** A frame's position counts once its data has been read, so a connection
+   * cut between the two reads that frame again. */
+  private framePosition: number | null = null;
+
+  constructor(
+    private readonly attempt: StreamAttempt,
+    after: number,
+    private readonly watchdog: { bump: () => void },
+  ) {
+    this.fullText = attempt.baseText;
+    this.joiner = after > 0 ? "" : segmentJoiner(attempt.baseText);
+  }
+
+  text(): string {
+    return this.fullText;
+  }
+
+  /** A complete (non-streamed) reply joined onto the text before it. */
+  joinWhole(content: string): string {
+    const base = this.attempt.baseText;
+    return base ? `${base}${segmentJoiner(base)}${content}` : content;
+  }
+
+  async read(response: Response): Promise<ChatAssistantReply> {
+    const body = eventStreamBody(response);
+    this.watchdog.bump();
+    await this.consume(body.getReader());
+    if (!this.doneEventSeen) {
+      throw new StreamDropError("The chat stream ended before the completion marker arrived.", this.fullText);
+    }
+    if (!this.fullText && !this.questions) {
+      throw new ChatRequestError("The model returned an empty response.", undefined, undefined, true);
+    }
+    return {
+      // A paused reply's lead-in travels with its questions.
+      content: this.questions ? "" : this.fullText,
+      citations: this.citations,
+      usage: this.usage,
+      memoryUsed: this.memoryUsed,
+      memorySaved: this.memorySaved,
+      concealedPrompt: this.concealedPrompt,
+      ...(this.questions ? { questions: this.questions } : {}),
+    };
+  }
+
+  private async consume(bodyReader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
     const decoder = new TextDecoder();
     let buffer = "";
-    let doneEventSeen = false;
-    let citations: ChatCitation[] = [];
-    let usage: ChatTokenUsage | undefined;
-    let memoryUsed = 0;
-    let memorySaved: MemorySavedNotice[] = [];
-    let concealedPrompt: string | undefined;
-
-    const processLine = (rawLine: string) => {
-      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-      // Non-data lines include SSE keep-alive comments the API emits while
-      // the model is thinking; they carry no content and are skipped here.
-      if (!line.startsWith("data:")) return;
-      const data = line.slice(5).trimStart();
-      if (data === "[DONE]") {
-        doneEventSeen = true;
-        return;
-      }
-      if (!data) return;
-      let event: unknown;
-      try {
-        event = JSON.parse(data);
-      } catch {
-        throw new ChatRequestError("The chat API returned a malformed streaming event.", undefined, fullText);
-      }
-      if (!event || typeof event !== "object" || Array.isArray(event)) return;
-      const record = event as Record<string, unknown>;
-      if (typeof record.error === "string" && record.error.trim()) {
-        throw new ChatRequestError(record.error, undefined, fullText, record.retryable === true);
-      }
-      const privacy = record.privacy;
-      if (privacy && typeof privacy === "object" && !Array.isArray(privacy)) {
-        const concealed = (privacy as Record<string, unknown>).concealed_prompt;
-        if (typeof concealed === "string" && concealed) {
-          concealedPrompt = concealed;
-          onConcealedPrompt?.(concealed);
-        }
-      }
-      reportActivity(record.activity, onActivity);
-      if (typeof record.delta === "string" && record.delta) {
-        fullText += joiner + record.delta;
-        joiner = "";
-        onText(fullText);
-        onDelta?.(fullText);
-      }
-      if (record.done === true) {
-        citations = Array.isArray(record.citations) ? (record.citations as ChatCitation[]) : [];
-        usage = normalizeTokenUsage(record.usage);
-        memoryUsed = typeof record.memory_used === "number" ? record.memory_used : 0;
-        memorySaved = Array.isArray(record.memory_saved)
-          ? (record.memory_saved as MemorySavedNotice[])
-          : [];
-      }
-    };
-
-    while (!doneEventSeen) {
-      const chunk = await reader.read();
-      watchdog.bump();
+    while (!this.doneEventSeen) {
+      const chunk = await bodyReader.read();
+      this.watchdog.bump();
       if (chunk.done) {
         buffer += decoder.decode();
         break;
       }
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let newline = buffer.indexOf("\n");
-      while (newline >= 0) {
-        processLine(buffer.slice(0, newline));
-        buffer = buffer.slice(newline + 1);
-        if (doneEventSeen) break;
-        newline = buffer.indexOf("\n");
-      }
+      buffer = this.processLines(buffer + decoder.decode(chunk.value, { stream: true }));
     }
-    if (!doneEventSeen && buffer.trim()) processLine(buffer);
-    if (!doneEventSeen) {
-      throw new ChatRequestError(
-        "The chat stream ended before the completion marker arrived.",
-        undefined,
-        fullText,
-        true,
-      );
+    if (!this.doneEventSeen && buffer.trim()) this.processLine(buffer);
+  }
+
+  /** Reads each complete line; returns the unfinished rest. */
+  private processLines(buffer: string): string {
+    let rest = buffer;
+    let newline = rest.indexOf("\n");
+    while (newline >= 0 && !this.doneEventSeen) {
+      this.processLine(rest.slice(0, newline));
+      rest = rest.slice(newline + 1);
+      newline = rest.indexOf("\n");
     }
-    if (!fullText) {
-      throw new ChatRequestError("The model returned an empty response.", undefined, undefined, true);
+    return rest;
+  }
+
+  private processLine(rawLine: string): void {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.startsWith("id:")) {
+      this.framePosition = framePositionOf(line);
+      return;
     }
-    return { content: fullText, citations, usage, memoryUsed, memorySaved, concealedPrompt };
-  } catch (error) {
-    if (error instanceof ChatRequestError) throw error;
-    if (isAbortError(error)) {
-      if (signal?.aborted) {
-        throw new ChatRequestError(CANCELLED_RESPONSE_MESSAGE, undefined, fullText);
-      }
-      throw new ChatRequestError(
-        "The chat stream stalled before the completion marker arrived.",
-        undefined,
-        fullText,
-        true,
-      );
+    // Other non-data lines include SSE keep-alive comments the API emits
+    // while the model is thinking; they carry no content and are skipped.
+    if (!line.startsWith("data:")) return;
+    this.readData(line.slice(5).trimStart());
+    if (this.framePosition !== null) this.attempt.onPosition(this.framePosition);
+    this.framePosition = null;
+  }
+
+  private readData(data: string): void {
+    if (data === "[DONE]") {
+      this.doneEventSeen = true;
+      return;
     }
-    throw new ChatRequestError(
-      "Could not reach the model. Check your connection and try again.",
-      undefined,
-      fullText,
-      true,
-    );
-  } finally {
-    watchdog.stop();
+    const event = data ? parseEventData(data, this.fullText) : null;
+    if (isRecord(event)) this.applyEvent(event);
+  }
+
+  private applyEvent(record: Record<string, unknown>): void {
+    if (typeof record.error === "string" && record.error.trim()) {
+      throw new ChatRequestError(record.error, undefined, this.fullText, record.retryable === true);
+    }
+    const snapshot = objectField(record, "snapshot");
+    if (snapshot) this.applySnapshot(snapshot);
+    this.showConcealedPrompt(objectField(record, "privacy")?.concealed_prompt);
+    reportActivity(record.activity, this.attempt.onActivity);
+    if (typeof record.delta === "string" && record.delta) this.appendDelta(record.delta);
+    this.questions = parseClarifyQuestions(record.questions) ?? this.questions;
+    if (record.done === true) this.recordDone(record);
+  }
+
+  private appendDelta(delta: string): void {
+    this.fullText += this.joiner + delta;
+    this.joiner = "";
+    this.attempt.onText(this.fullText);
+    this.attempt.onDelta?.(this.fullText);
+  }
+
+  private recordDone(record: Record<string, unknown>): void {
+    this.citations = Array.isArray(record.citations) ? (record.citations as ChatCitation[]) : [];
+    this.usage = normalizeTokenUsage(record.usage);
+    this.memoryUsed = typeof record.memory_used === "number" ? record.memory_used : 0;
+    this.memorySaved = Array.isArray(record.memory_saved) ? (record.memory_saved as MemorySavedNotice[]) : [];
+  }
+
+  private showConcealedPrompt(concealed: unknown): void {
+    if (typeof concealed !== "string" || !concealed) return;
+    this.concealedPrompt = concealed;
+    this.attempt.onConcealedPrompt?.(concealed);
+  }
+
+  /** The reply so far, in one piece, for a page following a run it did not
+   * start. `base` is the text the run itself continued. */
+  private applySnapshot(snapshot: Record<string, unknown>): void {
+    const base = typeof snapshot.base === "string" ? snapshot.base : this.attempt.baseText;
+    const text = typeof snapshot.text === "string" ? snapshot.text : "";
+    this.attempt.onSnapshot?.();
+    this.fullText = base;
+    this.joiner = segmentJoiner(base);
+    this.showConcealedPrompt(snapshot.concealed_prompt);
+    const activities: unknown[] = Array.isArray(snapshot.activities) ? snapshot.activities : [];
+    for (const activity of activities) reportActivity(activity, this.attempt.onActivity);
+    this.questions = parseClarifyQuestions(snapshot.questions);
+    if (text) this.appendDelta(text);
+    else this.attempt.onText(this.fullText);
   }
 }
 
@@ -634,6 +867,7 @@ function chatRequestBody(
   messages: ChatWireMessage[],
   runtime: ChatRuntimeOptions | undefined,
   stream: boolean,
+  runId?: string,
 ) {
   return {
     model,
@@ -641,6 +875,7 @@ function chatRequestBody(
     stream,
     surface: runtime?.surface ?? "chat",
     thread_id: runtime?.threadId ?? null,
+    ...(runId ? { run_id: runId } : {}),
     draft_title: runtime?.draftTitle ?? null,
     client_started_at: runtime?.clientStartedAt ?? null,
     agent_profile_id: runtime?.agentProfileId ?? null,
@@ -657,6 +892,7 @@ function chatRequestBody(
     context_attachment_ids: runtime?.contextAttachmentIds ?? [],
     max_completion_tokens: runtime?.maxCompletionTokens ?? null,
     reasoning_effort: runtime?.reasoningEffort ?? null,
+    clarify_mode: runtime?.clarifyMode ?? null,
   };
 }
 

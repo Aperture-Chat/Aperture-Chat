@@ -19,7 +19,7 @@ import threading
 import time
 import weakref
 from collections import Counter, defaultdict
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -5236,6 +5236,22 @@ class SeedStore:
             scan_thread(self, saved, self.tenant_retention_policy(saved.tenant_id))
         self._capture_training_signals(saved)
         return saved
+
+    def revise_chat_thread(
+        self,
+        thread_id: str,
+        revise: Callable[[ChatThread | None], ChatThread | None],
+    ) -> ChatThread | None:
+        """Read, revise and save one thread with no other writer in between.
+
+        ``revise`` receives the stored thread (None when there is none) and
+        returns the thread to save, or None to leave it unchanged. Browser
+        saves and server-settled replies both go through here, so neither
+        can overwrite a change the other made a moment earlier.
+        """
+        with self._store_lock:
+            revised = revise(self.chat_threads.get(thread_id))
+            return None if revised is None else self.save_chat_thread(revised)
 
     _TRAINING_SIGNATURE_LIMIT = 5000
 
