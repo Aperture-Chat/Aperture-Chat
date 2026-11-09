@@ -2002,7 +2002,11 @@ export function useChatStore(
           messages: nextMessages,
         };
 
-        setThreads((prev) => [updated, ...prev.filter((item) => item.id !== targetId)]);
+        // The ref gets the new reply now, not after the next render, so a
+        // stream event that arrives first has a reply to land on.
+        const addThread = (threads: ChatThread[]) => [updated, ...threads.filter((item) => item.id !== targetId)];
+        threadsRef.current = addThread(threadsRef.current);
+        setThreads(addThread);
         setActiveId(targetId);
         persistThread(updated);
 

@@ -356,6 +356,34 @@ function readThread(overrides: Partial<ChatThread> = {}): ChatThread {
   };
 }
 
+test("sending in one chat moves it to the top once and keeps every other chat", async () => {
+  const data = firstUseData();
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([
+    readThread({ id: "thread-a", title: "First" }),
+    readThread({ id: "thread-b", title: "Second" }),
+  ]);
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_user, saved) => saved);
+  vi.spyOn(api, "sendChatStream").mockResolvedValue({ content: "Done.", citations: [], memoryUsed: 0, memorySaved: [] });
+  const view = renderHook(() => useChatStore(data.me.id, data));
+  await act(async () => {});
+  act(() => view.result.current.selectThread("thread-b"));
+
+  await act(async () => {
+    view.result.current.sendMessage("One more thing", []);
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+
+  expect(view.result.current.threads.map((item) => item.title)).toEqual(["Second", "First", "New chat"]);
+  expect(view.result.current.activeThread?.messages.map((message) => message.content)).toEqual([
+    "Summarize",
+    "Summary",
+    "One more thing",
+    "Done.",
+  ]);
+});
+
 test("marking a chat read stores the position on the server without saving or reordering the chat", async () => {
   const data = firstUseData();
   vi.spyOn(api, "listChatThreads").mockResolvedValue([readThread()]);
@@ -1055,12 +1083,13 @@ const askedQuestions = {
 const pausedReply = { content: "", questions: askedQuestions, citations: [], memoryUsed: 0, memorySaved: [] };
 const askedTurn = { role: "assistant", content: "One question first.\n\nI paused to ask:\n1. Which state? (California / New York)" };
 
-async function pausedChat() {
+async function pausedChat({ askBeforeDraw = false } = {}) {
   vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
   const saves = vi.spyOn(api, "saveChatThread").mockImplementation(async (_user, saved) => saved);
   const stream = vi.spyOn(api, "sendChatStream").mockImplementationOnce(async (_user, options) => {
-    // A real stream reports activity after the page has drawn the new reply.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A stream usually reports activity after the page has drawn the new
+    // reply, but a fast one (or a busy page) can report it first.
+    if (!askBeforeDraw) await new Promise((resolve) => setTimeout(resolve, 0));
     options.onActivity?.({ kind: "ask", questions: 1 });
     return pausedReply;
   });
@@ -1085,6 +1114,15 @@ test("a reply that pauses to ask waits on its questions instead of finishing", a
   expect(reply().content).toBe("");
   expect(reply().metadata?.clarify).toMatchObject({ state: "waiting", ...askedQuestions, waitedMs: 0 });
   expect(reply().metadata?.chatRuntime).toMatchObject({ clarifyMode: "ask" });
+  const steps = reply().activityTrace?.map((step) => step.id) ?? [];
+  expect(steps).toContain("ask:questions");
+  expect(steps).not.toContain("done:reply");
+});
+
+test("questions reported before the page draws the new reply still show in its trace", async () => {
+  const { reply } = await pausedChat({ askBeforeDraw: true });
+
+  expect(reply().metadata?.clarify).toMatchObject({ state: "waiting" });
   const steps = reply().activityTrace?.map((step) => step.id) ?? [];
   expect(steps).toContain("ask:questions");
   expect(steps).not.toContain("done:reply");
