@@ -236,6 +236,36 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.21
+
+- **Replies keep running when you leave.** A chat reply now runs on the server
+  instead of inside the browser tab. Reload the page, close the browser, or
+  switch to another chat, and the reply keeps going; come back and it picks up
+  where it is, with its work trace, or shows the finished answer. **Stop** ends
+  the run on the server. This also fixes "Unknown model 'agent-client-update'"
+  after clicking away from a running chat: the reload had resumed the reply
+  before the account's models loaded.
+- **How runs are kept.** Live runs are held in the API process, which runs one
+  worker in the published image; keep it that way, because a second worker or
+  replica would not see the first one's runs. A finished run stays available
+  to reattach for 30 minutes. Restarting or updating the API ends any run in
+  progress, and the browser then continues that reply as a new request. New
+  routes: `GET /api/chat/runs/{id}/events?after=N` and
+  `POST /api/chat/runs/{id}/cancel`; `/api/chat/complete` takes `run_id` and
+  `thread_id`. Drafts and automations do not use server runs yet.
+- **Clarifying questions.** When a request is unclear, a chat reply can pause
+  to ask up to three multiple-choice questions, one at a time, with a
+  recommended choice marked. **Decide for me** lets the assistant choose and say
+  what it assumed, and **Always decide for me** stops the questions. Answers
+  continue the same reply, and its time leaves out the wait. Reply settings has
+  a new **Ask me when unclear** switch, on by default and remembered per user in
+  this browser. Questions work with every provider, apply only to streamed chat
+  replies, and change nothing for `/v1` clients.
+- **No migration.** This release adds no database migration and changes no
+  stored row format; a paused reply is an ordinary saved message.
+- **Training and the README do not show clarifying questions yet.** No lesson,
+  PDF guide, or README picture covers the question card or the new switch.
+
 ## New Since v0.5.20
 
 - **Share a draft and edit it together.** Documents, decks, and spreadsheets have
