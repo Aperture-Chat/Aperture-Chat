@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   FileText,
   LayoutGrid,
+  MessageCircleQuestion,
   MessageSquare,
   PenLine,
   Plug,
@@ -176,13 +177,45 @@ export function MatterOptionRow({
   );
 }
 
-export function StreamSwitch({ checked, onToggle }: { checked: boolean; onToggle: () => void }) {
+/** A Reply settings switch: a real checkbox with a short name, explained beside it. */
+function SettingSwitch({
+  icon,
+  title,
+  detail,
+  checked,
+  onToggle,
+}: {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
   return (
     <label className="composer-option-row">
-      <OptionCopy icon={PenLine} title="Stream replies" detail="Show the words as they are written." />
-      <input className="composer-switch-input" type="checkbox" aria-label="Stream replies" checked={checked} onChange={onToggle} />
+      <OptionCopy icon={icon} title={title} detail={detail} />
+      <input className="composer-switch-input" type="checkbox" aria-label={title} checked={checked} onChange={onToggle} />
       <SwitchFace on={checked} />
     </label>
+  );
+}
+
+export function StreamSwitch({ checked, onToggle }: { checked: boolean; onToggle: () => void }) {
+  return (
+    <SettingSwitch icon={PenLine} title="Stream replies" detail="Show the words as they are written." checked={checked} onToggle={onToggle} />
+  );
+}
+
+/** Whether the assistant may stop to ask when a request could go several ways. */
+export function AskSwitch({ checked, onToggle }: { checked: boolean; onToggle: () => void }) {
+  return (
+    <SettingSwitch
+      icon={MessageCircleQuestion}
+      title="Ask me when unclear"
+      detail={checked ? "Ask first when a request is unclear." : "Decide, then say what was assumed."}
+      checked={checked}
+      onToggle={onToggle}
+    />
   );
 }
 

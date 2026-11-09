@@ -28,6 +28,10 @@ export type ChatStreamActivity =
   | { kind: "screen-done" }
   | { kind: "continue"; round: number }
   | { kind: "hermes"; memories: number; skills: string[]; automations: string[] }
+  /** The reply paused to ask the user this many questions. */
+  | { kind: "ask"; questions: number }
+  /** Client-side: the user answered the questions, or left them to the assistant. */
+  | { kind: "answered"; questions: number; summary: string; delegated: boolean }
   /** Client-side: the stream dropped and the browser resumed it. */
   | { kind: "resume"; attempt: number };
 
@@ -127,6 +131,10 @@ const PARSERS: Record<string, Parser> = {
   continue: (raw) => {
     const round = count(raw.round);
     return round ? { kind: "continue", round } : null;
+  },
+  ask: (raw) => {
+    const questions = count(raw.questions);
+    return questions ? { kind: "ask", questions } : null;
   },
   hermes: (raw) => {
     const memories = count(raw.memories);

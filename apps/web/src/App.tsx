@@ -322,6 +322,8 @@ export function App() {
   );
   const chat = useChatStore(sessionUserId ?? "signed-out", effectiveData, {
     enabled: Boolean(sessionUserId),
+    // Until bootstrap loads, `data` is the bundled sample workspace.
+    ready: sessionHydrated,
   });
   // Folders kept in sync from Library > Knowledge keep adding new files while Aperture is open.
   useFolderSyncWatcher(sessionUserId && sessionHydrated ? data.me.id : null);

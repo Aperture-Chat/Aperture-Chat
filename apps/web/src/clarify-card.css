@@ -1,0 +1,248 @@
+/* Clarifying questions (components/ClarifyCard.tsx).
+ *
+ * A reply that paused to ask shows its questions under its trace, in the same
+ * frame and keys as the Drafts handoff card (.draft-handoff-*). Each option is
+ * a raised key holding a real radio button or checkbox: the whole row is the
+ * target, the state is a lit mark as well as a tint, and the focus ring sits
+ * inside the row. Text stays at 13px or larger and rows at 44px or taller.
+ * The one thing the assistant would pick says "Suggested" in words. */
+
+.clarify-card {
+  --clarify-accent: color-mix(in srgb, var(--teal-strong) 74%, #000);
+  max-width: 620px;
+}
+
+.theme-dark .clarify-card {
+  --clarify-accent: color-mix(in srgb, var(--teal) 45%, #fff);
+}
+
+.clarify-question {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.clarify-question legend {
+  margin: 0 0 2px;
+  padding: 0;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.message .clarify-step {
+  margin: -4px 0 -6px;
+  color: var(--clarify-accent);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.clarify-asked {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.message .clarify-question-hint {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Back borrows the handoff card's quiet key, at this card's 13px floor. */
+.clarify-card .draft-handoff-edit {
+  font-size: 13px;
+}
+
+.clarify-options {
+  display: grid;
+  gap: 6px;
+}
+
+.clarify-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--tactile-raised);
+  cursor: pointer;
+  transition:
+    background var(--speed) var(--ease),
+    border-color var(--speed) var(--ease),
+    box-shadow var(--speed) var(--ease);
+}
+
+/* The real input stays in the row for keyboards and screen readers; the
+   mark beside it is what the eye reads. */
+.clarify-option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.clarify-option:has(input:focus-visible) {
+  outline: 2px solid var(--teal);
+  outline-offset: -3px;
+}
+
+@media (hover: hover) {
+  .clarify-option:not(.is-picked):has(input:not(:disabled)):hover {
+    border-color: color-mix(in srgb, var(--teal) 55%, var(--border-strong));
+    box-shadow: var(--tactile-raised-hover);
+  }
+}
+
+.clarify-option.is-picked {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal-soft) 70%, var(--surface));
+  box-shadow: var(--tactile-pressed-row);
+}
+
+.clarify-option:has(input:disabled) {
+  cursor: default;
+  box-shadow: none;
+}
+
+.clarify-option-mark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--tactile-track);
+  box-shadow: var(--tactile-switch-well);
+  color: #fff;
+}
+
+.clarify-option-mark[data-type="checkbox"] {
+  border-radius: 6px;
+}
+
+.is-picked .clarify-option-mark {
+  background: var(--tactile-lit);
+  box-shadow: var(--tactile-switch-well-on);
+}
+
+.is-picked .clarify-option-mark[data-type="radio"]::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.clarify-option-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.clarify-option-copy strong {
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.clarify-option-copy small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.clarify-option-tag {
+  color: var(--clarify-accent);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* iOS zooms into fields under 16px. */
+.clarify-other-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--tactile-field);
+  color: var(--text);
+  box-shadow: var(--tactile-field-shadow);
+  font: inherit;
+  font-size: 16px;
+}
+
+.clarify-other-input:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: var(--tactile-field-focus), var(--tactile-field-shadow);
+}
+
+.message .clarify-note {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.clarify-always {
+  min-height: 32px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--clarify-accent);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.clarify-always:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.clarify-always:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The conversation moved on: what was asked stays readable, but quiet. */
+.clarify-card.is-passed {
+  background: var(--surface);
+  box-shadow: none;
+}
+
+@media (max-width: 600px), (pointer: coarse) {
+  .clarify-always {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clarify-option {
+    transition: none;
+  }
+}

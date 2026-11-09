@@ -4037,3 +4037,120 @@ test("a new chat filed under a typed client-matter number is linked once its fir
   expect(await screen.findByRole("menuitem", { name: "Matter Filed under 100234-0001." })).toBeInTheDocument();
   expect(matterCalls.filter((call) => call.startsWith("PUT"))).toHaveLength(1);
 });
+
+/* ------------------------------------------------------------------ */
+/* Clarifying questions                                                */
+/* ------------------------------------------------------------------ */
+
+const CLARIFY_QUESTIONS = {
+  intro: "One question first.",
+  questions: [
+    {
+      id: "q1",
+      question: "Which state's law applies?",
+      options: [{ label: "California" }, { label: "New York" }],
+      multiple: false,
+      recommended: 0,
+    },
+  ],
+};
+
+/** Each chat request gets its own hand-driven stream, in order. */
+function stubClarifyingChat() {
+  const streams: Array<ReturnType<typeof stagedSseResponse>> = [];
+  const bodies: Array<Record<string, unknown>> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/chat/complete")) {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        const sse = stagedSseResponse();
+        streams.push(sse);
+        return sse.response;
+      }
+      return new Response("unavailable", { status: 500 });
+    }),
+  );
+  return { streams, bodies };
+}
+
+function pauseToAsk(sse: ReturnType<typeof stagedSseResponse>) {
+  sse.push('data: {"activity":{"kind":"ask","questions":1}}\n\n');
+  sse.push(`data: ${JSON.stringify({ questions: CLARIFY_QUESTIONS })}\n\n`);
+  sse.push('data: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n');
+  sse.close();
+}
+
+test("a reply that pauses to ask shows its questions, and answering carries the same reply on", async () => {
+  const { streams, bodies } = stubClarifyingChat();
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  sendFromComposer("Which notice period applies to my lease?");
+  await waitFor(() => expect(streams).toHaveLength(1));
+  expect(bodies[0].clarify_mode).toBe("ask");
+
+  pauseToAsk(streams[0]);
+
+  const card = await screen.findByRole("region", { name: "Aperture Chat has a question before going on" });
+  expect(within(card).getByText("One question first.")).toBeInTheDocument();
+  expect(await screen.findByText("Waiting for your answer")).toBeInTheDocument();
+  fireEvent.click(within(card).getByRole("radio", { name: /California/ }));
+  fireEvent.click(within(card).getByRole("button", { name: "Continue" }));
+
+  await waitFor(() => expect(streams).toHaveLength(2));
+  expect(bodies[1].clarify_mode).toBe("answered");
+  expect((bodies[1].messages as Array<{ content: string }>).slice(-2).map((message) => message.content)).toEqual([
+    "One question first.\n\nI paused to ask:\n1. Which state's law applies? (California / New York)",
+    "My answers:\n1. Which state's law applies? California\n\nContinue with these answers.",
+  ]);
+  expect(screen.queryByRole("region", { name: "Aperture Chat has a question before going on" })).not.toBeInTheDocument();
+
+  streams[1].push('data: {"delta":"The clause, under California law."}\n\n');
+  streams[1].push('data: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n');
+  streams[1].close();
+
+  expect(await screen.findByText("The clause, under California law.")).toBeInTheDocument();
+  expect(screen.getAllByRole("article").filter((item) => item.classList.contains("assistant-message"))).toHaveLength(1);
+  const trace = await screen.findByRole("region", { name: "Aperture Chat activity trace" });
+  fireEvent.click(within(trace).getByRole("button", { name: "Collapse work trace" }));
+  fireEvent.click(within(trace).getByRole("button", { name: "Expand work trace" }));
+  expect(within(trace).getByText("Paused to ask you 1 question")).toBeInTheDocument();
+  expect(within(trace).getByText("You answered 1 question")).toBeInTheDocument();
+  expect(within(trace).getByText("California")).toBeInTheDocument();
+});
+
+test("turning off Ask me when unclear tells the assistant to make the choices", async () => {
+  const { streams, bodies } = stubClarifyingChat();
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await screen.findByLabelText("Message");
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  const askToggle = await screen.findByRole("checkbox", { name: "Ask me when unclear" });
+  expect(askToggle).toBeChecked();
+  fireEvent.click(askToggle);
+  expect(askToggle).not.toBeChecked();
+  expect(window.localStorage.getItem("aperture-ask-when-unclear-user-admin")).toBe("off");
+  fireEvent.keyDown(document, { key: "Escape" });
+
+  sendFromComposer("Which notice period applies to my lease?");
+
+  await waitFor(() => expect(streams).toHaveLength(1));
+  expect(bodies[0].clarify_mode).toBe("decide");
+});
+
+test("Always decide for me lets the assistant decide now and stops it asking later", async () => {
+  const { streams, bodies } = stubClarifyingChat();
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  sendFromComposer("Which notice period applies to my lease?");
+  await waitFor(() => expect(streams).toHaveLength(1));
+  pauseToAsk(streams[0]);
+
+  const card = await screen.findByRole("region", { name: "Aperture Chat has a question before going on" });
+  fireEvent.click(within(card).getByRole("button", { name: "Always decide for me" }));
+
+  await waitFor(() => expect(streams).toHaveLength(2));
+  expect((bodies[1].messages as Array<{ content: string }>).at(-1)?.content).toMatch(/^Make these choices yourself/);
+  expect(window.localStorage.getItem("aperture-ask-when-unclear-user-admin")).toBe("off");
+});

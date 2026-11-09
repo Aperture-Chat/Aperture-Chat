@@ -40,6 +40,8 @@ export type TraceKind =
   | "image"
   | "continue"
   | "resume"
+  | "ask"
+  | "answer"
   | "check"
   | "flag"
   | "save"
@@ -50,7 +52,7 @@ export type TraceStep = { id: string; kind: TraceKind; label: string; detail?: s
 const TRACE_KINDS = new Set<string>([
   "route", "agent", "context", "knowledge", "web", "fetch", "attachments", "memory", "tools", "skills",
   "plan", "privacy", "screen", "think", "write", "code", "diagram", "table", "image", "continue",
-  "resume", "check", "flag", "save", "done",
+  "resume", "ask", "answer", "check", "flag", "save", "done",
 ]);
 
 /** Ids from the preset trace saved before this one. `validator` claimed a
@@ -252,11 +254,32 @@ const ACTIVITY_STEPS: StepBuilders = {
   resume: ({ attempt }) => [
     stepOf(`resume:a${attempt}`, "Connection dropped — resumed where it left off", `Reconnect ${attempt}`),
   ],
+  ask: ({ questions }) => [
+    stepOf("ask:questions", `Paused to ask you ${plural(questions, "question")}`, "So the reply fits what you need"),
+  ],
+  answered: ({ questions, summary, delegated }) => [
+    delegated
+      ? stepOf("answer:reply", "You left the choices to the assistant", "It picks what it judges best and says what it chose.")
+      : stepOf("answer:reply", `You answered ${plural(questions, "question")}`, summary || undefined),
+  ],
 };
 
 function activitySteps(activity: ChatStreamActivity): ChatActivityTraceStep[] {
   const build = ACTIVITY_STEPS[activity.kind] as (activity: ChatStreamActivity) => ChatActivityTraceStep[];
   return build(activity);
+}
+
+/** A trace ready to have its run's reported activity replayed onto it.
+ * Reported facts merge by id, so only continuation rounds, which the run adds
+ * anew each time it reports them, are cleared first. */
+export function forReplay(trace: ChatActivityTraceStep[] = []): ChatActivityTraceStep[] {
+  return trace.filter((step) => kindOf(step.id) !== "continue");
+}
+
+/** A reply that paused to ask has no text yet: what was gathered stays, and
+ * steps read from its lead-in (now shown with the questions) go. */
+export function pausedTrace(trace: ChatActivityTraceStep[] = []): ChatActivityTraceStep[] {
+  return trace.filter((step) => !CONTENT_KINDS.has(kindOf(step.id) as TraceKind));
 }
 
 /** Adds what the API reported. A repeated fact replaces its step; continuation

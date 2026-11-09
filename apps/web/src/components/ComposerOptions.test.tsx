@@ -5,6 +5,7 @@ import {
   ResourceSearch,
   ResourceTiles,
   ShortcutGuide,
+  AskSwitch,
   StreamSwitch,
   MatterOptionRow,
   ToolSwitch,
@@ -80,6 +81,23 @@ describe("StreamSwitch", () => {
   test("shows Off when replies wait until they finish", () => {
     render(<StreamSwitch checked={false} onToggle={() => {}} />);
     expect(screen.getByRole("checkbox", { name: "Stream replies" }).closest("label")).toHaveTextContent("Off");
+  });
+});
+
+describe("AskSwitch", () => {
+  test("says in words what the assistant does either way", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(<AskSwitch checked onToggle={onToggle} />);
+    const box = screen.getByRole("checkbox", { name: "Ask me when unclear" });
+    expect(box).toBeChecked();
+    expect(box.closest("label")).toHaveTextContent("Ask first when a request is unclear.");
+    expect(box.closest("label")).toHaveTextContent("On");
+    fireEvent.click(box);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+
+    rerender(<AskSwitch checked={false} onToggle={onToggle} />);
+    expect(box.closest("label")).toHaveTextContent("Decide, then say what was assumed.");
+    expect(box.closest("label")).toHaveTextContent("Off");
   });
 });
 
