@@ -222,6 +222,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Lets a page on another origin read the chat API's do-not-retry signal.
+    expose_headers=["X-Aperture-Retryable"],
 )
 
 app.include_router(health.router)

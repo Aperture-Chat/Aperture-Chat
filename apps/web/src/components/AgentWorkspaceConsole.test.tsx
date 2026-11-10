@@ -776,6 +776,22 @@ test("an empty workspace offers agent templates", () => {
   expect(screen.getByLabelText("Agent name")).toHaveValue("Policy Q&A");
 });
 
+test.each([
+  ["Contract Reviewer", /issue list/i, /section or clause/i],
+  ["Deposition Summarizer", /page and line/i, /never characterize/i],
+  ["Financial Analyst", /show (the|each) calculation/i, /units, currency, and period/i],
+  ["Client Memo Writer", /recommendation first/i, /assumption/i],
+])("the %s template fills in instructions written for that work", (name, instructions, guardrail) => {
+  currentData = { ...currentData, models: currentData.models.filter((model) => !model.is_custom) };
+  renderAgentWorkspace();
+
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(name) }));
+
+  expect(screen.getByLabelText("Agent name")).toHaveValue(name);
+  expect((screen.getByLabelText("System prompt") as HTMLTextAreaElement).value).toMatch(instructions);
+  expect((screen.getByLabelText("Meta prompt") as HTMLTextAreaElement).value).toMatch(guardrail);
+});
+
 test("Hermes agents stay visible but locked for users without the Hermes grant", () => {
   const hermesAgent = currentData.models.find((model) => model.agentic_companion === "hermes")!;
   const jane = currentData.users.find((user) => user.id === "user-jane")!;

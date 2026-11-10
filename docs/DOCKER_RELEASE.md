@@ -236,6 +236,49 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.22
+
+- **Research steps in chat.** Before it answers, a chat reply can ask the
+  platform to search the user's knowledge again, search the web again, read a
+  linked page, or work out a figure exactly. It may take up to four steps at a
+  time and up to three rounds, and each step shows in the work trace. A step
+  can only use what the message was already allowed: knowledge the user
+  attached, web search the user switched on. Fast replies, `/v1` clients, and
+  code edits take no steps. The audit log records `chat.research_steps` with
+  each step's kind and count and the sources it added, never the search text.
+- **Drafts asks before it writes.** With **Ask me when unclear** on, a
+  drafting request for a document, deck, or spreadsheet first gets a short
+  check. If something is open, the assistant shows the chat's question card
+  under the request and writes with the answers. This adds one short model
+  call to each drafting request; turn the switch off in the assistant's
+  settings, or in chat's Send options, to skip it. The switch is shared with
+  chat and remembered per user in this browser.
+- **Research steps in Drafts.** A request that writes a document, deck, or
+  workbook can take the same steps before it writes. They are listed in the
+  draft chat when the draft arrives, not while it is being written.
+- **Check.** A **Check** key in the document status bar lists blanks and
+  placeholders, defined terms that are unused or undefined, missing exhibits
+  and cross-references, and numbering that skips or repeats. It runs in the
+  browser, uses no model, and does not read automatically numbered lists.
+- **Legal, finance, and consulting starting points.** Four agent templates
+  (Contract Reviewer, Deposition Summarizer, Financial Analyst, Client Memo
+  Writer), three automation recipes (Weekly matter status, Month-end variance
+  commentary, Regulatory watch), a **Legal & business** group of AI actions in
+  documents, and new slide and spreadsheet actions.
+- **Fixes.** "Under 50 words" was read as a minimum and is now a limit. A
+  linked page gave the model 1,000 characters and now gives 6,000. When web
+  search is unavailable the reply shows that message at once instead of
+  retrying for minutes as a dropped connection. Warning colors now have dark
+  theme values.
+- **No migration, no new settings.** This release adds no database migration,
+  no environment variable, no Compose service, and no new dependency. Research
+  steps and questions work with every provider because the model writes them
+  as text; a model that ignores the instruction simply answers as before.
+- **Not shown or tried yet.** Research steps and Drafts questions were
+  exercised with a scripted stand-in model, not a real one, and the README's
+  four new pictures use that stand-in. No training lesson or PDF guide covers
+  research steps, Drafts questions, Check, or the new templates.
+
 ## New Since v0.5.21
 
 - **Replies keep running when you leave.** A chat reply now runs on the server

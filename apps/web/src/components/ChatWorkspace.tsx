@@ -1864,6 +1864,7 @@ export function ChatWorkspace({
         runtime.fetchUrls = [...fetchUrls];
       }
       runtime.clarifyMode = clarifyMode;
+      runtime.workSteps = true;
       const approvedRuntimeToolIds = (runtime.toolConfigIds ?? []).filter((toolId) => approvedToolIds.has(toolId));
       runtime.approvedToolConfigIds = approvedRuntimeToolIds;
       // Exchange each user approval for a signed token the backend trusts; the
@@ -1957,6 +1958,7 @@ export function ChatWorkspace({
       runtime.approvedToolConfigIds = [];
       runtime.approvalTokens = [];
       runtime.clarifyMode = clarifyMode;
+      runtime.workSteps = true;
       setPendingHandoff(null);
       chat.sendMessage(pending.text, uploaded, runtime);
     } catch (error) {

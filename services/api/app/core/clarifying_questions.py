@@ -28,10 +28,11 @@ parse is released as written, so nothing the model wrote is ever lost.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, Literal
+
+from app.core.fenced_block import BlockGate, FenceTag, block_body
 
 ClarifyMode = Literal["ask", "decide", "answered"]
 
@@ -44,13 +45,7 @@ LABEL_CHARS = 120
 DETAIL_CHARS = 200
 INTRO_CHARS = 2000
 
-# An opening fence line naming the tag. The newline is required: until it
-# arrives, "```aperture-ask" could still turn into "```aperture-asks".
-_OPENER = re.compile(
-    rf"^[ \t]*(?:`{{3,}}|~{{3,}})[ \t]*{ASK_TAG}(?![\w-])[^\n]*\n", re.MULTILINE | re.IGNORECASE
-)
-_CLOSER = re.compile(r"^[ \t]*(?:`{3,}|~{3,})[ \t]*$", re.MULTILINE)
-_FENCE_START = re.compile(r"(`+|~+)[ \t]*([^\n]*)$")
+_ASK_FENCE = FenceTag(ASK_TAG)
 
 
 @dataclass(frozen=True)
@@ -176,11 +171,6 @@ def parse_ask_block(raw: str, *, intro: str = "") -> AskBlock | None:
     return AskBlock(intro=intro.strip()[:INTRO_CHARS], questions=tuple(questions[:MAX_QUESTIONS]))
 
 
-def _block_body(after_opener: str) -> str:
-    closer = _CLOSER.search(after_opener)
-    return (after_opener[: closer.start()] if closer else after_opener).strip()
-
-
 @dataclass(frozen=True)
 class AskSplit:
     """A finished reply: its text, and the questions it paused on, if any."""
@@ -195,76 +185,21 @@ def split_reply(text: str) -> AskSplit:
     A reply with no block, or with one that does not parse, stays as written.
     Anything after a valid block is dropped: the model was told to stop there.
     """
-    opener = _OPENER.search(text)
+    opener = _ASK_FENCE.opener.search(text)
     if opener is None:
         return AskSplit(text, None)
     intro = text[: opener.start()].strip()
-    block = parse_ask_block(_block_body(text[opener.end() :]), intro=intro)
+    block = parse_ask_block(block_body(text[opener.end() :]), intro=intro)
     return AskSplit(intro, block) if block is not None else AskSplit(text, None)
 
 
-def _could_open(line: str) -> bool:
-    """Whether a line still being written may turn out to open an ask block."""
-    stripped = line.lstrip(" \t")
-    if not stripped:
-        return True
-    match = _FENCE_START.match(stripped)
-    if match is None:
-        return False
-    fence, rest = match.group(1), match.group(2).lower()
-    if len(fence) < 3:
-        return rest == ""
-    return ASK_TAG.startswith(rest) or rest.startswith(ASK_TAG)
-
-
-class AskGate:
-    """Streams a reply while holding back an ask block.
-
-    ``feed`` returns the text that is safe to show now: everything except a
-    last line that may be the start of the block, and, once the block has
-    begun, nothing more. ``finish`` returns what is still owed: a held line
-    that turned out to be ordinary text, or a block that did not parse.
-    """
+class AskGate(BlockGate[AskBlock]):
+    """Streams a reply while holding back an ask block; see ``BlockGate``."""
 
     def __init__(self, *, enabled: bool = True) -> None:
-        self._enabled = enabled
-        self._text = ""
-        self._released = 0
-        self._opener: re.Match[str] | None = None
-        self.block: AskBlock | None = None
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
-    def feed(self, delta: str) -> str:
-        self._text += delta
-        if not self._enabled:
-            return self._release(len(self._text))
-        if self._opener is not None:
-            return ""
-        # Every line that might open a block is held back, so a block never
-        # starts before the text already shown.
-        self._opener = _OPENER.search(self._text, self._released)
-        if self._opener is not None:
-            return self._release(self._opener.start())
-        return self._release(self._safe_end())
-
-    def finish(self) -> str:
-        if self._opener is None:
-            return self._release(len(self._text))
-        intro = self._text[: self._opener.start()]
-        self.block = parse_ask_block(_block_body(self._text[self._opener.end() :]), intro=intro)
-        return "" if self.block is not None else self._release(len(self._text))
-
-    def _safe_end(self) -> int:
-        line_start = self._text.rfind("\n") + 1
-        return line_start if _could_open(self._text[line_start:]) else len(self._text)
-
-    def _release(self, end: int) -> str:
-        shown = self._text[self._released : end]
-        self._released = max(end, self._released)
-        return shown
+        super().__init__(
+            _ASK_FENCE, lambda body, intro: parse_ask_block(body, intro=intro), enabled=enabled
+        )
 
 
 _ASK_LINE = (

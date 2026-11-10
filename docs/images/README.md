@@ -9,6 +9,12 @@ Send options. `chat-light.png`, `chat-dark.png`, `chat-mobile.png`, and
 images illustrate the current interface, not a claim that every pixel matches an
 older published image.
 
+Four pictures were added on November 10, 2026 from the v0.5.23 interface:
+`chat-steps-light.png`, `chat-questions-light.png`,
+`drafts-questions-light.png`, and `drafts-check-light.png`. Nothing else was
+recaptured, so the product tour and the other pictures still show v0.5.21 and
+do not show research steps, question cards, or the **Check** key.
+
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
@@ -58,6 +64,17 @@ older published image.
   Platform Owner Console model availability table, both opened from the
   Account panel.
 - `sign-in.png`: email sign-in, access requests, and the pre-login walkthrough.
+- `chat-steps-light.png`: a reply's work trace after it took research steps
+  (two more searches of workspace knowledge and one worked-out figure), with
+  the cited answer below it.
+- `chat-questions-light.png`: a reply paused on its question card, question 1
+  of 3, with a suggested choice, **Next**, **Decide for me**, and **Always
+  decide for me**.
+- `drafts-questions-light.png`: the Document Assistant paused under a request
+  with question 1 of 2 before it writes anything.
+- `drafts-check-light.png`: the **Check** panel beside a five-line consulting
+  agreement typed into the editor, listing three blanks and two defined-term
+  findings.
 
 ## Data and honesty
 
@@ -91,6 +108,19 @@ checked against the brief. No provider
 responses, connection results, or usage counters were edited or fabricated.
 Screens that depend on external services (web search, cloud connectors, MCP
 servers) are shown in their unconfigured state or not at all.
+
+The four November 10 pictures are different, and the model picker in them
+reads `qa-stub` to say so. They were taken on separate isolated instances
+started with the application's seeded demo organization, and the model was a
+scripted stand-in, not a real model: a small local server that returns a fixed
+question block, a fixed request for research steps, and a fixed answer. What
+the application did with those is real. It drew the question cards, ran the
+knowledge searches against the seeded demo knowledge, worked out
+`1250000 * 0.065 / 12` itself, matched the citation markers, and built the
+work trace. The answer text in `chat-steps-light.png` is the stand-in's
+script, so it is not evidence of what a real model would write. The **Check**
+panel uses no model; its findings come from the text typed into the editor.
+No real model has been pictured asking a question or taking a step yet.
 
 ## Refresh procedure
 

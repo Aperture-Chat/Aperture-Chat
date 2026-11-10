@@ -1833,6 +1833,17 @@ def test_platform_web_search_failure_returns_honest_503(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert "Web search (searxng) is unavailable" in response.json()["detail"]
+    # The message tells the person what to do, so the page shows it at once
+    # instead of quietly trying again.
+    assert response.headers["x-aperture-retryable"] == "false"
+
+
+def test_a_browser_on_another_origin_can_read_the_do_not_retry_signal() -> None:
+    origin = get_settings().web_origin_list[0]
+
+    response = client.get("/health", headers={"origin": origin})
+
+    assert "x-aperture-retryable" in response.headers["access-control-expose-headers"].lower()
 
 
 def test_agent_profile_discovers_mcp_tools_for_prompt_and_audit(monkeypatch) -> None:

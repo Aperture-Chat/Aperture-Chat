@@ -734,3 +734,62 @@ describe("clarifying questions", () => {
     expect(ids(pausedTrace(trace))).toEqual(["memory:recall", "think:first-token"]);
   });
 });
+
+describe("research steps", () => {
+  const step = (number: number, kind: string, ok: boolean, found: number, about = "") =>
+    ({ kind: "step", number, do: kind, ok, found, about }) as const;
+
+  test("each step the reply took on its own is listed in order, in plain words", () => {
+    let trace = recordActivity([], step(1, "search_knowledge", true, 3, "seller indemnity cap"));
+    trace = recordActivity(trace, step(2, "search_web", true, 1, "prime rate history"));
+    trace = recordActivity(trace, step(3, "read_page", true, 1, "https://www.example.com/rates/today?ref=1"));
+    trace = recordActivity(trace, step(4, "calculate", true, 1, "1250000 * 0.065 / 12"));
+
+    expect(readTrace(trace)).toEqual([
+      { id: "knowledge:step-1", kind: "knowledge", label: "Looked again in workspace knowledge · 3 passages", detail: "For “seller indemnity cap”" },
+      { id: "web:step-2", kind: "web", label: "Searched the web again · 1 result", detail: "For “prime rate history”" },
+      { id: "fetch:step-3", kind: "fetch", label: "Read a web page", detail: "example.com/rates/today" },
+      { id: "calc:step-4", kind: "calc", label: "Worked out a figure", detail: "1250000 * 0.065 / 12" },
+    ]);
+  });
+
+  test("a search that found nothing says so", () => {
+    expect(readTrace(recordActivity([], step(1, "search_knowledge", true, 0, "force majeure")))).toEqual([
+      { id: "knowledge:step-1", kind: "knowledge", label: "Looked again in workspace knowledge", detail: "Nothing more matched “force majeure”" },
+    ]);
+    expect(readTrace(recordActivity([], step(1, "search_web", true, 0, "")))).toEqual([
+      { id: "web:step-1", kind: "web", label: "Searched the web again", detail: "No results came back." },
+    ]);
+  });
+
+  test("a step held for screening is listed without what it was about", () => {
+    expect(readTrace(recordActivity([], step(1, "search_knowledge", true, 2)))).toEqual([
+      { id: "knowledge:step-1", kind: "knowledge", label: "Looked again in workspace knowledge · 2 passages" },
+    ]);
+    expect(readTrace(recordActivity([], step(2, "calculate", true, 1)))).toEqual([
+      { id: "calc:step-2", kind: "calc", label: "Worked out a figure" },
+    ]);
+  });
+
+  test.each([
+    ["search_knowledge", "Could not look again in workspace knowledge"],
+    ["search_web", "Could not search the web again"],
+    ["read_page", "Could not read a web page"],
+    ["calculate", "Could not work out a figure"],
+    ["send_email", "Tried a step that is not available"],
+  ])("a %s step that failed is flagged", (kind, label) => {
+    expect(readTrace(recordActivity([], step(1, kind, false, 0, "anything")))).toEqual([
+      { id: "flag:step-1", kind: "flag", label, detail: "The reply was written without it." },
+    ]);
+  });
+
+  test("a page address that is not a web address is shown as written", () => {
+    expect(readTrace(recordActivity([], step(1, "read_page", true, 1, "the rates page")))[0]?.detail).toBe("the rates page");
+  });
+
+  test("replaying a run's steps does not list them twice", () => {
+    const once = recordActivity([], step(1, "calculate", true, 1, "2 + 2"));
+
+    expect(recordActivity(once, step(1, "calculate", true, 1, "2 + 2"))).toEqual(once);
+  });
+});

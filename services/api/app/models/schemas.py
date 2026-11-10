@@ -3157,6 +3157,9 @@ class ChatCompletionRequest(BaseModel):
     # ("ask"), must choose for the user ("decide"), or has the user's answers
     # and should finish ("answered"). See app.core.clarifying_questions.
     clarify_mode: Literal["ask", "decide", "answered"] | None = None
+    # Chat only: the model may ask the platform to run more searches, read a
+    # page, or work out a figure before it answers. See app.core.work_steps.
+    work_steps: bool = False
     stop: str | list[str] | None = None
     seed: int | None = None
     response_format: dict[str, Any] | None = None
@@ -3202,6 +3205,10 @@ class ChatCompletionResponse(BaseModel):
     # own text, so echoing it back leaks nothing.
     memory_saved: list[MemorySavedNotice] = Field(default_factory=list)
     directives: list[DirectiveResult] = Field(default_factory=list)
+    # The research steps a reply took before it was written, as work-trace
+    # facts, for a reply that arrives whole. A streamed reply reports them as
+    # they happen instead.
+    activity: list[dict[str, Any]] = Field(default_factory=list)
     # Personal-data protection: the person's latest prompt as stored and sent,
     # with detected values replaced by tokens, so the client shows the same
     # concealed text. Absent when nothing was concealed.
