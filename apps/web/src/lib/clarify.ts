@@ -156,7 +156,9 @@ function askedText(clarification: Clarification): string {
   return [clarification.intro, lines.join("\n")].filter(Boolean).join("\n\n");
 }
 
-function answerFor(clarification: AnsweredClarification, question: ClarifyQuestion): string[] {
+/** What the user answered to one question: the options picked, then their
+ * own words. Empty when they left it to the assistant. */
+export function chosenAnswers(clarification: AnsweredClarification, question: ClarifyQuestion): string[] {
   const answer = clarification.answers.find((item) => item.questionId === question.id);
   return answer ? [...answer.choices, answer.other].filter(Boolean) : [];
 }
@@ -167,7 +169,7 @@ const DECIDE_TEXT =
 function responseText(clarification: AnsweredClarification | DelegatedClarification): string {
   if (clarification.state === "delegated") return DECIDE_TEXT;
   const lines = clarification.questions.map((question, index) => {
-    const chosen = answerFor(clarification, question);
+    const chosen = chosenAnswers(clarification, question);
     return `${index + 1}. ${question.question} ${chosen.length ? chosen.join("; ") : "No preference. You decide."}`;
   });
   return `My answers:\n${lines.join("\n")}\n\nContinue with these answers.`;
@@ -186,7 +188,7 @@ const LEFT_TO_ASSISTANT = "Assistant's choice";
 /** What the user chose, question by question, for the trace. */
 export function answerSummary(clarification: AnsweredClarification): string {
   return clarification.questions
-    .map((question) => answerFor(clarification, question).join(", ") || LEFT_TO_ASSISTANT)
+    .map((question) => chosenAnswers(clarification, question).join(", ") || LEFT_TO_ASSISTANT)
     .join(" · ");
 }
 

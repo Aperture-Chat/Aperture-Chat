@@ -67,9 +67,14 @@ export type ChatRuntimeOptions = {
    * Omitted = provider default.
    */
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | null;
-  /** Chat only: whether the assistant may pause to ask clarifying questions,
-   * must make the choices itself, or is continuing with the user's answers. */
+  /** Whether the assistant may pause to ask clarifying questions, must make
+   * the choices itself, or is continuing with the user's answers. In Drafts
+   * only the intake turn may ask (see ../draftIntake). */
   clarifyMode?: ClarifyMode | null;
+  /** The assistant may run more searches, read a page, or work out a figure
+   * on its own before it answers. A streamed reply reports each step as it
+   * happens; a whole reply carries them as `activity`. */
+  workSteps?: boolean;
 };
 
 export type ChatCompletionResponse = {
@@ -81,6 +86,8 @@ export type ChatCompletionResponse = {
   memory_saved?: MemorySavedNotice[];
   /** The latest prompt as stored, with personal data replaced by tokens. */
   concealed_prompt?: string | null;
+  /** The research steps the reply took before it was written. */
+  activity?: unknown;
 };
 
 export type ChatAssistantReply = {
@@ -96,6 +103,9 @@ export type ChatAssistantReply = {
   concealedPrompt?: string;
   /** Set when the reply paused to ask: it has no text until the user answers. */
   questions?: ClarifyQuestions;
+  /** The research steps a whole (not streamed) reply took before it was
+   * written. A streamed reply reports them through `onActivity` instead. */
+  activity?: ChatStreamActivity[];
 };
 
 /** Keep only real, positive token counts; drop all-zero usage blocks so the
@@ -566,8 +576,11 @@ type StreamAttempt = {
   onSnapshot?: () => void;
 };
 
-function retryableStatus(status: number): boolean {
-  return status === 429 || status >= 500;
+/** A busy or failing API is tried again, unless it says trying again will not
+ * help: its message then tells the person what to do, so it is shown at once. */
+function retryableRefusal(response: Response): boolean {
+  if (response.headers.get("x-aperture-retryable") === "false") return false;
+  return response.status === 429 || response.status >= 500;
 }
 
 /** One streaming attempt. Resumability is decided per failure: transport
@@ -617,7 +630,7 @@ async function completeAfterRefusal(
     const reply = await sendChat(userId, { model, messages, runtime, signal });
     return { ...reply, content: reader.joinWhole(reply.content) };
   }
-  throw new ChatRequestError(detail, response.status, reader.text(), retryableStatus(response.status));
+  throw new ChatRequestError(detail, response.status, reader.text(), retryableRefusal(response));
 }
 
 /** Follows a server run from frame `after` on: a page that came back, or a
@@ -634,7 +647,7 @@ async function followRunOnce(
     });
     if (response.status === 404) throw new RunGoneError(await readApiError(response), reader.text());
     if (!response.ok) {
-      throw new ChatRequestError(await readApiError(response), response.status, reader.text(), retryableStatus(response.status));
+      throw new ChatRequestError(await readApiError(response), response.status, reader.text(), retryableRefusal(response));
     }
     return reader.read(response);
   });
@@ -893,6 +906,7 @@ function chatRequestBody(
     max_completion_tokens: runtime?.maxCompletionTokens ?? null,
     reasoning_effort: runtime?.reasoningEffort ?? null,
     clarify_mode: runtime?.clarifyMode ?? null,
+    work_steps: Boolean(runtime?.workSteps),
   };
 }
 
@@ -908,7 +922,14 @@ function chatReplyFromCompletion(data: ChatCompletionResponse): ChatAssistantRep
     memoryUsed: typeof data.memory_used === "number" ? data.memory_used : 0,
     memorySaved: Array.isArray(data.memory_saved) ? data.memory_saved : [],
     concealedPrompt: typeof data.concealed_prompt === "string" && data.concealed_prompt ? data.concealed_prompt : undefined,
+    activity: reportedActivity(data.activity),
   };
+}
+
+/** The activity a whole reply reports, keeping only what this page can read. */
+function reportedActivity(raw: unknown): ChatStreamActivity[] {
+  const listed: unknown[] = Array.isArray(raw) ? raw : [];
+  return listed.map(parseStreamActivity).filter((activity): activity is ChatStreamActivity => activity !== null);
 }
 
 export async function uploadChatAttachment(

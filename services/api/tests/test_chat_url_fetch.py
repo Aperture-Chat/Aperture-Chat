@@ -183,3 +183,46 @@ def test_ad_hoc_url_contract_rejects_more_than_three_or_blank_entries(
     assert too_many.status_code == 422
     assert blank.status_code == 422
     assert blank.json()["detail"] == "Ad-hoc URL entries must not be blank."
+
+
+def test_a_linked_page_reaches_the_model_well_past_its_first_screen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A page the user asked about is read, not skimmed: a fact a few thousand
+    characters in must reach the model, and a very long page is still cut."""
+    opening = "Background. " * 250  # about 3,000 characters before the fact
+    page = f"{opening}The indemnity cap is two million dollars. {'Appendix. ' * 2000}"
+
+    def fake_fetch(url: str, **_kwargs: object) -> FetchedWebSource:
+        return FetchedWebSource(
+            requested_url=url,
+            final_url=url,
+            filename="agreement.html",
+            content_type="text/html",
+            text=page,
+            byte_count=len(page),
+        )
+
+    gateway = _CapturingGateway()
+    monkeypatch.setattr("app.routes.chat.fetch_web_source", fake_fetch)
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _tenant_route)
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: gateway)
+
+    response = client.post(
+        "/api/chat/complete",
+        headers=_headers(),
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "What is the indemnity cap?"}],
+            "fetch_urls": ["https://example.test/agreement"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert gateway.messages is not None
+    line = next(
+        line for line in str(gateway.messages[0]["content"]).splitlines() if line.startswith("- [U1] agreement.html")
+    )
+    assert "The indemnity cap is two million dollars." in line
+    assert len(line) < 6_200
+    assert line.endswith("...")

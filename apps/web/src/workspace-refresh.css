@@ -23,6 +23,10 @@
   --muted: #536a6d;
   --faint: #526c6e;
   --danger: var(--red);
+  /* Warnings that are words to read, not just a tint: darker than --orange
+     so they hold up as text on porcelain. */
+  --amber: #b45309;
+  --warning-text: #8a5a00;
   --accent-ink: var(--teal-strong);
   --radius: 12px;
   --radius-lg: 16px;
@@ -47,6 +51,8 @@
   --faint: #8aa0a2;
   --border: #26383e;
   --border-strong: #36565f;
+  --amber: #fbbf24;
+  --warning-text: #fcd34d;
   --accent-ink: color-mix(in srgb, var(--teal-2) 55%, white);
   --shadow: 0 8px 24px -16px rgb(0 0 0 / 45%);
   --shadow-lg: 0 24px 64px -24px rgb(0 0 0 / 70%);
@@ -391,7 +397,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 .draft-upload-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .draft-source-block { max-width: 100%; min-width: 0; }
 .draft-source-block .attach-chip { max-width: 100%; }
-.draft-source-block.is-name-only .attach-chip { border-color: color-mix(in srgb, var(--amber, #b45309) 45%, var(--border)); }
+.draft-source-block.is-name-only .attach-chip { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); }
 /* The # list opens from the box the way it does from the chat composer. */
 .document-assistant-page .draft-command-box { position: relative; }
 
@@ -699,7 +705,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 
 .document-assistant-page .draft-template-tabs { display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 1px; }
 .document-assistant-page .draft-template-tabs::-webkit-scrollbar { display: none; }
-.document-assistant-page .draft-template-tabs button { flex: 0 0 auto; min-height: 28px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--muted); padding: 0 11px; font-size: 12px; font-weight: 600; box-shadow: none; }
+.document-assistant-page .draft-template-tabs button { flex: 0 0 auto; min-height: 28px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--muted); padding: 0 11px; font-size: 12px; font-weight: 600; box-shadow: none; }
 .document-assistant-page .draft-template-tabs button:hover { background: var(--surface-soft); color: var(--text-strong); }
 .document-assistant-page .draft-template-tabs button.is-active { background: var(--text-strong); color: var(--surface); }
 
@@ -739,7 +745,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 .draft-history-doc-text time::before { content: "·"; margin-right: 6px; }
 .draft-history-state { font-weight: 650; }
 .draft-history-state.is-saved { color: var(--teal-strong); }
-.draft-history-state.is-local { color: var(--amber, #b45309); }
+.draft-history-state.is-local { color: var(--amber); }
 .draft-history-state.is-failed { color: var(--red); }
 .draft-history-state.is-running { color: var(--teal); }
 .document-assistant-page .draft-history-actions { position: absolute; top: 50%; right: 6px; display: flex; gap: 4px; padding: 4px 2px 4px 22px; background: linear-gradient(90deg, transparent, var(--surface) 20px); opacity: 0; transform: translateY(-50%); pointer-events: none; transition: opacity var(--speed) var(--ease); }
@@ -814,7 +820,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 .document-assistant-page .deck-brand-upload:disabled { opacity: .6; }
 .document-assistant-page .deck-brand-card .deck-theme-swatches { flex-wrap: wrap; gap: 5px; }
 .document-assistant-page .deck-brand-card .deck-theme-dot { width: 16px; height: 16px; }
-.document-assistant-page .deck-brand-card .deck-theme-actions button { height: 30px; border-color: var(--draft-edge, var(--border)); border-radius: 999px; font-size: 12px; font-weight: 650; }
+.document-assistant-page .deck-brand-card .deck-theme-actions button { height: 30px; border-color: var(--draft-edge, var(--border)); border-radius: 10px; font-size: 12px; font-weight: 650; }
 .document-assistant-page .deck-brand-card .deck-theme-actions button.is-icon { width: 30px; justify-content: center; margin-left: auto; padding: 0; color: var(--muted); }
 .document-assistant-page .deck-brand-card .deck-theme-actions button.is-icon:hover { border-color: var(--red-border, var(--red)); color: var(--red); }
 

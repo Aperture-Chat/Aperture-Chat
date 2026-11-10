@@ -19,7 +19,9 @@ a false "you missed this" is worse than a soft miss.
 from __future__ import annotations
 
 import json
+import operator
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.core.citation_use import marker_spans
@@ -45,6 +47,48 @@ class Directive:
     @property
     def verifiable(self) -> bool:
         return self.id.split(":", 1)[0] in _VERIFIERS
+
+
+def _length_directive(text: str) -> Directive | None:
+    """How long the answer must be, when the request says: a page count, a
+    word ceiling, a word floor, or simply a complete long-form piece."""
+    requested_pages = _requested_page_count(text)
+    if requested_pages:
+        return Directive(
+            id=f"pages:{requested_pages}",
+            label=f"Write {requested_pages} pages of content",
+            instruction=(
+                f"Write the full {requested_pages}-page deliverable, roughly "
+                f"{requested_pages * TARGET_WORDS_PER_REQUESTED_PAGE} words of drafted body content."
+            ),
+            amount=requested_pages,
+        )
+    word_ceiling = _requested_word_ceiling(text)
+    if word_ceiling:
+        return Directive(
+            id=f"maxwords:{word_ceiling}",
+            label=f"Use no more than {word_ceiling} words",
+            instruction=f"Use no more than {word_ceiling} words in the whole answer.",
+            amount=word_ceiling,
+        )
+    requested_words = _requested_word_count(text)
+    if requested_words:
+        return Directive(
+            id=f"words:{requested_words}",
+            label=f"Write at least {requested_words} words",
+            instruction=f"Write at least {requested_words} words of drafted body content.",
+            amount=requested_words,
+        )
+    if _long_form_requested(text):
+        return Directive(
+            id="longform",
+            label="Deliver the complete long-form piece",
+            instruction=(
+                "Produce the complete requested deliverable, not an outline or a plan, "
+                "and do not stop to ask whether to continue."
+            ),
+        )
+    return None
 
 
 def extract_directives(prompt: str, standing_instructions: list[str] | None = None) -> list[Directive]:
@@ -131,41 +175,9 @@ def extract_directives(prompt: str, standing_instructions: list[str] | None = No
             )
         )
 
-    requested_pages = _requested_page_count(text)
-    if requested_pages:
-        add(
-            Directive(
-                id=f"pages:{requested_pages}",
-                label=f"Write {requested_pages} pages of content",
-                instruction=(
-                    f"Write the full {requested_pages}-page deliverable, roughly "
-                    f"{requested_pages * TARGET_WORDS_PER_REQUESTED_PAGE} words of drafted body content."
-                ),
-                amount=requested_pages,
-            )
-        )
-    else:
-        requested_words = _requested_word_count(text)
-        if requested_words:
-            add(
-                Directive(
-                    id=f"words:{requested_words}",
-                    label=f"Write at least {requested_words} words",
-                    instruction=f"Write at least {requested_words} words of drafted body content.",
-                    amount=requested_words,
-                )
-            )
-        elif _long_form_requested(text):
-            add(
-                Directive(
-                    id="longform",
-                    label="Deliver the complete long-form piece",
-                    instruction=(
-                        "Produce the complete requested deliverable, not an outline or a plan, "
-                        "and do not stop to ask whether to continue."
-                    ),
-                )
-            )
+    length = _length_directive(text)
+    if length is not None:
+        add(length)
 
     for instruction in standing_instructions or []:
         cleaned = " ".join(str(instruction or "").split())
@@ -338,14 +350,24 @@ def _verify_pages(directive: Directive, text: str) -> str | None:
     return " ".join(issues) if issues else None
 
 
-def _verify_words(directive: Directive, text: str) -> str | None:
-    target = directive.amount or 0
-    words = word_count(text)
-    if words >= target:
-        return None
-    return (
-        f"The user asked for at least {target} words; the current answer has about {words}."
-    )
+def _word_limit_verifier(
+    asked: str, within: Callable[[int, int], bool]
+) -> Callable[[Directive, str], str | None]:
+    """A check that the answer's word count sits on the right side of the
+    directive's amount: at or above a floor, at or below a ceiling."""
+
+    def verify(directive: Directive, text: str) -> str | None:
+        limit = directive.amount or 0
+        words = word_count(text)
+        if within(words, limit):
+            return None
+        return f"The user asked for {asked} {limit} words; the current answer has about {words}."
+
+    return verify
+
+
+_verify_words = _word_limit_verifier("at least", operator.ge)
+_verify_max_words = _word_limit_verifier("no more than", operator.le)
 
 
 def _verify_longform(directive: Directive, text: str) -> str | None:
@@ -374,6 +396,7 @@ _VERIFIERS = {
     "count": _verify_count,
     "pages": _verify_pages,
     "words": _verify_words,
+    "maxwords": _verify_max_words,
     "longform": _verify_longform,
 }
 
@@ -444,6 +467,29 @@ def _requested_page_count(prompt: str) -> int | None:
     if re.search(r"\btwenty[- ]five\s+pages?\b", prompt, flags=re.IGNORECASE):
         return 25
     return None
+
+
+# "under 50 words", "50 words or less": the count is a ceiling. "No fewer than"
+# and "not less than" set a floor, so they are ruled out before the ceiling
+# phrases they contain.
+_WORD_FLOOR_PHRASE = re.compile(r"\b(?:no|not)\s+(?:fewer|less)\s+than\s+\d", re.IGNORECASE)
+_WORD_CEILING_BEFORE = re.compile(
+    r"\b(?:under|below|fewer\s+than|less\s+than|no\s+more\s+than|not\s+more\s+than|at\s+most|"
+    r"max(?:imum)?(?:\s+of)?|up\s+to|within|limit(?:ed)?[^.\n\d]{0,30}?\bto|keep[^.\n\d]{0,30}?\bto)\s+"
+    r"(\d{2,6})\s*[- ]?\s*words?\b",
+    re.IGNORECASE,
+)
+_WORD_CEILING_AFTER = re.compile(
+    r"\b(\d{2,6})\s*[- ]?\s*words?\s+(?:or\s+(?:less|fewer|under)|max(?:imum)?|at\s+most|tops)\b",
+    re.IGNORECASE,
+)
+
+
+def _requested_word_ceiling(prompt: str) -> int | None:
+    if _WORD_FLOOR_PHRASE.search(prompt):
+        return None
+    match = _WORD_CEILING_BEFORE.search(prompt) or _WORD_CEILING_AFTER.search(prompt)
+    return int(match.group(1)) if match else None
 
 
 def _requested_word_count(prompt: str) -> int | None:
