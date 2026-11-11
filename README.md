@@ -63,13 +63,15 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.21](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.21)**:
-> Share a document, deck, or spreadsheet with your group or chosen people and edit
-> it together at the same time; add whole folders to a knowledge base and keep them
-> in sync; file chats and knowledge bases under a client-matter number; and dictate
-> with Whisper or gpt-4o-transcribe speech models that hand off when one is busy.
-> v0.5.20 fitted the consoles to every window and added Excel exports.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0520) and
+> **Current release: [v0.5.23](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.23)**:
+> A chat reply can take research steps before it answers (search your knowledge,
+> search the web, read a linked page, work out a figure); the Drafts assistant
+> asks before it writes and takes the same steps for documents, decks, and
+> spreadsheets; a **Check** key lists blanks, undefined terms, and missing
+> exhibits in a document; and Agents, Automations, and AI actions gain legal,
+> finance, and consulting starting points.
+> v0.5.22 kept replies running on the server when you leave and added clarifying questions.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0522) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -81,12 +83,21 @@ policies appropriate for your organization's data.
 | ![Chat with the Policy Assistant agent: a cited answer drawn from the uploaded travel policy](docs/images/chat-light.png) | ![Dark mode: a colored Python code block with Copy, Download, Preview, and Edit](docs/images/chat-dark.png) |
 | ![A structure diagram of the vendor approval workflow with its Copy, PNG, SVG, Code, Style, and Edit toolbar](docs/images/chat-diagram-light.png) | ![The same structure diagram in dark mode](docs/images/chat-diagram-dark.png) |
 
+| Research steps | Clarifying questions |
+| --- | --- |
+| ![A reply's work trace listing its research steps: two more knowledge searches and a worked-out figure, then the cited answer](docs/images/chat-steps-light.png) | ![A reply paused on a question card: question 1 of 3 with a suggested choice, Next, Decide for me, and Always decide for me](docs/images/chat-questions-light.png) |
+
+<sub>The two pictures above use a scripted stand-in model (shown as <code>qa-stub</code>), so the answer text is scripted; the question card, the steps, and the trace are the application's own. See <a href="docs/images/README.md">how the pictures were made</a>.</sub>
+
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
+- **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, and Fast replies skip them.
+- **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
+- **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
 - **Client-matter numbers.** File a chat under a client-matter number from the **Matter** row in **Send options**. Numbers you type are saved for reuse, and the same numbers tag knowledge bases, so records staff can find a matter's chats in retention and its knowledge bases in Library search.
 - **Dictation.** Speak into the composer's microphone. Transcription uses a Gemini Flash model or a speech model such as Whisper or gpt-4o-transcribe (on Groq, OpenAI, Azure OpenAI, or Azure AI Foundry), and a busy or unreachable model hands the recording to the next one.
-- **Work traces.** Review the steps, sources, and provider-reported usage behind each reply, live while it streams. Availability depends on the provider.
+- **Work traces.** Review the steps, sources, and provider-reported usage behind each reply, live while it streams. Provider-reported usage depends on the provider.
 - **Response actions.** Copy, share, regenerate, rate, and transfer an answer to Drafts.
 - **Organized history.** Search conversations and keep them tidy with folders, pins, and archives. Read state follows your account across browsers.
 
@@ -110,12 +121,21 @@ policies appropriate for your organization's data.
 - **Spreadsheets.** Build multi-sheet workbooks with Excel-style formulas, tables, pivot tables, and charts, open and export `.xlsx` and `.csv` files, and ask the **Spreadsheet Assistant** to edit a selection or build whole tables.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
 - **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
-- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting.
+- **Asks before it writes.** When a drafting request leaves something open, the assistant asks one to three multiple-choice questions under your request, for documents, decks, and spreadsheets, then writes with your answers. **Decide for me** skips them, and **Ask me when unclear** in the assistant's settings turns them off; chat shares the same switch.
+- **Research while it writes.** A writing request can search your knowledge, search the web, read a linked page, or work out a figure before it writes, and the steps it took are listed in the draft chat.
+- **Check.** The **Check** key in the document status bar reads the page and lists blanks and placeholders still to fill in, defined terms that are never used or never defined, references to a numbered section the document does not have, references to an exhibit or schedule that is missing from the ones attached, and numbering that skips or repeats. Choose an item to jump to it. The checks run in the browser without a model.
+- **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting. A **Legal & business** group adds actions such as **Tighten this clause**, **Break into numbered sub-clauses**, **Lead with the conclusion**, and **Make figures consistent**; decks add **Write a takeaway title**, and spreadsheets add **Add variance columns** and **Check that the totals add up**.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts (including statement, big-number, and picture-with-bullets), and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and seven theme designs, a slide sorter, snapping guides, and presenter view round it out.
 - **Share and edit together.** Every draft starts private. **Share** offers **Only me**, **My group**, or **Specific people**; group shares follow current group membership, and a draft in a matter is shared only with people on that matter. A shared draft saves itself into one live copy, two people can edit at once, and their changes merge (documents by paragraph and word, decks by slide, spreadsheets by cell) while colored initials show who else is in it. Only the owner changes sharing, archives, or deletes it.
 - **Versions you can trust.** Save versions, compare and return to versions while a draft is open, preview history, and archive drafts. On a shared draft every saved version records who saved it and **Bring back** restores it for everyone. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
 - **Export.** Download Word (`.docx`), Markdown (`.md`), PowerPoint (`.pptx`), or Excel (`.xlsx`), build an archival PDF/A file, or print.
+
+| Asks before it writes | Check |
+| --- | --- |
+| ![The Document Assistant paused under a request with question 1 of 2, Who is this memo for?, and a suggested choice](docs/images/drafts-questions-light.png) | ![The Check panel beside a consulting agreement: three blanks to fill in and two defined-term findings](docs/images/drafts-check-light.png) |
+
+<sub>The question card on the left came from the same scripted stand-in model. The Check panel uses no model.</sub>
 
 <p align="center">
   <img src="docs/images/drafts-share-light.png" alt="The Share dialog on the project brief with Specific people chosen: Priya Shah and Marcus Lee added, and the rest of the organization listed to add" width="760">
@@ -137,8 +157,8 @@ policies appropriate for your organization's data.
 | --- | --- |
 | ![Agents page with three agents, their models, audiences, knowledge, and readiness](docs/images/agents-light.png) | ![Automations page with weekly, weekday, and one-time automations and their next runs](docs/images/automations-light.png) |
 
-- **Agents** bundle instructions, a model, knowledge, tools, prompts, and skills into a reusable assistant. Choose who can use each one, check its readiness, and start from a template or duplicate an existing agent.
-- **Automations** run a prompt through one or more models or agents, once, weekly, or on a cron schedule in the time zone you choose. A live preview lists the next runs, and invalid schedules are rejected before they are saved.
+- **Agents** bundle instructions, a model, knowledge, tools, prompts, and skills into a reusable assistant. Choose who can use each one, check its readiness, and start from a template or duplicate an existing agent. Templates include **Contract Reviewer**, **Deposition Summarizer**, **Financial Analyst**, and **Client Memo Writer**.
+- **Automations** run a prompt through one or more models or agents, once, weekly, or on a cron schedule in the time zone you choose. A live preview lists the next runs, and invalid schedules are rejected before they are saved. Recipes such as **Weekly matter status**, **Month-end variance commentary**, and **Regulatory watch** fill in a starting prompt and schedule.
 - **Delivered where you work.** Each run arrives as a new chat or a new draft, and the last 10 runs, including **Run now**, are kept in the run history. Scheduled automations pause after three failures in a row.
 
 ### Library: knowledge and tools
@@ -189,7 +209,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.21
+#   APERTURE_IMAGE_TAG=v0.5.23
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -210,7 +230,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.21 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.23 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -245,10 +265,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.21` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.23` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.21-dev`, `v0.5.21-test`, `v0.5.21-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.23-dev`, `v0.5.23-test`, `v0.5.23-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

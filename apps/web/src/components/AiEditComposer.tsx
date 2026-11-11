@@ -20,6 +20,7 @@ import {
   Loader2,
   MessageSquareQuote,
   RotateCcw,
+  Scale,
   Sigma,
   Sparkles,
   Square,
@@ -98,6 +99,7 @@ type Props = {
 const ACTION_ICONS: Record<string, LucideIcon> = {
   improve: Wand2,
   transform: ListPlus,
+  professional: Scale,
   write: MessageSquareQuote,
   slide: Sparkles,
   formulas: Sigma,

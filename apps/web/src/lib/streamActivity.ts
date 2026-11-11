@@ -30,6 +30,9 @@ export type ChatStreamActivity =
   | { kind: "hermes"; memories: number; skills: string[]; automations: string[] }
   /** The reply paused to ask the user this many questions. */
   | { kind: "ask"; questions: number }
+  /** A research step the reply took on its own: another search, a page read,
+   * or a calculation. `about` is what it looked for, empty when withheld. */
+  | { kind: "step"; number: number; do: string; ok: boolean; found: number; about: string }
   /** Client-side: the user answered the questions, or left them to the assistant. */
   | { kind: "answered"; questions: number; summary: string; delegated: boolean }
   /** Client-side: the stream dropped and the browser resumed it. */
@@ -97,6 +100,14 @@ function parseWeb(raw: Raw): ChatStreamActivity | null {
   return { kind: "web", results, engine: text(raw.engine) ?? "" };
 }
 
+function parseStep(raw: Raw): ChatStreamActivity | null {
+  const number = count(raw.number);
+  const found = count(raw.found);
+  const done = text(raw.do);
+  if (!number || found === null || done === null || typeof raw.ok !== "boolean") return null;
+  return { kind: "step", number, do: done, ok: raw.ok, found, about: text(raw.about) || "" };
+}
+
 const PARSERS: Record<string, Parser> = {
   agent: (raw) => {
     const name = text(raw.name);
@@ -136,6 +147,7 @@ const PARSERS: Record<string, Parser> = {
     const questions = count(raw.questions);
     return questions ? { kind: "ask", questions } : null;
   },
+  step: parseStep,
   hermes: (raw) => {
     const memories = count(raw.memories);
     if (memories === null) return null;

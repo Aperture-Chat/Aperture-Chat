@@ -34,7 +34,7 @@
   line-height: 1.4;
 }
 
-.message .clarify-step {
+:is(.message, .draft-event-list) .clarify-step {
   margin: -4px 0 -6px;
   color: var(--clarify-accent);
   font-size: 13px;
@@ -52,7 +52,7 @@
   line-height: 1.45;
 }
 
-.message .clarify-question-hint {
+:is(.message, .draft-event-list) .clarify-question-hint {
   margin: -4px 0 0;
   color: var(--muted);
   font-size: 13px;
@@ -198,7 +198,7 @@
   box-shadow: var(--tactile-field-focus), var(--tactile-field-shadow);
 }
 
-.message .clarify-note {
+:is(.message, .draft-event-list) .clarify-note {
   margin: -4px 0 0;
   color: var(--muted);
   font-size: 13px;
@@ -245,4 +245,28 @@
   .clarify-option {
     transition: none;
   }
+}
+
+/* In the Drafts assistant (components/DocumentAssistantWorkspace.tsx).
+ *
+ * The same card sits under a request in the draft chat, in a panel about
+ * 350px wide. It keeps its full height in the scrolling list, and its lead-in
+ * takes the handoff card's paragraph style, which the chat scopes to a
+ * message. A request that was answered shows each answer on its own line. */
+
+.draft-event-list .clarify-card {
+  flex: none;
+  gap: 12px;
+  padding: 14px;
+}
+
+.draft-event-list .draft-handoff-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.draft-event.is-user > span > span {
+  white-space: pre-line;
 }

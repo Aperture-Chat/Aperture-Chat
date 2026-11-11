@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cancelChatRun, saveChatThread, sendChatStream } from "./chat";
+import { cancelChatRun, saveChatThread, sendChat, sendChatStream } from "./chat";
 import { ChatRequestError } from "./http";
 
 
@@ -11,6 +11,41 @@ const request = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+
+describe("sendChat", () => {
+  function completion(extra: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "The draft." } }], ...extra }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  test("carries the research steps a whole reply took, dropping any it cannot read", async () => {
+    completion({
+      activity: [
+        { kind: "step", number: 1, do: "calculate", ok: true, found: 1, about: "2 + 2" },
+        { kind: "mystery" },
+        "not a fact",
+      ],
+    });
+
+    const reply = await sendChat("user-1", request);
+
+    expect(reply.content).toBe("The draft.");
+    expect(reply.activity).toEqual([{ kind: "step", number: 1, do: "calculate", ok: true, found: 1, about: "2 + 2" }]);
+  });
+
+  test("has no research to show when the API reports none", async () => {
+    completion({});
+
+    expect((await sendChat("user-1", request)).activity).toEqual([]);
+  });
 });
 
 
@@ -523,6 +558,21 @@ describe("sendChatStream reading and retrying", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test("a 503 the API marks as not worth retrying ends the reply at once with its message", async () => {
+    const refusal = new Response(JSON.stringify({ detail: "Web search is unavailable. Turn off Web for this reply." }), {
+      status: 503,
+      headers: { "content-type": "application/json", "x-aperture-retryable": "false" },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(refusal);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChatStream("user-1", { ...request, resumeDelaysMs: [0] }).catch((caught) => caught);
+
+    expect(error.message).toBe("Web search is unavailable. Turn off Web for this reply.");
+    expect(error.resumable).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test.each([400, 404, 499])("a %i refusal ends the reply at once", async (status) => {
     const fetchMock = vi.fn().mockResolvedValue(json(status, { detail: "Not allowed" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -756,5 +806,16 @@ describe("sendChatStream clarifying questions", () => {
 
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).clarify_mode).toBe("ask");
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).clarify_mode).toBeNull();
+  });
+
+  test("the request says whether the assistant may research further on its own", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => sse(`data: {"delta":"Hi"}\n\n${finished}`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChatStream("user-1", { ...request, runtime: { workSteps: true } });
+    await sendChatStream("user-1", request);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).work_steps).toBe(true);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).work_steps).toBe(false);
   });
 });

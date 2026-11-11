@@ -80,3 +80,33 @@ test("a reply that paused to ask says how many questions it asked", () => {
   expect(parseStreamActivity({ kind: "ask", questions: 0 })).toBeNull();
   expect(parseStreamActivity({ kind: "ask" })).toBeNull();
 });
+
+describe("research steps", () => {
+  test("a step says what was done, whether it worked, how much it found, and what it was about", () => {
+    expect(
+      parseStreamActivity({ kind: "step", number: 2, do: "search_knowledge", ok: true, found: 3, about: "indemnity cap" }),
+    ).toEqual({ kind: "step", number: 2, do: "search_knowledge", ok: true, found: 3, about: "indemnity cap" });
+  });
+
+  test("a step reported without its subject has none", () => {
+    expect(parseStreamActivity({ kind: "step", number: 1, do: "calculate", ok: false, found: 0 })).toEqual({
+      kind: "step",
+      number: 1,
+      do: "calculate",
+      ok: false,
+      found: 0,
+      about: "",
+    });
+  });
+
+  test.each([
+    { kind: "step", do: "search_web", ok: true, found: 1 },
+    { kind: "step", number: 0, do: "search_web", ok: true, found: 1 },
+    { kind: "step", number: 1, ok: true, found: 1 },
+    { kind: "step", number: 1, do: "", ok: true, found: 1 },
+    { kind: "step", number: 1, do: "search_web", ok: "yes", found: 1 },
+    { kind: "step", number: 1, do: "search_web", ok: true, found: -1 },
+  ])("a malformed step %j is dropped", (raw) => {
+    expect(parseStreamActivity(raw)).toBeNull();
+  });
+});

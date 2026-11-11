@@ -1,4 +1,4 @@
-import { Keyboard, ListTree, Minus, Plus, TextSearch } from "lucide-react";
+import { ClipboardCheck, Keyboard, ListTree, Minus, Plus, TextSearch } from "lucide-react";
 
 export const DOCUMENT_ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
@@ -11,13 +11,15 @@ type Props = {
   selectionWords: number | null;
   zoom: number;
   outlineOpen: boolean;
+  checkOpen: boolean;
   onZoomChange: (zoom: number) => void;
   onToggleOutline: () => void;
+  onToggleCheck: () => void;
   onOpenFind: () => void;
   onShowShortcuts: () => void;
 };
 
-/** Word-style status bar: page, counts, reading time, outline, find, zoom. */
+/** Word-style status bar: page, counts, reading time, outline, check, find, zoom. */
 export function DocumentStatusBar({
   page,
   pageCount,
@@ -26,8 +28,10 @@ export function DocumentStatusBar({
   selectionWords,
   zoom,
   outlineOpen,
+  checkOpen,
   onZoomChange,
   onToggleOutline,
+  onToggleCheck,
   onOpenFind,
   onShowShortcuts,
 }: Props) {
@@ -59,6 +63,16 @@ export function DocumentStatusBar({
         >
           <ListTree size={14} />
           <span>Outline</span>
+        </button>
+        <button
+          type="button"
+          aria-label="Check document"
+          aria-pressed={checkOpen}
+          data-tooltip="Look for blanks, undefined terms, and broken cross-references"
+          onClick={onToggleCheck}
+        >
+          <ClipboardCheck size={14} />
+          <span>Check</span>
         </button>
         <button type="button" aria-label="Find and replace" data-tooltip="Find and replace (⌘F)" onClick={onOpenFind}>
           <TextSearch size={14} />

@@ -4207,7 +4207,7 @@ a.nav-item {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: 9px 10px;
-  border: 1px solid color-mix(in srgb, var(--amber, #b45309) 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
   border-radius: 12px;
   background: color-mix(in srgb, #f59e0b 9%, var(--surface));
   padding: 11px 12px;
@@ -4215,11 +4215,7 @@ a.nav-item {
 
 .document-export-save-notice > svg {
   margin-top: 1px;
-  color: #b45309;
-}
-
-.theme-dark .document-export-save-notice > svg {
-  color: #fbbf24;
+  color: var(--amber);
 }
 
 .document-export-save-notice span {
@@ -23233,7 +23229,7 @@ button.retention-tagged-title:focus-visible strong {
 
 .draft-redline-fallback {
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--amber, #b45309) 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
   border-radius: 12px;
   background: color-mix(in srgb, #f59e0b 9%, var(--surface));
   color: var(--text-strong);
@@ -25754,9 +25750,9 @@ button.feedback-event-row.is-clickable:focus-visible {
   inset: 4px auto 4px 4px;
   width: calc(50% - 4px);
   border-radius: 10px;
-  background: linear-gradient(160deg, var(--teal), color-mix(in srgb, var(--teal) 60%, #052e35));
-  border: 1px solid #ffffff35;
-  box-shadow: 0 2px 8px #0003, inset 0 1px #ffffff40;
+  background: var(--tactile-lit);
+  border: 1px solid var(--tactile-lit-border);
+  box-shadow: var(--tactile-lit-shadow);
   transition: transform 220ms cubic-bezier(.2,.8,.2,1);
 }
 .document-assistant-page .deck-mode-switch[data-mode="deck"]::before,
@@ -25776,7 +25772,7 @@ button.feedback-event-row.is-clickable:focus-visible {
 .document-assistant-page .deck-mode-switch button.is-active,
 .section-switch button.is-active { color: white; }
 .document-assistant-page .deck-mode-switch button:focus-visible,
-.section-switch button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+.section-switch button:focus-visible { outline: 2px solid color-mix(in srgb, currentColor 40%, var(--teal-2, var(--teal))); outline-offset: -2px; }
 .draft-history-entry { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: 0 0 auto; }
 .draft-history-entry .draft-history-document-card { border: 0; border-radius: 0; }
 .draft-history-actions, .draft-history-filter { display: flex; gap: 6px; padding: 6px 10px; }

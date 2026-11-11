@@ -4120,6 +4120,30 @@ test("a reply that pauses to ask shows its questions, and answering carries the 
   expect(within(trace).getByText("California")).toBeInTheDocument();
 });
 
+test("a reply that researches on its own lists each step it took in the work trace", async () => {
+  const { streams, bodies } = stubClarifyingChat();
+  await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  sendFromComposer("What is the monthly interest on the note?");
+  await waitFor(() => expect(streams).toHaveLength(1));
+  expect(bodies[0].work_steps).toBe(true);
+
+  streams[0].push('data: {"activity":{"kind":"step","number":1,"do":"search_knowledge","ok":true,"found":2,"about":"note interest rate"}}\n\n');
+  streams[0].push('data: {"activity":{"kind":"step","number":2,"do":"calculate","ok":true,"found":1,"about":"1250000 * 0.065 / 12"}}\n\n');
+  streams[0].push('data: {"delta":"The monthly interest is $6,770.83."}\n\n');
+  streams[0].push('data: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n');
+  streams[0].close();
+
+  expect(await screen.findByText("The monthly interest is $6,770.83.")).toBeInTheDocument();
+  const trace = await screen.findByRole("region", { name: "Aperture Chat activity trace" });
+  fireEvent.click(within(trace).getByRole("button", { name: "Collapse work trace" }));
+  fireEvent.click(within(trace).getByRole("button", { name: "Expand work trace" }));
+  expect(within(trace).getByText("Looked again in workspace knowledge · 2 passages")).toBeInTheDocument();
+  expect(within(trace).getByText("For “note interest rate”")).toBeInTheDocument();
+  expect(within(trace).getByText("Worked out a figure")).toBeInTheDocument();
+  expect(within(trace).getByText("1250000 * 0.065 / 12")).toBeInTheDocument();
+});
+
 test("turning off Ask me when unclear tells the assistant to make the choices", async () => {
   const { streams, bodies } = stubClarifyingChat();
   await renderApp();

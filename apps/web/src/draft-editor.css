@@ -739,7 +739,7 @@
 }
 
 .document-selection-toolbar .document-selection-ai svg {
-  color: #b9a8ff;
+  color: inherit;
 }
 
 .document-selection-style {
@@ -1196,6 +1196,81 @@
   background: var(--surface-soft);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+/* ---------- Check (proofreading findings, in the outline's place) ---------- */
+.document-check-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px 14px;
+  overflow-y: auto;
+}
+
+.document-check-summary {
+  margin: 0 8px 4px;
+  color: var(--text-strong);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.document-check .document-outline-empty {
+  margin: 4px 8px;
+  font-size: 13px;
+}
+
+.document-check-group {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.document-check-group span {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.document-check ol {
+  flex: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.document-check li button {
+  white-space: normal;
+}
+
+/* A finding's own words may run to a second line; past that they are cut. */
+.document-check li button strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-weight: 650;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.document-check li button small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.document-check-note {
+  margin: 14px 8px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 @media (max-width: 900px) {
@@ -3247,7 +3322,7 @@ figure.document-media-align-right {
 }
 
 .deck-text-toolbar-ai svg {
-  color: #b9a8ff;
+  color: inherit;
 }
 
 .deck-text-toolbar-size {

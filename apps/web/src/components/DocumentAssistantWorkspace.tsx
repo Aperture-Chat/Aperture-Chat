@@ -19,6 +19,7 @@ import { AiEditComposer, type AiComposerAnchor, type AiComposerPhase } from "./A
 import { DocumentSelectionToolbar } from "./DocumentSelectionToolbar";
 import { DocumentSlashMenu, type SlashCommandItem } from "./DocumentSlashMenu";
 import { DocumentFindBar } from "./DocumentFindBar";
+import { DocumentCheckPanel } from "./DocumentCheckPanel";
 import { DocumentOutline, type DocumentOutlineHeading } from "./DocumentOutline";
 import { DocumentStatusBar } from "./DocumentStatusBar";
 import { EditorShortcutsDialog } from "./EditorShortcutsDialog";
@@ -34,6 +35,7 @@ import {
   tableCellContext,
   toggleTableHeaderRow,
 } from "../lib/documentTable";
+import { checkDocument, checkableBlocks, type DocumentFinding } from "../lib/documentChecks";
 import { findTextRanges, replaceRangeText } from "../lib/documentFind";
 import { clampBoxToCanvas, snapMovedBox, type SnapGuides } from "../lib/deck/deckSnapping";
 import { isDividerMarker, matchBlockAutoformat, matchInlineAutoformat } from "../lib/editorAutoformat";
@@ -92,6 +94,11 @@ import { OPEN_IN_EDITOR_EXTENSIONS, type DraftHandoffRequest } from "../lib/draf
 import { applyDocumentPatch, documentBlocks, documentPatchPrompt, parseDocumentPatch } from "../lib/documentBlockEdit";
 import { SelectControl } from "./SelectControl";
 import { WorkTrace } from "./WorkTrace";
+import { ClarifyCard } from "./ClarifyCard";
+import { respondToClarification, waitingClarification, type ClarifyQuestions, type ClarifyResponse, type WaitingClarification } from "../lib/clarify";
+import { draftIntakePrompt, requestWithAnswers, revealScrollTop } from "../lib/draftIntake";
+import { loadAskPreference, storeAskPreference } from "../lib/streamPreference";
+import type { ChatStreamActivity } from "../lib/streamActivity";
 import {
   ALargeSmall,
   AlignCenter,
@@ -364,7 +371,7 @@ import { SHEET_TEMPLATES, buildSheetTemplate } from "../lib/sheet/templates";
 import { XLSX_MIME_TYPE, buildXlsxWorkbook } from "../lib/sheet/xlsxExport";
 import { describeChanges, workbookPlainText, workbookTitleFrom } from "../lib/sheet/sheetAi";
 import { type SheetRunOutcome, sheetRunFinished, sheetRunFixing, sheetRunReplied, sheetRunStart } from "../lib/sheet/sheetTrace";
-import { type DraftStepId, type DraftTraceState, type DraftTraceStep, draftRunMessage, draftRunNext, traceAnchorId } from "../lib/draftTrace";
+import { type DraftStepId, type DraftTraceState, type DraftTraceStep, draftRunMessage, draftRunNext, intakePaused, intakeRun, recordResearch, traceAnchorId } from "../lib/draftTrace";
 import { runSheetAiFlow } from "../lib/sheet/sheetAiFlow";
 import {
   type Workbook,
@@ -2500,6 +2507,16 @@ export function DocumentAssistantWorkspace({
   );
   const [events, setEvents] = useState<AssistantEvent[]>(importedDraftState?.events ?? []);
   const [draftTrace, setDraftTrace] = useState<DraftTraceState | null>(null);
+  // The intake turn for the request being read, or waiting on the user's
+  // answers (see lib/draftIntake). The ref is what async work reads.
+  const [draftIntake, setDraftIntakeState] = useState<DraftIntake | null>(null);
+  const draftIntakeRef = useRef<DraftIntake | null>(null);
+  const draftIntakeAbortRef = useRef<AbortController | null>(null);
+  // A request that passed intake, started on the next render so the run
+  // reads the draft as it is then, not as it was when the request was sent.
+  const [clearedRequest, setClearedRequest] = useState<{ request: string; asked: string } | null>(null);
+  const draftEventListRef = useRef<HTMLDivElement | null>(null);
+  const [askWhenUnclear, setAskWhenUnclear] = useState(() => loadAskPreference(completionUserId));
   const [status, setStatus] = useState(importedDraftState?.status ?? "Blank draft ready");
   // Rail actions (toggles, uploads, connectors) confirm themselves in a short
   // visible notice; `status` alone is screen-reader only.
@@ -2533,8 +2550,18 @@ export function DocumentAssistantWorkspace({
       message={draftRunMessage(draftTrace)}
       brandName={workspaceName}
       state={draftTrace.complete ? "complete" : "pending"}
-      thinkingTraces={draftTrace.sheetRun?.thinking}
+      thinkingTraces={draftTrace.factRun?.thinking}
       upNext={draftRunNext(draftTrace)}
+      awaitingAnswer={draftTrace.awaitingAnswer}
+    />
+  );
+  const draftQuestionCard = draftIntake?.clarification && (
+    <ClarifyCard
+      clarification={draftIntake.clarification}
+      brandName={workspaceName}
+      state="open"
+      onRespond={answerDraftQuestions}
+      onAlwaysDecide={alwaysDecideDraftQuestions}
     />
   );
   const documentAiEditing = assistantWorking || docAi?.phase === "working";
@@ -2663,6 +2690,9 @@ export function DocumentAssistantWorkspace({
   const [findTotal, setFindTotal] = useState(0);
   const [outlineOpen, setOutlineOpen] = useState(() => readDraftPreference(OUTLINE_PREFERENCE_KEY) === "1");
   const [activeOutlineIndex, setActiveOutlineIndex] = useState(0);
+  // The check shares the outline's side of the page; while it is open the
+  // outline steps aside and comes back when the check is closed.
+  const [checkOpen, setCheckOpen] = useState(false);
   const [documentZoom, setDocumentZoom] = useState(() => {
     const stored = Number(readDraftPreference(ZOOM_PREFERENCE_KEY));
     return Number.isFinite(stored) && stored >= 0.5 && stored <= 2 ? stored : 1;
@@ -3559,6 +3589,11 @@ export function DocumentAssistantWorkspace({
       if (stepIndex < 0) return current;
       return { ...current, activeIndex: Math.max(current.activeIndex, stepIndex) };
     });
+  }
+
+  /** Shows the research a writing call did on its own before it wrote. */
+  function recordDraftResearch(activity: ChatStreamActivity[] = []) {
+    setDraftTrace((trace) => (trace ? recordResearch(trace, activity) : trace));
   }
 
   function finishDraftTrace(failure?: string) {
@@ -6050,11 +6085,11 @@ export function DocumentAssistantWorkspace({
     const knowledge = activeSourceIds.length;
     const attachments = draftAttachmentRuntime().attachmentIds.length;
     const activity = sheetRunStart({ modelLabel: selectedAgent.name, web: useWebSearch, knowledge, attachments, workbook: current });
-    setDraftTrace({ steps: [], activeIndex: 0, complete: false, startedAt: Date.now(), sheetRun: { activity, thinking: [], requestEventId: requestEvent.id } });
+    setDraftTrace({ steps: [], activeIndex: 0, complete: false, startedAt: Date.now(), factRun: { activity, thinking: [], requestEventId: requestEvent.id } });
     const record = (update: (steps: ChatActivityTraceStep[]) => ChatActivityTraceStep[], thinking: string[] = []) =>
       setDraftTrace((trace) =>
-        trace?.sheetRun
-          ? { ...trace, sheetRun: { ...trace.sheetRun, activity: update(trace.sheetRun.activity), thinking: [...trace.sheetRun.thinking, ...thinking] } }
+        trace?.factRun
+          ? { ...trace, factRun: { ...trace.factRun, activity: update(trace.factRun.activity), thinking: [...trace.factRun.thinking, ...thinking] } }
           : trace,
       );
     const finish = (outcome: SheetRunOutcome) => record((steps) => sheetRunFinished(steps, outcome));
@@ -6074,8 +6109,10 @@ export function DocumentAssistantWorkspace({
           ...draftAttachmentRuntime(),
           maxCompletionTokens: 16000,
           reasoningEffort: reasoningEffortForSend,
+          workSteps: true,
         },
       });
+      recordDraftResearch(reply.activity);
       const { visibleContent, thinkingTraces } = splitAssistantThinking(reply.content ?? "");
       record((steps) => sheetRunReplied(steps, askedAt, Date.now()), thinkingTraces);
       return plainDraftCitations(visibleContent, reply.citations);
@@ -6220,8 +6257,10 @@ export function DocumentAssistantWorkspace({
           ...draftAttachmentRuntime(),
           maxCompletionTokens: 12000,
           reasoningEffort: reasoningEffortForSend,
+          workSteps: true,
         },
       });
+      recordDraftResearch(reply.activity);
       return plainDraftCitations(reply.content ?? "", reply.citations);
     };
     // Fit fixes are rewording only: no web, sources, or attachments.
@@ -8142,7 +8181,10 @@ export function DocumentAssistantWorkspace({
     request?: string,
     sourceSummaryForDraft = sourceSummary,
     sourceIdsForDraft: string[] = activeSourceIds,
-    options?: Partial<Pick<DraftContextOptions, "useTemplateContext" | "useWebSearch">>,
+    options?: Partial<Pick<DraftContextOptions, "useTemplateContext" | "useWebSearch">> & {
+      /** The request with the user's answers to the intake questions under it. */
+      asked?: string;
+    },
   ) {
     if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     clearDraftTimers();
@@ -8153,7 +8195,8 @@ export function DocumentAssistantWorkspace({
     const sourceHtmlBeforeDraft = contentRef.current;
     const contextOptions = draftContextOptions(sourceSummaryForDraft, options);
     const liveWebSearch = contextOptions.useWebSearch;
-    const requestText = request?.trim() || `Create a complete ${template.name} draft from the selected template.`;
+    const requestText =
+      options?.asked ?? (request?.trim() || `Create a complete ${template.name} draft from the selected template.`);
     // Layout wording ("in Garamond 12 on legal-size paper") is not the subject.
     const requestSubject = request ? extractDraftSubject(stripLayoutPhrases(request)) : null;
     const nextTitle = requestSubject ? providerWebDraftTitle(template, requestSubject) : template.defaultTitle;
@@ -8254,8 +8297,10 @@ export function DocumentAssistantWorkspace({
           ...draftAttachmentRuntime(),
           maxCompletionTokens: pageTotal > 1 ? 24000 : 12000,
           reasoningEffort: reasoningEffortForSend,
+          workSteps: true,
         },
       });
+      recordDraftResearch(reply.activity);
       advanceDraftTrace("generate");
       const markdownWithSources = appendWebCitationList(plainDraftCitations(reply.content, reply.citations), reply.citations);
       if (contentRef.current !== sourceHtmlBeforeDraft) {
@@ -8664,8 +8709,10 @@ export function DocumentAssistantWorkspace({
               requestedAdditionalPages,
             ),
             reasoningEffort: reasoningEffortForSend,
+            workSteps: true,
           },
         });
+        recordDraftResearch(reply.activity);
         ensureUnchanged();
         advanceDraftTrace("protect");
         const revisedMarkdown = appendWebCitationList(plainDraftCitations(reply.content, reply.citations), reply.citations);
@@ -8845,24 +8892,38 @@ export function DocumentAssistantWorkspace({
     // Keep the prompt intact if model access disappears while it is being composed.
     if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (!request) return;
+    if (assistantWorking || revisionInFlightRef.current) {
+      setStatus(`The ${DRAFT_ASSISTANT_NAMES[draftKind]} assistant is already working on the current request.`);
+      return;
+    }
+    // A new request while questions wait replaces the one they were about.
+    if (draftIntakeRef.current) {
+      endDraftIntake();
+      setDraftTrace(null);
+    }
+    if (askWhenUnclear && !fromChat && !isDocumentImageRequest(request)) {
+      await beginDraftIntake(request);
+      return;
+    }
+    await routeAssistantRequest(request, request, options);
+  }
+
+  /** A document request for a picture from the web: specific, with nothing to ask. */
+  function isDocumentImageRequest(request: string) {
+    return draftKind === "document" && isImageInsertRequest(request) && !isDraftCreationRequest(request);
+  }
+
+  /** Starts the run for a request. `asked` is the request as the user finally
+   * put it: with their answers to the intake questions under it, if any. What
+   * kind of run it is depends on the request itself. */
+  async function routeAssistantRequest(request: string, asked: string, options: { fromChat?: boolean } = {}) {
+    const fromChat = options.fromChat === true;
     if (draftKind === "deck") {
-      if (assistantWorking || revisionInFlightRef.current) {
-        setStatus("The deck assistant is already working on the current request.");
-        return;
-      }
-      await runDeckAssistantRequest(request);
+      await runDeckAssistantRequest(asked);
       return;
     }
     if (draftKind === "spreadsheet") {
-      if (assistantWorking || revisionInFlightRef.current) {
-        setStatus("The spreadsheet assistant is already working on the current request.");
-        return;
-      }
-      await runSpreadsheetAssistantRequest(request);
-      return;
-    }
-    if (assistantWorking || revisionInFlightRef.current) {
-      setStatus("The document assistant is already working on the current request.");
+      await runSpreadsheetAssistantRequest(asked);
       return;
     }
     if (!fromChat && isImageInsertRequest(request) && !isDraftCreationRequest(request)) {
@@ -8914,12 +8975,174 @@ export function DocumentAssistantWorkspace({
         {
           useTemplateContext: templateContextEnabled,
           useWebSearch: webSearchEnabled,
+          asked,
         },
       );
       return;
     }
-    await applyProviderRevision(request, sourceSummaryForRequest, sourceIdsForRequest);
+    await applyProviderRevision(asked, sourceSummaryForRequest, sourceIdsForRequest);
   }
+
+  /* ---------------------------------------------------------------- */
+  /* The intake turn: read the request, and ask before writing         */
+  /* ---------------------------------------------------------------- */
+
+  function setDraftIntake(intake: DraftIntake | null) {
+    draftIntakeRef.current = intake;
+    setDraftIntakeState(intake);
+  }
+
+  /** Forgets the intake turn without acting on it. */
+  function endDraftIntake() {
+    draftIntakeAbortRef.current?.abort();
+    draftIntakeAbortRef.current = null;
+    setDraftIntake(null);
+  }
+
+  /** What the draft holds now, in plain words, for the intake turn to judge the request against. */
+  function currentDraftText(): string {
+    if (draftKind === "deck") return (deckState?.slides ?? []).map(deckSlideOutline).join("\n\n");
+    if (draftKind === "spreadsheet") return workbookState ? workbookPlainText(workbookState, computeWorkbook(workbookState), 1500) : "";
+    const holder = window.document.createElement("div");
+    holder.innerHTML = contentRef.current;
+    return documentBlocks(holder).map((block) => block.text).join("\n");
+  }
+
+  /** Reads a request before anything is written. The model either finds it
+   * clear, and the run starts, or asks; the run then waits for the answers. */
+  async function beginDraftIntake(request: string) {
+    if (!selectedAgent) return;
+    const startedAt = draftNowIso();
+    const requestEvent = draftEvent("user", "intake-request", request, { createdAt: startedAt });
+    const intake: DraftIntake = { id: requestEvent.id, request, clarification: null };
+    const controller = new AbortController();
+    draftIntakeAbortRef.current = controller;
+    setDraftIntake(intake);
+    setInstruction("");
+    setEvents((list) => [...list, requestEvent]);
+    setDraftTrace(intakeRun(requestEvent.id, Date.now()));
+    setStatus("Reading your request.");
+    const timeout = window.setTimeout(() => controller.abort(), DRAFT_INTAKE_TIMEOUT_MS);
+    let questions: ClarifyQuestions | undefined;
+    try {
+      const reply = await sendChatStream(completionUserId, {
+        model: selectedAgent.id,
+        messages: [
+          {
+            role: "user",
+            content: draftIntakePrompt({
+              kind: draftKind,
+              request,
+              title: documentTitle.trim() || EMPTY_DOCUMENT_TITLE,
+              current: currentDraftText(),
+              attachments: attachedFiles.map((file) => file.name),
+              sources: sourceSummary.activeKnowledge.map((source) => source.name),
+              template: draftKind === "document" && templateContextEnabled ? selectedTemplate?.name : undefined,
+              webSearch: webSearchEnabled && webSearchAvailable,
+            }),
+          },
+        ],
+        signal: controller.signal,
+        runtime: {
+          surface: "draft",
+          draftTitle: documentTitle.trim() || EMPTY_DOCUMENT_TITLE,
+          clientStartedAt: startedAt,
+          webEnabled: false,
+          citationsEnabled: false,
+          knowledgeConfigIds: [],
+          maxCompletionTokens: 1200,
+          reasoningEffort: reasoningSupported ? "low" : null,
+          clarifyMode: "ask",
+        },
+      });
+      questions = reply.questions;
+    } catch {
+      // Asking first is a courtesy. When the intake turn cannot run, the
+      // request goes ahead as asked, and the run reports any real failure.
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    // The draft moved on while the request was being read.
+    if (draftIntakeRef.current?.id !== intake.id) return;
+    draftIntakeAbortRef.current = null;
+    if (!questions) {
+      continueFromIntake(intake, request);
+      return;
+    }
+    const asked = questions.questions.length;
+    setDraftIntake({ ...intake, clarification: waitingClarification(questions, draftNowIso()) });
+    setDraftTrace((trace) => (trace ? intakePaused(trace, asked, Date.now()) : trace));
+    setStatus(`The assistant has ${asked === 1 ? "a question" : `${asked} questions`} before it starts.`);
+  }
+
+  /** The request is clear, or the user has answered: the run adds the request
+   * as finally asked, so the one shown while it was read goes. */
+  function continueFromIntake(intake: DraftIntake, asked: string) {
+    setDraftIntake(null);
+    setEvents((list) => list.filter((event) => event.id !== intake.id));
+    setDraftTrace(null);
+    setClearedRequest({ request: intake.request, asked });
+  }
+
+  function answerDraftQuestions(response: ClarifyResponse) {
+    const intake = draftIntakeRef.current;
+    if (!intake?.clarification) return;
+    const { next } = respondToClarification(intake.clarification, response, Date.now());
+    continueFromIntake(intake, requestWithAnswers(intake.request, next));
+  }
+
+  function setAskPreference(enabled: boolean) {
+    setAskWhenUnclear(enabled);
+    storeAskPreference(completionUserId, enabled);
+  }
+
+  function alwaysDecideDraftQuestions() {
+    setAskPreference(false);
+    answerDraftQuestions({ kind: "decide" });
+  }
+
+  // Before paint, so the request never blinks out between intake and run.
+  useLayoutEffect(() => {
+    if (!clearedRequest) return;
+    setClearedRequest(null);
+    void routeAssistantRequest(clearedRequest.request, clearedRequest.asked);
+  }, [clearedRequest]);
+
+  // The questions arrive below what is on screen. The card grows or shrinks
+  // from one question to the next, and the trace above it is still playing
+  // its steps in: keep the card where it can be answered.
+  const askingDraftQuestions = Boolean(draftIntake?.clarification);
+  useEffect(() => {
+    const list = draftEventListRef.current;
+    const card = list?.querySelector<HTMLElement>(".clarify-card");
+    if (!askingDraftQuestions || !list || !card) return;
+    const reveal = () => {
+      const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+      list.scrollTop = revealScrollTop(
+        { scrollTop: list.scrollTop, height: list.clientHeight },
+        { top, bottom: top + card.offsetHeight },
+      );
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    Array.from(list.children).forEach((row) => observer.observe(row));
+    return () => observer.disconnect();
+  }, [askingDraftQuestions]);
+
+  // Questions cannot wait behind a closed drawer.
+  useEffect(() => {
+    if (railIsDrawer && askingDraftQuestions) setRailOpen(true);
+  }, [railIsDrawer, askingDraftQuestions]);
+
+  // Questions wait only while their request is on screen with its trace:
+  // opening another draft, or a run started some other way, ends them.
+  useEffect(() => {
+    if (!draftIntake) return;
+    const listed = events.some((event) => event.id === draftIntake.id);
+    const traced = draftTrace?.factRun?.requestEventId === draftIntake.id;
+    if (!listed || !traced) endDraftIntake();
+  }, [draftIntake, events, draftTrace]);
 
   /** Entry point for the export panel buttons. An export or print must
    * contain what the editor shows; with unsaved manual edits it stops and
@@ -10339,16 +10562,40 @@ export function DocumentAssistantWorkspace({
     });
   }
 
-  function jumpToHeading(index: number) {
+  /** The Outline key: with the check open it puts the check away and shows the outline. */
+  function toggleOutlinePanel() {
+    if (!checkOpen) return toggleOutline();
+    setCheckOpen(false);
+    if (!outlineOpen) toggleOutline();
+  }
+
+  // Read from the same blocks, in the same order, that jumpToFinding walks on the page.
+  const checkFindings = useMemo<DocumentFinding[]>(() => {
+    if (draftKind !== "document" || !checkOpen || typeof document === "undefined") return [];
+    const page = document.createElement("div");
+    page.innerHTML = content;
+    return checkDocument(checkableBlocks(page));
+  }, [content, checkOpen, draftKind]);
+
+  /** Brings a block of the page into view and puts the caret at its start. */
+  function goToBlock(block: HTMLElement | undefined): boolean {
     const editor = editorRef.current;
     const scroller = pageScrollRef.current;
-    const heading = editor?.querySelectorAll<HTMLElement>("h1,h2,h3")[index];
-    if (!editor || !scroller || !heading) return;
-    const top = heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    if (!editor || !scroller || !block) return false;
+    const top = block.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     animatePageScroll(scroller, Math.max(0, top - 56));
-    setActiveOutlineIndex(index);
     editor.focus({ preventScroll: true });
-    placeCaretAtEdge(heading, true);
+    placeCaretAtEdge(block, true);
+    return true;
+  }
+
+  function jumpToHeading(index: number) {
+    if (goToBlock(editorRef.current?.querySelectorAll<HTMLElement>("h1,h2,h3")[index])) setActiveOutlineIndex(index);
+  }
+
+  function jumpToFinding(finding: DocumentFinding) {
+    const editor = editorRef.current;
+    goToBlock(editor ? (checkableBlocks(editor)[finding.block]?.element as HTMLElement | undefined) : undefined);
   }
 
   function updateActiveOutline() {
@@ -11671,7 +11918,11 @@ export function DocumentAssistantWorkspace({
                 <h1>{draftKind === "deck" ? "Deck Assistant" : draftKind === "spreadsheet" ? "Spreadsheet Assistant" : "Document Assistant"}</h1>
                 <small className={assistantWorking ? "is-working" : undefined}>
                   {assistantWorking && <PenLine size={12} aria-hidden="true" />}
-                  {assistantWorking
+                  {draftIntake
+                    ? draftIntake.clarification
+                      ? "Waiting for your answer"
+                      : "Reading your request…"
+                    : assistantWorking
                     ? draftKind === "deck"
                       ? "Building slides…"
                       : draftKind === "spreadsheet"
@@ -11845,6 +12096,7 @@ export function DocumentAssistantWorkspace({
               <strong>Draft chat</strong>
             </div>
             <div
+              ref={draftEventListRef}
               className={`draft-event-list ${events.length === 0 && !draftTrace ? "is-empty" : ""}`}
               aria-label="Assistant events"
             >
@@ -11852,6 +12104,7 @@ export function DocumentAssistantWorkspace({
                 <Fragment key={event.id}>
                   <DraftEventRow event={event} />
                   {event.id === draftTraceAnchor && draftWorkTrace}
+                  {event.id === draftIntake?.id && draftQuestionCard}
                 </Fragment>
               ))}
               {draftTraceAnchor === null && draftWorkTrace}
@@ -12310,6 +12563,24 @@ export function DocumentAssistantWorkspace({
                       aria-label="Require source citations"
                       checked={requireCitations}
                       onChange={(event) => toggleRequireCitations(event.target.checked)}
+                    />
+                  </label>
+                  <label className="draft-switch-row">
+                    <span>
+                      <strong>Ask me when unclear</strong>
+                      <small>
+                        {askWhenUnclear
+                          ? "The assistant asks a few quick questions before it writes when a request is unclear."
+                          : "The assistant makes the choices itself and starts writing."}
+                      </small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      className="draft-switch"
+                      aria-label="Ask me when unclear"
+                      checked={askWhenUnclear}
+                      onChange={(event) => setAskPreference(event.target.checked)}
                     />
                   </label>
                   {draftKind === "document" && (
@@ -14912,10 +15183,13 @@ export function DocumentAssistantWorkspace({
           {draftKind === "document" && (
           <div
             className={`document-editor-body ${citationsOpen ? "has-citation-panel" : ""} ${
-              outlineOpen ? "has-outline" : ""
+              outlineOpen || checkOpen ? "has-outline" : ""
             }`}
           >
-            {outlineOpen && (
+            {checkOpen && (
+              <DocumentCheckPanel findings={checkFindings} onJump={jumpToFinding} onClose={() => setCheckOpen(false)} />
+            )}
+            {outlineOpen && !checkOpen && (
               <DocumentOutline
                 headings={outlineHeadings}
                 activeIndex={activeOutlineIndex}
@@ -15285,9 +15559,11 @@ export function DocumentAssistantWorkspace({
               characters={wordCount.characters}
               selectionWords={selectionWordCount}
               zoom={documentZoom}
-              outlineOpen={outlineOpen}
+              outlineOpen={outlineOpen && !checkOpen}
+              checkOpen={checkOpen}
               onZoomChange={changeDocumentZoom}
-              onToggleOutline={toggleOutline}
+              onToggleOutline={toggleOutlinePanel}
+              onToggleCheck={() => setCheckOpen((open) => !open)}
               onOpenFind={() => openFind()}
               onShowShortcuts={() => setShortcutsOpen(true)}
             />
@@ -17636,6 +17912,24 @@ function withCitationRequirement(prompt: string, required: boolean) {
 
 Citation requirement: cite every factual claim inline with the exact source label provided in context (for example [K1] for workspace knowledge, the web citation for web results, or the attachment name for uploaded files). If no provided source supports a claim, keep it only if essential and mark it [citation needed]. Never invent sources.`;
 }
+
+/** The intake turn for one request (see lib/draftIntake): reading it, or,
+ * once the model has asked, waiting on the user's answers. */
+type DraftIntake = {
+  /** The request's event in the draft chat. */
+  id: string;
+  request: string;
+  clarification: WaitingClarification | null;
+};
+
+/** Long enough to read a request; past it, the run starts without asking. */
+const DRAFT_INTAKE_TIMEOUT_MS = 25_000;
+
+const DRAFT_ASSISTANT_NAMES: Record<DraftFormat, string> = {
+  document: "document",
+  deck: "deck",
+  spreadsheet: "spreadsheet",
+};
 
 function DraftEventRow({ event }: { event: AssistantEvent }) {
   const timestamp = draftEventTimestamp(event);

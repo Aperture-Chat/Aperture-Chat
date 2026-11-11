@@ -29,6 +29,7 @@ export type TraceKind =
   | "memory"
   | "tools"
   | "skills"
+  | "calc"
   | "plan"
   | "privacy"
   | "screen"
@@ -51,7 +52,7 @@ export type TraceStep = { id: string; kind: TraceKind; label: string; detail?: s
 
 const TRACE_KINDS = new Set<string>([
   "route", "agent", "context", "knowledge", "web", "fetch", "attachments", "memory", "tools", "skills",
-  "plan", "privacy", "screen", "think", "write", "code", "diagram", "table", "image", "continue",
+  "calc", "plan", "privacy", "screen", "think", "write", "code", "diagram", "table", "image", "continue",
   "resume", "ask", "answer", "check", "flag", "save", "done",
 ]);
 
@@ -213,6 +214,62 @@ function hermesSteps(memories: number, skills: string[], automations: string[]):
   return [stepOf("save:hermes", "Hermes saved what it learned", parts.join(" · ") || undefined)];
 }
 
+/** A page address without its scheme, `www.`, query, or trailing slash. */
+function pageLabel(address: string): string {
+  try {
+    const url = new URL(address);
+    return `${url.hostname.replace(/^www\./, "")}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return address;
+  }
+}
+
+type ResearchStep = Extract<ChatStreamActivity, { kind: "step" }>;
+
+/** How each kind of research step reads: the trace kind it is filed under,
+ * what it says when it worked, what it says when it found nothing, and what
+ * it says when it could not be done. */
+const RESEARCH_STEPS: Record<
+  string,
+  { kind: TraceKind; done: (step: ResearchStep) => [label: string, detail?: string]; failed: string }
+> = {
+  search_knowledge: {
+    kind: "knowledge",
+    done: ({ found, about }) =>
+      found
+        ? [`Looked again in workspace knowledge · ${plural(found, "passage")}`, about ? `For “${about}”` : undefined]
+        : ["Looked again in workspace knowledge", about ? `Nothing more matched “${about}”` : "Nothing more matched."],
+    failed: "Could not look again in workspace knowledge",
+  },
+  search_web: {
+    kind: "web",
+    done: ({ found, about }) =>
+      found
+        ? [`Searched the web again · ${plural(found, "result")}`, about ? `For “${about}”` : undefined]
+        : ["Searched the web again", "No results came back."],
+    failed: "Could not search the web again",
+  },
+  read_page: {
+    kind: "fetch",
+    done: ({ about }) => ["Read a web page", about ? pageLabel(about) : undefined],
+    failed: "Could not read a web page",
+  },
+  calculate: {
+    kind: "calc",
+    done: ({ about }) => ["Worked out a figure", about || undefined],
+    failed: "Could not work out a figure",
+  },
+};
+
+function researchSteps(step: ResearchStep): ChatActivityTraceStep[] {
+  const known = RESEARCH_STEPS[step.do];
+  if (!known || !step.ok) {
+    const label = known ? known.failed : "Tried a step that is not available";
+    return [stepOf(`flag:step-${step.number}`, label, "The reply was written without it.")];
+  }
+  return [stepOf(`${known.kind}:step-${step.number}`, ...known.done(step))];
+}
+
 type ActivityKind = ChatStreamActivity["kind"];
 type StepBuilders = {
   [K in ActivityKind]: (activity: Extract<ChatStreamActivity, { kind: K }>) => ChatActivityTraceStep[];
@@ -257,6 +314,7 @@ const ACTIVITY_STEPS: StepBuilders = {
   ask: ({ questions }) => [
     stepOf("ask:questions", `Paused to ask you ${plural(questions, "question")}`, "So the reply fits what you need"),
   ],
+  step: researchSteps,
   answered: ({ questions, summary, delegated }) => [
     delegated
       ? stepOf("answer:reply", "You left the choices to the assistant", "It picks what it judges best and says what it chose.")

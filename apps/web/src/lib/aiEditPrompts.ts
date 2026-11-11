@@ -7,7 +7,15 @@
  * writer picks, so a preset never behaves differently from typing it.
  */
 
-export type AiEditActionGroup = "improve" | "transform" | "write" | "slide" | "formulas" | "data" | "analyze";
+export type AiEditActionGroup =
+  | "improve"
+  | "transform"
+  | "professional"
+  | "write"
+  | "slide"
+  | "formulas"
+  | "data"
+  | "analyze";
 
 export type AiEditAction = {
   id: string;
@@ -25,6 +33,7 @@ export type AiEditChipGroup = { id: string; label: string; chips: AiEditChip[] }
 export const AI_EDIT_GROUP_LABELS: Record<AiEditActionGroup, string> = {
   improve: "Edit",
   transform: "Transform",
+  professional: "Legal & business",
   write: "Write at cursor",
   slide: "This slide",
   formulas: "Formulas",
@@ -103,6 +112,38 @@ export const DOCUMENT_SELECTION_ACTIONS: AiEditAction[] = [
     keywords: "passive direct",
     instruction: "Rewrite passive constructions in the active voice. Keep the meaning and facts.",
   },
+  {
+    id: "clause-tighten",
+    label: "Tighten this clause",
+    group: "professional",
+    keywords: "legal contract drafting precise ambiguity agreement",
+    instruction:
+      "Redraft this as a careful contract drafter would: remove ambiguity and surplus words, use each defined term exactly as it is defined, and make clear who must do what and by when. Keep the legal effect the same and add no new obligation, right, or exception.",
+  },
+  {
+    id: "clause-subclauses",
+    label: "Break into numbered sub-clauses",
+    group: "professional",
+    keywords: "legal contract structure list provisions",
+    instruction:
+      "Restructure this provision into a lead-in followed by lettered sub-clauses, (a), (b), (c), one requirement or condition in each. Keep every word of substance and the legal effect; change only the structure and the connecting words.",
+  },
+  {
+    id: "conclusion-first",
+    label: "Lead with the conclusion",
+    group: "professional",
+    keywords: "executive summary answer first consulting recommendation memo",
+    instruction:
+      "Rewrite this so the conclusion or recommendation comes first in one or two sentences, followed by the supporting points in order of importance. Keep every fact and figure.",
+  },
+  {
+    id: "figures-consistent",
+    label: "Make figures consistent",
+    group: "professional",
+    keywords: "finance numbers currency units dates format",
+    instruction:
+      "Make the numbers read consistently: currency written one way, thousands separators, the same number of decimal places for like figures, units stated, and dates written one way. Do not change any value, and do not round a figure that was given exactly.",
+  },
 ];
 
 /** Actions for a collapsed caret: the reply is new text inserted there. */
@@ -153,6 +194,38 @@ export const DOCUMENT_WRITE_ACTIONS: AiEditAction[] = [
     keywords: "structure sections headings",
     instruction:
       "Draft an outline for the rest of this document as headings with one-line descriptions, using real heading and list elements.",
+  },
+  {
+    id: "defined-terms",
+    label: "List the defined terms",
+    group: "write",
+    keywords: "definitions glossary legal contract capitalized",
+    instruction:
+      "List every defined term in the document as a table with two columns, the term and its definition as the document gives it. After the table, list any capitalized term that is used but never defined, and any defined term that is never used.",
+  },
+  {
+    id: "open-items",
+    label: "List blanks and open points",
+    group: "write",
+    keywords: "placeholder tbd bracket missing unfinished fill in",
+    instruction:
+      "List everything in the document that is still unfinished: blanks, bracketed text, placeholders such as TBD, and questions left for someone to answer. For each, give the heading or section it sits under and what is needed to complete it. Write nothing else.",
+  },
+  {
+    id: "key-terms",
+    label: "Summarize the key terms",
+    group: "write",
+    keywords: "term sheet deal summary parties obligations contract",
+    instruction:
+      "Summarize the document's key terms as a table: the parties, the dates and term, the amounts and how they are paid, each side's main obligations, and how it can be ended. Use only what the document says and write “not stated” where it is silent.",
+  },
+  {
+    id: "deadlines",
+    label: "List dates and deadlines",
+    group: "write",
+    keywords: "calendar due notice period timeline",
+    instruction:
+      "List every date, deadline, and notice period in the document as a table with three columns: the date or period, what must happen, and who is responsible. Keep the order in which they fall due.",
   },
 ];
 
@@ -251,6 +324,14 @@ export const SLIDE_ACTIONS: AiEditAction[] = [
     instruction:
       "Fix spelling, grammar, and punctuation on this slide and in its notes. Change nothing else.",
   },
+  {
+    id: "slide-action-title",
+    label: "Write a takeaway title",
+    group: "slide",
+    keywords: "consulting action title headline so what message",
+    instruction:
+      "Rewrite the title as one full sentence that states the slide's main takeaway, the point the audience should remember, in at most two lines. Leave the rest of the slide as it is.",
+  },
 ];
 
 export const SLIDE_CHIP_GROUPS: AiEditChipGroup[] = [
@@ -300,6 +381,14 @@ export const SHEET_ACTIONS: AiEditAction[] = [
     keywords: "sum subtotal total",
     instruction:
       "Add a bold totals row under the data with SUM formulas for the number columns, formatted like the column above.",
+  },
+  {
+    id: "sheet-variance",
+    label: "Add variance columns",
+    group: "formulas",
+    keywords: "budget actual difference percent finance forecast",
+    instruction:
+      "Beside the two number columns being compared (for example actual and budget, or this year and last), add a variance column and a variance % column. Use formulas with cell references, guard the percentage against a zero base, and match the number formats beside them.",
   },
   {
     id: "sheet-clean",
@@ -364,6 +453,14 @@ export const SHEET_ACTIONS: AiEditAction[] = [
     keywords: "trends findings takeaways",
     instruction:
       "Read the data and summarize the three to five most important trends or takeaways, with the numbers behind them. Do not change any cells.",
+  },
+  {
+    id: "sheet-tie-out",
+    label: "Check that the totals add up",
+    group: "analyze",
+    keywords: "reconcile tie out foot cross-foot audit sum verify",
+    instruction:
+      "Check the arithmetic in the selection: every subtotal and total against the cells it should add up, across rows and down columns, and any figure typed in where a formula belongs. Report each one that does not agree, with the cell, the value shown, and the value it should be. Do not change any cells.",
   },
 ];
 

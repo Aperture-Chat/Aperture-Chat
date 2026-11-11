@@ -1268,6 +1268,22 @@ test("a reload while the answered reply runs follows it with the answers still i
   ]);
 });
 
+test("a reply remembers that it may research further, for regenerating it", async () => {
+  vi.spyOn(api, "listChatThreads").mockResolvedValue([]);
+  vi.spyOn(api, "saveChatThread").mockImplementation(async (_user, saved) => saved);
+  vi.spyOn(api, "sendChatStream").mockReturnValue(new Promise(() => {}));
+  const data = firstUseData();
+  const view = renderHook(() => useChatStore("fresh-user", data));
+  await act(async () => {});
+
+  await act(async () => {
+    view.result.current.sendMessage("Hello", [], { workSteps: true, webEnabled: false });
+  });
+
+  const runtime = view.result.current.activeThread?.messages.at(-1)?.metadata?.chatRuntime as Record<string, unknown>;
+  expect(runtime.workSteps).toBe(true);
+});
+
 test.each([
   ["ask", "ask"],
   ["decide", "decide"],
