@@ -257,9 +257,12 @@ traffic.
   workbook can take the same steps before it writes. They are listed in the
   draft chat when the draft arrives, not while it is being written.
 - **Check.** A **Check** key in the document status bar lists blanks and
-  placeholders, defined terms that are unused or undefined, missing exhibits
-  and cross-references, and numbering that skips or repeats. It runs in the
-  browser, uses no model, and does not read automatically numbered lists.
+  placeholders, defined terms that are unused or undefined, references to a
+  section or exhibit that is not there, and numbering that skips or repeats.
+  It runs in the browser and uses no model. Section references are checked
+  once a document numbers three sections, exhibits and schedules only when the
+  document holds at least one of that kind (otherwise they are taken to be
+  separate documents), and automatically numbered lists are not read.
 - **Legal, finance, and consulting starting points.** Four agent templates
   (Contract Reviewer, Deposition Summarizer, Financial Analyst, Client Memo
   Writer), three automation recipes (Weekly matter status, Month-end variance
