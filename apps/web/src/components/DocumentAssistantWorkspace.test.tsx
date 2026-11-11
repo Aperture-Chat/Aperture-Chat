@@ -12,6 +12,9 @@ const SCOPED_DRAFT_CACHE_KEY = "aperture-drafts-cache-v2:tenant-example:user-adm
 
 beforeEach(() => {
   window.localStorage.clear();
+  // These tests cover the writing itself, so the user here has turned off
+  // "Ask me when unclear". DocumentAssistantIntake.test.tsx covers asking.
+  window.localStorage.setItem("aperture-ask-when-unclear-user-admin", "off");
   window.getSelection()?.removeAllRanges();
   delete (window as Partial<Window & { showSaveFilePicker: unknown }>).showSaveFilePicker;
   resetOfflineFetch();
@@ -3972,6 +3975,50 @@ test("find highlights every match, steps through them, and replace all is one un
 
   fireEvent.click(screen.getByRole("button", { name: "Undo document edit" }));
   expect(documentText()).toContain("Revenue grew. Revenue per customer rose.");
+});
+
+test("Check lists what a proofreader would catch, goes to each finding, and takes turns with the outline", () => {
+  render(
+    <DocumentAssistantWorkspace
+      data={sampleData}
+      brandName="Aperture Chat"
+      initialDraft={{
+        id: "check-transfer",
+        title: "Services Agreement",
+        sourceLabel: "transferred chat",
+        createdAt: "10:05 AM",
+        content:
+          "# Services Agreement\n\nAcme Inc. (the “Company”) hires [Name] (the “Consultant”).\n\nThe Company will pay on ________.",
+      }}
+    />,
+  );
+  const status = screen.getByRole("contentinfo", { name: "Document status" });
+  const check = within(status).getByRole("button", { name: "Check document" });
+  expect(check).toHaveAttribute("aria-pressed", "false");
+
+  fireEvent.click(check);
+
+  expect(check).toHaveAttribute("aria-pressed", "true");
+  const panel = screen.getByRole("complementary", { name: "Document check" });
+  expect(within(panel).getByRole("status")).toHaveTextContent("3 things to look at");
+  expect(within(panel).getByRole("button", { name: /\[Name\]/ })).toBeInTheDocument();
+  expect(within(panel).getByRole("button", { name: /will pay on ____\./ })).toHaveTextContent("1 blank to fill in");
+  fireEvent.click(within(panel).getByRole("button", { name: /Consultant/ }));
+  expect(window.getSelection()?.anchorNode?.textContent).toContain("Acme Inc.");
+
+  // The outline and the check share one side of the page: opening one puts the other away.
+  fireEvent.click(within(status).getByRole("button", { name: "Document outline" }));
+  expect(screen.queryByRole("complementary", { name: "Document check" })).not.toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "Document outline" })).toBeInTheDocument();
+  expect(check).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(check);
+  expect(screen.queryByRole("navigation", { name: "Document outline" })).not.toBeInTheDocument();
+  expect(within(status).getByRole("button", { name: "Document outline" })).toHaveAttribute("aria-pressed", "false");
+
+  fireEvent.click(within(screen.getByRole("complementary", { name: "Document check" })).getByRole("button", { name: "Close check" }));
+  expect(screen.queryByRole("complementary", { name: "Document check" })).not.toBeInTheDocument();
+  // Closing the check brings back the outline the writer had open.
+  expect(screen.getByRole("navigation", { name: "Document outline" })).toBeInTheDocument();
 });
 
 test("the status bar counts words, opens the outline, and zooms the page", () => {

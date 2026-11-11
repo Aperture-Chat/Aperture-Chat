@@ -120,6 +120,7 @@ function persistableRuntime(runtime?: ChatRuntimeOptions): ChatRuntimeOptions | 
   if (runtime.reasoningEffort) persisted.reasoningEffort = runtime.reasoningEffort;
   // "answered" belongs to one continued reply, never to the next send.
   if (runtime.clarifyMode === "ask" || runtime.clarifyMode === "decide") persisted.clarifyMode = runtime.clarifyMode;
+  if (runtime.workSteps) persisted.workSteps = true;
   return Object.keys(persisted).length > 0 ? persisted : undefined;
 }
 

@@ -151,6 +151,20 @@ test("a recipe pre-fills a two-step chain delivered to drafts", async () => {
   );
 });
 
+test.each([
+  ["Weekly matter status", "Step 2 instruction", /status report/i, /New draft/],
+  ["Month-end variance commentary", "Step 2 instruction", /commentary/i, /New draft/],
+  ["Regulatory watch", "Prompt", /rules, guidance, and enforcement/i, /New chat/],
+])("the %s recipe pre-fills work a professional can schedule", (name, field, text, surface) => {
+  renderConsole({ ...sampleData, automations: [] });
+
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(name) }));
+
+  expect(screen.getByLabelText("Name")).toHaveValue(name);
+  expect((screen.getByLabelText(field) as HTMLInputElement).value).toMatch(text);
+  expect(screen.getByRole("button", { name: surface })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("enables, runs with delivery, links the result, and deletes an automation", async () => {
   const existing = automation();
   const enabled = { ...existing, enabled: true, next_run_at: "2026-09-28T09:00:00+00:00" };

@@ -1,7 +1,11 @@
 import { expect, test } from "vitest";
 import {
+  AI_EDIT_GROUP_LABELS,
   AI_TRANSLATE_CHIPS,
   DOCUMENT_SELECTION_ACTIONS,
+  DOCUMENT_WRITE_ACTIONS,
+  SHEET_ACTIONS,
+  SLIDE_ACTIONS,
   aiActionMatches,
   aiEditIntent,
   aiEditKeepsFormatting,
@@ -87,4 +91,67 @@ test("scope rules carry the formatting contract and the blank-filling rules", ()
   const restyle = aiEditScopeLines({ instruction: "Make it bold", selectedText: "Rent is due." }).join("\n");
   expect(restyle).not.toContain("formatting must come back exactly as it is");
   expect(restyle).not.toContain("Fill each blank");
+});
+
+test.each([
+  [DOCUMENT_SELECTION_ACTIONS, "clause-tighten", "Tighten this clause", "legal contract drafting"],
+  [DOCUMENT_SELECTION_ACTIONS, "clause-subclauses", "Break into numbered sub-clauses", "legal"],
+  [DOCUMENT_SELECTION_ACTIONS, "conclusion-first", "Lead with the conclusion", "executive"],
+  [DOCUMENT_SELECTION_ACTIONS, "figures-consistent", "Make figures consistent", "finance"],
+  [DOCUMENT_WRITE_ACTIONS, "defined-terms", "List the defined terms", "definitions"],
+  [DOCUMENT_WRITE_ACTIONS, "open-items", "List blanks and open points", "placeholder"],
+  [DOCUMENT_WRITE_ACTIONS, "key-terms", "Summarize the key terms", "term sheet"],
+  [DOCUMENT_WRITE_ACTIONS, "deadlines", "List dates and deadlines", "calendar"],
+  [SLIDE_ACTIONS, "slide-action-title", "Write a takeaway title", "consulting"],
+  [SHEET_ACTIONS, "sheet-variance", "Add variance columns", "budget actual"],
+  [SHEET_ACTIONS, "sheet-tie-out", "Check that the totals add up", "reconcile"],
+])("%# a professional can find the %s action by the words of their trade", (actions, id, label, search) => {
+  const action = actions.find((item) => item.id === id);
+
+  expect(action?.label).toBe(label);
+  expect(aiActionMatches(action!, search, AI_EDIT_GROUP_LABELS[action!.group])).toBe(true);
+});
+
+test("the professional actions for highlighted text sit together under their own heading", () => {
+  const professional = DOCUMENT_SELECTION_ACTIONS.filter((action) => action.group === "professional");
+
+  expect(AI_EDIT_GROUP_LABELS.professional).toBe("Legal & business");
+  expect(professional.map((action) => action.id)).toEqual([
+    "clause-tighten",
+    "clause-subclauses",
+    "conclusion-first",
+    "figures-consistent",
+  ]);
+});
+
+test("every action has its own id and an instruction to send", () => {
+  for (const actions of [DOCUMENT_SELECTION_ACTIONS, DOCUMENT_WRITE_ACTIONS, SLIDE_ACTIONS, SHEET_ACTIONS]) {
+    expect(new Set(actions.map((action) => action.id)).size).toBe(actions.length);
+    expect(actions.every((action) => action.instruction.trim().length > 20)).toBe(true);
+  }
+});
+
+test.each([
+  ["sheet-tie-out", /Do not change any cells/],
+  ["sheet-variance", /formulas/],
+])("the %s action tells the assistant how far it may go", (id, rule) => {
+  expect(SHEET_ACTIONS.find((action) => action.id === id)?.instruction).toMatch(rule);
+});
+
+test.each([
+  ["clause-tighten", /legal effect/],
+  ["figures-consistent", /Do not change any value/],
+])("the %s action keeps what must not change", (id, rule) => {
+  expect(DOCUMENT_SELECTION_ACTIONS.find((action) => action.id === id)?.instruction).toMatch(rule);
+});
+
+test.each([
+  ["clause-tighten", true],
+  ["conclusion-first", true],
+  ["figures-consistent", true],
+  ["clause-subclauses", false],
+])("the %s action keeps the highlight's formatting: %s", (id, keeps) => {
+  const action = DOCUMENT_SELECTION_ACTIONS.find((item) => item.id === id)!;
+
+  expect(aiEditKeepsFormatting(aiEditIntent(action.instruction))).toBe(keeps);
 });

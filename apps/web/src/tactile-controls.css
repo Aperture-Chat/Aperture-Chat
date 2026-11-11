@@ -1515,3 +1515,80 @@ span.mini-avatar.avatar-initials,
     display: none;
   }
 }
+
+/* --- Controls that predate the tokens --------------------------------------------------------------
+   Each of these drew its own flat fill, oval, or outside halo before the four rules above existed.
+   They are named here, in the layer that owns the look, so their feature styles keep only layout. */
+
+/* Main actions are lit keys. */
+.composer-approval-approve:not(:disabled),
+.document-export-save-notice button:not(:disabled),
+.deck-blade-done:not(:disabled),
+.folder-create-form button:not(:disabled) {
+  border: 1px solid var(--tactile-lit-border);
+  background: var(--tactile-lit);
+  color: #fff;
+  box-shadow: var(--tactile-lit-shadow);
+}
+
+.composer-approval-approve:not(:disabled):hover,
+.document-export-save-notice button:not(:disabled):hover,
+.deck-blade-done:not(:disabled):hover,
+.folder-create-form button:not(:disabled):hover {
+  background: var(--tactile-lit);
+  filter: brightness(1.07);
+  box-shadow: var(--tactile-lit-hover-shadow);
+}
+
+.composer-approval-approve:not(:disabled):active,
+.document-export-save-notice button:not(:disabled):active,
+.deck-blade-done:not(:disabled):active,
+.folder-create-form button:not(:disabled):active {
+  filter: brightness(0.96);
+  box-shadow: var(--tactile-lit-pressed);
+  transform: translateY(1px);
+}
+
+/* The other choice beside a main action, and a small action in a status line, are raised keys.
+   The approval pair never set a border style, so the browser drew its own bevel. */
+.composer-approval-deny,
+.message-stream-status button {
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  box-shadow: var(--tactile-raised);
+}
+
+.composer-approval-deny:hover,
+.message-stream-status button:hover {
+  box-shadow: var(--tactile-raised-hover);
+}
+
+.composer-approval-deny:active,
+.message-stream-status button:active {
+  box-shadow: var(--tactile-pressed);
+  transform: translateY(1px);
+}
+
+/* Places you type are sunk into the surface. */
+.chat-title-editor input,
+.folder-create-form input,
+.document-link-popover input,
+.inline-ai-popover textarea,
+.data-export-popover input {
+  background-color: var(--tactile-field);
+  box-shadow: var(--tactile-field-shadow);
+}
+
+/* A title being renamed is always the active field: its edge is drawn inside, not as a halo. */
+.chat-title-editor input {
+  box-shadow: var(--tactile-field-shadow), var(--tactile-field-focus);
+}
+
+/* Focus drawn inside the control instead of around it. */
+.md-code-action:focus-visible {
+  box-shadow: var(--tactile-field-focus);
+}
+
+.file-chip.has-image-preview:focus-visible {
+  box-shadow: var(--tactile-field-focus), var(--shadow);
+}

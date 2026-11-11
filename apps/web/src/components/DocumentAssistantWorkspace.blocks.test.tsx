@@ -126,6 +126,9 @@ const nextFrame = () => act(() => new Promise<void>((resolve) => requestAnimatio
 
 beforeEach(() => {
   window.localStorage.clear();
+  // These tests follow what the writing call carries, so the user here has
+  // turned off "Ask me when unclear". DocumentAssistantIntake.test.tsx covers asking.
+  window.localStorage.setItem("aperture-ask-when-unclear-user-admin", "off");
 });
 
 describe.each(["Document", "Deck", "Spreadsheet"])("the %s assistant", (tab) => {

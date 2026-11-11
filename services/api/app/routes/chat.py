@@ -6,7 +6,7 @@ import mimetypes
 import re
 import time
 import zipfile
-from collections.abc import Callable, Collection, Generator, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -182,15 +182,31 @@ from app.core.clarifying_questions import (
     clarify_prompt_line,
     split_reply,
 )
+from app.core.calculator import CalculationError, calculate
 from app.core.knowledge_ingestion import DEFAULT_CHUNK_CHARS
 from app.core.live_site_lookup import live_site_hits
-from app.core.web_fetch import WebFetchError, fetch_web_source
+from app.core.web_fetch import FetchedWebSource, WebFetchError, fetch_web_source
 from app.core.web_search import (
     KEYED_SEARCH_ENGINE_KINDS,
     OPENROUTER_WEB_SEARCH_TOOL,
     WebSearchError,
     resolve_search_provider_key,
     web_search_client_from_config,
+)
+from app.core.work_steps import (
+    MAX_STEP_ROUNDS,
+    Researched,
+    Step,
+    StepFailed,
+    StepGate,
+    StepOutcome,
+    StepResult,
+    StepRunner,
+    answer_after_steps,
+    results_message,
+    run_steps,
+    step_activity,
+    steps_prompt_line,
 )
 from app.core.policy import (
     assert_agent_profile_access,
@@ -264,8 +280,16 @@ logger = logging.getLogger("aperture.chat")
 router = APIRouter(tags=["chat"])
 
 MAX_CHAT_ATTACHMENT_BYTES = 25 * 1024 * 1024
+# Sent with a refusal that an immediate retry cannot fix.
+NOT_RETRYABLE_HEADER = "X-Aperture-Retryable"
 MAX_CHAT_FETCH_BYTES = 2 * 1024 * 1024
 MAX_CHAT_FETCH_CHARS = 12_000
+# How much of a web page the model reads, whether the user linked it or a
+# research step opened it: enough to answer from without crowding out the
+# question. (The whole fetched text is still kept for the citation.)
+PAGE_EXCERPT_CHARS = 6_000
+# How many passages one research-step search hands back.
+WORK_STEP_KNOWLEDGE_HITS = 4
 TEXT_PREVIEW_BYTES = 16 * 1024
 TEXT_PREVIEW_CHARS = 2400
 DOCX_TEXT_XML_MAX_BYTES = 10 * 1024 * 1024
@@ -1445,9 +1469,13 @@ def complete(
             actor=actor,
             usage_context=usage_context,
         )
-    _attach_platform_web_search(
-        request, route, runtime_context, store, _gateway_tenant_id(store, actor, tenant_slug)
-    )
+    web_tenant_id = _gateway_tenant_id(store, actor, tenant_slug)
+    _attach_platform_web_search(request, route, runtime_context, store, web_tenant_id)
+    step_runners = _work_step_runners(store, actor, request, route, runtime_context, web_tenant_id)
+    if step_runners:
+        # Recorded with the completion, so the audit trail says what the
+        # model was allowed to do on its own this turn.
+        runtime_context["work_step_kinds"] = sorted(step_runners)
     _record_chat_audit(
         store, actor, model, route, "chat.completion", request.stream, runtime_context
     )
@@ -1472,6 +1500,7 @@ def complete(
             actor=actor,
             usage_context=usage_context,
             registry=registry,
+            step_runners=step_runners,
         )
     if request.stream:
         return _streaming_response(
@@ -1482,6 +1511,7 @@ def complete(
             store=store,
             actor=actor,
             usage_context=usage_context,
+            step_runners=step_runners,
         )
     return _generate_completion(
         request,
@@ -1491,6 +1521,7 @@ def complete(
         store=store,
         actor=actor,
         usage_context=usage_context,
+        step_runners=step_runners,
     )
 
 
@@ -1535,11 +1566,15 @@ def cancel_chat_run(
 
 
 def _clarify_mode(request: ChatCompletionRequest) -> ClarifyMode | None:
-    """Only chat replies may pause to ask: no one answers a draft or an API
-    client, and the questions travel on the reply's stream."""
-    if request.surface != "chat" or (request.clarify_mode == "ask" and not request.stream):
+    """Who may pause to ask. A chat reply may. On Drafts only the intake turn
+    may, before anything is written: a writing call returns the draft itself.
+    No one answers an API client, and the questions travel on the reply's
+    stream."""
+    if request.clarify_mode == "ask" and not request.stream:
         return None
-    return request.clarify_mode
+    if request.surface == "chat":
+        return request.clarify_mode
+    return "ask" if request.clarify_mode == "ask" and _is_draft_intake(request) else None
 
 
 def _runs_on_server(request: ChatCompletionRequest) -> bool:
@@ -1568,6 +1603,7 @@ def _run_streaming_response(
     actor: User,
     usage_context: UsageBudgetRequestContext,
     registry: ChatRunRegistry,
+    step_runners: Mapping[str, StepRunner] | None = None,
 ) -> StreamingResponse:
     """Start the reply as a server-owned run and follow it from the start."""
     try:
@@ -1584,6 +1620,7 @@ def _run_streaming_response(
                 store=store,
                 actor=actor,
                 usage_context=usage_context,
+                step_runners=step_runners,
             ),
             on_finish=lambda finished: _finish_run(store, actor, usage_context, finished),
         )
@@ -2787,11 +2824,15 @@ def _generate_completion(
     actor: User,
     usage_context: UsageBudgetRequestContext,
     usage_surface: str | None = None,
+    step_runners: Mapping[str, StepRunner] | None = None,
 ) -> ChatCompletionResponse:
     """Call the configured provider for a real completion.
 
     There is deliberately no fabricated fallback text: an unconfigured route or
     an upstream failure surfaces as HTTP 503 so the client can show the truth.
+
+    With ``step_runners`` the model may take research steps before it writes
+    (see app.core.work_steps); the reply carries what it did as ``activity``.
     """
 
     try:
@@ -2805,21 +2846,38 @@ def _generate_completion(
         completion_budget = _completion_token_budget(request, model_config)
         gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
         resolved_usage_surface = usage_surface or request.surface
-        payload = _gateway_complete(
-            client,
-            route=route,
-            messages=messages,
-            max_tokens=completion_budget,
-            tools=request.tools or None,
-            tool_choice=request.tool_choice,
-            options=_openai_generation_options(request),
-            web_search_tools=gateway_web_tools,
-            usage_context=usage_context,
-            model_id=model_config.id,
-            usage_surface=resolved_usage_surface,
-            thread_id=request.thread_id,
+
+        def complete(conversation: list[dict[str, Any]]) -> Completion:
+            payload = _gateway_complete(
+                client,
+                route=route,
+                messages=conversation,
+                max_tokens=completion_budget,
+                tools=request.tools or None,
+                tool_choice=request.tool_choice,
+                options=_openai_generation_options(request),
+                web_search_tools=gateway_web_tools,
+                usage_context=usage_context,
+                model_id=model_config.id,
+                usage_surface=resolved_usage_surface,
+                thread_id=request.thread_id,
+            )
+            return payload, _translate_response(payload, request.model, runtime_context)
+
+        step_facts: list[dict[str, Any]] = []
+        researched = _complete_after_steps(
+            complete,
+            messages,
+            step_runners or {},
+            step_facts,
+            store=store,
+            actor=actor,
+            model_config=model_config,
+            runtime_context=runtime_context,
         )
-        response = _translate_response(payload, request.model, runtime_context)
+        # Whatever follows continues from the research, not from before it.
+        messages = researched.messages
+        payload, response = researched.reply
         if request.surface == "draft" and _provider_filtered(response):
             raise _provider_filter_exception(route, payload)
         completed = _continue_completion_if_needed(
@@ -2866,6 +2924,7 @@ def _generate_completion(
             filtered, runtime_context, resolve_model_content_filters(store, model_config)
         )
         filtered.directives = _directive_results(runtime_context, filtered)
+        filtered.activity = step_facts
         concealed_prompt = runtime_context.get("privacy_concealed_prompt")
         if isinstance(concealed_prompt, str):
             filtered.concealed_prompt = concealed_prompt
@@ -3761,7 +3820,6 @@ def _attach_platform_web_search(
     # The admin toggle writes the workspace's "web" connector-config record;
     # the catalog entry carries the platform-level ceiling. No record at all
     # means the keyless platform default applies (web search on).
-    web_config = next(iter(tenant_connector_configs(store, "web", tenant_id)), None)
     if not connector_enabled_for_tenant(store, "web", tenant_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3772,11 +3830,7 @@ def _attach_platform_web_search(
         # upstream family, so the platform engine never runs for these routes.
         return
 
-    client = web_search_client_from_config(dict(web_config.settings) if web_config else None)
-    if client.engine in KEYED_SEARCH_ENGINE_KINDS and not client.api_key:
-        client.api_key = resolve_search_provider_key(
-            store, client.engine, tenant_id=route.credential_tenant_id
-        )
+    client = _platform_web_search_client(store, route, tenant_id)
     query = str(runtime_context.get("retrieval_query") or "") or _latest_user_message(
         request.messages
     )
@@ -3786,42 +3840,81 @@ def _attach_platform_web_search(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Web search ({client.engine}) is unavailable: {exc} Turn off Web for this reply to continue without it.",
+            # The same request would fail the same way, and the message says
+            # what to do instead, so the page shows it without retrying.
+            headers={NOT_RETRYABLE_HEADER: "false"},
         ) from exc
 
     # One page, one number: a second number for a URL would have no row to cite.
     results = list({result.url: result for result in reversed(results)}.values())[::-1]
     runtime_context["web_search_engine"] = client.engine
-    runtime_context["web_results"] = [
-        {"title": result.title, "url": result.url, "snippet": result.snippet} for result in results
-    ]
-    if runtime_context.get("citations_enabled") and results:
-        existing = runtime_context.get("citations")
-        citations = existing if isinstance(existing, list) else []
-        # A fetched URL is the same page, so its row answers to both labels. A
-        # knowledge chunk at that URL is a different source and keeps its own.
-        fetched = {
-            citation.get("source_uri"): citation
-            for citation in citations
-            if isinstance(citation, dict) and citation.get("k_index") is None
-        }
-        whole_texts = _citation_texts(runtime_context)
-        runtime_context["citation_texts"] = whole_texts
-        for index, result in enumerate(results, start=1):
-            if result.url in fetched:
-                fetched[result.url]["w_index"] = index
-                continue
-            citations.append(
-                ChatCitation(
-                    id=f"cite-web-{index}",
-                    source_name=result.title,
-                    source_type="web",
-                    source_uri=result.url,
-                    snippet=_citation_snippet(result.snippet),
-                    w_index=index,
-                ).model_dump()
-            )
-            whole_texts[f"cite-web-{index}"] = result.snippet
-        runtime_context["citations"] = citations
+    runtime_context["web_results"] = []
+    _add_web_results(runtime_context, results)
+
+
+def _platform_web_search_client(
+    store: SeedStore, route: ModelGatewayRoute, tenant_id: str | None
+) -> Any:
+    """The workspace's configured search engine, with its stored key when it needs one."""
+    web_config = next(iter(tenant_connector_configs(store, "web", tenant_id)), None)
+    client = web_search_client_from_config(dict(web_config.settings) if web_config else None)
+    if client.engine in KEYED_SEARCH_ENGINE_KINDS and not client.api_key:
+        client.api_key = resolve_search_provider_key(
+            store, client.engine, tenant_id=route.credential_tenant_id
+        )
+    return client
+
+
+def _add_web_results(runtime_context: dict[str, object], results: Iterable[Any]) -> list[int]:
+    """List search results for the reply and return each one's [W#] number.
+
+    A page already listed keeps its number; a new one takes the next and, when
+    citations are on, gets a source row.
+    """
+    listed = _runtime_dicts(runtime_context, "web_results")
+    numbers = {str(result.get("url")): number for number, result in enumerate(listed, start=1)}
+    added: list[tuple[int, Any]] = []
+    found: list[int] = []
+    for result in results:
+        if result.url not in numbers:
+            listed.append({"title": result.title, "url": result.url, "snippet": result.snippet})
+            numbers[result.url] = len(listed)
+            added.append((len(listed), result))
+        found.append(numbers[result.url])
+    if runtime_context.get("citations_enabled") and added:
+        _cite_web_results(runtime_context, added)
+    return found
+
+
+def _cite_web_results(runtime_context: dict[str, object], numbered: Iterable[tuple[int, Any]]) -> None:
+    """A source row for each newly listed search result, under its [W#] number."""
+    existing = runtime_context.get("citations")
+    citations = existing if isinstance(existing, list) else []
+    # A fetched URL is the same page, so its row answers to both labels. A
+    # knowledge chunk at that URL is a different source and keeps its own.
+    fetched = {
+        citation.get("source_uri"): citation
+        for citation in citations
+        if isinstance(citation, dict) and citation.get("k_index") is None
+    }
+    whole_texts = _citation_texts(runtime_context)
+    runtime_context["citation_texts"] = whole_texts
+    for index, result in numbered:
+        if result.url in fetched:
+            fetched[result.url]["w_index"] = index
+            continue
+        citations.append(
+            ChatCitation(
+                id=f"cite-web-{index}",
+                source_name=result.title,
+                source_type="web",
+                source_uri=result.url,
+                snippet=_citation_snippet(result.snippet),
+                w_index=index,
+            ).model_dump()
+        )
+        whole_texts[f"cite-web-{index}"] = result.snippet
+    runtime_context["citations"] = citations
 
 
 def _gateway_web_search_tools(
@@ -3992,6 +4085,7 @@ def _streaming_response(
     store: SeedStore,
     actor: User,
     usage_context: UsageBudgetRequestContext,
+    step_runners: Mapping[str, StepRunner] | None = None,
 ) -> StreamingResponse:
     # Unconfigured routes fail before the stream starts so the client gets an
     # honest 503 instead of fabricated deltas.
@@ -4009,6 +4103,7 @@ def _streaming_response(
             store=store,
             actor=actor,
             usage_context=usage_context,
+            step_runners=step_runners,
         ),
         media_type="text/event-stream",
         headers=_SSE_RESPONSE_HEADERS,
@@ -4280,8 +4375,13 @@ def _stream_events(
     store: SeedStore,
     actor: User,
     usage_context: UsageBudgetRequestContext,
+    step_runners: Mapping[str, StepRunner] | None = None,
 ) -> Iterator[str]:
     """Yield Server-Sent Events: `data: {"delta": "..."}` lines then `data: [DONE]`.
+
+    With ``step_runners``, a model turn may end in a research-step block
+    instead of the answer: the steps run, their results go back to the model,
+    and the next turn continues the same reply (see app.core.work_steps).
 
     Hardened for long generations: upstream keep-alives are forwarded as SSE
     comments so nothing between the model and the browser mistakes thinking
@@ -4347,22 +4447,32 @@ def _stream_events(
             yield _sse_data({"activity": activity})
         request_messages = base_messages
         continuation_rounds = 0
+        # Research steps: the turns that asked for them and their results, and
+        # where in the reply the text written since the last of them begins.
+        step_messages: list[dict[str, Any]] = []
+        step_rounds = 0
+        steps_taken = 0
+        answer_start = 0
         while True:
             usage_sink: dict[str, Any] = {}
             completion_id = new_accounting_id()
             current_completion_id = completion_id
             current_usage_sink = usage_sink
             round_settled = False
-            deltas = _gateway_stream(
-                client,
-                route=route,
-                messages=request_messages,
-                max_tokens=completion_budget,
-                tools=request.tools or None,
-                tool_choice=request.tool_choice,
-                options=_openai_generation_options(request),
-                web_search_tools=gateway_web_tools,
-                usage_sink=usage_sink,
+            step_gate = StepGate(enabled=bool(step_runners) and step_rounds < MAX_STEP_ROUNDS)
+            deltas = _outside_step_block(
+                _gateway_stream(
+                    client,
+                    route=route,
+                    messages=request_messages,
+                    max_tokens=completion_budget,
+                    tools=request.tools or None,
+                    tool_choice=request.tool_choice,
+                    options=_openai_generation_options(request),
+                    web_search_tools=gateway_web_tools,
+                    usage_sink=usage_sink,
+                ),
+                step_gate,
             )
             first_delta_of_round = True
             for delta in deltas:
@@ -4373,7 +4483,7 @@ def _stream_events(
                     continue
                 if (
                     first_delta_of_round
-                    and continuation_rounds
+                    and (continuation_rounds or step_rounds)
                     and accumulated
                     and not accumulated.endswith(("\n", " "))
                 ):
@@ -4419,11 +4529,44 @@ def _stream_events(
                     "total_tokens": settlement.event.total_tokens,
                 }
                 total_usage = _merge_usage(total_usage, round_usage) if total_usage else round_usage
+            if step_gate.block and step_runners:
+                # The turn asked for research instead of answering: run it,
+                # hand the results back, and let the model go on.
+                step_rounds += 1
+                outcomes = yield from _activity_frames(
+                    _take_steps(
+                        step_gate.block,
+                        step_runners,
+                        store=store,
+                        actor=actor,
+                        model_config=model_config,
+                        runtime_context=runtime_context,
+                        round_number=step_rounds,
+                        first_number=steps_taken + 1,
+                        privacy_categories=privacy_categories,
+                        show_about=not buffer_output,
+                    )
+                )
+                last_wire_activity = time.monotonic()
+                steps_taken += len(outcomes)
+                step_messages.extend(
+                    [
+                        {"role": "assistant", "content": step_gate.text.rstrip()},
+                        {
+                            "role": "user",
+                            "content": results_message(outcomes, more_allowed=step_rounds < MAX_STEP_ROUNDS),
+                        },
+                    ]
+                )
+                answer_start = len(accumulated)
+                request_messages = [*base_messages, *step_messages]
+                continue
             finish_reason = str(usage_sink.get("finish_reason") or "").strip().lower()
             wants_continuation = finish_reason in CONTINUATION_FINISH_REASONS or (
                 finish_reason == "stop" and _ends_inside_code_fence(accumulated)
             )
-            if not wants_continuation or continuation_rounds >= MAX_CONTINUATION_CALLS or not accumulated:
+            written = accumulated[answer_start:]
+            if not wants_continuation or continuation_rounds >= MAX_CONTINUATION_CALLS or not written:
                 break
             # The provider stopped at the completion token budget mid-answer;
             # continue in-place so the user still receives the full output.
@@ -4431,10 +4574,11 @@ def _stream_events(
             yield _sse_data({"activity": {"kind": "continue", "round": continuation_rounds}})
             request_messages = [
                 *base_messages,
+                *step_messages,
                 # Trailing whitespace from a mid-token cut can violate
                 # provider dialect rules for assistant content; strip it —
                 # the joiner on the next round restores natural spacing.
-                {"role": "assistant", "content": accumulated.rstrip()},
+                {"role": "assistant", "content": written.rstrip()},
                 {"role": "user", "content": CONTINUATION_PROMPT},
             ]
         delivery = yield from _deliver_output(
@@ -4621,6 +4765,126 @@ def _stream_events(
         yield "data: [DONE]\n\n"
 
 
+def _outside_step_block(deltas: Iterable[str], gate: StepGate) -> Iterator[str]:
+    """One model turn's text with a research-step block held out of it.
+
+    Upstream keep-alives (empty deltas) pass through. Text the gate held that
+    turned out to be ordinary, or a block that did not parse, follows at the end.
+    """
+    for delta in deltas:
+        if not delta:
+            yield delta
+            continue
+        released = gate.feed(delta)
+        if released:
+            yield released
+    tail = gate.finish()
+    if tail:
+        yield tail
+
+
+def _take_steps(
+    steps: Sequence[Step],
+    step_runners: Mapping[str, StepRunner],
+    *,
+    store: SeedStore,
+    actor: User,
+    model_config: ModelConfig,
+    runtime_context: dict[str, object],
+    round_number: int,
+    first_number: int,
+    privacy_categories: list[str] | None,
+    show_about: bool,
+) -> Generator[dict[str, Any], None, list[StepOutcome]]:
+    """Run one round of research steps, giving each one's work-trace fact as it
+    finishes. The round is audited even when the reader leaves partway."""
+    marks = _step_marks(runtime_context)
+    screen = partial(_concealed, privacy_categories=privacy_categories)
+    outcomes: list[StepOutcome] = []
+    try:
+        for step in steps:
+            outcomes.extend(run_steps((step,), step_runners))
+            fact = step_activity(
+                outcomes[-1],
+                number=first_number + len(outcomes) - 1,
+                screen=screen,
+                show_about=show_about,
+            )
+            yield fact
+    finally:
+        if outcomes:
+            _record_step_round(store, actor, model_config, runtime_context, round_number, outcomes, marks)
+    return outcomes
+
+
+StepRound = Generator[dict[str, Any], None, list[StepOutcome]]
+
+
+def _activity_frames(step_round: StepRound) -> Generator[str, None, list[StepOutcome]]:
+    """A round's facts as stream frames, each sent as its step finishes."""
+    try:
+        while True:
+            try:
+                fact = next(step_round)
+            except StopIteration as finished:
+                return cast(list[StepOutcome], finished.value)
+            yield _sse_data({"activity": fact})
+    finally:
+        # A reader who leaves mid-round still gets the round audited.
+        step_round.close()
+
+
+def _collect_facts(step_round: StepRound, facts: list[dict[str, Any]]) -> list[StepOutcome]:
+    """A round's facts gathered for a reply that arrives whole."""
+    while True:
+        try:
+            facts.append(next(step_round))
+        except StopIteration as finished:
+            return cast(list[StepOutcome], finished.value)
+
+
+Completion = tuple[dict[str, Any], ChatCompletionResponse]
+
+
+def _complete_after_steps(
+    complete: Callable[[list[dict[str, Any]]], Completion],
+    messages: list[dict[str, Any]],
+    step_runners: Mapping[str, StepRunner],
+    facts: list[dict[str, Any]],
+    *,
+    store: SeedStore,
+    actor: User,
+    model_config: ModelConfig,
+    runtime_context: dict[str, object],
+) -> Researched[Completion]:
+    """A reply that arrives whole. With step runners the model may research
+    first (see ``answer_after_steps``); each step's fact is added to ``facts``
+    for the reply to carry, since nothing streams to show it as it happens."""
+    if not step_runners:
+        return Researched(complete(messages), messages, ())
+    privacy_categories = _privacy_output_categories(runtime_context)
+    show_about = not filters_have_output_rules(resolve_model_content_filters(store, model_config))
+
+    def run_round(steps: Sequence[Step], round_number: int) -> list[StepOutcome]:
+        return _collect_facts(
+            _take_steps(
+                steps,
+                step_runners,
+                store=store,
+                actor=actor,
+                model_config=model_config,
+                runtime_context=runtime_context,
+                round_number=round_number,
+                first_number=len(facts) + 1,
+                privacy_categories=privacy_categories,
+                show_about=show_about,
+            ),
+            facts,
+        )
+
+    return answer_after_steps(complete, lambda reply: _response_text(reply[1]), messages, run_round)
+
+
 @dataclass(frozen=True)
 class _Delivery:
     """How a finished stream ended for the person reading it."""
@@ -4669,6 +4933,224 @@ def _held_back_tail(ask_gate: AskGate, concealer: StreamingConcealer | None) -> 
 
 def _concealed(text: str, privacy_categories: list[str] | None) -> str:
     return conceal(text, privacy_categories).text if privacy_categories is not None else text
+
+
+# --- Research steps (see app.core.work_steps) --------------------------------
+
+
+def _work_steps_requested(request: ChatCompletionRequest) -> bool:
+    """A chat reply takes steps while it streams, and a Drafts writing call
+    takes them before it returns the draft. A code edit and an API client each
+    expect one model turn whose text is the result. A reply the user asked to
+    be fast answers from what it already has."""
+    if not request.work_steps or request.reasoning_effort == "minimal":
+        return False
+    if request.surface == "draft":
+        return _is_draft_writing_call(request)
+    return bool(request.stream and request.surface == "chat" and not _is_code_inline_edit(request))
+
+
+def _is_draft_writing_call(request: ChatCompletionRequest) -> bool:
+    """A Drafts call that writes a document, deck, or workbook from a request.
+    The intake turn only reads the request, and an edit to a passage or to the
+    document's blocks returns exactly the replacement text."""
+    return (
+        not _is_draft_intake(request)
+        and document_patch_instruction(request) is None
+        and _draft_inline_edit_parts(request) is None
+    )
+
+
+def _work_step_runners(
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    route: ModelGatewayRoute,
+    runtime_context: dict[str, object],
+    tenant_id: str | None,
+) -> dict[str, StepRunner]:
+    """The steps this turn may take. Each one reuses what the turn was already
+    allowed: knowledge the user attached, web search the user switched on."""
+    if not _work_steps_requested(request):
+        return {}
+    runners: dict[str, StepRunner] = {"calculate": _calculate_step}
+    if runtime_context.get("knowledge_config_ids"):
+        runners["search_knowledge"] = partial(_search_knowledge_step, store, actor, runtime_context)
+    if "web_results" in runtime_context:
+        # The platform's own engine searched for this turn, so it can search again.
+        runners["search_web"] = partial(_search_web_step, store, route, runtime_context, tenant_id)
+    if runtime_context.get("web_enabled"):
+        runners["read_page"] = partial(_read_page_step, runtime_context)
+    return runners
+
+
+def _calculate_step(expression: str) -> StepResult:
+    try:
+        return StepResult(found=1, lines=(f"{expression} = {calculate(expression)}",))
+    except CalculationError as exc:
+        raise StepFailed(str(exc)) from exc
+
+
+def _runtime_dicts(runtime_context: dict[str, object], key: str) -> list[dict[str, object]]:
+    """A list the reply's context keeps and steps add to; created when missing."""
+    value = runtime_context.get(key)
+    if not isinstance(value, list):
+        value = []
+        runtime_context[key] = value
+    return cast(list[dict[str, object]], value)
+
+
+def _marker_number(entry: Mapping[str, object], key: str) -> int:
+    value = entry.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _add_runtime_citation(runtime_context: dict[str, object], citation: ChatCitation) -> None:
+    """A source found mid-reply, kept the way the turn's first sources are:
+    a short snippet in the row, the whole text beside it."""
+    if not runtime_context.get("citations_enabled"):
+        return
+    _runtime_dicts(runtime_context, "citations").append(
+        citation.model_copy(update={"snippet": _citation_snippet(citation.snippet)}).model_dump()
+    )
+    whole_texts = _citation_texts(runtime_context)
+    whole_texts[citation.id] = citation.snippet
+    runtime_context["citation_texts"] = whole_texts
+
+
+def _search_knowledge_step(
+    store: SeedStore, actor: User, runtime_context: dict[str, object], query: str
+) -> StepResult:
+    """Search the turn's knowledge sources again. ``retrieve_knowledge`` applies
+    the same access rules and ethical walls as the first search."""
+    config_ids = [str(config_id) for config_id in cast(list[object], runtime_context["knowledge_config_ids"])]
+    found = _dedupe_knowledge_hits(
+        store.retrieve_knowledge(actor, config_ids, query, limit=WORK_STEP_KNOWLEDGE_HITS)
+    )
+    hits = _runtime_dicts(runtime_context, "knowledge_hits")
+    known = {str(hit.get("chunk_id")): hit for hit in [*_attachment_read_passages(runtime_context), *hits]}
+    next_marker = max([_marker_number(hit, "k_index") for hit in known.values()], default=0) + 1
+    lines: list[str] = []
+    for chunk in found:
+        hit = known.get(chunk.id)
+        if hit is None:
+            # A passage found again keeps its number; a new one takes the next.
+            hit = _runtime_knowledge_hit(chunk, k_index=next_marker)
+            hits.append(hit)
+            _add_runtime_citation(runtime_context, _knowledge_citation(chunk, next_marker))
+            next_marker += 1
+        lines.append(_knowledge_excerpt_line(hit, _marker_number(hit, "k_index")))
+    return StepResult(found=len(found), lines=tuple(filter(None, lines)))
+
+
+def _search_web_step(
+    store: SeedStore,
+    route: ModelGatewayRoute,
+    runtime_context: dict[str, object],
+    tenant_id: str | None,
+    query: str,
+) -> StepResult:
+    try:
+        results = _platform_web_search_client(store, route, tenant_id).search(query)
+    except WebSearchError as exc:
+        raise StepFailed(f"Web search is unavailable: {exc}") from exc
+    numbers = _add_web_results(runtime_context, results)
+    listed = _runtime_dicts(runtime_context, "web_results")
+    lines = [_web_result_line(number, listed[number - 1]) for number in dict.fromkeys(numbers)]
+    return StepResult(found=len(lines), lines=tuple(filter(None, lines)))
+
+
+def _read_page_step(runtime_context: dict[str, object], url: str) -> StepResult:
+    """Read one public page. The fetcher refuses private and internal addresses."""
+    try:
+        fetched = fetch_web_source(
+            url,
+            max_bytes=MAX_CHAT_FETCH_BYTES,
+            max_chars=MAX_CHAT_FETCH_CHARS,
+            user_agent="ApertureChat-ChatFetcher/0.1",
+        )
+    except WebFetchError as exc:
+        raise StepFailed(str(exc.detail)) from exc
+    pages = _runtime_dicts(runtime_context, "fetched_urls")
+    source_uri = _citation_safe_url(fetched.final_url)
+    page = next((known for known in pages if source_uri and known.get("source_uri") == source_uri), None)
+    if page is None:
+        number = max([_marker_number(known, "u_index") for known in pages], default=0) + 1
+        page = _fetched_url_entry(fetched, number)
+        pages.append(page)
+        _cite_read_page(runtime_context, page)
+    label = f"[U{page['u_index']}] {page['source_name']}"
+    if source_uri:
+        label = f"{label} ({source_uri})"
+    return StepResult(
+        found=1, lines=(f"- {label}: {_prompt_excerpt(fetched.text, limit=PAGE_EXCERPT_CHARS)}",)
+    )
+
+
+def _cite_read_page(runtime_context: dict[str, object], page: Mapping[str, object]) -> None:
+    """A page a search result already lists is the same source, so that row
+    answers to both labels; any other page gets its own row."""
+    source_uri = str(page.get("source_uri") or "")
+    if not source_uri or not runtime_context.get("citations_enabled"):
+        return
+    for citation in _runtime_dicts(runtime_context, "citations"):
+        if citation.get("source_uri") == source_uri and citation.get("k_index") is None:
+            citation["u_index"] = page["u_index"]
+            return
+    _add_runtime_citation(
+        runtime_context,
+        ChatCitation(
+            id=f"cite-fetch-{page['u_index']}",
+            source_name=str(page.get("source_name") or source_uri),
+            source_type="web",
+            source_uri=source_uri,
+            snippet=str(page.get("text") or ""),
+            u_index=cast(int, page["u_index"]),
+        ),
+    )
+
+
+def _step_marks(runtime_context: dict[str, object]) -> dict[str, int]:
+    """How many sources the reply has before a round, to tell the new ones after."""
+    return {
+        key: len(_runtime_dicts(runtime_context, key))
+        for key in ("knowledge_hits", "web_results", "fetched_urls")
+    }
+
+
+def _record_step_round(
+    store: SeedStore,
+    actor: User,
+    model_config: ModelConfig,
+    runtime_context: dict[str, object],
+    round_number: int,
+    outcomes: Sequence[StepOutcome],
+    marks: Mapping[str, int],
+) -> None:
+    """What a round of steps did and which sources it added. The model's own
+    wording of what it searched for stays out, as the user's question does."""
+
+    def added(key: str) -> list[dict[str, object]]:
+        return _runtime_dicts(runtime_context, key)[marks[key] :]
+
+    store.record_audit(
+        actor,
+        "chat.research_steps",
+        model_config.id,
+        {
+            "surface": runtime_context.get("surface", "chat"),
+            "thread_id": runtime_context.get("thread_id"),
+            "round": round_number,
+            "steps": [
+                {"do": outcome.step.kind, "ok": outcome.ok, "found": outcome.found}
+                for outcome in outcomes
+            ],
+            "knowledge_hit_refs": [_audit_knowledge_hit(hit) for hit in added("knowledge_hits")],
+            "web_result_urls": [result.get("url") for result in added("web_results")],
+            "fetched_urls": [page.get("source_uri") for page in added("fetched_urls")],
+        },
+        runtime_state_changed=False,
+    )
 
 
 def _deliver_screened(
@@ -5336,6 +5818,7 @@ def _resolve_runtime_context(
         or _draft_revision_parts(request) is not None
         or document_patch_instruction(request) is not None
         or _is_code_inline_edit(request)
+        or _is_draft_intake(request)
     ):
         directives: list[Directive] = []
     else:
@@ -6139,6 +6622,23 @@ def _carried_knowledge_hits(
     ]
 
 
+def _knowledge_citation(hit: KnowledgeChunk, k_index: int) -> ChatCitation:
+    return ChatCitation(
+        id=f"cite-{hit.id}",
+        source_name=hit.source_name,
+        source_type=hit.source_type,
+        source_uri=hit.source_uri,
+        snippet=hit.text,
+        page_start=hit.page_start,
+        page_end=hit.page_end,
+        locator=hit.locator,
+        chunk_id=hit.id,
+        k_index=k_index,
+        document_id=hit.document_id,
+        knowledge_config_id=hit.knowledge_config_id,
+    )
+
+
 def _runtime_citations(
     knowledge_hits: list[KnowledgeChunk],
     attachments: list[ChatAttachment],
@@ -6156,22 +6656,7 @@ def _runtime_citations(
     reads = attachment_reads or {}
     citations: list[ChatCitation] = []
     for k_index, hit in enumerate(_dedupe_knowledge_hits(knowledge_hits), start=1):
-        citations.append(
-            ChatCitation(
-                id=f"cite-{hit.id}",
-                source_name=hit.source_name,
-                source_type=hit.source_type,
-                source_uri=hit.source_uri,
-                snippet=hit.text,
-                page_start=hit.page_start,
-                page_end=hit.page_end,
-                locator=hit.locator,
-                chunk_id=hit.id,
-                k_index=k_index,
-                document_id=hit.document_id,
-                knowledge_config_id=hit.knowledge_config_id,
-            )
-        )
+        citations.append(_knowledge_citation(hit, k_index))
     for fetched in fetched_urls or []:
         raw_index = fetched.get("u_index")
         u_index = raw_index if isinstance(raw_index, int) and raw_index >= 1 else 1
@@ -6258,18 +6743,19 @@ def _fetch_chat_urls(urls: list[str]) -> list[dict[str, object]]:
             )
         except WebFetchError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-        source_uri = _citation_safe_url(fetched.final_url)
-        fetched_urls.append(
-            {
-                "u_index": u_index,
-                "source_name": fetched.filename,
-                "source_uri": source_uri,
-                "text": fetched.text,
-                "byte_count": fetched.byte_count,
-                "content_type": fetched.content_type,
-            }
-        )
+        fetched_urls.append(_fetched_url_entry(fetched, u_index))
     return fetched_urls
+
+
+def _fetched_url_entry(fetched: FetchedWebSource, u_index: int) -> dict[str, object]:
+    return {
+        "u_index": u_index,
+        "source_name": fetched.filename,
+        "source_uri": _citation_safe_url(fetched.final_url),
+        "text": fetched.text,
+        "byte_count": fetched.byte_count,
+        "content_type": fetched.content_type,
+    }
 
 
 def _citation_safe_url(url: str) -> str:
@@ -6373,6 +6859,19 @@ def _is_code_inline_edit(request: ChatCompletionRequest) -> bool:
     if request.surface != "chat":
         return False
     return _latest_user_message(request.messages).lstrip().startswith(CODE_INLINE_EDIT_PREFIX)
+
+
+# The turn Drafts sends before it writes anything (apps/web/src/lib/draftIntake.ts).
+DRAFT_INTAKE_PREFIX = "You are the intake step of the drafting assistant."
+
+
+def _is_draft_intake(request: ChatCompletionRequest) -> bool:
+    """Whether this is the intake turn: it reads a Drafts request and either
+    finds it clear or pauses to ask. Its prompt quotes the request, so the
+    request's wording is not an instruction to this turn."""
+    if request.surface != "draft":
+        return False
+    return _latest_user_message(request.messages).lstrip().startswith(DRAFT_INTAKE_PREFIX)
 
 
 # The whole-document edit from Drafts (apps/web/src/lib/documentBlockEdit.ts).
@@ -7754,6 +8253,9 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
     context_lines.extend(
         filter(None, [clarify_prompt_line(cast(ClarifyMode | None, runtime_context.get("clarify_mode")))])
     )
+    context_lines.extend(
+        filter(None, [steps_prompt_line(cast(list[str], runtime_context.get("work_step_kinds") or []))])
+    )
     if runtime_context.get("web_enabled"):
         # Recency questions ("how did X do in the World Cup?") fail without an
         # anchor date: the model otherwise weighs its training-era prior over
@@ -7918,7 +8420,7 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
                 label = f"[U{u_index}] {source_name}"
                 if source_uri:
                     label = f"{label} ({source_uri})"
-                context_lines.append(f"- {label}: {_prompt_excerpt(text)}")
+                context_lines.append(f"- {label}: {_prompt_excerpt(text, limit=PAGE_EXCERPT_CHARS)}")
     attachment_passages = _attachment_read_passages(runtime_context)
     knowledge_hits = runtime_context.get("knowledge_hits")
     if not isinstance(knowledge_hits, list):
@@ -7942,53 +8444,31 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             )
     if knowledge_hits:
         context_lines.append("Retrieved knowledge excerpts:")
-        for fallback_index, hit in enumerate(knowledge_hits, start=1):
-            if not isinstance(hit, dict):
-                continue
-            raw_k_index = hit.get("k_index")
-            k_index = (
-                raw_k_index
-                if (
-                    isinstance(raw_k_index, int)
-                    and not isinstance(raw_k_index, bool)
-                    and raw_k_index >= 1
-                )
-                else fallback_index
+        context_lines.extend(
+            filter(
+                None,
+                (
+                    _knowledge_excerpt_line(hit, fallback_index)
+                    for fallback_index, hit in enumerate(knowledge_hits, start=1)
+                    if isinstance(hit, dict)
+                ),
             )
-            source_name = str(hit.get("source_name") or "Knowledge source")
-            source_uri = str(hit.get("source_uri") or "")
-            text = str(hit.get("text") or "").strip()
-            if text:
-                label = f"[K{k_index}]"
-                location = _knowledge_hit_location(hit)
-                if location:
-                    label = f"{label} ({location})"
-                label = f"{label} {source_name}"
-                if source_uri:
-                    label = f"{label} ({source_uri})"
-                # Document properties (author, dates, labels) travel with
-                # every passage so answers can say who wrote what and when.
-                details = str(hit.get("source_details") or "").strip()
-                if details:
-                    label = f"{label} [{details}]"
-                context_lines.append(
-                    f"- {label}: {_prompt_excerpt(text, limit=KNOWLEDGE_EXCERPT_CHARS)}"
-                )
+        )
     context_lines.extend(_attachment_read_lines(runtime_context))
     web_results = runtime_context.get("web_results")
     if isinstance(web_results, list) and web_results:
         engine = str(runtime_context.get("web_search_engine") or "web")
         context_lines.append(f"Live web search results (engine: {engine}, fetched this turn):")
-        for index, result in enumerate(web_results, start=1):
-            if not isinstance(result, dict):
-                continue
-            title = str(result.get("title") or "Web result")
-            url = str(result.get("url") or "")
-            snippet = str(result.get("snippet") or "").strip()
-            if url:
-                context_lines.append(
-                    f"- [W{index}] {title} ({url}): {_prompt_excerpt(snippet or title)}"
-                )
+        context_lines.extend(
+            filter(
+                None,
+                (
+                    _web_result_line(index, result)
+                    for index, result in enumerate(web_results, start=1)
+                    if isinstance(result, dict)
+                ),
+            )
+        )
     if (knowledge_hits or attachment_passages) and _prompt_cites_strictly(runtime_context):
         # Instructions at the tail are the ones models hold on to, and missing
         # markers now mean missing sources.
@@ -8004,6 +8484,45 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
     if checklist:
         parts.append(checklist)
     return "\n\n".join(parts)
+
+
+def _knowledge_excerpt_line(hit: Mapping[str, object], fallback_index: int) -> str:
+    """One retrieved passage as the model reads it, under its [K#] label; empty
+    when the passage has no text."""
+    text = str(hit.get("text") or "").strip()
+    if not text:
+        return ""
+    number = _marker_number(hit, "k_index")
+    label = _knowledge_excerpt_label(hit, number if number >= 1 else fallback_index)
+    return f"- {label}: {_prompt_excerpt(text, limit=KNOWLEDGE_EXCERPT_CHARS)}"
+
+
+def _knowledge_excerpt_label(hit: Mapping[str, object], k_index: int) -> str:
+    """A passage's marker, where it sits in its document, and the document."""
+    source_name = str(hit.get("source_name") or "Knowledge source")
+    source_uri = str(hit.get("source_uri") or "")
+    label = f"[K{k_index}]"
+    location = _knowledge_hit_location(dict(hit))
+    if location:
+        label = f"{label} ({location})"
+    label = f"{label} {source_name}"
+    if source_uri:
+        label = f"{label} ({source_uri})"
+    # Document properties (author, dates, labels) travel with
+    # every passage so answers can say who wrote what and when.
+    details = str(hit.get("source_details") or "").strip()
+    if details:
+        label = f"{label} [{details}]"
+    return label
+
+
+def _web_result_line(index: int, result: Mapping[str, object]) -> str:
+    """One web search result as the model reads it, under its [W#] label; empty
+    when the result has no address."""
+    title = str(result.get("title") or "Web result")
+    url = str(result.get("url") or "")
+    snippet = str(result.get("snippet") or "").strip()
+    return f"- [W{index}] {title} ({url}): {_prompt_excerpt(snippet or title)}" if url else ""
 
 
 def _attachment_coverage(read: Mapping[str, Any]) -> str:
