@@ -2153,6 +2153,54 @@ def test_model_sync_never_overwrites_custom_agent_profiles(monkeypatch: pytest.M
     assert catalog_row.capabilities.supported_parameters == ["temperature", "tools"]
 
 
+@pytest.mark.parametrize("who", ["platform", "admin"])
+def test_a_sync_that_reports_no_context_window_keeps_the_one_already_set(who: str) -> None:
+    """Many model lists (Azure deployments, most OpenAI-compatible /models
+    answers) report no context window. A sync must not blank the one an owner
+    entered, which would cut attachments to the small default budget. The
+    owner's sync and an admin's sync reconcile the catalog separately."""
+    from app.routes import admin as admin_route
+    from app.routes import platform as platform_route
+
+    reconcile = {"platform": platform_route, "admin": admin_route}[who]._reconcile_provider_models
+    store = get_store()
+    provider = Provider(
+        id="provider-compatible",
+        name="Firm gateway",
+        kind="openai-compatible",
+        region="Example",
+        base_url="https://gateway.example.test/v1",
+    )
+    store.providers[provider.id] = provider
+
+    def catalog_row(upstream: str, context_window: int) -> ModelConfig:
+        model = ModelConfig(
+            id=f"model-{upstream.lower()}",
+            provider_id=provider.id,
+            provider_name=provider.name,
+            name=upstream,
+            upstream_model_id=upstream,
+            context_window=context_window,
+        )
+        store.models[model.id] = model
+        return model
+
+    entered = catalog_row("Kimi-K3.1-Pro", 1_000_000)
+    reported = catalog_row("gpt-5.5", 400_000)
+
+    reconcile(
+        store,
+        provider,
+        [
+            DiscoveredModel(id="Kimi-K3.1-Pro", name="Kimi-K3.1-Pro"),
+            DiscoveredModel(id="gpt-5.5", name="gpt-5.5", context_window=1_050_000),
+        ],
+    )
+
+    assert store.models[entered.id].context_window == 1_000_000
+    assert store.models[reported.id].context_window == 1_050_000
+
+
 def test_newly_synced_provider_models_default_to_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """New catalog models wait for an explicit owner enable; the enable grants the default group."""
     provider_response = client.post(

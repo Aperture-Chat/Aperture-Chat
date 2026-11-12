@@ -17,7 +17,13 @@ from app.core.connector_availability import connector_enabled_for_tenant
 from app.core.generated_artifacts import generated_artifact_file
 from app.core.mcp_runtime import call_mcp_tool, check_mcp_server, mcp_env_from_auth
 from app.core.net_guard import EgressBlocked, validate_public_url
-from app.core.policy import assert_group_permission, assert_tool_access, require_admin_or_owner
+from app.core.policy import (
+    TOOL_ACCESS_DENIED,
+    assert_group_permission,
+    assert_tool_access,
+    require_admin_or_owner,
+    tool_use_allowed,
+)
 from app.core.script_tools import clamp_timeout_seconds, run_custom_script
 from app.core.sessions import (
     sign_approval_token,
@@ -233,6 +239,10 @@ def approve_mcp_tool(
     the proof of approval, instead of trusting a client-asserted id list.
     """
     tool = _get_configurable_tool(config_id, actor, store)
+    # Only someone who may use the tool now can consent to running it, so the
+    # audit trail never records an approval that could not have run.
+    if not tool_use_allowed(actor, store.groups, tool):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TOOL_ACCESS_DENIED)
     if tool.tool_type != "mcp":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only MCP tools require approval.")
     if not connector_enabled_for_tenant(store, "mcp", tool.tenant_id):

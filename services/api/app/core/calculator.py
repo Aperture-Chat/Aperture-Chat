@@ -66,7 +66,8 @@ def _power(base: Decimal, exponent: Decimal) -> Decimal:
 
 
 def _round(value: Decimal, places: Decimal = Decimal(0)) -> Decimal:
-    if not _is_whole(places):
+    # Infinity equals its own integral value, so it has to be ruled out by name.
+    if not places.is_finite() or not _is_whole(places):
         _refuse("round needs a whole number of decimal places.")
     return value.quantize(Decimal(f"1e{-int(places)}"), rounding=ROUND_HALF_UP)
 

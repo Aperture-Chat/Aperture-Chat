@@ -16,7 +16,11 @@ export type MarkdownBlock =
   | { kind: "heading"; level: number; text: string }
   | { kind: "image"; alt: string; url: string; title?: string }
   | { kind: "paragraph"; lines: string[] }
-  | { kind: "list"; ordered: boolean; items: string[] }
+  | { kind: "list"; ordered: false; items: string[] }
+  // `start` is the number the first item was written with. A list that a
+  // paragraph interrupts resumes as a new list, so it has to keep counting
+  // from where the writer left off rather than from 1.
+  | { kind: "list"; ordered: true; start: number; items: string[] }
   | { kind: "table"; headers: string[]; rows: string[][]; aligns: MarkdownColumnAlign[] }
   | { kind: "rule" }
   | { kind: "code"; language: string; text: string; info?: string }
@@ -137,18 +141,10 @@ function walkMarkdownBlocks(source: string): { blocks: MarkdownBlock[]; tableSpa
       continue;
     }
 
-    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
-    const ordered = /^\s*\d+\.\s+(.*)$/.exec(line);
-    if (bullet || ordered) {
+    const listItem = readListItemLine(line);
+    if (listItem) {
       flushParagraph();
-      const isOrdered = Boolean(ordered);
-      const item = (bullet?.[1] ?? ordered?.[1] ?? "").trim();
-      const last = blocks[blocks.length - 1];
-      if (last && last.kind === "list" && last.ordered === isOrdered) {
-        last.items.push(item);
-      } else {
-        blocks.push({ kind: "list", ordered: isOrdered, items: [item] });
-      }
+      appendListItem(blocks, listItem);
       index += 1;
       continue;
     }
@@ -159,6 +155,29 @@ function walkMarkdownBlocks(source: string): { blocks: MarkdownBlock[]; tableSpa
 
   flushParagraph();
   return { blocks, tableSpans };
+}
+
+type ListItemLine = { ordered: false; text: string } | { ordered: true; start: number; text: string };
+
+/** A line that opens a list item: `- text`, `* text`, or `3. text`. */
+function readListItemLine(line: string): ListItemLine | null {
+  const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+  if (bullet) return { ordered: false, text: bullet[1].trim() };
+  // Up to nine digits, as in CommonMark: a longer number is not a marker.
+  const ordered = /^\s*(\d{1,9})\.\s+(.*)$/.exec(line);
+  return ordered ? { ordered: true, start: Number(ordered[1]), text: ordered[2].trim() } : null;
+}
+
+/** Adds the item to the list it continues, or starts a new list with it. */
+function appendListItem(blocks: MarkdownBlock[], item: ListItemLine) {
+  const last = blocks[blocks.length - 1];
+  if (last?.kind === "list" && last.ordered === item.ordered) {
+    last.items.push(item.text);
+  } else if (item.ordered) {
+    blocks.push({ kind: "list", ordered: true, start: item.start, items: [item.text] });
+  } else {
+    blocks.push({ kind: "list", ordered: false, items: [item.text] });
+  }
 }
 
 function sameTableData(left: MarkdownTable, right: MarkdownTable): boolean {

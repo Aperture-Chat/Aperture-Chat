@@ -2445,7 +2445,11 @@ def _reconcile_provider_models(
         model.name = discovered.name or upstream_model_id
         model.upstream_model_id = upstream_model_id
         model.notes = discovered.notes
-        model.context_window = discovered.context_window
+        # A provider that reports no context window (Azure deployments, many
+        # OpenAI-compatible /models answers) must not blank the one an owner
+        # entered.
+        if discovered.context_window is not None:
+            model.context_window = discovered.context_window
         if discovered.capabilities is not None:
             model.capabilities = discovered.capabilities
         updated_count += 1

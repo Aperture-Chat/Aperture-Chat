@@ -30,6 +30,7 @@ from app.core.model_gateway import (
     ModelGatewayConfigurationError,
     ModelGatewayError,
     ModelGatewayRoute,
+    deterministic_sampling,
     get_model_gateway_client,
     resolve_model_route,
     supports_image_input,
@@ -174,10 +175,9 @@ class VisionPageReader:
         return supports_reasoning_effort(self.route.upstream_model, self.route.supported_parameters)
 
     def _options(self) -> dict[str, Any]:
-        # Reasoning models reject sampling knobs, so they keep their defaults.
-        if self._reasoning:
-            return {}
-        options: dict[str, Any] = {"temperature": 0}
+        options = deterministic_sampling(self.route)
+        if not options:
+            return options
         if self.route.provider_kind.strip().lower() == "openrouter" and is_gemini_flash_upstream(
             self.route.upstream_model
         ):

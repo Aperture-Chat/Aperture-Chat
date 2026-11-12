@@ -1389,6 +1389,20 @@ def _enforced_sso_config_for_domain(
     return None
 
 
+def _sso_config_admits(account: User, config: SsoConfig) -> bool:
+    """Whether this SSO configuration may sign an existing account in.
+
+    An account signs in through its own workspace's configuration. Platform
+    owners sit outside every workspace, so that match can never hold for them;
+    only a configuration a platform owner authored may sign one in. The stamp
+    is set by the admin API and re-stamped when a workspace admin edits the
+    configuration, so a workspace admin's provider can never assert an owner.
+    """
+    if account.role == Role.PLATFORM_OWNER:
+        return config.settings.get("authored_by_role") == Role.PLATFORM_OWNER.value
+    return account.tenant_id == config.tenant_id
+
+
 def _login_sso(
     email: str,
     display_name: str | None,
@@ -1402,7 +1416,7 @@ def _login_sso(
     if existing is not None:
         if not existing.active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is inactive.")
-        if existing.tenant_id != config.tenant_id:
+        if not _sso_config_admits(existing, config):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="SSO tenant does not match this account.")
         if subject:
             # Bind the account to the provider's stable subject. A different

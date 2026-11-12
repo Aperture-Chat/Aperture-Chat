@@ -332,3 +332,31 @@ test("document conversion keeps section levels and signature lines", () => {
   expect(html).toContain("<p>______________________<br>[Attorney Name]</p>");
   expect(html.match(/document-page-break/g)).toHaveLength(1);
 });
+
+// The shape a model writes for "top five" answers: each numbered headline
+// followed by its own paragraph. Every item after the first used to restart
+// at 1 because the number it was written with was thrown away.
+test("a numbered list broken up by paragraphs keeps the numbers it was written with", () => {
+  const blocks = parseMarkdownBlocks("1. **First**\n   Body one.\n\n2. **Second**\n   Body two.\n\n3. **Third**\n   Body three.");
+  expect(blocks.filter((block) => block.kind === "list")).toEqual([
+    { kind: "list", ordered: true, start: 1, items: ["**First**"] },
+    { kind: "list", ordered: true, start: 2, items: ["**Second**"] },
+    { kind: "list", ordered: true, start: 3, items: ["**Third**"] },
+  ]);
+});
+
+test("an unbroken numbered list is one list that starts at its first number", () => {
+  expect(parseMarkdownBlocks("4. Four\n5. Five\n6. Six")).toEqual([
+    { kind: "list", ordered: true, start: 4, items: ["Four", "Five", "Six"] },
+  ]);
+});
+
+test("a bulleted list carries no start number", () => {
+  expect(parseMarkdownBlocks("- One\n- Two")).toEqual([{ kind: "list", ordered: false, items: ["One", "Two"] }]);
+});
+
+test("a number too long to be a list marker stays ordinary text", () => {
+  expect(parseMarkdownBlocks("12345678901. Not a list")).toEqual([
+    { kind: "paragraph", lines: ["12345678901. Not a list"] },
+  ]);
+});

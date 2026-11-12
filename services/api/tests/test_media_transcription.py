@@ -409,3 +409,41 @@ def test_transcription_stops_resolving_after_best_configured_model(monkeypatch: 
     selection = resolve_transcription_model(store, tenant_id="tenant-example", prefer_fast=True)
     assert selection[0].id == model.id
     assert checked == [("new-unconfigured", "tenant-example"), (model.id, "tenant-example")]
+
+
+def test_video_stills_are_described_with_the_sampling_the_route_accepts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A GPT-5-class deployment rejects temperature 0, so the visual notes
+    were dropped without a word."""
+    from app.core import media_transcription
+    from app.core.model_gateway import ModelGatewayRoute
+
+    calls: list[dict[str, object]] = []
+
+    class _Gateway:
+        def complete(self, **kwargs: object) -> dict[str, object]:
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": "- A whiteboard."}}], "usage": None}
+
+    class _Usage:
+        def settle_provider_child(self, **_kwargs: object) -> None:
+            return None
+
+    monkeypatch.setattr(media_transcription, "get_model_gateway_client", lambda: _Gateway())
+    route = ModelGatewayRoute(
+        provider_id="provider-foundry-test",
+        provider_name="Azure Foundry Test",
+        provider_kind="azure-foundry",
+        auth_type="api-key",
+        upstream_model="gpt-5.4-mini",
+        base_url="https://myres.services.ai.azure.com/models",
+        configured=True,
+        status_message="ready",
+        secret_value="test-only-secret",
+    )
+
+    notes = media_transcription._describe_frames(
+        (b"jpeg-bytes",), model=_audio_model(), route=route, usage_context=_Usage()  # type: ignore[arg-type]
+    )
+
+    assert "whiteboard" in notes
+    assert calls[0]["options"] == {}

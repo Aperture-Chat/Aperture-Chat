@@ -1055,3 +1055,42 @@ describe("citation markers in a reply", () => {
     expect(screen.getAllByRole("button", { name: "Open source K1: Handbook.pdf, Page 40" })).toHaveLength(2);
   });
 });
+
+describe("numbered lists", () => {
+  // The counter the reader sees is drawn by CSS from each list's
+  // counter-reset, so the start number has to reach the element.
+  const shownStart = (list: HTMLOListElement) =>
+    list.style.counterReset ? Number(list.style.counterReset.replace("md-counter ", "")) + 1 : 1;
+
+  it("numbers headlines one through three when each has its own paragraph", () => {
+    const { container } = render(
+      <Markdown content={"1. **First**\n   Body one.\n\n2. **Second**\n   Body two.\n\n3. **Third**\n   Body three."} />,
+    );
+    const lists = Array.from(container.querySelectorAll("ol"));
+    expect(lists.map((list) => list.textContent)).toEqual(["First", "Second", "Third"]);
+    expect(lists.map((list) => list.start)).toEqual([1, 2, 3]);
+    expect(lists.map(shownStart)).toEqual([1, 2, 3]);
+  });
+
+  it("makes room for numbers too long for the usual margin", () => {
+    // A section numbered 101 or a line starting with a year: three or more
+    // digits used to print over the item's own text.
+    const { container } = render(<Markdown content={"101. Definitions\n102. Term"} />);
+    const list = container.querySelector("ol");
+    expect(list?.start).toBe(101);
+    expect(list?.style.getPropertyValue("--md-list-gutter")).toBe("5ch");
+  });
+
+  it("keeps the usual margin for a list that ends below one hundred", () => {
+    const { container } = render(<Markdown content={"98. One\n99. Two"} />);
+    expect(container.querySelector("ol")?.style.getPropertyValue("--md-list-gutter")).toBe("");
+  });
+
+  it("leaves a list that starts at one exactly as before", () => {
+    const { container } = render(<Markdown content={"1. One\n2. Two"} />);
+    const list = container.querySelector("ol");
+    expect(list?.getAttribute("start")).toBeNull();
+    expect(list?.getAttribute("style")).toBeNull();
+    expect(list?.querySelectorAll("li")).toHaveLength(2);
+  });
+});

@@ -59,7 +59,10 @@ STEP_KINDS: dict[str, str] = {
         "in your own words; use one search per document, party, clause, or sub-question"
     ),
     "search_web": 'search_web ("query"): run another public web search',
-    "read_page": 'read_page ("url"): read a public web page in full, such as one a search result points to',
+    "read_page": (
+        'read_page ("url"): read a public web page in full; only an address a search result gives '
+        "or the user wrote, exactly as it appears"
+    ),
     "calculate": (
         'calculate ("expression"): exact arithmetic, such as 1250000 * 0.065 / 12; '
         "use it for every figure you compute, and write 15% as 0.15"
