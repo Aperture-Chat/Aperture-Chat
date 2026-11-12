@@ -161,7 +161,7 @@ const RECIPES: Recipe[] = [
   {
     key: "variance",
     name: "Month-end variance commentary",
-    summary: "On the third business day, explain budget-to-actual variances and draft the commentary.",
+    summary: "On the 3rd of each month, explain budget-to-actual variances and draft the commentary.",
     icon: ChartNoAxesCombined,
     form: {
       name: "Month-end variance commentary",

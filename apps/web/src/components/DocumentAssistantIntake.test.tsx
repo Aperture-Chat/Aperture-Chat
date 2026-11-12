@@ -254,6 +254,55 @@ test("a deck request is read first too, and its answers reach the deck's writing
   expect(prompt(sent[1]!)).toContain("Build a deck about the renewal\n\nMy answers:\n- Who is it for? The client");
 });
 
+const BOSTON_DECK = [
+  "```json",
+  JSON.stringify({
+    schema: "aperture-deck-v1",
+    title: "Boston Expansion",
+    slides: [
+      { id: "g1", notes: "", layout: "title", title: "Boston Expansion", subtitle: "Growth plan" },
+      { id: "g2", notes: "", layout: "title-bullets", title: "Why Boston", bullets: [{ runs: [{ text: "Talent density" }], level: 0 }] },
+      { id: "g3", notes: "", layout: "closing", title: "Next steps", body: "Approve the budget" },
+    ],
+  }),
+  "```",
+].join("\n");
+
+test("a question's wording never turns an edit to a built deck into a rebuild", async () => {
+  // The question says "start" and "images"; the request itself asks for neither a new deck nor pictures.
+  const question = {
+    intro: "",
+    questions: [
+      {
+        id: "q1",
+        question: "Which fee structure should the slide start from, and should it keep its images?",
+        options: [{ label: "Fixed fee" }, { label: "Hourly" }],
+        multiple: false,
+        recommended: 0,
+      },
+    ],
+  };
+  let intakeTurns = 0;
+  const sent = installModel({ intake: () => (intakeTurns++ === 0 ? ready() : asking(question)()), writing: writes(BOSTON_DECK) });
+  renderDrafts();
+  fireEvent.click(screen.getByRole("button", { name: "Deck", exact: true }));
+  ask("Build a deck about our Boston expansion", "Ask the deck assistant");
+  await waitFor(() => expect(screen.getByText("Slide 1 of 3")).toBeInTheDocument(), { timeout: 8000 });
+  const writingCalls = () => sent.filter((payload) => payload.clarify_mode !== "ask");
+  const built = writingCalls().length;
+
+  ask("Tighten the wording on slide 2", "Ask the deck assistant");
+  const card = await questionCard();
+  fireEvent.click(within(card).getByLabelText(/Fixed fee/));
+  fireEvent.click(within(card).getByRole("button", { name: "Continue" }));
+
+  await waitFor(() => expect(writingCalls().length).toBeGreaterThan(built));
+  const revision = prompt(writingCalls()[built]!);
+  expect(revision).toContain("You are revising an existing slide deck");
+  expect(revision).toContain("Tighten the wording on slide 2\n\nMy answers:\n- Which fee structure should the slide start from, and should it keep its images? Fixed fee");
+  expect(await screen.findByText(/Revised 3 slides/)).toBeInTheDocument();
+});
+
 test("a spreadsheet request is read first too, and its answers reach the workbook's writing call", async () => {
   const sent = installModel({ intake: asking(), writing: writes("Not a workbook") });
   renderDrafts();

@@ -13,8 +13,8 @@ from functools import partial
 from html import unescape
 from itertools import chain, groupby
 from io import BytesIO
-from typing import Any, cast
-from urllib.parse import urlparse
+from typing import Annotated, Any, cast
+from urllib.parse import urlparse, urlsplit, urlunsplit
 from uuid import uuid4
 from xml.etree import ElementTree
 
@@ -26,6 +26,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Path,
     Query,
     UploadFile,
     status,
@@ -223,6 +224,8 @@ from app.core.policy import (
     tool_access_allowed,
 )
 from app.models.schemas import (
+    CHAT_RUN_ID_MAX_LENGTH,
+    CHAT_RUN_ID_PATTERN,
     ChatAttachment,
     KnowledgeAttachmentRequest,
     ChatFolder,
@@ -1525,9 +1528,14 @@ def complete(
     )
 
 
+# A run id in a route's address has the shape the request body requires, so
+# nothing else is ever remembered as a stop or written to the audit trail.
+RunId = Annotated[str, Path(min_length=1, max_length=CHAT_RUN_ID_MAX_LENGTH, pattern=CHAT_RUN_ID_PATTERN)]
+
+
 @router.get("/api/chat/runs/{run_id}/events")
 def chat_run_events(
-    run_id: str,
+    run_id: RunId,
     after: int = Query(default=0, ge=0),
     actor: User = Depends(current_user),
     registry: ChatRunRegistry = Depends(get_chat_run_registry),
@@ -1544,7 +1552,7 @@ def chat_run_events(
 
 @router.post("/api/chat/runs/{run_id}/cancel")
 def cancel_chat_run(
-    run_id: str,
+    run_id: RunId,
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
     registry: ChatRunRegistry = Depends(get_chat_run_registry),
@@ -4980,7 +4988,7 @@ def _work_step_runners(
         # The platform's own engine searched for this turn, so it can search again.
         runners["search_web"] = partial(_search_web_step, store, route, runtime_context, tenant_id)
     if runtime_context.get("web_enabled"):
-        runners["read_page"] = partial(_read_page_step, runtime_context)
+        runners["read_page"] = partial(_read_page_step, runtime_context, _typed_page_keys(request))
     return runners
 
 
@@ -5060,8 +5068,59 @@ def _search_web_step(
     return StepResult(found=len(lines), lines=tuple(filter(None, lines)))
 
 
-def _read_page_step(runtime_context: dict[str, object], url: str) -> StepResult:
-    """Read one public page. The fetcher refuses private and internal addresses."""
+_TYPED_ADDRESS = re.compile(r"https?://[^\s<>()\[\]{}\"'`]+", re.IGNORECASE)
+
+
+def _page_key(url: object) -> str:
+    """An address as two addresses are compared: the fragment dropped, the
+    scheme and host in lower case, a bare host given its root path. Anything
+    else that differs, the query included, is a different address."""
+    try:
+        parsed = urlsplit(str(url or "").strip())
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path or "/", parsed.query, ""))
+
+
+def _typed_page_keys(request: ChatCompletionRequest) -> frozenset[str]:
+    """The addresses the user gave this conversation: the links sent to be
+    read, and every address written in the user's own messages."""
+    typed = list(request.fetch_urls)
+    for message in request.messages:
+        if message.get("role") == "user":
+            text = _message_content_text(message.get("content"))
+            typed.extend(found.rstrip(".,;:!?") for found in _TYPED_ADDRESS.findall(text))
+    return frozenset(filter(None, map(_page_key, typed)))
+
+
+def _reply_was_given(runtime_context: dict[str, object], typed: frozenset[str], url: str) -> bool:
+    """True for an address this turn already holds: one the user gave, a
+    search result, a page already read, or a knowledge source's own address."""
+    key = _page_key(url)
+    if not key:
+        return False
+    held = (
+        [result.get("url") for result in _runtime_dicts(runtime_context, "web_results")]
+        + [page.get("source_uri") for page in _runtime_dicts(runtime_context, "fetched_urls")]
+        + [hit.get("source_uri") for hit in _runtime_dicts(runtime_context, "knowledge_hits")]
+    )
+    return key in typed or any(_page_key(address) == key for address in held)
+
+
+def _read_page_step(runtime_context: dict[str, object], typed: frozenset[str], url: str) -> StepResult:
+    """Read one public page the turn already holds the address of. The model
+    writes the address, and text it has read (a web page, a knowledge passage,
+    an attached file) can tell it what to write, so an address of the model's
+    own making could carry what the reply knows to someone else's server. The
+    fetcher also refuses private and internal addresses."""
+    if not _reply_was_given(runtime_context, typed, url):
+        raise StepFailed(
+            "That address is not one this reply was given. A step can read a page from the search "
+            "results, a link in the user's messages, or a knowledge source's address, exactly as "
+            "written there. Search the web for it instead."
+        )
     try:
         fetched = fetch_web_source(
             url,
@@ -5118,6 +5177,18 @@ def _step_marks(runtime_context: dict[str, object]) -> dict[str, int]:
     }
 
 
+def _audit_step(outcome: StepOutcome) -> dict[str, object]:
+    """One step as the audit trail keeps it. A page step names the host it
+    asked for, read or refused, and nothing else of the address."""
+    entry: dict[str, object] = {"do": outcome.step.kind, "ok": outcome.ok, "found": outcome.found}
+    if outcome.step.kind == "read_page":
+        try:
+            entry["host"] = urlsplit(outcome.step.argument).hostname or ""
+        except ValueError:
+            entry["host"] = ""
+    return entry
+
+
 def _record_step_round(
     store: SeedStore,
     actor: User,
@@ -5141,10 +5212,7 @@ def _record_step_round(
             "surface": runtime_context.get("surface", "chat"),
             "thread_id": runtime_context.get("thread_id"),
             "round": round_number,
-            "steps": [
-                {"do": outcome.step.kind, "ok": outcome.ok, "found": outcome.found}
-                for outcome in outcomes
-            ],
+            "steps": [_audit_step(outcome) for outcome in outcomes],
             "knowledge_hit_refs": [_audit_knowledge_hit(hit) for hit in added("knowledge_hits")],
             "web_result_urls": [result.get("url") for result in added("web_results")],
             "fetched_urls": [page.get("source_uri") for page in added("fetched_urls")],
