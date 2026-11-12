@@ -463,6 +463,46 @@ def test_a_search_result_with_something_added_to_its_address_is_a_different_addr
     assert _step_facts(events)[0]["ok"] is False
 
 
+def test_another_page_on_a_search_results_host_is_a_different_address(
+    scripted, web_search: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        chat_route, "fetch_web_source", lambda *_args, **_kwargs: pytest.fail("no page may be fetched")
+    )
+    scripted(_steps({"do": "read_page", "url": "https://example.com/private"}), "Not read.")
+
+    events = _send(web_enabled=True)
+
+    assert _step_facts(events)[0]["ok"] is False
+
+
+def test_an_address_that_is_not_a_web_page_is_never_read_even_from_a_search_result(
+    scripted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FtpResult:
+        title = "Archive"
+        url = "ftp://example.com/archive"
+        snippet = "An archive."
+
+    class Search:
+        engine = "duckduckgo"
+        api_key = None
+
+        def search(self, _query: str) -> list[FtpResult]:
+            return [FtpResult()]
+
+    monkeypatch.setattr(chat_route, "web_search_client_from_config", lambda _settings: Search())
+    monkeypatch.setattr(
+        chat_route, "fetch_web_source", lambda *_args, **_kwargs: pytest.fail("no page may be fetched")
+    )
+    model = scripted(_steps({"do": "read_page", "url": "ftp://example.com/archive"}), "Not read.")
+
+    events = _send(web_enabled=True)
+
+    assert _step_facts(events)[0]["ok"] is False
+    assert "not one this reply was given" in json.dumps(model.calls[1])
+
+
 @pytest.mark.parametrize(
     ("typed", "asked_for"),
     [
