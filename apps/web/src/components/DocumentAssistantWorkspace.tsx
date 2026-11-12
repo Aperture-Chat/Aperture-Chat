@@ -7331,17 +7331,12 @@ export function DocumentAssistantWorkspace({
     if (draftKind === "deck") {
       const parsed = parseSlideDeck(doc.content);
       if (!parsed.ok) return;
-      latestDeckRef.current = parsed.deck;
-      flushSync(() => {
-        setDeckState(parsed.deck);
-        setDocumentTitle(doc.title);
-        if (!parsed.deck.slides.some((slide) => slide.id === selectedSlideId)) {
-          setSelectedSlideId(parsed.deck.slides[0]?.id ?? null);
-        }
-      });
       // Text boxes are filled once and then owned by the DOM, so a change to
-      // the slide on screen is written into them here; otherwise the next
-      // read would flush the old text back over the colleague's change.
+      // the slide on screen is written into them first, before the state
+      // commits. Effects in that commit read the boxes back (the live
+      // session's change check flushes them into the deck): a box still
+      // showing the old text would put it back, the box sync would write the
+      // new text again, and the two would trade places until React gave up.
       for (const { element, slideId, region } of deckBlockRefs.current.values()) {
         const slide = parsed.deck.slides.find((item) => item.id === slideId);
         if (!slide || !element.isConnected) continue;
@@ -7351,6 +7346,14 @@ export function DocumentAssistantWorkspace({
         element.innerHTML = deckRegionHtml(slide, region);
         if (caret !== null) placeCaretAtTextOffset(element, shiftedCaretOffset(caret, oldText, element.textContent ?? ""));
       }
+      latestDeckRef.current = parsed.deck;
+      flushSync(() => {
+        setDeckState(parsed.deck);
+        setDocumentTitle(doc.title);
+        if (!parsed.deck.slides.some((slide) => slide.id === selectedSlideId)) {
+          setSelectedSlideId(parsed.deck.slides[0]?.id ?? null);
+        }
+      });
       setDeckUndoStack([]);
       setDeckRedoStack([]);
       deckEditSessionUndoRef.current = null;
