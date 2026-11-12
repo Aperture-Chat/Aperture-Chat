@@ -236,6 +236,91 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.23
+
+- **Azure AI Foundry replies work across model families.** These fixes come
+  from S.F. Steward's runs against a live Azure AI Foundry resource.
+  GPT-5-class deployments refused every reply because Aperture sent
+  `max_tokens`; `azure-foundry` routes now send `max_completion_tokens`, and a
+  provider's `max_tokens_param` setting still wins. Mistral Large streams its
+  answer as typed parts with its thinking among them, so every streamed
+  Mistral reply ended in an error; the gateway now joins the answer text and
+  keeps the thinking out of it. Mistral on Foundry refuses temperature 0
+  unless `top_p` is 1, which sent page reading to plain OCR and dropped video
+  still notes; Foundry routes now send both.
+- **Research steps however a model asks for them.** Mistral asks for research
+  steps with a native tool call and no text, so its reply came back empty.
+  Kimi K3 sometimes writes the request in its own tool markup, so the reader
+  saw markup and no answer. Both are now read as the steps or questions they
+  ask for, in chat and in Drafts. A call for something Aperture does not offer
+  is reported to the model as unavailable, and the reply goes on. Tool calls
+  on a turn that sent its own tools (a `/v1` client's, or the gateway's web
+  search tool) are left alone, and no step can run that the turn was not
+  already allowed.
+- **Pictures reach more models.** Image attachments now go to Kimi K3,
+  Mistral Large 4, and DeepSeek V4, which read images but report no
+  capabilities on Foundry. Their earlier text-only generations are unchanged.
+  Aperture decides this by the model name, so keep the model's own name in
+  the deployment name.
+- **Grok usage is recorded.** xAI Grok counts its reasoning tokens in the
+  total but not in the completion count, so every Grok reply failed with
+  "Provider usage could not be recorded exactly". When the reported reasoning
+  count closes the gap exactly, those tokens now count as output. Any other
+  mismatch still fails closed.
+- **Sync Models keeps your context windows.** When a provider's model list
+  reports no context window (most OpenAI-compatible `/models` answers report
+  none), a sync blanked the value an owner had entered, which cut attachments
+  to the small default budget. A sync now keeps it, and still takes a value
+  the provider reports.
+- **Tool approvals are checked again when the tool runs.** Approving an MCP
+  tool records the user's consent to one run and has never granted access.
+  Approving now requires that the user can use the tool at that moment, so a
+  user who has lost access gets a 403 and the audit log no longer records an
+  approval that could not have run. Starting the MCP server and each
+  configured tool call read the live user and tool first. If an administrator
+  removes the user from the tool's group, turns tools off for the user's
+  groups, deactivates the user, or turns off or deletes the tool while the
+  reply is still gathering context, the tool does not run, and the turn
+  records it as skipped ("Not run: the user no longer has access to this
+  tool"). One rule (`policy.tool_use_allowed`) decides all three checks: the
+  group's tools policy, the tool's own access rules, and the Hermes grant.
+- **A research step reads only addresses it was given.** A **read page** step
+  now reads only an address the reply already holds: a search result, a link
+  in the user's own messages or link list, a page already read, or a knowledge
+  source's address. Text the model has read can tell it what to write, so an
+  address of its own making could send what the reply knows to another
+  server. The model is told why a page was refused, and the audit record
+  names the host of each page a step asked for, read or refused.
+- **Fixes.** A numbered list with a paragraph under each item showed "1." on
+  every item; each item now keeps the number it was written with, and
+  three-digit numbers get a wider margin. Two people typing in one shared
+  slide could crash the editor of whoever was typing; it now stays up. After
+  the Drafts assistant asked its questions, a word such as "start" or "images"
+  in a question could turn an edit to a finished deck into a rebuild; an edit
+  now stays an edit. A platform owner can sign in through an SSO configuration
+  that a platform owner created, and a configuration a workspace
+  administrator created or last edited never signs an owner in. A malformed
+  run id in a chat run address is refused with 422, `round()` with infinite
+  places is refused with a reason, and the Month-end variance recipe's caption
+  says "the 3rd of each month", which is when it runs.
+- **Running models on Azure AI Foundry.** Azure reports no context window
+  for a deployment, so enter each chat model's context window in Models.
+  Each deployment has a per-minute token limit set in Microsoft Foundry; a
+  research-style reply used 8,000 to 34,000 tokens on Steward's pilot, and a
+  reply over the limit fails with Azure's rate-limit message. Azure's content
+  filter refused about one web-research reply in fifty there. Azure reports
+  no cost with a reply, so its usage counts toward token budgets but never
+  reaches a budget set in dollars. Aperture does not sync an Azure catalog;
+  add each deployment as a model by name.
+- **No migration, no new settings.** This release adds no database migration,
+  no environment variable, no Compose service, and no new dependency. Only API
+  and web code change, so rolling back to v0.5.23 is an image swap.
+- **Not shown or tried yet.** The Azure AI Foundry fixes were proven live on
+  S.F. Steward's Foundry resource; in Aperture they are covered by tests built
+  from the response shapes those deployments sent, and Aperture's development
+  instance has no Foundry provider. The README pictures, training lessons, and
+  PDF guides are unchanged by this release.
+
 ## New Since v0.5.22
 
 - **Research steps in chat.** Before it answers, a chat reply can ask the
