@@ -266,3 +266,70 @@ def test_a_parsed_call_that_hands_its_steps_over_as_text_is_read() -> None:
     assert whole_turn_steps("".join(fenced_native_calls([], provider_calls=lambda: calls)))[0] == (
         Step("search_web", "Kansas 60-511"),
     )
+
+
+# A fence opens a block only at the start of a line, and a blank line before it
+# is noise in the reply, so each rewrite puts the block on a line of its own
+# exactly once.
+def test_a_call_already_on_a_line_of_its_own_gets_no_blank_line_before_it() -> None:
+    assert as_fenced_blocks("Checking the statutes.\n" + KIMI_STEPS).startswith(
+        "Checking the statutes.\n```aperture-steps\n"
+    )
+
+
+def test_a_call_at_the_start_of_a_piece_looks_at_the_reply_before_it() -> None:
+    assert as_fenced_blocks(KIMI_STEPS, after="Checking.\n").startswith("```aperture-steps\n")
+    assert as_fenced_blocks(KIMI_STEPS, after="Checking.").startswith("\n```aperture-steps\n")
+
+
+def test_a_streamed_call_after_a_finished_line_gets_no_blank_line_before_it() -> None:
+    turn = "".join(fenced_native_calls(["Checking the statutes.\n", KIMI_STEPS]))
+
+    assert turn.startswith("Checking the statutes.\n```aperture-steps\n")
+
+
+def test_a_parsed_call_after_a_rewritten_block_starts_on_the_next_line() -> None:
+    calls = [_provider_call("calculate", {"expression": "2 + 2"})]
+
+    turn = "".join(fenced_native_calls([KIMI_STEPS], provider_calls=lambda: calls))
+
+    assert turn.count("```aperture-steps\n") == 2
+    assert "\n\n```aperture-steps" not in turn
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_start"),
+    [("Checking.\n", "Checking.\n```aperture-steps\n"), ("Checking.", "Checking.\n```aperture-steps\n")],
+)
+def test_a_whole_reply_puts_a_parsed_call_on_a_line_of_its_own(content: str, expected_start: str) -> None:
+    from app.core.native_call_markup import completion_with_fenced_blocks
+
+    call = {"id": "a", "type": "function", "function": {"name": "calculate", "arguments": '{"expression": "2 + 2"}'}}
+    payload = {"choices": [{"message": {"role": "assistant", "content": content, "tool_calls": [call]}}]}
+
+    message = completion_with_fenced_blocks(payload)["choices"][0]["message"]
+
+    assert message["content"].startswith(expected_start)
+    assert "tool_calls" not in message
+
+
+def test_a_whole_reply_skips_tool_call_entries_that_are_not_calls() -> None:
+    from app.core.native_call_markup import completion_with_fenced_blocks
+
+    call = {"id": "a", "type": "function", "function": {"name": "calculate", "arguments": '{"expression": "2 + 2"}'}}
+    junk: list[object] = ["not a call", {"id": "b", "function": "not a function"}, call]
+    payload = {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": junk}}]}
+
+    message = completion_with_fenced_blocks(payload)["choices"][0]["message"]
+
+    assert whole_turn_steps(message["content"])[0] == (Step("calculate", "2 + 2"),)
+
+
+@pytest.mark.parametrize("arguments", [{"verbose": True}, {"query": ""}])
+def test_a_call_whose_only_argument_is_a_switch_or_empty_has_nothing_to_look_for(arguments: dict[str, object]) -> None:
+    calls = [_provider_call("search_web", arguments)]
+
+    steps = whole_turn_steps("".join(fenced_native_calls([], provider_calls=lambda: calls)))[0]
+
+    assert steps is not None
+    assert [step.kind for step in steps] == ["search_web with nothing to look for"]
