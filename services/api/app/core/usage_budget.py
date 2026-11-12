@@ -136,20 +136,8 @@ def normalize_reported_usage(raw_usage: Mapping[str, Any] | None) -> ReportedUsa
         "total_cost",
         "cost_usd",
     )
-    component_total: int | None = None
     if prompt is not None and completion is not None:
-        component_total = prompt + completion
-        if component_total > SIGNED_BIGINT_MAX:
-            raise UsageMeteringInvalid("Provider token counters overflow signed BIGINT.")
-    if total is None and prompt is not None and completion is not None:
-        total = component_total
-    elif total is not None and component_total is not None and total != component_total:
-        reasoning = _separately_reported_reasoning_tokens(usage)
-        if reasoning is None or component_total + reasoning != total:
-            raise UsageMeteringInvalid(
-                "Provider total_tokens contradicts prompt/input plus completion/output tokens."
-            )
-        completion = completion + reasoning
+        completion, total = _reconciled_completion_and_total(usage, prompt, completion, total)
     status: MeteringStatus = "reported" if total is not None else "unmetered"
     return ReportedUsage(
         metering_status=status,
@@ -158,6 +146,28 @@ def normalize_reported_usage(raw_usage: Mapping[str, Any] | None) -> ReportedUsa
         total_tokens=total,
         reported_cost_nanos=reported_cost_nanos,
     )
+
+
+def _reconciled_completion_and_total(
+    usage: Mapping[str, Any], prompt: int, completion: int, total: int | None
+) -> tuple[int, int]:
+    """Completion and total tokens once both exact components are known.
+
+    A missing total is their sum. A total that differs from the sum is
+    accepted only when separately reported reasoning tokens close the gap
+    exactly; those tokens are output, so they join the completion count.
+    """
+    component_total = prompt + completion
+    if component_total > SIGNED_BIGINT_MAX:
+        raise UsageMeteringInvalid("Provider token counters overflow signed BIGINT.")
+    if total is None or total == component_total:
+        return completion, component_total
+    reasoning = _separately_reported_reasoning_tokens(usage)
+    if reasoning is None or component_total + reasoning != total:
+        raise UsageMeteringInvalid(
+            "Provider total_tokens contradicts prompt/input plus completion/output tokens."
+        )
+    return completion + reasoning, total
 
 
 def _separately_reported_reasoning_tokens(usage: Mapping[str, Any]) -> int | None:
