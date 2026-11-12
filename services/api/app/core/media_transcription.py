@@ -35,6 +35,7 @@ from app.core.model_gateway import (
     ModelGatewayConfigurationError,
     ModelGatewayError,
     ModelGatewayRoute,
+    deterministic_sampling,
     get_model_gateway_client,
     is_speech_to_text_model_id,
     resolve_model_route,
@@ -518,7 +519,7 @@ def _describe_frames(
     client = get_model_gateway_client()
     completion_id = new_accounting_id()
     payload = client.complete(
-        route=route, messages=messages, max_tokens=1024, options={"temperature": 0}
+        route=route, messages=messages, max_tokens=1024, options=deterministic_sampling(route)
     )
     usage_context.settle_provider_child(
         completion_id=completion_id,

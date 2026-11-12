@@ -114,8 +114,10 @@ def normalize_reported_usage(raw_usage: Mapping[str, Any] | None) -> ReportedUsa
 
     ``total_tokens`` is accepted only as an exact nonnegative integer. When it
     is absent, exact prompt/input and completion/output counters may be added
-    arithmetically. Partial reports remain unmetered. Malformed, conflicting, or
-    overflowing counters fail explicitly; no tokenizer estimate is introduced.
+    arithmetically. Reasoning tokens reported beside the completion counter are
+    output tokens when they exactly close the gap to ``total_tokens``. Partial
+    reports remain unmetered. Malformed, conflicting, or overflowing counters
+    fail explicitly; no tokenizer estimate is introduced.
     """
 
     if raw_usage is not None and not isinstance(raw_usage, Mapping):
@@ -134,17 +136,8 @@ def normalize_reported_usage(raw_usage: Mapping[str, Any] | None) -> ReportedUsa
         "total_cost",
         "cost_usd",
     )
-    component_total: int | None = None
     if prompt is not None and completion is not None:
-        component_total = prompt + completion
-        if component_total > SIGNED_BIGINT_MAX:
-            raise UsageMeteringInvalid("Provider token counters overflow signed BIGINT.")
-    if total is None and prompt is not None and completion is not None:
-        total = component_total
-    elif total is not None and component_total is not None and total != component_total:
-        raise UsageMeteringInvalid(
-            "Provider total_tokens contradicts prompt/input plus completion/output tokens."
-        )
+        completion, total = _reconciled_completion_and_total(usage, prompt, completion, total)
     status: MeteringStatus = "reported" if total is not None else "unmetered"
     return ReportedUsage(
         metering_status=status,
@@ -153,6 +146,42 @@ def normalize_reported_usage(raw_usage: Mapping[str, Any] | None) -> ReportedUsa
         total_tokens=total,
         reported_cost_nanos=reported_cost_nanos,
     )
+
+
+def _reconciled_completion_and_total(
+    usage: Mapping[str, Any], prompt: int, completion: int, total: int | None
+) -> tuple[int, int]:
+    """Completion and total tokens once both exact components are known.
+
+    A missing total is their sum. A total that differs from the sum is
+    accepted only when separately reported reasoning tokens close the gap
+    exactly; those tokens are output, so they join the completion count.
+    """
+    component_total = prompt + completion
+    if component_total > SIGNED_BIGINT_MAX:
+        raise UsageMeteringInvalid("Provider token counters overflow signed BIGINT.")
+    if total is None or total == component_total:
+        return completion, component_total
+    reasoning = _separately_reported_reasoning_tokens(usage)
+    if reasoning is None or component_total + reasoning != total:
+        raise UsageMeteringInvalid(
+            "Provider total_tokens contradicts prompt/input plus completion/output tokens."
+        )
+    return completion + reasoning, total
+
+
+def _separately_reported_reasoning_tokens(usage: Mapping[str, Any]) -> int | None:
+    """Reasoning tokens a provider reports beside its completion counter.
+
+    Most providers count reasoning inside ``completion_tokens``. Some (xAI Grok
+    on Azure AI Foundry) leave it out and add it to ``total_tokens`` instead.
+    The caller accepts the total only when this exact counter closes the gap.
+    """
+    for name in ("completion_tokens_details", "output_tokens_details"):
+        details = usage.get(name)
+        if isinstance(details, Mapping):
+            return _exact_alias_counter(details, "reasoning_tokens")
+    return None
 
 
 def utc_usage_date(value: datetime) -> date:

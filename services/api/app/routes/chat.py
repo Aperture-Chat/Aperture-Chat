@@ -13,8 +13,8 @@ from functools import partial
 from html import unescape
 from itertools import chain, groupby
 from io import BytesIO
-from typing import Any, cast
-from urllib.parse import urlparse
+from typing import Annotated, Any, cast
+from urllib.parse import urlparse, urlsplit, urlunsplit
 from uuid import uuid4
 from xml.etree import ElementTree
 
@@ -26,6 +26,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Path,
     Query,
     UploadFile,
     status,
@@ -193,6 +194,7 @@ from app.core.web_search import (
     resolve_search_provider_key,
     web_search_client_from_config,
 )
+from app.core.native_call_markup import completion_with_fenced_blocks, fenced_native_calls
 from app.core.work_steps import (
     MAX_STEP_ROUNDS,
     Researched,
@@ -217,12 +219,14 @@ from app.core.policy import (
     assert_model_access,
     hermes_companion_allowed,
     knowledge_chunk_visible_to_user,
-    hermes_locked_for,
     is_hermes_tool,
     model_access_allowed,
     tool_access_allowed,
+    tool_use_allowed,
 )
 from app.models.schemas import (
+    CHAT_RUN_ID_MAX_LENGTH,
+    CHAT_RUN_ID_PATTERN,
     ChatAttachment,
     KnowledgeAttachmentRequest,
     ChatFolder,
@@ -1525,9 +1529,14 @@ def complete(
     )
 
 
+# A run id in a route's address has the shape the request body requires, so
+# nothing else is ever remembered as a stop or written to the audit trail.
+RunId = Annotated[str, Path(min_length=1, max_length=CHAT_RUN_ID_MAX_LENGTH, pattern=CHAT_RUN_ID_PATTERN)]
+
+
 @router.get("/api/chat/runs/{run_id}/events")
 def chat_run_events(
-    run_id: str,
+    run_id: RunId,
     after: int = Query(default=0, ge=0),
     actor: User = Depends(current_user),
     registry: ChatRunRegistry = Depends(get_chat_run_registry),
@@ -1544,7 +1553,7 @@ def chat_run_events(
 
 @router.post("/api/chat/runs/{run_id}/cancel")
 def cancel_chat_run(
-    run_id: str,
+    run_id: RunId,
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
     registry: ChatRunRegistry = Depends(get_chat_run_registry),
@@ -3967,7 +3976,11 @@ def _gateway_complete(
     if options:
         kwargs["options"] = options
     completion_id = new_accounting_id()
-    payload = client.complete(**kwargs)
+    # Tool calls answer the caller's own tools, or the web search tool the
+    # gateway declared, on any turn that sent tools.
+    payload = completion_with_fenced_blocks(
+        client.complete(**kwargs), caller_tools=bool(merged_tools)
+    )
     usage_context.settle_provider_child(
         completion_id=completion_id,
         usage=_raw_provider_usage(payload),
@@ -4461,16 +4474,25 @@ def _stream_events(
             round_settled = False
             step_gate = StepGate(enabled=bool(step_runners) and step_rounds < MAX_STEP_ROUNDS)
             deltas = _outside_step_block(
-                _gateway_stream(
-                    client,
-                    route=route,
-                    messages=request_messages,
-                    max_tokens=completion_budget,
-                    tools=request.tools or None,
-                    tool_choice=request.tool_choice,
-                    options=_openai_generation_options(request),
-                    web_search_tools=gateway_web_tools,
-                    usage_sink=usage_sink,
+                # A step or ask block the model wrote as a native tool call
+                # becomes the fenced block before any gate reads the turn.
+                fenced_native_calls(
+                    _gateway_stream(
+                        client,
+                        route=route,
+                        messages=request_messages,
+                        max_tokens=completion_budget,
+                        tools=request.tools or None,
+                        tool_choice=request.tool_choice,
+                        options=_openai_generation_options(request),
+                        web_search_tools=gateway_web_tools,
+                        usage_sink=usage_sink,
+                    ),
+                    # On a turn that sent tools (the caller's own, or the
+                    # gateway's web search tool) tool calls answer those.
+                    None
+                    if request.tools or gateway_web_tools
+                    else partial(usage_sink.get, "tool_calls"),
                 ),
                 step_gate,
             )
@@ -4980,7 +5002,7 @@ def _work_step_runners(
         # The platform's own engine searched for this turn, so it can search again.
         runners["search_web"] = partial(_search_web_step, store, route, runtime_context, tenant_id)
     if runtime_context.get("web_enabled"):
-        runners["read_page"] = partial(_read_page_step, runtime_context)
+        runners["read_page"] = partial(_read_page_step, runtime_context, _typed_page_keys(request))
     return runners
 
 
@@ -5060,8 +5082,59 @@ def _search_web_step(
     return StepResult(found=len(lines), lines=tuple(filter(None, lines)))
 
 
-def _read_page_step(runtime_context: dict[str, object], url: str) -> StepResult:
-    """Read one public page. The fetcher refuses private and internal addresses."""
+_TYPED_ADDRESS = re.compile(r"https?://[^\s<>()\[\]{}\"'`]+", re.IGNORECASE)
+
+
+def _page_key(url: object) -> str:
+    """An address as two addresses are compared: the fragment dropped, the
+    scheme and host in lower case, a bare host given its root path. Anything
+    else that differs, the query included, is a different address."""
+    try:
+        parsed = urlsplit(str(url or "").strip())
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path or "/", parsed.query, ""))
+
+
+def _typed_page_keys(request: ChatCompletionRequest) -> frozenset[str]:
+    """The addresses the user gave this conversation: the links sent to be
+    read, and every address written in the user's own messages."""
+    typed = list(request.fetch_urls)
+    for message in request.messages:
+        if message.get("role") == "user":
+            text = _message_content_text(message.get("content"))
+            typed.extend(found.rstrip(".,;:!?") for found in _TYPED_ADDRESS.findall(text))
+    return frozenset(filter(None, map(_page_key, typed)))
+
+
+def _reply_was_given(runtime_context: dict[str, object], typed: frozenset[str], url: str) -> bool:
+    """True for an address this turn already holds: one the user gave, a
+    search result, a page already read, or a knowledge source's own address."""
+    key = _page_key(url)
+    if not key:
+        return False
+    held = (
+        [result.get("url") for result in _runtime_dicts(runtime_context, "web_results")]
+        + [page.get("source_uri") for page in _runtime_dicts(runtime_context, "fetched_urls")]
+        + [hit.get("source_uri") for hit in _runtime_dicts(runtime_context, "knowledge_hits")]
+    )
+    return key in typed or any(_page_key(address) == key for address in held)
+
+
+def _read_page_step(runtime_context: dict[str, object], typed: frozenset[str], url: str) -> StepResult:
+    """Read one public page the turn already holds the address of. The model
+    writes the address, and text it has read (a web page, a knowledge passage,
+    an attached file) can tell it what to write, so an address of the model's
+    own making could carry what the reply knows to someone else's server. The
+    fetcher also refuses private and internal addresses."""
+    if not _reply_was_given(runtime_context, typed, url):
+        raise StepFailed(
+            "That address is not one this reply was given. A step can read a page from the search "
+            "results, a link in the user's messages, or a knowledge source's address, exactly as "
+            "written there. Search the web for it instead."
+        )
     try:
         fetched = fetch_web_source(
             url,
@@ -5118,6 +5191,18 @@ def _step_marks(runtime_context: dict[str, object]) -> dict[str, int]:
     }
 
 
+def _audit_step(outcome: StepOutcome) -> dict[str, object]:
+    """One step as the audit trail keeps it. A page step names the host it
+    asked for, read or refused, and nothing else of the address."""
+    entry: dict[str, object] = {"do": outcome.step.kind, "ok": outcome.ok, "found": outcome.found}
+    if outcome.step.kind == "read_page":
+        try:
+            entry["host"] = urlsplit(outcome.step.argument).hostname or ""
+        except ValueError:
+            entry["host"] = ""
+    return entry
+
+
 def _record_step_round(
     store: SeedStore,
     actor: User,
@@ -5141,10 +5226,7 @@ def _record_step_round(
             "surface": runtime_context.get("surface", "chat"),
             "thread_id": runtime_context.get("thread_id"),
             "round": round_number,
-            "steps": [
-                {"do": outcome.step.kind, "ok": outcome.ok, "found": outcome.found}
-                for outcome in outcomes
-            ],
+            "steps": [_audit_step(outcome) for outcome in outcomes],
             "knowledge_hit_refs": [_audit_knowledge_hit(hit) for hit in added("knowledge_hits")],
             "web_result_urls": [result.get("url") for result in added("web_results")],
             "fetched_urls": [page.get("source_uri") for page in added("fetched_urls")],
@@ -5770,9 +5852,10 @@ def _resolve_runtime_context(
         _require_workspace_connector(
             store, "mcp", actor.tenant_id, "MCP servers are turned off for this workspace."
         )
-    mcp_servers = _runtime_mcp_servers(store, tool_configs, request.agent_enabled)
+    mcp_servers = _runtime_mcp_servers(store, actor, tool_configs, request.agent_enabled)
     mcp_tool_results = _runtime_mcp_tool_results(
         store,
+        actor,
         tool_configs,
         mcp_servers,
         retrieval_query=retrieval_query,
@@ -6294,53 +6377,76 @@ def _approval_required_mcp_tools(tool_configs: list[ToolConfig]) -> list[ToolCon
     return [tool for tool in tool_configs if tool.tool_type == "mcp" and tool.approval_required]
 
 
+MCP_ACCESS_REMOVED = "Not run: the user no longer has access to this tool."
+
+
+def _still_usable(store: SeedStore, actor: User, config: ToolConfig) -> bool:
+    """Recheck access at the moment an MCP server starts or a tool call runs.
+
+    The turn resolved its tools first, and gathering the rest of its context
+    (searches, page fetches, server starts) takes time. An administrator can
+    remove the user's access in between, so the live user and tool are read
+    again here. A signed approval does not change the answer: it is the
+    user's consent to a run, never permission to use the tool.
+    """
+    user = store.users.get(actor.id)
+    live_config = store.tool_configs.get(config.id)
+    return (
+        user is not None
+        and user.active
+        and live_config is not None
+        and tool_use_allowed(user, store.groups, live_config)
+    )
+
+
 def _runtime_mcp_servers(
-    store: SeedStore, tool_configs: list[ToolConfig], agent_enabled: bool
+    store: SeedStore, actor: User, tool_configs: list[ToolConfig], agent_enabled: bool
 ) -> list[dict[str, object]]:
     if not agent_enabled:
         return []
-    servers: list[dict[str, object]] = []
-    for tool in tool_configs:
-        if tool.tool_type != "mcp":
-            continue
-        try:
-            extra_env = _mcp_runtime_env(store, tool)
-            health = (
-                check_mcp_server(tool, timeout_seconds=3.0, extra_env=extra_env)
-                if extra_env
-                else check_mcp_server(tool, timeout_seconds=3.0)
-            )
-            servers.append(
-                {
-                    "tool_config_id": health.tool_config_id,
-                    "name": health.name,
-                    "transport": health.transport,
-                    "command": health.command,
-                    "status": health.status,
-                    "message": health.message,
-                    "server_info": health.server_info,
-                    "tools": [
-                        tool_summary.model_dump(exclude_none=True) for tool_summary in health.tools
-                    ],
-                }
-            )
-        except (
-            Exception
-        ) as exc:  # pragma: no cover - defensive guard for local MCP process failures.
-            logger.warning("MCP capability discovery failed for %s: %s", tool.id, exc)
-            servers.append(
-                {
-                    "tool_config_id": tool.id,
-                    "name": tool.name,
-                    "transport": str(tool.settings.get("transport") or "stdio"),
-                    "command": str(tool.settings.get("command") or "") or None,
-                    "status": "error",
-                    "message": f"MCP capability discovery failed: {exc}",
-                    "server_info": {},
-                    "tools": [],
-                }
-            )
-    return servers
+    return [
+        _discover_mcp_server(store, tool)
+        if _still_usable(store, actor, tool)
+        else _unavailable_mcp_server(tool, "skipped", MCP_ACCESS_REMOVED)
+        for tool in tool_configs
+        if tool.tool_type == "mcp"
+    ]
+
+
+def _discover_mcp_server(store: SeedStore, tool: ToolConfig) -> dict[str, object]:
+    try:
+        extra_env = _mcp_runtime_env(store, tool)
+        health = (
+            check_mcp_server(tool, timeout_seconds=3.0, extra_env=extra_env)
+            if extra_env
+            else check_mcp_server(tool, timeout_seconds=3.0)
+        )
+        return {
+            "tool_config_id": health.tool_config_id,
+            "name": health.name,
+            "transport": health.transport,
+            "command": health.command,
+            "status": health.status,
+            "message": health.message,
+            "server_info": health.server_info,
+            "tools": [tool_summary.model_dump(exclude_none=True) for tool_summary in health.tools],
+        }
+    except Exception as exc:  # pragma: no cover - defensive guard for local MCP process failures.
+        logger.warning("MCP capability discovery failed for %s: %s", tool.id, exc)
+        return _unavailable_mcp_server(tool, "error", f"MCP capability discovery failed: {exc}")
+
+
+def _unavailable_mcp_server(tool: ToolConfig, status_value: str, message: str) -> dict[str, object]:
+    return {
+        "tool_config_id": tool.id,
+        "name": tool.name,
+        "transport": str(tool.settings.get("transport") or "stdio"),
+        "command": str(tool.settings.get("command") or "") or None,
+        "status": status_value,
+        "message": message,
+        "server_info": {},
+        "tools": [],
+    }
 
 
 def _runtime_mcp_tool_names(mcp_servers: list[dict[str, object]]) -> list[str]:
@@ -6359,6 +6465,7 @@ def _runtime_mcp_tool_names(mcp_servers: list[dict[str, object]]) -> list[str]:
 
 def _runtime_mcp_tool_results(
     store: SeedStore,
+    actor: User,
     tool_configs: list[ToolConfig],
     mcp_servers: list[dict[str, object]],
     *,
@@ -6374,93 +6481,99 @@ def _runtime_mcp_tool_results(
         for server in mcp_servers
         if isinstance(server.get("tool_config_id"), str)
     }
-    results: list[dict[str, object]] = []
     substitutions = {
         "query": retrieval_query,
         "user_message": retrieval_query,
         "agent_profile_id": agent_profile_id or "",
         "agent_profile_name": agent_profile_name or "",
     }
+    results: list[dict[str, object]] = []
     for config in tool_configs:
         if config.tool_type != "mcp":
             continue
-        invocations = _configured_mcp_invocations(config)
-        if not invocations:
-            continue
         server = servers_by_tool_id.get(config.id)
-        available_tool_names = _server_tool_names(server)
-        for invocation in invocations:
+        for invocation in _configured_mcp_invocations(config):
             if len(results) >= MAX_RUNTIME_MCP_TOOL_CALLS:
                 return results
-            tool_name = str(invocation.get("tool_name") or invocation.get("name") or "").strip()
-            label = str(invocation.get("label") or tool_name or config.name).strip()
-            if not tool_name:
-                results.append(
-                    _skipped_mcp_tool_result(
-                        config, "", label, "MCP runtime invocation is missing tool_name."
-                    )
-                )
-                continue
-            if server is None or server.get("status") != "ready":
-                message = "MCP server was not ready for chat-time tool execution."
-                if isinstance(server, dict) and server.get("message"):
-                    message = f"{message} {server['message']}"
-                results.append(_skipped_mcp_tool_result(config, tool_name, label, message))
-                continue
-            if available_tool_names and tool_name not in available_tool_names:
-                results.append(
-                    _skipped_mcp_tool_result(
-                        config,
-                        tool_name,
-                        label,
-                        f"MCP tool '{tool_name}' was not advertised by this server.",
-                    )
-                )
-                continue
-            raw_arguments = invocation.get("arguments")
-            arguments = _interpolate_mcp_arguments(
-                raw_arguments if isinstance(raw_arguments, dict) else {}, substitutions
-            )
-            try:
-                extra_env = _mcp_runtime_env(store, config)
-                response = (
-                    call_mcp_tool(
-                        config,
-                        tool_name=tool_name,
-                        arguments=arguments,
-                        label=label,
-                        extra_env=extra_env,
-                    )
-                    if extra_env
-                    else call_mcp_tool(
-                        config, tool_name=tool_name, arguments=arguments, label=label
-                    )
-                )
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - defensive guard for local MCP process failures.
-                logger.warning("MCP tool call failed for %s/%s: %s", config.id, tool_name, exc)
-                results.append(
-                    _skipped_mcp_tool_result(
-                        config, tool_name, label, f"MCP tool call failed: {exc}"
-                    )
-                )
-                continue
             results.append(
-                {
-                    "tool_config_id": response.tool_config_id,
-                    "server_name": response.name,
-                    "transport": response.transport,
-                    "tool_name": response.tool_name,
-                    "label": response.label or label,
-                    "status": response.status,
-                    "message": response.message,
-                    "result_text": response.result_text,
-                    "structured_content": response.structured_content,
-                    "is_error": response.is_error,
-                }
+                _run_mcp_invocation(store, actor, config, server, invocation, substitutions)
             )
     return results
+
+
+def _run_mcp_invocation(
+    store: SeedStore,
+    actor: User,
+    config: ToolConfig,
+    server: dict[str, object] | None,
+    invocation: dict[str, object],
+    substitutions: dict[str, str],
+) -> dict[str, object]:
+    tool_name = str(invocation.get("tool_name") or invocation.get("name") or "").strip()
+    label = str(invocation.get("label") or tool_name or config.name).strip()
+    blocked = _mcp_invocation_blocked(store, actor, config, server, tool_name)
+    if blocked:
+        return _skipped_mcp_tool_result(config, tool_name, label, blocked)
+    raw_arguments = invocation.get("arguments")
+    arguments = _interpolate_mcp_arguments(
+        raw_arguments if isinstance(raw_arguments, dict) else {}, substitutions
+    )
+    return _call_runtime_mcp_tool(store, config, tool_name, label, arguments)
+
+
+def _mcp_invocation_blocked(
+    store: SeedStore,
+    actor: User,
+    config: ToolConfig,
+    server: dict[str, object] | None,
+    tool_name: str,
+) -> str | None:
+    """Why a configured call must not run, or None when it may run now."""
+    if not tool_name:
+        return "MCP runtime invocation is missing tool_name."
+    if not _still_usable(store, actor, config):
+        return MCP_ACCESS_REMOVED
+    if server is None or server.get("status") != "ready":
+        detail = server.get("message") if isinstance(server, dict) else None
+        message = "MCP server was not ready for chat-time tool execution."
+        return f"{message} {detail}" if detail else message
+    available_tool_names = _server_tool_names(server)
+    if available_tool_names and tool_name not in available_tool_names:
+        return f"MCP tool '{tool_name}' was not advertised by this server."
+    return None
+
+
+def _call_runtime_mcp_tool(
+    store: SeedStore,
+    config: ToolConfig,
+    tool_name: str,
+    label: str,
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    try:
+        extra_env = _mcp_runtime_env(store, config)
+        response = (
+            call_mcp_tool(
+                config, tool_name=tool_name, arguments=arguments, label=label, extra_env=extra_env
+            )
+            if extra_env
+            else call_mcp_tool(config, tool_name=tool_name, arguments=arguments, label=label)
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard for local MCP process failures.
+        logger.warning("MCP tool call failed for %s/%s: %s", config.id, tool_name, exc)
+        return _skipped_mcp_tool_result(config, tool_name, label, f"MCP tool call failed: {exc}")
+    return {
+        "tool_config_id": response.tool_config_id,
+        "server_name": response.name,
+        "transport": response.transport,
+        "tool_name": response.tool_name,
+        "label": response.label or label,
+        "status": response.status,
+        "message": response.message,
+        "result_text": response.result_text,
+        "structured_content": response.structured_content,
+        "is_error": response.is_error,
+    }
 
 
 def _configured_mcp_invocations(tool: ToolConfig) -> list[dict[str, object]]:
@@ -8000,16 +8113,11 @@ def _resolve_usable_tool_configs(
     if not config_ids:
         return [], []
     assert_group_permission(actor, store.groups, "tools_access", "Tool access")
-    hermes_locked = hermes_locked_for(actor, store.groups)
     usable: list[ToolConfig] = []
     skipped: list[str] = []
     for config_id in config_ids:
         config = store.tool_configs.get(config_id)
-        if (
-            config is None
-            or not tool_access_allowed(actor, config)
-            or (hermes_locked and is_hermes_tool(config))
-        ):
+        if config is None or not tool_use_allowed(actor, store.groups, config):
             skipped.append(config_id)
             continue
         usable.append(config)

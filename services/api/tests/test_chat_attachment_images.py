@@ -75,6 +75,13 @@ def test_supports_image_input_prefers_reported_modalities() -> None:
         "google/gemini-2.5-pro",
         "meta-llama/llama-3.2-90b-vision-instruct",
         "qwen/qwen2.5-vl-72b-instruct",
+        # Azure AI Foundry reports no modalities for its deployments. Each of
+        # these read an image when asked live on a Foundry resource.
+        "Kimi-K3.1-Pro",
+        "mistral-large-4-latest",
+        "DeepSeek-V4.1-Flash",
+        "grok-4.6",
+        "gpt-5.4-mini",
     ],
 )
 def test_supports_image_input_family_heuristics_accept(upstream_model: str) -> None:
@@ -83,7 +90,16 @@ def test_supports_image_input_family_heuristics_accept(upstream_model: str) -> N
 
 @pytest.mark.parametrize(
     "upstream_model",
-    ["deepseek/deepseek-chat", "gpt-oss-120b", "mistral-large-2411", "", None],
+    [
+        "deepseek/deepseek-chat",
+        "deepseek-v3.2",
+        "gpt-oss-120b",
+        "mistral-large-2411",
+        "mistral-large-latest",
+        "kimi-k2-thinking",
+        "",
+        None,
+    ],
 )
 def test_supports_image_input_family_heuristics_reject(upstream_model: str | None) -> None:
     assert supports_image_input(upstream_model) is False

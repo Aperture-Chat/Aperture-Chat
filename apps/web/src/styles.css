@@ -6791,6 +6791,8 @@ a.nav-item {
 
 .md-list-ordered li {
   counter-increment: md-counter;
+  /* Wider for a list whose numbers reach three digits; see Markdown.tsx. */
+  padding-left: var(--md-list-gutter, 22px);
 }
 
 .md-list-ordered li::before {

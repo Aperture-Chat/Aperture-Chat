@@ -218,6 +218,15 @@ def test_someone_else_cannot_see_stop_or_reuse_a_run(provider) -> None:
     assert jane_run is not None and jane_run.cancel_requested is False
 
 
+@pytest.mark.parametrize("run_id", ["run.with.dots", "r" * 129, "run%20with%20space"])
+def test_a_run_id_no_page_could_have_sent_is_refused_before_anything_is_kept(run_id: str) -> None:
+    """A reply's id comes from the page that started it, in one fixed shape.
+    Anything else is not a stop to remember or an event to audit."""
+    assert client.get(f"/api/chat/runs/{run_id}/events", headers=_headers()).status_code == 422
+    assert client.post(f"/api/chat/runs/{run_id}/cancel", headers=_headers()).status_code == 422
+    assert [e for e in get_store().audit_events_newest_first() if e.action == "chat.reply_stopped"] == []
+
+
 def test_an_unknown_run_says_it_is_no_longer_running() -> None:
     response = client.get("/api/chat/runs/run-missing/events", headers=_headers())
 

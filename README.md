@@ -41,8 +41,9 @@ provider credentials stay in your deployment.
 <td width="33%" valign="top">
 
 **Any approved model**<br>
-Connect OpenAI, Anthropic, Azure OpenAI, Google Gemini, OpenRouter, Ollama,
-and other OpenAI-compatible providers, then decide who may use each model.
+Connect OpenAI, Anthropic, Azure OpenAI, Azure AI Foundry, Google Gemini,
+OpenRouter, Ollama, and other OpenAI-compatible providers, then decide who may
+use each model.
 
 </td>
 <td width="33%" valign="top">
@@ -63,15 +64,14 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.23](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.23)**:
-> A chat reply can take research steps before it answers (search your knowledge,
-> search the web, read a linked page, work out a figure); the Drafts assistant
-> asks before it writes and takes the same steps for documents, decks, and
-> spreadsheets; a **Check** key lists blanks, undefined terms, and missing
-> exhibits in a document; and Agents, Automations, and AI actions gain legal,
-> finance, and consulting starting points.
-> v0.5.22 kept replies running on the server when you leave and added clarifying questions.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0522) and
+> **Current release: [v0.5.24](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.24)**:
+> Azure AI Foundry models work across families: GPT-5 and streamed Mistral
+> replies no longer fail, Mistral and Kimi take research steps instead of
+> returning nothing or showing markup, Kimi, Mistral, and DeepSeek read attached
+> pictures, and Grok's usage is recorded. An approved MCP tool checks access again at the moment it runs, and a
+> research step reads only a page address the reply was given.
+> v0.5.23 added research steps, Drafts questions, and the **Check** key.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0523) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -91,7 +91,7 @@ policies appropriate for your organization's data.
 
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
-- **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, and Fast replies skip them.
+- **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, a page step reads only an address from the search results, your own messages, or your knowledge sources, and Fast replies skip them.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
 - **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
@@ -176,7 +176,7 @@ policies appropriate for your organization's data.
 - **Client-matter numbers.** Give a knowledge base an optional client-matter number when you create it or in its settings. The number shows on the card and in the header, and searching for it lists every base filed under it.
 - **Sync** re-fetches web pages and API sources and never touches uploaded files. API requests pass the outbound guards and refuse redirects.
 - **Cloud sources.** Connect Google Drive, Box, SharePoint, OneDrive, or iManage with the provider's credentials and permissions. A successful connection does not grant every user access to every document.
-- **Tools** hold MCP connections, prompt templates, and skills. Connections are tested before they are saved, and tool use remains subject to workspace policy.
+- **Tools** hold MCP connections, prompt templates, and skills. Connections are tested before they are saved, and tool use remains subject to workspace policy: access is checked when a tool is approved and again at the moment it runs.
 
 ### Administration and identity
 
@@ -209,7 +209,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.23
+#   APERTURE_IMAGE_TAG=v0.5.24
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -230,7 +230,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.23 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.24 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -265,10 +265,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.23` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.24` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.23-dev`, `v0.5.23-test`, `v0.5.23-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.24-dev`, `v0.5.24-test`, `v0.5.24-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
