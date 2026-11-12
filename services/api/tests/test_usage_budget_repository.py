@@ -100,6 +100,33 @@ def _acquire_new_permit(
         ),
         ({"prompt_tokens": 7}, "unmetered", 7, None, None),
         (None, "unmetered", None, None, None),
+        # Reasoning counted inside completion_tokens (OpenAI): nothing to add.
+        (
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+                "completion_tokens_details": {"reasoning_tokens": 15},
+            },
+            "reported",
+            10,
+            20,
+            30,
+        ),
+        # Reasoning reported beside completion_tokens (xAI Grok on Azure AI
+        # Foundry): the total is exact, so the reasoning tokens are output.
+        (
+            {
+                "prompt_tokens": 15,
+                "completion_tokens": 1,
+                "total_tokens": 135,
+                "completion_tokens_details": {"reasoning_tokens": 119},
+            },
+            "reported",
+            15,
+            120,
+            135,
+        ),
     ],
 )
 def test_normalize_reported_usage_is_exact_and_never_estimates(
@@ -126,6 +153,19 @@ def test_normalize_reported_usage_is_exact_and_never_estimates(
         {"total_tokens": SIGNED_BIGINT_MAX + 1},
         {"prompt_tokens": 1, "input_tokens": 2, "completion_tokens": 3},
         {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 4},
+        # Separately reported reasoning tokens must account for the whole gap.
+        {
+            "prompt_tokens": 1,
+            "completion_tokens": 2,
+            "total_tokens": 9,
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        },
+        {
+            "prompt_tokens": 1,
+            "completion_tokens": 2,
+            "total_tokens": 4,
+            "completion_tokens_details": {"reasoning_tokens": "1"},
+        },
         {"prompt_tokens": SIGNED_BIGINT_MAX, "completion_tokens": 1},
     ],
 )

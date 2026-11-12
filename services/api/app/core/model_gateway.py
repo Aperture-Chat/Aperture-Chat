@@ -2076,7 +2076,9 @@ def _completion_token_parameter(route: ModelGatewayRoute) -> str:
     if configured in {"max_tokens", "max_completion_tokens"}:
         return configured
     kind = _provider_kind(route.provider_kind)
-    if kind == "openai":
+    # GPT-5-class models reject max_tokens. The Azure AI Foundry inference
+    # endpoint accepts max_completion_tokens for every model family it serves.
+    if kind in {"openai", "azure-foundry"}:
         return "max_completion_tokens"
     return "max_tokens"
 

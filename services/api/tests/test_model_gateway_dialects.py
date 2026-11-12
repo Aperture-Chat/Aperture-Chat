@@ -348,6 +348,45 @@ def test_azure_foundry_dialect_targets_inference_endpoint_with_api_key() -> None
     assert result["choices"][0]["message"]["content"] == "ok"
 
 
+def _foundry_route(model: str, auth_metadata: dict[str, object] | None = None) -> ModelGatewayRoute:
+    return ModelGatewayRoute(
+        provider_id="provider-foundry-test",
+        provider_name="Azure Foundry Test",
+        provider_kind="azure-foundry",
+        auth_type="api-key",
+        upstream_model=model,
+        base_url="https://myres.services.ai.azure.com/models",
+        configured=True,
+        status_message="ready",
+        secret_value="az-foundry-secret",
+        auth_metadata=auth_metadata or {},
+        supported_parameters=frozenset(),
+    )
+
+
+def test_azure_foundry_caps_replies_with_max_completion_tokens() -> None:
+    """GPT-5-class deployments reject max_tokens outright, and every model on
+    the Foundry inference endpoint accepts max_completion_tokens."""
+    captured: dict[str, object] = {}
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured)))
+
+    gateway.complete(route=_foundry_route("gpt-5.4-mini"), messages=[{"role": "user", "content": "hi"}])
+
+    assert captured["body"]["max_completion_tokens"] >= 256
+    assert "max_tokens" not in captured["body"]
+
+
+def test_azure_foundry_token_parameter_can_still_be_overridden() -> None:
+    captured: dict[str, object] = {}
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured)))
+    route = _foundry_route("legacy-model", {"max_tokens_param": "max_tokens"})
+
+    gateway.complete(route=route, messages=[{"role": "user", "content": "hi"}])
+
+    assert captured["body"]["max_tokens"] >= 256
+    assert "max_completion_tokens" not in captured["body"]
+
+
 def test_azure_foundry_defaults_api_version_when_unset() -> None:
     captured: dict[str, object] = {}
     gateway = ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured)))
