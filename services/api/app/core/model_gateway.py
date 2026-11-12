@@ -227,7 +227,11 @@ def supports_reasoning_effort(
 _VISION_INPUT_MODELS = re.compile(
     r"(?:^|[^a-z0-9])(?:claude|gemini|pixtral|gpt-4o|gpt-4-turbo|gpt-4\.1|gpt-5"
     r"|o(?:4|[13](?!-mini(?:[^a-z0-9]|$)|-preview(?:[^a-z0-9]|$)))(?:[^a-z0-9]|$)"
-    r"|grok-4|vl(?:[^a-z0-9]|$))"
+    r"|grok-4|vl(?:[^a-z0-9]|$)"
+    # Azure AI Foundry reports no modalities for a deployment. These families
+    # each read an image when asked on a live Foundry resource; their earlier
+    # generations (Kimi K2, Mistral Large 2, DeepSeek V3) are text only.
+    r"|kimi-k3|mistral-large-4|deepseek-v4)"
     r"|vision"
 )
 
@@ -259,6 +263,23 @@ _SPEECH_TO_TEXT_MODELS = re.compile(r"whisper|transcribe")
 def is_speech_to_text_model_id(model_id: str | None) -> bool:
     """True for ids or labels that name a speech-to-text model."""
     return bool(_SPEECH_TO_TEXT_MODELS.search((model_id or "").strip().lower()))
+
+
+def deterministic_sampling(route: ModelGatewayRoute) -> dict[str, Any]:
+    """Sampling options for a call that should read the same every time, such
+    as reading a page or transcribing speech.
+
+    Reasoning models reject sampling knobs, so they keep their defaults.
+    Azure AI Foundry serves Mistral with a top_p below 1, and Mistral refuses
+    temperature 0 ("greedy sampling") unless top_p is 1, so Foundry routes
+    send both. Other providers default top_p to 1 already, and some of their
+    models refuse the two knobs together.
+    """
+    if supports_reasoning_effort(route.upstream_model, route.supported_parameters):
+        return {}
+    if _provider_kind(route.provider_kind) == "azure-foundry":
+        return {"temperature": 0, "top_p": 1}
+    return {"temperature": 0}
 
 
 class ModelGatewayError(RuntimeError):
@@ -505,6 +526,7 @@ class ModelGatewayClient:
                 finish_reason = choices[0].get("finish_reason")
                 if isinstance(finish_reason, str) and finish_reason:
                     usage_sink["finish_reason"] = finish_reason
+                _gather_tool_calls(usage_sink, choices[0].get("delta"))
             delta = (choices[0].get("delta") or {}).get("content") if choices else None
             if delta:
                 yield delta
@@ -662,8 +684,10 @@ class ModelGatewayClient:
             payload["plugins"] = plugins
         _apply_reasoning_effort(payload, route)
         _apply_completion_token_budget(payload, route, max_tokens)
-        return self._post_for_json(
-            route, _chat_completions_url(route), headers=_headers(route), json=payload
+        return _with_plain_text_content(
+            self._post_for_json(
+                route, _chat_completions_url(route), headers=_headers(route), json=payload
+            )
         )
 
     def _stream_openai_compatible(
@@ -749,6 +773,7 @@ class ModelGatewayClient:
                                 # Recorded so the chat route can continue a
                                 # response the provider cut at the token budget.
                                 usage_sink["finish_reason"] = finish_reason
+                            _gather_tool_calls(usage_sink, choices[0].get("delta"))
                         delta = (choices[0].get("delta") or {}).get("content") if choices else None
                         if delta:
                             yield delta
@@ -801,15 +826,9 @@ class ModelGatewayClient:
                             body = ""
                         raise _status_error(route, response.status_code, body.strip())
                     for line in response.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data = line[len("data:") :].strip()
-                        if data == "[DONE]":
+                        chunk = _parse_openai_stream_chunk(line)
+                        if chunk is _STREAM_DONE:
                             return
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
                         if isinstance(chunk, dict):
                             yield chunk
         except httpx.HTTPStatusError as exc:
@@ -2099,9 +2118,97 @@ def _parse_openai_stream_chunk(line: str) -> Any:
     if data == "[DONE]":
         return _STREAM_DONE
     try:
-        return json.loads(data)
+        return _with_plain_text_content(json.loads(data))
     except json.JSONDecodeError:
         return None
+
+
+def _gather_tool_calls(sink: dict[str, Any], delta: Any) -> None:
+    """Keep the tool calls of a text stream for its caller, as
+    ``sink["tool_calls"]``: each call's name and its arguments JSON.
+
+    A text stream yields only the reply's words, so a turn that is a tool
+    call would otherwise end with nothing. Some providers send a call whole;
+    others send the name first and the arguments in pieces. A piece belongs
+    to the call its index names. With no usable index, a piece that carries
+    an id or a name starts a call and any other continues the last one.
+    """
+    calls = delta.get("tool_calls") if isinstance(delta, dict) else None
+    for call in calls if isinstance(calls, list) else []:
+        function = call.get("function") if isinstance(call, dict) else None
+        if isinstance(function, dict):
+            _gather_tool_call_piece(sink.setdefault("tool_calls", []), call, function)
+
+
+def _gather_tool_call_piece(
+    gathered: list[dict[str, str]], call: dict[str, Any], function: dict[str, Any]
+) -> None:
+    name = str(function.get("name") or "")
+    target = _tool_call_target(gathered, call.get("index"), name, call.get("id"))
+    # A provider that repeats the whole name on every piece names it once.
+    if name != target["name"]:
+        target["name"] += name
+    target["arguments"] += str(function.get("arguments") or "")
+
+
+def _tool_call_target(
+    gathered: list[dict[str, str]], index: Any, name: str, call_id: Any
+) -> dict[str, str]:
+    """The gathered call a piece belongs to, started when the piece opens one."""
+    if isinstance(index, int) and 0 <= index < len(gathered):
+        return gathered[index]
+    if gathered and index is None and not name and not call_id:
+        return gathered[-1]
+    target = {"name": "", "arguments": ""}
+    gathered.append(target)
+    return target
+
+
+def _with_plain_text_content(payload: Any) -> Any:
+    """A chat completion (or one streamed chunk of it) whose message content
+    is always a string.
+
+    Most providers send ``content`` as text. Mistral on Azure AI Foundry sends
+    a list of typed parts with the model's thinking among them, and every
+    reader past the gateway concatenates content as text. The answer text is
+    joined here, where the provider's reply enters; thinking moves to
+    ``reasoning_content``, the field other reasoning models already use, so
+    it is never shown as part of the answer.
+    """
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    for choice in choices if isinstance(choices, list) else []:
+        for key in ("delta", "message"):
+            holder = choice.get(key) if isinstance(choice, dict) else None
+            if isinstance(holder, dict) and isinstance(holder.get("content"), list):
+                _flatten_content_parts(holder)
+    return payload
+
+
+def _flatten_content_parts(holder: dict[str, Any]) -> None:
+    parts = holder["content"]
+    thinking = "".join(
+        _parts_text(part.get("thinking"))
+        for part in parts
+        if isinstance(part, dict) and part.get("type") == "thinking"
+    )
+    holder["content"] = _parts_text(
+        [part for part in parts if not (isinstance(part, dict) and part.get("type") == "thinking")]
+    )
+    if thinking and not holder.get("reasoning_content"):
+        holder["reasoning_content"] = thinking
+
+
+def _parts_text(parts: Any) -> str:
+    """The text of a string, or of a list of strings and ``{"text": ...}`` parts."""
+    if isinstance(parts, str):
+        return parts
+    if not isinstance(parts, list):
+        return ""
+    return "".join(
+        part if isinstance(part, str) else str(part.get("text") or "")
+        for part in parts
+        if isinstance(part, (str, dict))
+    )
 
 
 def _openai_stream_annotations(chunk: dict[str, Any]) -> list[dict[str, Any]]:

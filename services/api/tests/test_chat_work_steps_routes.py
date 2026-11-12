@@ -777,3 +777,75 @@ def test_a_page_whose_address_cannot_be_kept_is_read_but_never_listed_as_a_sourc
     assert _result_lines(model) == ["- [U1] Rates page: Readable text."]
     assert [c for c in _done(events)["citations"] if not c["source_uri"]] == []
     assert [c for c in _done(events)["citations"] if c.get("u_index")] == []
+
+
+def test_steps_a_model_asks_for_in_its_own_tool_call_markup_are_taken_and_never_shown(scripted) -> None:
+    """Kimi on Azure AI Foundry sometimes writes the step block as a native
+    tool call. The provider leaves it in the reply text because the request
+    declared no tools."""
+    native_call = (
+        '<|open|>tools<|sep|><|open|>call tool="aperture-steps" index="1"<|sep|>'
+        '<|open|>argument key="steps" type="array"<|sep|>[{"do":"calculate","expression":"2 + 2"}]'
+        "<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|><|close|>message<|sep|>"
+    )
+    model = scripted(native_call, "The total is 4.")
+
+    events = _send()
+
+    assert _text(events) == "The total is 4."
+    assert [fact["about"] for fact in _step_facts(events)] == ["2 + 2"]
+    assert all(fact["ok"] for fact in _step_facts(events))
+    assert len(model.calls) == 2
+
+
+def test_steps_a_model_asks_for_as_a_real_tool_call_are_taken(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mistral on Azure AI Foundry answers with a tool call and no text even
+    though the request declared no tools. The reply used to come back empty."""
+    calls: list[list[dict[str, object]]] = []
+
+    def stream(_client: object, **kwargs: object) -> Iterator[str]:
+        calls.append(list(kwargs["messages"]))  # type: ignore[arg-type]
+        sink = kwargs["usage_sink"]
+        if len(calls) == 1:
+            sink["finish_reason"] = "tool_calls"  # type: ignore[index]
+            sink["tool_calls"] = [  # type: ignore[index]
+                {"name": "aperture-steps", "arguments": json.dumps({"steps": [{"do": "calculate", "expression": "2 + 2"}]})}
+            ]
+            return iter([])
+        sink["finish_reason"] = "stop"  # type: ignore[index]
+        return iter(["The total ", "is 4."])
+
+    monkeypatch.setattr(chat_route, "_resolve_gateway_route", _route)
+    monkeypatch.setattr(chat_route, "_gateway_stream", stream)
+
+    events = _send()
+
+    assert _text(events) == "The total is 4."
+    assert [fact["about"] for fact in _step_facts(events)] == ["2 + 2"]
+    assert len(calls) == 2
+    assert "2 + 2 = 4" in str(calls[1][-1]["content"])
+
+
+def test_tool_calls_on_a_turn_that_declared_tools_are_not_read_as_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller's own tools, and the web search tool the gateway declares for
+    OpenRouter, answer with tool calls that are not requests to Aperture."""
+    calls: list[list[dict[str, object]]] = []
+
+    def stream(_client: object, **kwargs: object) -> Iterator[str]:
+        calls.append(list(kwargs["messages"]))  # type: ignore[arg-type]
+        sink = kwargs["usage_sink"]
+        sink["finish_reason"] = "stop"  # type: ignore[index]
+        sink["tool_calls"] = [{"name": "calculate", "arguments": json.dumps({"expression": "2 + 2"})}]  # type: ignore[index]
+        return iter(["The total is 4."])
+
+    monkeypatch.setattr(chat_route, "_resolve_gateway_route", _route)
+    monkeypatch.setattr(chat_route, "_gateway_stream", stream)
+    monkeypatch.setattr(
+        chat_route, "_gateway_web_search_tools", lambda *_args: [{"type": "openrouter:web_search"}]
+    )
+
+    events = _send()
+
+    assert _text(events) == "The total is 4."
+    assert _step_facts(events) == []
+    assert len(calls) == 1

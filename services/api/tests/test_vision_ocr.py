@@ -176,6 +176,21 @@ def test_plain_models_read_at_temperature_zero() -> None:
     assert gateway.calls[0]["options"]["temperature"] == 0
 
 
+def test_a_page_read_on_azure_foundry_asks_for_the_whole_distribution_with_temperature_zero() -> None:
+    """Mistral on Azure AI Foundry answers temperature 0 alone with HTTP 400,
+    "top_p must be 1 when using greedy sampling", and the page fell back to
+    plain OCR."""
+    gateway = FakeGateway(["ok"])
+    reader = VisionPageReader(
+        model=_model("model-mistral", "mistral-large-4-latest"),
+        route=_route("azure-foundry", "mistral-large-4-latest"),
+        usage=FakeUsage,
+        client=gateway,
+    )
+    reader.read_page(_page(), mode="full", label="p")
+    assert gateway.calls[0]["options"] == {"temperature": 0, "top_p": 1}
+
+
 # ------------------------------------------------------------------ ranking
 
 

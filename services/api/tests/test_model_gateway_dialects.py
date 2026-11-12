@@ -22,6 +22,7 @@ from app.core.model_gateway import (
     ModelGatewayRoute,
     _route_status,
     default_provider_base_url,
+    deterministic_sampling,
     provider_dialect,
     supports_image_input,
     supports_reasoning_effort,
@@ -1045,3 +1046,204 @@ def test_unrelated_404_still_surfaces_the_raw_upstream_detail() -> None:
         gateway.complete(route=route, messages=[{"role": "user", "content": "hi"}])
 
     assert "No endpoints found." in str(excinfo.value)
+
+
+# Mistral Large on Azure AI Foundry streams `delta.content` as a list of typed
+# parts, with the model's thinking among them, where every other deployment
+# sends a string. These are the shapes the live deployment sent.
+_MISTRAL_STREAM_CHUNKS: list[dict[str, object]] = [
+    {"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]},
+    {"choices": [{"index": 0, "delta": {"content": [{"type": "thinking", "thinking": [{"type": "text", "text": "The user wants "}]}]}}]},
+    {"choices": [{"index": 0, "delta": {"content": [{"type": "thinking", "thinking": [{"type": "text", "text": "a list."}], "closed": True}]}}]},
+    {"choices": [{"index": 0, "delta": {"content": [{"type": "thinking", "thinking": [{"type": "text", "text": ""}], "closed": True}, {"type": "text", "text": "1. Red"}]}}]},
+    {"choices": [{"index": 0, "delta": {"content": "\n2. Blue"}}]},
+    {"choices": [{"index": 0, "delta": {"content": ""}, "finish_reason": "stop"}]},
+    {"choices": [], "usage": {"prompt_tokens": 20, "completion_tokens": 18, "total_tokens": 38}},
+]
+
+
+def _sse_handler(chunks: list[dict[str, object]]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+        return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+
+    return handler
+
+
+def test_a_reply_streamed_as_typed_parts_reads_as_its_answer_text() -> None:
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_sse_handler(_MISTRAL_STREAM_CHUNKS)))
+    usage: dict[str, object] = {}
+
+    deltas = list(
+        gateway.stream(
+            route=_foundry_route("mistral-large-4-latest"),
+            messages=[{"role": "user", "content": "List two colors."}],
+            usage_sink=usage,
+        )
+    )
+
+    # Text only, as strings: the thinking is not part of the answer.
+    assert deltas == ["1. Red", "\n2. Blue"]
+    assert usage["total_tokens"] == 38
+    assert usage["finish_reason"] == "stop"
+
+
+def test_typed_parts_reach_openai_clients_as_text_with_thinking_kept_apart() -> None:
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_sse_handler(_MISTRAL_STREAM_CHUNKS)))
+
+    chunks = list(
+        gateway.stream_events(
+            route=_foundry_route("mistral-large-4-latest"),
+            messages=[{"role": "user", "content": "List two colors."}],
+        )
+    )
+
+    deltas = [chunk["choices"][0]["delta"] for chunk in chunks if chunk["choices"]]
+    assert [delta["content"] for delta in deltas] == ["", "", "", "1. Red", "\n2. Blue", ""]
+    assert "".join(delta.get("reasoning_content", "") for delta in deltas) == "The user wants a list."
+
+
+def test_a_whole_reply_returned_as_typed_parts_reads_as_its_answer_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        message = {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": [{"type": "text", "text": "Simple."}], "closed": True},
+                {"type": "text", "text": "pong"},
+                {"type": "reference", "reference_ids": [1]},
+            ],
+        }
+        return httpx.Response(200, json={"choices": [{"index": 0, "message": message, "finish_reason": "stop"}]})
+
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(handler))
+
+    result = gateway.complete(
+        route=_foundry_route("mistral-large-4-latest"), messages=[{"role": "user", "content": "ping"}]
+    )
+
+    assert result["choices"][0]["message"]["content"] == "pong"
+    assert result["choices"][0]["message"]["reasoning_content"] == "Simple."
+
+
+def test_reasoning_a_model_already_reports_is_not_replaced() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        message = {
+            "role": "assistant",
+            "reasoning_content": "Reported by the model.",
+            "content": [{"type": "thinking", "thinking": "Inline."}, "po", {"type": "text", "text": "ng"}, 7],
+        }
+        return httpx.Response(200, json={"choices": [{"index": 0, "message": message}]})
+
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(handler))
+
+    message = gateway.complete(
+        route=_foundry_route("mistral-large-4-latest"), messages=[{"role": "user", "content": "ping"}]
+    )["choices"][0]["message"]
+
+    assert message["content"] == "pong"
+    assert message["reasoning_content"] == "Reported by the model."
+
+
+def test_a_call_that_should_read_the_same_every_time_uses_what_each_route_accepts() -> None:
+    # Reasoning models reject sampling knobs and keep their defaults.
+    assert deterministic_sampling(_foundry_route("gpt-5.4-mini")) == {}
+    # Foundry serves Mistral with a top_p below 1, and Mistral refuses
+    # temperature 0 unless top_p is 1.
+    assert deterministic_sampling(_foundry_route("mistral-large-4-latest")) == {"temperature": 0, "top_p": 1}
+    # Elsewhere temperature 0 alone is enough, and some models refuse both knobs together.
+    assert deterministic_sampling(_anthropic_route()) == {}
+    openai = ModelGatewayRoute(
+        provider_id="provider-openai-test",
+        provider_name="OpenAI Test",
+        provider_kind="openai-compatible",
+        auth_type="bearer",
+        upstream_model="gpt-4o",
+        base_url="https://api.openai.invalid/v1",
+        configured=True,
+        status_message="ready",
+        secret_value="test-only-secret",
+    )
+    assert deterministic_sampling(openai) == {"temperature": 0}
+
+
+def test_tool_calls_a_text_stream_cannot_carry_are_gathered_for_the_caller() -> None:
+    """Mistral on Azure AI Foundry answers a request that declared no tools
+    with a tool call and no text. The call arrives whole there; other
+    providers send the name first and the arguments in pieces."""
+    chunks: list[dict[str, object]] = [
+        {"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]},
+        {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "a", "type": "function", "function": {"name": "aperture-steps", "arguments": '{"steps": '}}]}}]},
+        {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '[{"do": "search_web", "query": "Kansas 60-511"}]}'}}]}}]},
+        {"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 1, "id": "b", "type": "function", "function": {"name": "calculate", "arguments": '{"expression": "2 + 2"}'}}]}, "finish_reason": "tool_calls"}]},
+    ]
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_sse_handler(chunks)))
+    sink: dict[str, object] = {}
+
+    deltas = list(
+        gateway.stream(
+            route=_foundry_route("mistral-large-4-latest"),
+            messages=[{"role": "user", "content": "Compare the two periods."}],
+            usage_sink=sink,
+        )
+    )
+
+    assert deltas == []
+    assert sink["tool_calls"] == [
+        {"name": "aperture-steps", "arguments": '{"steps": [{"do": "search_web", "query": "Kansas 60-511"}]}'},
+        {"name": "calculate", "arguments": '{"expression": "2 + 2"}'},
+    ]
+    assert sink["finish_reason"] == "tool_calls"
+
+
+def _gathered(deltas: list[dict[str, object]]) -> object:
+    chunks = [{"choices": [{"index": 0, "delta": delta}]} for delta in deltas]
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_sse_handler(chunks)))
+    sink: dict[str, object] = {}
+    list(
+        gateway.stream(
+            route=_foundry_route("some-deployment"),
+            messages=[{"role": "user", "content": "hi"}],
+            usage_sink=sink,
+        )
+    )
+    return sink.get("tool_calls")
+
+
+def test_a_tool_call_whose_name_is_repeated_on_every_piece_keeps_one_name() -> None:
+    call = lambda arguments: {"tool_calls": [{"index": 0, "function": {"name": "calculate", "arguments": arguments}}]}  # noqa: E731
+
+    assert _gathered([call('{"expression": '), call('"2 + 2"}')]) == [
+        {"name": "calculate", "arguments": '{"expression": "2 + 2"}'}
+    ]
+
+
+def test_tool_call_pieces_without_an_index_continue_the_call_before_them() -> None:
+    assert _gathered(
+        [
+            {"tool_calls": [{"id": "a", "function": {"name": "calculate", "arguments": '{"expression": '}}]},
+            {"tool_calls": [{"function": {"arguments": '"2 + 2"}'}}]},
+            {"tool_calls": [{"id": "b", "function": {"name": "search_web", "arguments": '{"query": "x"}'}}]},
+        ]
+    ) == [
+        {"name": "calculate", "arguments": '{"expression": "2 + 2"}'},
+        {"name": "search_web", "arguments": '{"query": "x"}'},
+    ]
+
+
+def test_a_tool_call_piece_without_an_index_continues_the_latest_of_several_calls() -> None:
+    assert _gathered(
+        [
+            {"tool_calls": [{"id": "a", "function": {"name": "calculate", "arguments": '{"expression": "1 + 1"}'}}]},
+            {"tool_calls": [{"id": "b", "function": {"name": "search_web", "arguments": '{"query": '}}]},
+            {"tool_calls": [{"function": {"arguments": '"Kansas 60-511"}'}}]},
+        ]
+    ) == [
+        {"name": "calculate", "arguments": '{"expression": "1 + 1"}'},
+        {"name": "search_web", "arguments": '{"query": "Kansas 60-511"}'},
+    ]
+
+
+def test_a_tool_call_index_far_past_the_calls_so_far_adds_one_call() -> None:
+    assert _gathered(
+        [{"tool_calls": [{"index": 5000, "function": {"name": "calculate", "arguments": "{}"}}]}]
+    ) == [{"name": "calculate", "arguments": "{}"}]

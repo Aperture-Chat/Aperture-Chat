@@ -194,6 +194,7 @@ from app.core.web_search import (
     resolve_search_provider_key,
     web_search_client_from_config,
 )
+from app.core.native_call_markup import completion_with_fenced_blocks, fenced_native_calls
 from app.core.work_steps import (
     MAX_STEP_ROUNDS,
     Researched,
@@ -3975,7 +3976,11 @@ def _gateway_complete(
     if options:
         kwargs["options"] = options
     completion_id = new_accounting_id()
-    payload = client.complete(**kwargs)
+    # Tool calls answer the caller's own tools, or the web search tool the
+    # gateway declared, on any turn that sent tools.
+    payload = completion_with_fenced_blocks(
+        client.complete(**kwargs), caller_tools=bool(merged_tools)
+    )
     usage_context.settle_provider_child(
         completion_id=completion_id,
         usage=_raw_provider_usage(payload),
@@ -4469,16 +4474,25 @@ def _stream_events(
             round_settled = False
             step_gate = StepGate(enabled=bool(step_runners) and step_rounds < MAX_STEP_ROUNDS)
             deltas = _outside_step_block(
-                _gateway_stream(
-                    client,
-                    route=route,
-                    messages=request_messages,
-                    max_tokens=completion_budget,
-                    tools=request.tools or None,
-                    tool_choice=request.tool_choice,
-                    options=_openai_generation_options(request),
-                    web_search_tools=gateway_web_tools,
-                    usage_sink=usage_sink,
+                # A step or ask block the model wrote as a native tool call
+                # becomes the fenced block before any gate reads the turn.
+                fenced_native_calls(
+                    _gateway_stream(
+                        client,
+                        route=route,
+                        messages=request_messages,
+                        max_tokens=completion_budget,
+                        tools=request.tools or None,
+                        tool_choice=request.tool_choice,
+                        options=_openai_generation_options(request),
+                        web_search_tools=gateway_web_tools,
+                        usage_sink=usage_sink,
+                    ),
+                    # On a turn that sent tools (the caller's own, or the
+                    # gateway's web search tool) tool calls answer those.
+                    None
+                    if request.tools or gateway_web_tools
+                    else partial(usage_sink.get, "tool_calls"),
                 ),
                 step_gate,
             )
