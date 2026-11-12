@@ -679,9 +679,24 @@ def tool_access_allowed(user: User, config: ToolConfig) -> bool:
     return True
 
 
+TOOL_ACCESS_DENIED = "Tool access is restricted by tenant, group, or tool policy."
+
+
 def assert_tool_access(user: User, config: ToolConfig) -> None:
     if not tool_access_allowed(user, config):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tool access is restricted by tenant, group, or tool policy.",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TOOL_ACCESS_DENIED)
+
+
+def tool_use_allowed(user: User, groups: Mapping[str, Group], config: ToolConfig) -> bool:
+    """Whether ``user`` may run ``config`` now.
+
+    The tenant's tools policy for the user's groups, the tool's own access
+    rules, and the Hermes grant all have to allow it. Approving a tool never
+    changes this answer: an approval is the user's consent to a run, not
+    permission to use the tool.
+    """
+    return (
+        group_permission_allowed(user, groups, "tools_access")
+        and tool_access_allowed(user, config)
+        and not (is_hermes_tool(config) and hermes_locked_for(user, groups))
+    )
