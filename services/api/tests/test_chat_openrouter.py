@@ -37,6 +37,7 @@ from app.models.schemas import (
     ModelConfig,
     Provider,
 )
+from app.core.provider_filter import MAX_FILTER_RETRIES
 from app.repositories.deps import get_store
 
 client = TestClient(app)
@@ -3015,8 +3016,62 @@ def test_a_draft_the_provider_filtered_fails_instead_of_becoming_the_document(
     assert "Azure's content filter withheld the model's reply" in detail
     assert "OpenRouter sent the request to Azure" in detail
     assert "cannot assist" not in detail
-    # No validator revisions are spent re-asking a filtered upstream.
-    assert len(captured_bodies) == 1
+    # The same request is asked again a set number of times, and no validator
+    # revisions are spent on a filtered upstream.
+    assert len(captured_bodies) == 1 + MAX_FILTER_RETRIES
+    assert all(body["messages"] == captured_bodies[0]["messages"] for body in captured_bodies)
+
+
+def test_a_draft_the_provider_filtered_once_is_written_on_the_next_try(monkeypatch) -> None:
+    _activate_provider("provider-openrouter")
+    store = get_store()
+    store.models["openrouter-filtered-draft"] = ModelConfig(
+        id="openrouter-filtered-draft",
+        provider_id="provider-openrouter",
+        provider_name="OpenRouter",
+        name="OpenRouter Filtered Draft",
+        upstream_model_id="openai/gpt-5.5",
+        context_window=128000,
+        group_ids=["group-litigation"],
+    )
+    calls: list[dict[str, object]] = []
+    written = {
+        "id": "gen-written",
+        "model": "openai/gpt-5.5",
+        "provider": "Azure",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "<h1>The Hundred Years' War</h1><p>It began in 1337.</p>"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 900, "completion_tokens": 40, "total_tokens": 940},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.read().decode()))
+        return httpx.Response(200, json=_content_filter_reply(1) if len(calls) == 1 else written)
+
+    fake = _gateway(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: fake)
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-filtered-draft",
+            "surface": "draft",
+            "work_steps": False,
+            "messages": [{"role": "user", "content": "Write a short history of the Hundred Years' War."}],
+        },
+        headers=headers(),
+    )
+
+    assert response.status_code == 200
+    content = response.json()["choices"][0]["message"]["content"]
+    assert "It began in 1337." in content
+    assert "cannot assist" not in content
+    assert calls[1]["messages"] == calls[0]["messages"]
 
 
 def test_a_filtered_revision_never_replaces_the_answer_in_hand(monkeypatch) -> None:

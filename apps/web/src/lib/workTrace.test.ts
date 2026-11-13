@@ -81,6 +81,21 @@ describe("recordActivity", () => {
     [{ kind: "screen-hold" }, "screen:hold", "Holding the reply for content-rule screening"],
     [{ kind: "screen-done" }, "screen:done", "Screened the reply against content rules"],
     [{ kind: "continue", round: 1 }, "continue:r1", "Reached the output limit and kept writing"],
+    [
+      { kind: "provider-filter", attempt: 1, servedBy: "Azure" },
+      "continue:filter1",
+      "A safety filter at Azure withheld the reply",
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure" },
+      "route:fallback",
+      "Claude Opus 5.5 answered instead",
+    ],
+    [
+      { kind: "provider-filter", attempt: 2, servedBy: "" },
+      "continue:filter2",
+      "The model provider's safety filter withheld the reply",
+    ],
     [{ kind: "resume", attempt: 1 }, "resume:a1", "Connection dropped — resumed where it left off"],
     [
       { kind: "hermes", memories: 1, skills: ["Citation style"], automations: [] },

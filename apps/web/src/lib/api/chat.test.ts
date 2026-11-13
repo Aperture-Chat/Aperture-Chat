@@ -451,6 +451,39 @@ describe("sendChatStream server runs", () => {
     expect(body.messages.at(-1).content).toContain("Continue exactly where the previous answer stopped");
   });
 
+  test("a continuation that adds nothing is asked again instead of ending the reply early", async () => {
+    const empty = sse(`id: 1\ndata: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n`);
+    const fetchMock = vi
+      .fn()
+      // The first request dies mid-sentence; the server has no run to follow.
+      .mockResolvedValueOnce(sse('data: {"delta":"Napoleon fought a series of"}\n\n'))
+      .mockResolvedValueOnce(empty)
+      .mockResolvedValueOnce(sse(`id: 1\ndata: {"delta":"battles in 1814."}\n\n${done(2)}`));
+    vi.stubGlobal("fetch", fetchMock);
+    const onActivity = vi.fn();
+
+    const reply = await sendChatStream("user-1", { ...request, onActivity, resumeDelaysMs: [0] });
+
+    expect(reply.content).toBe("Napoleon fought a series of\n\nbattles in 1814.");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(onActivity).toHaveBeenCalledWith({ kind: "resume", attempt: 2 });
+  });
+
+  test("a continuation that keeps adding nothing ends with the text so far", async () => {
+    const empty = () => sse(`id: 1\ndata: {"done":true,"citations":[],"usage":null}\n\ndata: [DONE]\n\n`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(sse('data: {"delta":"The whole answer."}\n\n'))
+      .mockImplementation(async () => empty());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reply = await sendChatStream("user-1", { ...request, resumeDelaysMs: [0] });
+
+    expect(reply.content).toBe("The whole answer.");
+    // The drop, then the first empty continuation and two more tries.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   test("a failure the API marks retryable starts a new run instead of following the failed one", async () => {
     const fetchMock = vi
       .fn()

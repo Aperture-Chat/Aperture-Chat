@@ -773,6 +773,10 @@ class ModelGatewayClient:
                                 # Recorded so the chat route can continue a
                                 # response the provider cut at the token budget.
                                 usage_sink["finish_reason"] = finish_reason
+                            served_by = chunk.get("provider")
+                            if isinstance(served_by, str) and served_by:
+                                # A router names the upstream that served the turn.
+                                usage_sink["served_by"] = served_by
                             _gather_tool_calls(usage_sink, choices[0].get("delta"))
                         delta = (choices[0].get("delta") or {}).get("content") if choices else None
                         if delta:
