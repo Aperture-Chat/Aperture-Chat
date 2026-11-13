@@ -307,6 +307,22 @@ const ACTIVITY_STEPS: StepBuilders = {
   ],
   "screen-done": () => [stepOf("screen:done", "Screened the reply against content rules")],
   continue: ({ round }) => [stepOf(`continue:r${round}`, "Reached the output limit and kept writing", `Continuation ${round}`)],
+  "provider-filter": ({ attempt, servedBy }) => [
+    stepOf(
+      `continue:filter${attempt}`,
+      servedBy
+        ? `A safety filter at ${servedBy} withheld the reply`
+        : "The model provider's safety filter withheld the reply",
+      `Asked again (try ${attempt + 1})`,
+    ),
+  ],
+  "model-fallback": ({ from, to, servedBy }) => [
+    stepOf(
+      "route:fallback",
+      `${to} answered instead`,
+      servedBy ? `A safety filter at ${servedBy} kept withholding ${from}` : `A safety filter kept withholding ${from}`,
+    ),
+  ],
   hermes: ({ memories, skills, automations }) => hermesSteps(memories, skills, automations),
   resume: ({ attempt }) => [
     stepOf(`resume:a${attempt}`, "Connection dropped — resumed where it left off", `Reconnect ${attempt}`),

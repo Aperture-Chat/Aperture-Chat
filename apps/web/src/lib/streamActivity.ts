@@ -27,6 +27,11 @@ export type ChatStreamActivity =
   | { kind: "screen-hold" }
   | { kind: "screen-done" }
   | { kind: "continue"; round: number }
+  /** The provider's safety filter withheld a turn and it was asked again.
+   * `servedBy` names the upstream that ran the filter, empty when unknown. */
+  | { kind: "provider-filter"; attempt: number; servedBy: string }
+  /** The filter kept withholding the reply, so another model answered. */
+  | { kind: "model-fallback"; from: string; to: string; servedBy: string }
   | { kind: "hermes"; memories: number; skills: string[]; automations: string[] }
   /** The reply paused to ask the user this many questions. */
   | { kind: "ask"; questions: number }
@@ -142,6 +147,15 @@ const PARSERS: Record<string, Parser> = {
   continue: (raw) => {
     const round = count(raw.round);
     return round ? { kind: "continue", round } : null;
+  },
+  "provider-filter": (raw) => {
+    const attempt = count(raw.attempt);
+    return attempt ? { kind: "provider-filter", attempt, servedBy: text(raw.served_by) ?? "" } : null;
+  },
+  "model-fallback": (raw) => {
+    const from = text(raw.from);
+    const to = text(raw.to);
+    return from && to ? { kind: "model-fallback", from, to, servedBy: text(raw.served_by) ?? "" } : null;
   },
   ask: (raw) => {
     const questions = count(raw.questions);
