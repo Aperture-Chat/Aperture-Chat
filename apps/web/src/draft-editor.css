@@ -3708,3 +3708,21 @@ figure.document-media-align-right {
   grid-template-columns: minmax(0, 1fr);
   justify-content: stretch;
 }
+
+/* A Drafts workspace the app keeps mounted (lib/draftSlots). On screen the
+ * frame adds nothing to the layout. Parked, the workspace keeps its size, so
+ * a reply that lands while the person is elsewhere is laid out as usual, but
+ * nothing of it can be seen or reached. */
+.draft-slot {
+  display: contents;
+}
+
+.draft-slot[data-parked="true"] {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
