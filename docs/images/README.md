@@ -15,6 +15,16 @@ Four pictures were added on November 10, 2026 from the v0.5.23 interface:
 recaptured, so the product tour and the other pictures still show v0.5.21 and
 do not show research steps, question cards, or the **Check** key.
 
+One picture was added on November 13, 2026 from the v0.5.25 interface:
+`chat-fallback-light.png`. It was taken on an isolated instance with a fresh
+data directory and the seeded demo organization. Both models in it are
+scripted stand-ins on a small local server. `qa-filtered` answered every
+request with "I'm sorry, but I cannot assist with that request.", a
+`content_filter` finish, and Azure named as the server, the way OpenRouter
+reports Azure's filter. `qa-stub` streamed a fixed answer. The retries, the
+switch to the other model, and the work trace are the application's own. No
+real provider filter was pictured.
+
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
@@ -64,6 +74,9 @@ do not show research steps, question cards, or the **Check** key.
   Platform Owner Console model availability table, both opened from the
   Account panel.
 - `sign-in.png`: email sign-in, access requests, and the pre-login walkthrough.
+- `chat-fallback-light.png`: a reply's work trace after a provider's filter
+  withheld it on all three tries and another model answered, with the answer
+  below it.
 - `chat-steps-light.png`: a reply's work trace after it took research steps
   (two more searches of workspace knowledge and one worked-out figure), with
   the cited answer below it.
