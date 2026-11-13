@@ -2157,9 +2157,17 @@ export function DocumentAssistantWorkspace({
   onInitialRequestStarted,
   initialServerDraftId,
   actorUserId,
+  parked = false,
+  onWorkingChange,
 }: {
   data: BootstrapData;
   brandName?: string | null;
+  /** The person is elsewhere in the app; this workspace stays mounted, out of
+   * sight, so the assistant's work in it finishes. */
+  parked?: boolean;
+  /** Called when the assistant starts or finishes work in this workspace
+   * (a request it is reading, or a draft it is writing). */
+  onWorkingChange?: (working: boolean) => void;
   onCloseDraft?: () => void;
   onNavigationGuardChange?: (guard: DraftNavigationGuard | null) => void;
   initialDraft?: DraftImportPayload | null;
@@ -2544,6 +2552,16 @@ export function DocumentAssistantWorkspace({
   const [documentToolPanel, setDocumentToolPanel] = useState<"text" | "paragraph" | "more" | null>(null);
   const [deckDesignTab, setDeckDesignTab] = useState<"layouts" | "themes">("layouts");
   const assistantWorking = draftTrace !== null && !draftTrace.complete;
+  // Work that leaving Drafts must not interrupt: a request being read or
+  // waiting on answers, a draft being written, deck images being made.
+  const workInFlight = assistantWorking || draftIntake !== null || deckImagesWorking || deckBackgroundWorking;
+  useEffect(() => {
+    onWorkingChange?.(workInFlight);
+  }, [onWorkingChange, workInFlight]);
+  useEffect(() => () => onWorkingChange?.(false), [onWorkingChange]);
+  // Window-level shortcuts belong to the view on screen, never to a parked one.
+  const parkedRef = useRef(parked);
+  parkedRef.current = parked;
   const draftTraceAnchor = draftTrace ? traceAnchorId(draftTrace, events) : null;
   const draftWorkTrace = draftTrace && (
     <WorkTrace
@@ -3335,7 +3353,7 @@ export function DocumentAssistantWorkspace({
   useEffect(() => {
     if (!railIsDrawer) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return;
+      if (parkedRef.current || event.isComposing || event.keyCode === 229) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key !== ".") return;
       // Another open dialog (unsaved edits, confirmations) owns the keyboard.
       const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
@@ -10464,7 +10482,7 @@ export function DocumentAssistantWorkspace({
   useEffect(() => {
     if (draftKind !== "deck") return undefined;
     const handle = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || deckPresentationOpenRef.current) return;
+      if (parkedRef.current || event.defaultPrevented || deckPresentationOpenRef.current) return;
       const target = event.target instanceof Node ? event.target : null;
       const inView = !target || target === document.body || Boolean(editorWorkspaceRef.current?.contains(target));
       if (inView) deckViewKeysRef.current(event);
@@ -10475,6 +10493,7 @@ export function DocumentAssistantWorkspace({
   useEffect(() => {
     if (draftKind !== "document") return undefined;
     const handle = (event: KeyboardEvent) => {
+      if (parkedRef.current) return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.defaultPrevented) return;
       const target = event.target instanceof Node ? event.target : null;
       const inView = !target || target === document.body || Boolean(editorWorkspaceRef.current?.contains(target));

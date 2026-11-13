@@ -9,10 +9,7 @@ import { ChatWorkspace } from "./components/ChatWorkspace";
 import type { MemoryManagerApi } from "./components/MemoryManager";
 import type { MyReportsApi } from "./components/MyReportsPanel";
 import type { SupportTicketsApi } from "./components/SupportTicketsConsole";
-import {
-  DocumentAssistantWorkspace,
-  type DraftImportPayload,
-} from "./components/DocumentAssistantWorkspace";
+import type { DraftImportPayload } from "./components/DocumentAssistantWorkspace";
 import { LibraryConsole } from "./components/LibraryConsole";
 import {
   PlatformConsole,
@@ -218,6 +215,8 @@ import {
 } from "./lib/brandIcon";
 import { appendChatCitationsForDraft } from "./lib/draftCitations";
 import type { DraftNavigationGuard } from "./lib/draftNavigation";
+import { keptDraftSlots, returnsToHeldDraft, sameDraftSlots, slotOnScreen, type DraftSlot } from "./lib/draftSlots";
+import { KeptDraftWorkspace } from "./components/KeptDraftWorkspace";
 import type { DraftHandoffRequest } from "./lib/draftHandoff";
 import type { DraftTransferFormat } from "./lib/draftTransfer";
 import { sampleData } from "./data/sampleData";
@@ -251,6 +250,7 @@ export function App() {
   const registerDraftNavigationGuard = useCallback((guard: DraftNavigationGuard | null) => {
     draftNavigationGuardRef.current = guard;
   }, []);
+  const clearDraftHandoff = useCallback(() => setDraftHandoff(null), []);
   // Only voluntary navigation uses this guard. Session invalidation and
   // security-driven sign-out must never depend on saving a local document.
   const requestWorkspaceNavigation = useCallback((label: string, proceed: () => void) => {
@@ -264,6 +264,29 @@ export function App() {
   }, [requestWorkspaceNavigation]);
   const router = useAppRoute(interceptPop);
   const { route, navigate } = router;
+  // A Drafts workspace the assistant is working in stays mounted when the
+  // person goes elsewhere, so its reply is never thrown away (lib/draftSlots).
+  const [keptDrafts, setKeptDrafts] = useState<DraftSlot[]>([]);
+  const [workingDrafts, setWorkingDrafts] = useState<ReadonlySet<string>>(() => new Set());
+  const draftOnScreen =
+    route.kind === "drafts" ? slotOnScreen(keptDrafts, draftSessionKey, route.draftId ?? null) : null;
+  // Signing out ends every workspace: none is carried into the next session.
+  const draftSlots = sessionUserId ? keptDraftSlots(keptDrafts, draftOnScreen, workingDrafts) : [];
+  useEffect(() => {
+    setKeptDrafts((current) => (sameDraftSlots(current, draftSlots) ? current : draftSlots));
+  });
+  const draftReturnRef = useRef({ slots: draftSlots, session: draftSessionKey });
+  draftReturnRef.current = { slots: draftSlots, session: draftSessionKey };
+  const closeDraft = useCallback(() => navigate(DEFAULT_ROUTE), [navigate]);
+  const setDraftWorking = useCallback((slotKey: string, working: boolean) => {
+    setWorkingDrafts((current) => {
+      if (current.has(slotKey) === working) return current;
+      const next = new Set(current);
+      if (working) next.add(slotKey);
+      else next.delete(slotKey);
+      return next;
+    });
+  }, []);
   const view = viewKeyForRoute(route);
   /* A deep link opened while signed out is remembered (as a parsed route,
    * never a raw string) and restored after sign-in through the role gate. */
@@ -845,14 +868,18 @@ export function App() {
   }, [chat, navigate, requestWorkspaceNavigation]);
 
   /* Every voluntary route change funnels through here so the drafts guard
-   * runs and entering Drafts always starts from a fresh workspace instance. */
+   * runs. Entering Drafts starts from a fresh workspace instance, unless the
+   * assistant was left working in one: then it goes back to that one. */
   const navigateTo = useCallback((nextRoute: AppRoute, options: { replace?: boolean } = {}) => {
     const label = nextRoute.kind === "drafts" ? routeLabel(nextRoute) : "leave Drafts";
     requestWorkspaceNavigation(label, () => {
       if (nextRoute.kind === "drafts") {
         setDraftImport(null);
         setDraftHandoff(null);
-        setDraftSessionKey((current) => current + 1);
+        const { slots, session } = draftReturnRef.current;
+        if (!returnsToHeldDraft(slots, session, nextRoute.draftId ?? null)) {
+          setDraftSessionKey((current) => current + 1);
+        }
       }
       navigate(nextRoute, options);
     });
@@ -1366,22 +1393,9 @@ export function App() {
         />
       );
     }
-    if (route.kind === "drafts") {
-      return (
-        <DocumentAssistantWorkspace
-          key={`${draftSessionKey}:${route.draftId ?? ""}`}
-          data={effectiveData}
-          brandName={chatBrandName}
-          initialDraft={route.draftId ? null : draftImport}
-          initialRequest={route.draftId ? null : draftHandoff}
-          onInitialRequestStarted={() => setDraftHandoff(null)}
-          initialServerDraftId={route.draftId ?? null}
-          actorUserId={effectiveData.me.id}
-          onCloseDraft={() => navigate(DEFAULT_ROUTE)}
-          onNavigationGuardChange={registerDraftNavigationGuard}
-        />
-      );
-    }
+    // Drafts workspaces are rendered beside this view, so one can stay
+    // mounted while another view is on screen.
+    if (route.kind === "drafts") return null;
     if (route.kind === "platform" && effectiveData.me.role === "PLATFORM_OWNER") {
       return (
         <PlatformConsole
@@ -1481,10 +1495,6 @@ export function App() {
     chat,
     chatBrandName,
     chatBrandDisplayName,
-    draftSessionKey,
-    draftImport,
-    draftHandoff,
-    registerDraftNavigationGuard,
     handleTransferToDraft,
     handleSendToDrafts,
     openAdminDocumentation,
@@ -1645,6 +1655,22 @@ export function App() {
         />
       )}
       {content}
+      {draftSlots.map((slot) => (
+        <KeptDraftWorkspace
+          key={slot.key}
+          slot={slot}
+          parked={slot.key !== draftOnScreen?.key}
+          data={effectiveData}
+          brandName={chatBrandName}
+          initialDraft={draftImport}
+          initialRequest={draftHandoff}
+          onInitialRequestStarted={clearDraftHandoff}
+          actorUserId={effectiveData.me.id}
+          onCloseDraft={closeDraft}
+          onNavigationGuardChange={registerDraftNavigationGuard}
+          onWorkingChange={setDraftWorking}
+        />
+      ))}
       {modelAccessExplainerOpen && sessionHydrated && (
         <ModelAccessExplainer
           userId={effectiveData.me.id}
