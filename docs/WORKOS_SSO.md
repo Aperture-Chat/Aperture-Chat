@@ -121,6 +121,11 @@ documentation library and the owner PDF guide.
   its first SSO identity, JIT provisioning follows the configuration, mapped
   groups follow the WorkOS roles, and the optional platform authenticator and
   enforcement behave as for OIDC.
+- A platform owner sits outside every workspace, so the workspace match that
+  admits everyone else cannot apply. A platform owner signs in through a
+  configuration only when a platform owner created it; a configuration a
+  workspace administrator created or last edited never signs an owner in.
+  The same rule applies to direct OIDC configurations.
 - Every outbound call goes through the same egress guard as OIDC.
 
 ## Known limits

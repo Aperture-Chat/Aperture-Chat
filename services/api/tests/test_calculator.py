@@ -79,6 +79,7 @@ def test_a_fractional_power_keeps_ten_decimal_places() -> None:
         ("15%", "not a calculation"),
         ("sqrt(-1)", "negative"),
         ("round(1.5, 2.5)", "whole number"),
+        ("round(1, 1e999)", "whole number"),
         ("unknown(3)", "not allowed"),
         ("abs()", "needs"),
         ("sqrt(1, 2)", "needs"),

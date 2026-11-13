@@ -390,3 +390,18 @@ def test_a_chat_reply_that_arrives_whole(scripted, mode: str, told: str | None) 
 
     line = next((line for line in _system(model.calls[0]).splitlines() if line.startswith("- Clarifying questions:")), None)
     assert (told in line) if told else line is None
+
+
+def test_a_draft_takes_steps_the_model_asked_for_in_its_own_tool_call_markup(scripted) -> None:
+    native_call = (
+        'Checking the figure.<|open|>tools<|sep|><|open|>call tool="undefined" index="1"<|sep|>'
+        '<|open|>argument key="steps" type="array"<|sep|>[{"do":"calculate","expression":"2 + 2"}]'
+        "<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|><|close|>message<|sep|>"
+    )
+    model = scripted(native_call, "# Memo\n\nThe total is 4.")
+
+    data = _write()
+
+    assert _reply(data) == "# Memo\n\nThe total is 4."
+    assert len(model.calls) == 2
+    assert "2 + 2 = 4" in str(model.calls[1][-1]["content"])

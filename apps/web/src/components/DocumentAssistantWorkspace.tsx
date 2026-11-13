@@ -6204,7 +6204,12 @@ export function DocumentAssistantWorkspace({
     }
   }
 
-  async function runDeckAssistantRequest(request: string) {
+  /** `request` is what the model is asked to do: the user's words, with any
+   * intake answers under them. `ownWords` is the request alone, and it decides
+   * what kind of run this is. The question wording under it is the model's, so
+   * a question that says "start" or "images" must never turn an edit into a
+   * rebuild or plan pictures nobody asked for. */
+  async function runDeckAssistantRequest(request: string, ownWords: string = request) {
     if (!selectedAgent) { setStatus(draftAiUnavailableReason); return; }
     if (revisionInFlightRef.current) {
       setStatus("The deck assistant is already working on the current request.");
@@ -6217,7 +6222,7 @@ export function DocumentAssistantWorkspace({
       currentDeck &&
         currentDeck.slides.some((slide) => deckSlideOutline(slide).trim().length > 0),
     );
-    const revising = Boolean(currentDeck && hasSlideContent && !isDraftCreationRequest(request));
+    const revising = Boolean(currentDeck && hasSlideContent && !isDraftCreationRequest(ownWords));
     const theme = currentDeck?.theme ?? defaultDeckTheme();
     const useWebSearch = webSearchEnabled && webSearchAvailable && !revising;
     const contextOptions = draftContextOptions(sourceSummary, {
@@ -6230,7 +6235,7 @@ export function DocumentAssistantWorkspace({
       ...current,
       draftEvent("user", "deck-request", request, { createdAt: requestStartedAt }),
     ]);
-    const wantsImagery = deckWantsImagery(request);
+    const wantsImagery = deckWantsImagery(ownWords);
     const artPassPlanned =
       wantsImagery || (!revising && deckImagesEnabled && Boolean(imageGenerationAgent));
     const traceSteps = deckAgentTraceSteps({
@@ -6288,7 +6293,7 @@ export function DocumentAssistantWorkspace({
       const promptDesign = deckThemeDesign((revising ? (currentDeck as SlideDeck) : deckState)?.theme ?? {});
       const basePrompt = revising
         ? providerDeckRevisionPrompt(deckJsonForPrompt(currentDeck as SlideDeck), request, promptDesign)
-        : providerDeckPrompt(selectedDeckTemplateOutline(), request, contextOptions, promptDesign);
+        : providerDeckPrompt(selectedDeckTemplateOutline(), request, contextOptions, promptDesign, wantsImagery);
       advanceDraftTrace("generate");
       const keptBackgrounds = new Map<string, DeckSlide>(
         (currentDeck?.slides ?? []).map((slide) => [slide.id, slide]),
@@ -7331,17 +7336,12 @@ export function DocumentAssistantWorkspace({
     if (draftKind === "deck") {
       const parsed = parseSlideDeck(doc.content);
       if (!parsed.ok) return;
-      latestDeckRef.current = parsed.deck;
-      flushSync(() => {
-        setDeckState(parsed.deck);
-        setDocumentTitle(doc.title);
-        if (!parsed.deck.slides.some((slide) => slide.id === selectedSlideId)) {
-          setSelectedSlideId(parsed.deck.slides[0]?.id ?? null);
-        }
-      });
       // Text boxes are filled once and then owned by the DOM, so a change to
-      // the slide on screen is written into them here; otherwise the next
-      // read would flush the old text back over the colleague's change.
+      // the slide on screen is written into them first, before the state
+      // commits. Effects in that commit read the boxes back (the live
+      // session's change check flushes them into the deck): a box still
+      // showing the old text would put it back, the box sync would write the
+      // new text again, and the two would trade places until React gave up.
       for (const { element, slideId, region } of deckBlockRefs.current.values()) {
         const slide = parsed.deck.slides.find((item) => item.id === slideId);
         if (!slide || !element.isConnected) continue;
@@ -7351,6 +7351,14 @@ export function DocumentAssistantWorkspace({
         element.innerHTML = deckRegionHtml(slide, region);
         if (caret !== null) placeCaretAtTextOffset(element, shiftedCaretOffset(caret, oldText, element.textContent ?? ""));
       }
+      latestDeckRef.current = parsed.deck;
+      flushSync(() => {
+        setDeckState(parsed.deck);
+        setDocumentTitle(doc.title);
+        if (!parsed.deck.slides.some((slide) => slide.id === selectedSlideId)) {
+          setSelectedSlideId(parsed.deck.slides[0]?.id ?? null);
+        }
+      });
       setDeckUndoStack([]);
       setDeckRedoStack([]);
       deckEditSessionUndoRef.current = null;
@@ -8919,7 +8927,7 @@ export function DocumentAssistantWorkspace({
   async function routeAssistantRequest(request: string, asked: string, options: { fromChat?: boolean } = {}) {
     const fromChat = options.fromChat === true;
     if (draftKind === "deck") {
-      await runDeckAssistantRequest(asked);
+      await runDeckAssistantRequest(asked, request);
       return;
     }
     if (draftKind === "spreadsheet") {
@@ -21678,6 +21686,7 @@ function providerDeckPrompt(
   request: string,
   contextOptions: DraftContextOptions,
   design: DeckDesign,
+  wantsImagery: boolean = deckWantsImagery(request),
 ): string {
   const contextLines = [
     `Drafting agent: ${contextOptions.agentName}.`,
@@ -21692,7 +21701,7 @@ function providerDeckPrompt(
       ? `Follow this deck template structure, adapting slide count as needed:\n${templateOutline}`
       : "Choose a clear structure: title slide, an agenda or sections as needed, and a closing slide.",
     "If the request names a slide or page count (\"a 10 page slide deck\", \"20 slides\"), produce exactly that many slides — that count overrides the template structure.",
-    ...(deckWantsImagery(request)
+    ...(wantsImagery
       ? [
           'The request asks for imagery: include one or two "image-caption" slides where a picture genuinely helps, describe the ideal photo in image.alt with a few concrete searchable words (still leave src empty), and keep every slide title concrete — the editor attaches real artwork by matching those descriptions.',
         ]

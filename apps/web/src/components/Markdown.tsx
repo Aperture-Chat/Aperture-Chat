@@ -1,7 +1,7 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Check, Code2, Copy, Download, Eye, LoaderCircle, Pencil, TriangleAlert, Workflow } from "lucide-react";
-import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { codeArtifactFilename, codeArtifactLanguage, precedingHeadings } from "../lib/codeArtifacts";
 import { copyCodeToClipboard, triggerBlobDownload } from "../lib/clipboard";
 import {
@@ -211,6 +211,22 @@ function MathBlock({ math, source }: { math: string; source: string }) {
   return <div className="md-katex md-katex-block" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+/** The numbers are drawn by the `md-counter` CSS counter, which every list
+ * resets, so a list that starts past 1 moves the counter to match. A list
+ * whose numbers reach three digits (a section 101, a line that opens with a
+ * year) also widens the margin they sit in, or they print over the text. A
+ * short list starting at 1 needs nothing. */
+function orderedListNumbering(start: number, count: number) {
+  const style: Record<string, string> = {};
+  if (start !== 1) style.counterReset = `md-counter ${start - 1}`;
+  const digits = String(start + count - 1).length;
+  if (digits > 2) style["--md-list-gutter"] = `${digits + 2}ch`;
+  return {
+    ...(start !== 1 ? { start } : {}),
+    ...(Object.keys(style).length ? { style: style as CSSProperties } : {}),
+  };
+}
+
 export function Markdown({
   content,
   deferDiagrams = false,
@@ -258,7 +274,7 @@ export function Markdown({
         if (block.kind === "list") {
           if (block.ordered) {
             return (
-              <ol key={index} className="md-list md-list-ordered">
+              <ol key={index} className="md-list md-list-ordered" {...orderedListNumbering(block.start, block.items.length)}>
                 {block.items.map((item, itemIndex) => (
                   <li key={itemIndex}>{inline(item)}</li>
                 ))}

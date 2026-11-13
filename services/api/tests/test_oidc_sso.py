@@ -696,6 +696,70 @@ def test_callback_rejects_subject_mismatch_for_bound_sso_account(
     assert get_store().users["user-jane"].entra_object_id == "entra-user-001"
 
 
+def _stamp_sso_author(role: str | None) -> None:
+    """Set who authored the seeded SSO configuration, as the admin API stamps it."""
+    settings = get_store().sso_configs["sso-entra-example"].settings
+    if role is None:
+        settings.pop("authored_by_role", None)
+    else:
+        settings["authored_by_role"] = role
+
+
+def _owner_callback(monkeypatch: pytest.MonkeyPatch):
+    """Sign the seeded platform owner in with an address on the allowed domain."""
+    get_store().users["user-owner"].email = "owner@example.com"
+    state, nonce = _start_authorize(monkeypatch)
+    id_token = _sign_id_token("owner@example.com", nonce, subject="entra-owner-001")
+    return _run_callback(monkeypatch, id_token, state)
+
+
+def test_platform_owner_signs_in_through_sso_config_an_owner_authored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Platform owners sit outside every workspace, so the workspace match
+    cannot apply to them; an owner-authored configuration signs them in."""
+    _stamp_sso_author("PLATFORM_OWNER")
+
+    fragment = _fragment(_owner_callback(monkeypatch))
+
+    assert fragment.startswith("sso_session=")
+    session = client.get("/api/auth/session", headers={"x-aperture-session": fragment.split("=", 1)[1]})
+    assert session.status_code == 200
+    assert session.json()["user"]["id"] == "user-owner"
+    assert session.json()["user"]["role"] == "PLATFORM_OWNER"
+    owner = get_store().users["user-owner"]
+    assert owner.tenant_id is None
+    assert owner.entra_object_id == "entra-owner-001"
+
+
+@pytest.mark.parametrize("author", ["TENANT_ADMIN", None])
+def test_platform_owner_is_refused_by_sso_config_an_owner_did_not_author(
+    monkeypatch: pytest.MonkeyPatch, author: str | None
+) -> None:
+    """A workspace admin's own provider can never assert a platform owner."""
+    _stamp_sso_author(author)
+
+    fragment = _fragment(_owner_callback(monkeypatch))
+
+    assert fragment.startswith("sso_error=")
+    assert "tenant does not match" in unquote(fragment)
+    assert get_store().users["user-owner"].entra_object_id is None
+
+
+def test_owner_authored_sso_config_still_refuses_a_user_from_another_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stamp_sso_author("PLATFORM_OWNER")
+    get_store().users["user-jane"].tenant_id = "tenant-elsewhere"
+    state, nonce = _start_authorize(monkeypatch)
+    id_token = _sign_id_token("jane.smith@example.com", nonce, name="Jane Smith")
+
+    fragment = _fragment(_run_callback(monkeypatch, id_token, state))
+
+    assert fragment.startswith("sso_error=")
+    assert "tenant does not match" in unquote(fragment)
+
+
 def test_sso_group_claim_mapping_syncs_managed_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     """mapped_groups is live: membership in mapped workspace groups follows the
     token's group claim, while unmapped groups stay admin-managed."""

