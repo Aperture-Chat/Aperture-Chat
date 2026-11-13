@@ -236,6 +236,55 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.24
+
+- **A provider's safety filter no longer answers for the model.** Some
+  upstreams run their own content filter (Azure does for the OpenAI models it
+  hosts, and an OpenRouter allowlist can send a model only there). When it
+  trips, the provider sends "I'm sorry, but I cannot assist with that
+  request." in the model's place, and Aperture delivered that as the answer.
+  The opening of each turn is now held back while it could still be that
+  sentence. A turn the provider withheld, by reporting `content_filter` or by
+  sending only that sentence, is asked again twice. If the provider still
+  reports its filter, another model answers the same conversation. The model
+  is chosen from those the user may use, with the same content filters, from
+  the same tenant or the platform, and never a workspace agent or an image
+  model. Another vendor's model comes first, and the same upstream model is
+  never chosen. Each switch is written to the audit log as
+  `chat.completion_fallback`, and the work trace shows the retries and which
+  model answered. The stand-in sentence without a filter report may be the
+  model's own refusal, so it is delivered after the retries. Drafts calls
+  switch the same way. A request from a `/v1` gateway client is never
+  switched to another model.
+- **A reply the filter cuts off goes on.** A long reply the filter stopped
+  partway was marked delivered while it ended mid-sentence. It now continues
+  from where it stopped, on another model if needed. If every model withholds
+  the rest, the reply ends with the reason and keeps the text already shown,
+  instead of passing for a finished answer.
+- **An empty "continue" no longer ends a reply.** When a reply's connection
+  dropped and the server no longer had its run, the browser asked the model
+  to continue from the text so far, and an empty answer ended the reply. It is
+  now asked again up to twice before the reply ends with the text it has.
+- **Drafts keeps writing when you leave it.** Leaving Drafts while the
+  assistant was writing threw its model request away, and coming back showed
+  a blank draft. The workspace now stays loaded, hidden, until that work is
+  done, and opening **Drafts** again returns to it. An idle workspace closes
+  as before. Reloading or closing the browser still stops a Drafts reply.
+- **What it costs.** A withheld turn costs up to three calls to the first
+  model, and a switch adds the other model's calls, all counted toward usage
+  and budgets as usual. There is no setting to turn the switch off; a model
+  should not be a fallback only if its users should not have it at all.
+- **No migration, no new settings.** This release adds no database migration,
+  no environment variable, no Compose service, and no new dependency. Only API
+  and web code change, so rolling back to v0.5.24 is an image swap.
+- **Not shown or tried yet.** The retries and the switch are proven by tests
+  and by a browser run against a scripted stand-in model that answered every
+  try with the filter's sentence and a `content_filter` finish. A real
+  provider filter has not been seen tripping since this change. Restarting the
+  API still ends replies that are being written; the browser continues them
+  as new requests. The training lessons and PDF guides do not show the switch
+  yet, and only one README picture is new.
+
 ## New Since v0.5.23
 
 - **Azure AI Foundry replies work across model families.** These fixes come
