@@ -64,14 +64,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.24](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.24)**:
-> Azure AI Foundry models work across families: GPT-5 and streamed Mistral
-> replies no longer fail, Mistral and Kimi take research steps instead of
-> returning nothing or showing markup, Kimi, Mistral, and DeepSeek read attached
-> pictures, and Grok's usage is recorded. An approved MCP tool checks access again at the moment it runs, and a
-> research step reads only a page address the reply was given.
-> v0.5.23 added research steps, Drafts questions, and the **Check** key.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0523) and
+> **Current release: [v0.5.25](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.25)**:
+> When a provider's safety filter keeps refusing a reply, another model you
+> may use answers it, and a reply the filter cuts off goes on instead of
+> stopping mid-sentence. Drafts keeps writing when you leave it.
+> v0.5.24 made Azure AI Foundry models work across families and checks a tool
+> approval again when the tool runs.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0524) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -89,11 +88,18 @@ policies appropriate for your organization's data.
 
 <sub>The two pictures above use a scripted stand-in model (shown as <code>qa-stub</code>), so the answer text is scripted; the question card, the steps, and the trace are the application's own. See <a href="docs/images/README.md">how the pictures were made</a>.</sub>
 
+<p align="center">
+  <img src="docs/images/chat-fallback-light.png" alt="A reply's work trace: a safety filter at Azure withheld the reply twice, then qa-stub answered instead, followed by the answer" width="760">
+</p>
+
+<sub>Also scripted: a stand-in model (<code>qa-filtered</code>) answered every try with the filter's refusal and named Azure as its server, and a second stand-in (<code>qa-stub</code>) wrote the answer. The retries, the switch, and the trace are the application's own.</sub>
+
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
 - **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, a page step reads only an address from the search results, your own messages, or your knowledge sources, and Fast replies skip them.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
-- **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it.
+- **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it. If the connection drops, the reply picks up where it stopped, and an empty answer to "continue" is asked again instead of ending the reply.
+- **When a provider's filter refuses.** Some providers run their own safety filter (Azure does for the OpenAI models it hosts) and send "I'm sorry, but I cannot assist with that request." in place of the answer. Aperture asks again twice. If the filter keeps refusing, another model you are allowed to use answers instead, and the work trace names it. A reply the filter cuts off partway goes on from where it stopped. Each switch is recorded in the audit log.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
 - **Client-matter numbers.** File a chat under a client-matter number from the **Matter** row in **Send options**. Numbers you type are saved for reuse, and the same numbers tag knowledge bases, so records staff can find a matter's chats in retention and its knowledge bases in Library search.
 - **Dictation.** Speak into the composer's microphone. Transcription uses a Gemini Flash model or a speech model such as Whisper or gpt-4o-transcribe (on Groq, OpenAI, Azure OpenAI, or Azure AI Foundry), and a busy or unreachable model hands the recording to the next one.
@@ -120,6 +126,7 @@ policies appropriate for your organization's data.
 - **One workspace, three formats.** Switch between **Document**, **Deck**, and **Spreadsheet** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
 - **Spreadsheets.** Build multi-sheet workbooks with Excel-style formulas, tables, pivot tables, and charts, open and export `.xlsx` and `.csv` files, and ask the **Spreadsheet Assistant** to edit a selection or build whole tables.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
+- **Keeps writing when you leave.** Go to chat or anywhere else while the assistant is writing a draft, and it finishes. Open **Drafts** again to find the finished draft. Reloading or closing the browser still stops it.
 - **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Asks before it writes.** When a drafting request leaves something open, the assistant asks one to three multiple-choice questions under your request, for documents, decks, and spreadsheets, then writes with your answers. **Decide for me** skips them, and **Ask me when unclear** in the assistant's settings turns them off; chat shares the same switch.
 - **Research while it writes.** A writing request can search your knowledge, search the web, read a linked page, or work out a figure before it writes, and the steps it took are listed in the draft chat.
@@ -209,7 +216,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.24
+#   APERTURE_IMAGE_TAG=v0.5.25
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -230,7 +237,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.24 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.25 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -265,10 +272,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.24` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.25` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.24-dev`, `v0.5.24-test`, `v0.5.24-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.25-dev`, `v0.5.25-test`, `v0.5.25-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

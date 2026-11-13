@@ -96,6 +96,14 @@ from app.core.connector_auth import (
     build_user_authorize_url,
     user_oauth_provider,
 )
+from app.core.model_fallback import fallback_order
+from app.core.provider_filter import (
+    MAX_FILTER_RETRIES,
+    StandInGate,
+    after_unshown_turn,
+    filter_reported,
+    withheld,
+)
 from app.core.content_filters import (
     FilterEvaluation,
     ContentRuleMatch,
@@ -220,6 +228,7 @@ from app.core.policy import (
     hermes_companion_allowed,
     knowledge_chunk_visible_to_user,
     is_hermes_tool,
+    is_workspace_agent_profile,
     model_access_allowed,
     tool_access_allowed,
     tool_use_allowed,
@@ -1494,6 +1503,9 @@ def complete(
     )
     _schedule_memory_followup(background_tasks, store, actor, request, route, runtime_context)
     _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
+    # When a provider's safety filter keeps withholding the reply, another
+    # model the person may use answers instead (see app.core.model_fallback).
+    fallback = partial(_filter_fallback, store, actor, model, runtime_context, web_tenant_id)
     if _runs_on_server(request):
         return _run_streaming_response(
             request,
@@ -1505,6 +1517,7 @@ def complete(
             usage_context=usage_context,
             registry=registry,
             step_runners=step_runners,
+            fallback=fallback,
         )
     if request.stream:
         return _streaming_response(
@@ -1516,6 +1529,7 @@ def complete(
             actor=actor,
             usage_context=usage_context,
             step_runners=step_runners,
+            fallback=fallback,
         )
     return _generate_completion(
         request,
@@ -1526,6 +1540,7 @@ def complete(
         actor=actor,
         usage_context=usage_context,
         step_runners=step_runners,
+        fallback=fallback,
     )
 
 
@@ -1613,6 +1628,7 @@ def _run_streaming_response(
     usage_context: UsageBudgetRequestContext,
     registry: ChatRunRegistry,
     step_runners: Mapping[str, StepRunner] | None = None,
+    fallback: FilterFallback | None = None,
 ) -> StreamingResponse:
     """Start the reply as a server-owned run and follow it from the start."""
     try:
@@ -1630,6 +1646,7 @@ def _run_streaming_response(
                 actor=actor,
                 usage_context=usage_context,
                 step_runners=step_runners,
+                fallback=fallback,
             ),
             on_finish=lambda finished: _finish_run(store, actor, usage_context, finished),
         )
@@ -2834,6 +2851,7 @@ def _generate_completion(
     usage_context: UsageBudgetRequestContext,
     usage_surface: str | None = None,
     step_runners: Mapping[str, StepRunner] | None = None,
+    fallback: FilterFallback | None = None,
 ) -> ChatCompletionResponse:
     """Call the configured provider for a real completion.
 
@@ -2856,7 +2874,7 @@ def _generate_completion(
         gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
         resolved_usage_surface = usage_surface or request.surface
 
-        def complete(conversation: list[dict[str, Any]]) -> Completion:
+        def ask(conversation: list[dict[str, Any]]) -> Completion:
             payload = _gateway_complete(
                 client,
                 route=route,
@@ -2873,6 +2891,9 @@ def _generate_completion(
             )
             return payload, _translate_response(payload, request.model, runtime_context)
 
+        def complete(conversation: list[dict[str, Any]]) -> Completion:
+            return _past_provider_filter(partial(ask, conversation))
+
         step_facts: list[dict[str, Any]] = []
         researched = _complete_after_steps(
             complete,
@@ -2887,6 +2908,9 @@ def _generate_completion(
         # Whatever follows continues from the research, not from before it.
         messages = researched.messages
         payload, response = researched.reply
+        switch = fallback() if fallback is not None and _provider_filtered(response) else None
+        if switch is not None:
+            raise _AnswerElsewhere(switch, _fallback_activity(model_config, switch, payload.get("provider")))
         if request.surface == "draft" and _provider_filtered(response):
             raise _provider_filter_exception(route, payload)
         completed = _continue_completion_if_needed(
@@ -2978,11 +3002,36 @@ def _generate_completion(
         if close_error is not None:
             raise _usage_budget_http_exception(close_error) from None
         raise
+    except _AnswerElsewhere as elsewhere:
+        # The provider's filter kept withholding the reply: the same request
+        # goes to the other model, on the same usage request.
+        answer = _generate_completion(
+            request,
+            elsewhere.switch.model,
+            elsewhere.switch.route,
+            runtime_context,
+            store=store,
+            actor=actor,
+            usage_context=usage_context,
+            usage_surface=usage_surface,
+            step_runners=step_runners,
+        )
+        answer.activity = [elsewhere.activity, *answer.activity]
+        return answer
     except Exception:
         close_error = _fail_usage_request(usage_context)
         if close_error is not None:
             raise _usage_budget_http_exception(close_error) from None
         raise
+
+
+class _AnswerElsewhere(Exception):
+    """Hands a withheld request to the model that answers instead."""
+
+    def __init__(self, switch: FilterSwitch, activity: dict[str, Any]) -> None:
+        super().__init__(switch.model.id)
+        self.switch = switch
+        self.activity = activity
 
 
 def _unconfigured_route_detail(route: ModelGatewayRoute) -> str:
@@ -4099,6 +4148,7 @@ def _streaming_response(
     actor: User,
     usage_context: UsageBudgetRequestContext,
     step_runners: Mapping[str, StepRunner] | None = None,
+    fallback: FilterFallback | None = None,
 ) -> StreamingResponse:
     # Unconfigured routes fail before the stream starts so the client gets an
     # honest 503 instead of fabricated deltas.
@@ -4117,6 +4167,7 @@ def _streaming_response(
             actor=actor,
             usage_context=usage_context,
             step_runners=step_runners,
+            fallback=fallback,
         ),
         media_type="text/event-stream",
         headers=_SSE_RESPONSE_HEADERS,
@@ -4389,6 +4440,7 @@ def _stream_events(
     actor: User,
     usage_context: UsageBudgetRequestContext,
     step_runners: Mapping[str, StepRunner] | None = None,
+    fallback: FilterFallback | None = None,
 ) -> Iterator[str]:
     """Yield Server-Sent Events: `data: {"delta": "..."}` lines then `data: [DONE]`.
 
@@ -4460,6 +4512,33 @@ def _stream_events(
             yield _sse_data({"activity": activity})
         request_messages = base_messages
         continuation_rounds = 0
+        # Turns asked again because the provider's filter withheld them, and
+        # whether another model has taken over the reply.
+        filter_retries = 0
+        switched = False
+
+        def take(text: str, opens_round: bool) -> str:
+            """Add a turn's text to the reply; returns what may be shown now.
+
+            Nothing user-visible flows until screening when output rules
+            apply; otherwise a possible ask block and text held for
+            concealment wait back.
+            """
+            nonlocal accumulated
+            if (
+                opens_round
+                and (continuation_rounds or step_rounds)
+                and accumulated
+                and not accumulated.endswith(("\n", " "))
+            ):
+                # Same segment join as the non-stream continuation path.
+                text = f"\n\n{text}"
+            accumulated += text
+            visible = "" if buffer_output else ask_gate.feed(text)
+            if concealer is not None and visible:
+                visible = concealer.feed(visible)
+            return visible
+
         # Research steps: the turns that asked for them and their results, and
         # where in the reply the text written since the last of them begins.
         step_messages: list[dict[str, Any]] = []
@@ -4497,28 +4576,18 @@ def _stream_events(
                 step_gate,
             )
             first_delta_of_round = True
+            # The turn's opening waits while it could still be the stand-in a
+            # provider sends for a reply its filter withheld.
+            stand_in = StandInGate()
             for delta in deltas:
                 if not delta:
                     # Upstream keep-alive while the model is still thinking.
                     yield ": keep-alive\n\n"
                     last_wire_activity = time.monotonic()
                     continue
-                if (
-                    first_delta_of_round
-                    and (continuation_rounds or step_rounds)
-                    and accumulated
-                    and not accumulated.endswith(("\n", " "))
-                ):
-                    # Same segment join as the non-stream continuation path.
-                    delta = f"\n\n{delta}"
-                first_delta_of_round = False
-                accumulated += delta
-                # Nothing user-visible flows until screening when output rules
-                # apply; otherwise a possible ask block and text held for
-                # concealment wait back.
-                visible = "" if buffer_output else ask_gate.feed(delta)
-                if concealer is not None and visible:
-                    visible = concealer.feed(visible)
+                delta = stand_in.feed(delta)
+                visible = take(delta, first_delta_of_round) if delta else ""
+                first_delta_of_round = first_delta_of_round and not delta
                 if not visible:
                     # Keep the wire alive so the client's stall watchdog never
                     # mistakes held-back text for a drop.
@@ -4551,6 +4620,38 @@ def _stream_events(
                     "total_tokens": settlement.event.total_tokens,
                 }
                 total_usage = _merge_usage(total_usage, round_usage) if total_usage else round_usage
+            finish_reason = str(usage_sink.get("finish_reason") or "").strip().lower()
+            if not stand_in.opened:
+                # Nothing of this turn has been shown yet.
+                held = stand_in.release()
+                # A turn that asked for research steps is not the reply.
+                verdict = "deliver" if step_gate.block else after_unshown_turn(finish_reason, held, filter_retries)
+                if verdict == "ask_again":
+                    # The same request often passes the next time.
+                    filter_retries += 1
+                    yield _sse_data({"activity": _filter_retry_activity(filter_retries, usage_sink)})
+                    last_wire_activity = time.monotonic()
+                    continue
+                if verdict == "fail":
+                    switch = None if switched or fallback is None else fallback()
+                    if switch is None:
+                        raise _ReplyWithheld(_provider_filter_detail(route, usage_sink.get("served_by")))
+                    # Another model answers the same turn, after the same
+                    # conversation; text already shown stays as it is.
+                    yield _sse_data({"activity": _fallback_activity(model_config, switch, usage_sink.get("served_by"))})
+                    last_wire_activity = time.monotonic()
+                    earlier_turns = request_messages[len(base_messages) :]
+                    model_config, route, switched, filter_retries = switch.model, switch.route, True, 0
+                    gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
+                    base_messages = _messages_with_runtime_context(request, model_config, runtime_context)
+                    completion_budget = _completion_token_budget(request, model_config)
+                    request_messages = [*base_messages, *earlier_turns]
+                    continue
+                # The model's own words after all: they join the reply.
+                visible = take(held, first_delta_of_round) if held else ""
+                if visible:
+                    yield _sse_data({"delta": visible})
+                    last_wire_activity = time.monotonic()
             if step_gate.block and step_runners:
                 # The turn asked for research instead of answering: run it,
                 # hand the results back, and let the model go on.
@@ -4583,13 +4684,20 @@ def _stream_events(
                 answer_start = len(accumulated)
                 request_messages = [*base_messages, *step_messages]
                 continue
-            finish_reason = str(usage_sink.get("finish_reason") or "").strip().lower()
-            wants_continuation = finish_reason in CONTINUATION_FINISH_REASONS or (
-                finish_reason == "stop" and _ends_inside_code_fence(accumulated)
+            # A turn the filter cut off after some of it was shown goes on
+            # from there, like one cut at the token budget.
+            filter_cut = filter_reported(finish_reason)
+            wants_continuation = (
+                finish_reason in CONTINUATION_FINISH_REASONS
+                or filter_cut
+                or (finish_reason == "stop" and _ends_inside_code_fence(accumulated))
             )
             written = accumulated[answer_start:]
             if not wants_continuation or continuation_rounds >= MAX_CONTINUATION_CALLS or not written:
                 break
+            if filter_cut:
+                filter_retries += 1
+                yield _sse_data({"activity": _filter_retry_activity(filter_retries, usage_sink)})
             # The provider stopped at the completion token budget mid-answer;
             # continue in-place so the user still receives the full output.
             continuation_rounds += 1
@@ -4679,7 +4787,9 @@ def _stream_events(
             )
             yield _sse_data({"error": detail, "retryable": False})
     except ModelGatewayError as exc:
-        if continuation_rounds > 0 and accumulated:
+        # A filter that withholds the rest of a reply is said plainly; the
+        # text already shown stays with the reason, never as a finished answer.
+        if continuation_rounds > 0 and accumulated and not isinstance(exc, _ReplyWithheld):
             # A continuation round failed after real content already
             # streamed. Ending at the provider's token-budget cut is already
             # accepted behavior (MAX_CONTINUATION_CALLS); erasing the whole
@@ -5601,27 +5711,112 @@ def _provider_filtered(response: ChatCompletionResponse) -> bool:
     return response.choices[0].finish_reason.strip().lower() == "content_filter"
 
 
+@dataclass(frozen=True)
+class FilterSwitch:
+    """The model that answers instead, and how to reach it."""
+
+    model: ModelConfig
+    route: ModelGatewayRoute
+
+
+FilterFallback = Callable[[], "FilterSwitch | None"]
+
+
+def _filter_fallback(
+    store: SeedStore,
+    actor: User,
+    current: ModelConfig,
+    runtime_context: dict[str, object],
+    tenant_id: str | None,
+) -> FilterSwitch | None:
+    """Another model that may answer this request, with a working route.
+
+    Only a model the person may use themselves, under the same content rules,
+    from the same tenant (or the platform), and not a workspace agent; it is
+    recorded in the audit trail before it answers.
+    """
+    eligible = [
+        model
+        for model in store.models.values()
+        if model.platform_enabled
+        and not model.is_custom
+        and not is_workspace_agent_profile(model)
+        and not _is_image_generation_model(model)
+        and model.tenant_id in (None, current.tenant_id)
+        and sorted(model.content_filter_ids) == sorted(current.content_filter_ids)
+        and model_access_allowed(actor, model)
+    ]
+    for model in fallback_order(current, eligible):
+        route = _resolve_gateway_route(store, model, tenant_id=tenant_id)
+        if route.configured:
+            _record_chat_audit(store, actor, model, route, "chat.completion_fallback", True, runtime_context)
+            return FilterSwitch(model, route)
+    return None
+
+
+def _fallback_activity(current: ModelConfig, switch: FilterSwitch, served_by: object) -> dict[str, Any]:
+    """The work-trace step for a reply another model answers."""
+    activity: dict[str, Any] = {"kind": "model-fallback", "from": current.name, "to": switch.model.name}
+    if isinstance(served_by, str) and served_by.strip():
+        activity["served_by"] = served_by.strip()
+    return activity
+
+
+def _past_provider_filter(ask: Callable[[], Completion]) -> Completion:
+    """One model turn, asked again while the provider's filter stands in for
+    the model. The last try is returned as it came back."""
+    completion = ask()
+    for _ in range(MAX_FILTER_RETRIES):
+        response = completion[1]
+        finish = response.choices[0].finish_reason if response.choices else ""
+        if not withheld(finish, _response_text(response)):
+            break
+        completion = ask()
+    return completion
+
+
+class _ReplyWithheld(ModelGatewayError):
+    """Every try at a turn was withheld by the provider's content filter.
+    Asking again from the browser would only repeat it."""
+
+    retryable = False
+
+
+def _filter_retry_activity(attempt: int, usage_sink: Mapping[str, Any]) -> dict[str, Any]:
+    """The work-trace step for a turn asked again after the filter withheld it."""
+    activity: dict[str, Any] = {"kind": "provider-filter", "attempt": attempt}
+    served_by = usage_sink.get("served_by")
+    if isinstance(served_by, str) and served_by.strip():
+        activity["served_by"] = served_by.strip()
+    return activity
+
+
 def _provider_filter_exception(
     route: ModelGatewayRoute, payload: Mapping[str, Any]
 ) -> HTTPException:
-    """Fail a filtered draft honestly instead of delivering the stock refusal.
+    """Fail a filtered draft honestly instead of delivering the stock refusal."""
+    served_by = payload.get("provider") if isinstance(payload, Mapping) else None
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=_provider_filter_detail(route, served_by),
+    )
+
+
+def _provider_filter_detail(route: ModelGatewayRoute, served_by: object) -> str:
+    """Who withheld the reply, and what the person can do about it.
 
     OpenRouter names the upstream that served the call; Azure, for one, runs
     its own content filter over the OpenAI models it hosts.
     """
-    served_by = payload.get("provider") if isinstance(payload, Mapping) else None
     source = served_by.strip() if isinstance(served_by, str) and served_by.strip() else None
     if source and source != route.provider_name:
-        withheld = (
+        reason = (
             f"{source}'s content filter withheld the model's reply "
             f"({route.provider_name} sent the request to {source})."
         )
     else:
-        withheld = f"{source or route.provider_name}'s content filter withheld the model's reply."
-    return HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail=f"{withheld} Choose a different model or try again.",
-    )
+        reason = f"{source or route.provider_name}'s content filter withheld the model's reply."
+    return f"{reason} Choose a different model or try again."
 
 
 def _needs_continuation(response: ChatCompletionResponse) -> bool:

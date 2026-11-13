@@ -25,6 +25,15 @@ describe("parseStreamActivity", () => {
     [{ kind: "screen", phase: "done" }, { kind: "screen-done" }],
     [{ kind: "continue", round: 2 }, { kind: "continue", round: 2 }],
     [
+      { kind: "provider-filter", attempt: 1, served_by: "Azure" },
+      { kind: "provider-filter", attempt: 1, servedBy: "Azure" },
+    ],
+    [{ kind: "provider-filter", attempt: 2 }, { kind: "provider-filter", attempt: 2, servedBy: "" }],
+    [
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", served_by: "Azure" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure" },
+    ],
+    [
       { kind: "hermes", memories: 1, skills: ["Style"], automations: [] },
       { kind: "hermes", memories: 1, skills: ["Style"], automations: [] },
     ],
@@ -44,6 +53,8 @@ describe("parseStreamActivity", () => {
     { kind: "requirements", phase: "later" },
     { kind: "screen", phase: "never" },
     { kind: "continue", round: 0 },
+    { kind: "provider-filter", attempt: 0 },
+    { kind: "model-fallback", from: "GPT-6 Astra" },
   ])("rejects malformed %j", (raw) => {
     expect(parseStreamActivity(raw)).toBeNull();
   });

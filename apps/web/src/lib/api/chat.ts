@@ -457,9 +457,14 @@ type FollowedRun = { id: string; position: number; follow: boolean };
  * is then followed again, and a reply without one is resumed with the
  * partial text.
  */
+/** How many more times a continuation that added nothing is asked again
+ * before the reply ends with the text it has. */
+const MAX_EMPTY_CONTINUATIONS = 2;
+
 class ResumableReply {
   private fullText: string;
   private stalledAttempts = 0;
+  private emptyContinuations = 0;
   private reconnects = 0;
   private run: FollowedRun | null;
 
@@ -474,12 +479,26 @@ class ResumableReply {
   async finish(): Promise<ChatAssistantReply> {
     while (true) {
       const progressBefore = this.fullText.length;
+      // A new request asked to continue text already here, not a follow.
+      const continuing = Boolean(this.fullText) && !this.run?.follow;
       try {
-        return await this.attempt();
+        const reply = await this.attempt();
+        if (!continuing || !this.shouldAskAgain(reply, progressBefore)) return reply;
+        // A reply cut mid-sentence is not finished because the request to
+        // continue it came back empty: ask again a set number of times.
+        this.emptyContinuations += 1;
+        this.startNewRun();
+        this.reconnects += 1;
+        this.options.onActivity?.({ kind: "resume", attempt: this.reconnects });
       } catch (error) {
         await this.recover(error, progressBefore);
       }
     }
+  }
+
+  private shouldAskAgain(reply: ChatAssistantReply, progressBefore: number): boolean {
+    if (reply.questions || this.fullText.length > progressBefore) return false;
+    return this.emptyContinuations < MAX_EMPTY_CONTINUATIONS;
   }
 
   private attempt(): Promise<ChatAssistantReply> {
