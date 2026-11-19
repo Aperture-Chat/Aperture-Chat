@@ -208,15 +208,53 @@ _DECK_PROMPT = re.compile(
 # Ask AI on a selection, and the formula fix round; apps/web/src/lib/sheet/sheetAi.ts)
 # opens with this. Its operation reference names tables, charts, and images.
 _SHEET_PROMPT = re.compile(r"\AYou are the spreadsheet assistant inside Aperture Drafts\b")
+# Drafts asks an image model for one picture, icon, or illustration with a
+# prompt that opens this way (apps/web DocumentAssistantWorkspace
+# generateSlideImageDataUrl); there is no document to check it against.
+_IMAGE_PROMPT = re.compile(r"\AGenerate one ")
+# Photos are placed by the editor through picture spots; a chart or diagram is
+# drawn in the paper itself, so only these words switch to spots.
+_PHOTO_REQUEST = re.compile(r"\b(images?|pictures?|photos?|photographs?|illustrations?)\b", re.IGNORECASE)
 
 
 def extract_draft_directives(prompt: str, standing_instructions: list[str] | None = None) -> list[Directive]:
     # Deck and workbook output is validated against its JSON contract in the
     # editor (decks get artwork afterward); prose/image verifiers are inapplicable.
-    if _DECK_PROMPT.match(prompt) or _SHEET_PROMPT.match(prompt):
+    if _DECK_PROMPT.match(prompt) or _SHEET_PROMPT.match(prompt) or _IMAGE_PROMPT.match(prompt):
         return []
     match = re.search(r"\AUser request: (.*?)\n\nDraft type:", prompt, re.DOTALL)
-    return extract_directives(match.group(1) if match else prompt, standing_instructions)
+    request = match.group(1) if match else prompt
+    return _with_picture_spots(request, extract_directives(request, standing_instructions))
+
+
+def extract_chat_directives(prompt: str, standing_instructions: list[str] | None = None) -> list[Directive]:
+    """A streamed chat reply places pictures through spots as it streams
+    (app.core.picture_spots), the same way a Drafts paper does."""
+    return _with_picture_spots(prompt, extract_directives(prompt, standing_instructions))
+
+
+def _with_picture_spots(request: str, directives: list[Directive]) -> list[Directive]:
+    photos = bool(_PHOTO_REQUEST.search(request))
+    return [_PICTURE_SPOTS if directive.id == "images" and photos else directive for directive in directives]
+
+
+# A document keeps only pictures stored inside it, so a paper marks where each
+# picture belongs and the Drafts editor fills the spot (apps/web
+# lib/documentPictures.ts reads this exact syntax); a streamed chat reply has
+# its spots filled on the server (app.core.picture_spots).
+PICTURE_SPOT_PATTERN = re.compile(r"\[\[Picture:\s*[^\]\n]{3,}\]\]")
+PICTURE_SPOTS_ID = "images:spots"
+_PICTURE_SPOTS = Directive(
+    id=PICTURE_SPOTS_ID,
+    label="Include pictures",
+    instruction=(
+        "Mark each place a picture belongs with a line of its own in the form "
+        "[[Picture: short description naming who or what, where, and when]], next to the "
+        "section it illustrates, at most six. Aperture places a freely licensed photo there, "
+        "or a labelled illustration when none exists. Do not write image links or markdown "
+        "image syntax, and never say you cannot add pictures."
+    ),
+)
 
 
 def directive_prompt_block(directives: list[Directive]) -> str:
@@ -264,6 +302,8 @@ def directive_results(directives: list[Directive], text: str) -> list[tuple[str,
 
 def _verify_images(directive: Directive, text: str) -> str | None:
     if _contains_markdown_image(text) or _contains_diagram(text):
+        return None
+    if directive.id == _PICTURE_SPOTS.id and PICTURE_SPOT_PATTERN.search(text):
         return None
     return (
         "The user asked for images or diagrams, but the answer contains no markdown image "

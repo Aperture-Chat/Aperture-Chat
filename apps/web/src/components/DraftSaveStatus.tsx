@@ -13,6 +13,8 @@ const TONE_ICONS: Record<DraftSaveTone, typeof CheckCircle2> = {
 type DraftSaveStatusProps = {
   status: DraftSaveStatusModel;
   onRetry: () => void;
+  /** A shared draft's autosave failed: try the live copy again now. */
+  onRetryLive: () => void;
   onReload: (serverId: string) => void;
   /** Documents: the status word also shows and hides the AI edit highlights. */
   highlights?: { on: boolean; onToggle: () => void };
@@ -21,7 +23,7 @@ type DraftSaveStatusProps = {
 /** The one save status of the Drafts editor, at the end of the formatting
  * toolbar. Its reason lives in the tooltip, except when this tab holds the
  * only copy: that warning is spelled out in full. */
-export function DraftSaveStatus({ status, onRetry, onReload, highlights }: DraftSaveStatusProps) {
+export function DraftSaveStatus({ status, onRetry, onRetryLive, onReload, highlights }: DraftSaveStatusProps) {
   const Icon = TONE_ICONS[status.tone];
   const word = (
     <>
@@ -52,7 +54,11 @@ export function DraftSaveStatus({ status, onRetry, onReload, highlights }: Draft
         <button
           className="document-save-action"
           type="button"
-          onClick={() => (action.kind === "reload" ? onReload(action.serverId) : onRetry())}
+          onClick={() => {
+            if (action.kind === "reload") onReload(action.serverId);
+            else if (action.kind === "retry-live") onRetryLive();
+            else onRetry();
+          }}
         >
           {action.kind === "reload" ? "Reload server copy" : "Retry"}
         </button>

@@ -432,6 +432,16 @@ import { parseDeckTemplate, type DeckTemplateParseResponse } from "../lib/api/de
 import { markdownOutlineFromDeck } from "../lib/deck/deckToDocument";
 import { PPTX_MIME_TYPE, buildPptxExportDocument } from "../lib/pptxExport";
 import { markdownToDocumentHtml } from "../lib/markdown";
+import {
+  fillPictureSpots,
+  hasPictureMarkers,
+  isolatePictureSpots,
+  pictureFigureHtml,
+  pictureReportMessage,
+  pictureSourceUrls,
+  type PicturePlacement,
+} from "../lib/documentPictures";
+import { findLicensedPictures } from "../lib/api/assets";
 import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "../lib/documentDiagrams";
 import { approvedWorkspaceModels, isModelUsable, modelsForTextDefault, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
 import {
@@ -4848,7 +4858,7 @@ export function DocumentAssistantWorkspace({
    * bounded JPEG data URL out. Throws with an honest message on any miss. */
   async function generateSlideImageDataUrl(
     request: string,
-    kind: "photo" | "background" = "photo",
+    kind: "photo" | "background" | "illustration" = "photo",
   ): Promise<string> {
     if (!imageGenerationAgent) {
       throw new ChatRequestError("No image-generation model is enabled for your workspace.");
@@ -4859,7 +4869,9 @@ export function DocumentAssistantWorkspace({
     const imagePrompt =
       kind === "background"
         ? `Generate one wide 16:9 image of pure atmosphere and scenery evoking this topic: ${request}. Muted, soft, low-detail. This will be used as a BACKDROP with text layered on top later, so the image itself must contain zero typography of any kind — no text, letters, words, numbers, titles, captions, watermarks, charts, diagrams, logos, or slide layouts. If any lettering would naturally appear in the scene, replace it with empty surface.`
-        : `Generate one wide 16:9 presentation slide image: ${request}. Photographic or clean illustration, no embedded text.`;
+        : kind === "illustration"
+          ? `Generate one painterly editorial illustration, clearly an illustration and not a photograph, for a document: ${request}. Show the place, objects, or period; do not depict a realistic likeness of any real person. No embedded text, no watermarks, no logos.`
+          : `Generate one wide 16:9 presentation slide image: ${request}. Photographic or clean illustration, no embedded text.`;
     const reply = await sendChat(completionUserId, {
       model: imageGenerationAgent.id,
       messages: [
@@ -7223,7 +7235,7 @@ export function DocumentAssistantWorkspace({
           ? "This deck exceeds the 8 MB server deck limit"
           : kind === "spreadsheet"
             ? "This workbook exceeds the 8 MB server spreadsheet limit"
-            : "This draft exceeds the 2 MB server draft limit",
+            : "This draft exceeds the 8 MB server draft limit",
       );
       return;
     }
@@ -8202,6 +8214,37 @@ export function DocumentAssistantWorkspace({
     });
   }
 
+  /** A freely licensed photo for one picture spot, a photo not already used
+   * in this paper; failing that, a labelled illustration when an image model
+   * is enabled; otherwise nothing (the spot is left out and reported). The
+   * photo search leaves the deployment, so it runs only with web search on. */
+  async function placeDocumentPicture(
+    description: string,
+    subject: string | null,
+    used: Set<string>,
+    search: { web: boolean; unreachable: boolean },
+  ): Promise<PicturePlacement> {
+    if (search.web) {
+      try {
+        const found = await findLicensedPictures(completionUserId, { query: description, subject, limit: 3 });
+        const fresh = found.find((picture) => !used.has(picture.source_url));
+        if (fresh) {
+          used.add(fresh.source_url);
+          return { kind: "photo", src: fresh.data_url, alt: fresh.alt, credit: fresh.credit, sourceUrl: fresh.source_url };
+        }
+      } catch {
+        // Commons could not be searched; an illustration can still fill the spot.
+        search.unreachable = true;
+      }
+    }
+    if (!imageGenerationAgent) return null;
+    try {
+      return { kind: "illustration", src: await generateSlideImageDataUrl(description, "illustration") };
+    } catch {
+      return null;
+    }
+  }
+
   async function startProviderDraftFromTemplate(
     template: DraftTemplate,
     request?: string,
@@ -8334,7 +8377,26 @@ export function DocumentAssistantWorkspace({
           "The document changed while the assistant was working, so the new draft was not substituted. Submit the request again from the current version.",
         );
       }
-      const draftBodyHtml = formatMlaDocument(documentHtmlFromMarkdown(markdownWithSources), requestText);
+      let draftBodyHtml = formatMlaDocument(
+        documentHtmlFromMarkdown(isolatePictureSpots(markdownWithSources)),
+        requestText,
+      );
+      let pictureNote = "";
+      if (hasPictureMarkers(draftBodyHtml)) {
+        setStatus(liveWebSearch ? "Finding freely licensed photos for the draft." : "Adding pictures to the draft.");
+        const usedPictures = new Set<string>();
+        const search = { web: liveWebSearch, unreachable: false };
+        const filled = await fillPictureSpots(draftBodyHtml, (description) =>
+          placeDocumentPicture(description, requestSubject, usedPictures, search),
+        );
+        draftBodyHtml = filled.html;
+        pictureNote = ` ${pictureReportMessage(filled.report)}${pictureSearchNote(search)}`;
+        if (contentRef.current !== sourceHtmlBeforeDraft) {
+          throw new Error(
+            "The document changed while the assistant was working, so the new draft was not substituted. Submit the request again from the current version.",
+          );
+        }
+      }
       // The draft is set in its page format: a layout the request describes,
       // the template's own, or its genre's (contract, letter, filing, ...).
       const draftSetup = draftBodyHtml.includes("document-mla-text")
@@ -8405,9 +8467,9 @@ export function DocumentAssistantWorkspace({
       setPageCount(Math.max(1, countDocumentPages(nextContentHtml) || pageTotal));
       setCurrentPage(1);
       setStatus(
-        liveWebSearch
+        (liveWebSearch
           ? `${nextTitle} drafted with provider-hosted web search.`
-          : `${nextTitle} drafted with the selected model.`,
+          : `${nextTitle} drafted with the selected model.`) + pictureNote,
       );
       setDocumentHistory(completedHistory);
       setActiveHistoryItemId(null);
@@ -11643,17 +11705,26 @@ export function DocumentAssistantWorkspace({
 
   async function insertWebImageForRequest(request: string, requestStartedAt = draftNowIso()) {
     const subject = extractVisualSubject(request, documentTitle);
-    const result = await resolveWebImageResult(subject);
-    const imageHtml = webImageHtml(result, subject);
-    runEditorCommand(
-      "insertHTML",
-      `Inserted web image for ${subject}.`,
-      imageHtml,
-    );
+    // Stored inside the document: a web link or a drawn stand-in was dropped
+    // when the draft saved, so the picture silently disappeared.
+    const used = new Set(pictureSourceUrls(contentRef.current));
+    const search = { web: webSearchEnabled, unreachable: false };
+    // Only the words of the request leave the deployment, never the title.
+    const placement = await placeDocumentPicture(subject, null, used, search);
+    if (!placement) {
+      setStatus(
+        `${imageGenerationAgent
+          ? `No freely licensed photo or illustration could be made for ${subject}.`
+          : `No freely licensed photo was found for ${subject}, and no image-generation model is enabled to make an illustration.`}${pictureSearchNote(search)}`,
+      );
+      return;
+    }
+    const what = placement.kind === "photo" ? "freely licensed photo" : "AI-generated illustration";
+    runEditorCommand("insertHTML", `Inserted a ${what} of ${subject}.`, pictureFigureHtml(subject, placement));
     const completedAt = draftNowIso();
     setEvents((current) => [
       ...current,
-      draftEvent("assistant", "image", `Found and inserted a web image for ${subject}.`, {
+      draftEvent("assistant", "image", `Found and inserted a ${what} of ${subject}.`, {
         createdAt: completedAt,
         executedAt: requestStartedAt,
         durationMs: timestampDifferenceMs(requestStartedAt, completedAt),
@@ -14046,6 +14117,7 @@ export function DocumentAssistantWorkspace({
             <DraftSaveStatus
               status={saveStatus}
               onRetry={retryDraftServerSync}
+              onRetryLive={() => void collab.retry()}
               onReload={(serverId) => void reloadServerDraftCopy(serverId)}
               highlights={{
                 on: showEdits,
@@ -14481,6 +14553,7 @@ export function DocumentAssistantWorkspace({
               <DraftSaveStatus
                 status={saveStatus}
                 onRetry={retryDraftServerSync}
+                onRetryLive={() => void collab.retry()}
                 onReload={(serverId) => void reloadServerDraftCopy(serverId)}
               />
             </div>
@@ -15195,6 +15268,7 @@ export function DocumentAssistantWorkspace({
                 <DraftSaveStatus
                   status={saveStatus}
                   onRetry={retryDraftServerSync}
+                  onRetryLive={() => void collab.retry()}
                   onReload={(serverId) => void reloadServerDraftCopy(serverId)}
                 />
               )}
@@ -18578,6 +18652,11 @@ function documentHtmlFromMarkdown(markdown: string) {
   return applyDocumentSignatureLines(markdownToDocumentHtml(markdown));
 }
 
+function pictureSearchNote(search: { web: boolean; unreachable: boolean }): string {
+  if (!search.web) return " Web search is off, so no photos were searched for; turn on Web to search Wikimedia Commons.";
+  return search.unreachable ? " Wikimedia Commons could not be reached for every picture." : "";
+}
+
 function documentImageSources(contentHtml: string) {
   if (typeof document === "undefined") return [];
   const template = document.createElement("template");
@@ -19659,14 +19738,6 @@ async function resolveWebImageResult(subject: string): Promise<WebImageResult> {
     caption: `Visual result for ${subject}`,
     source: "Aperture local fallback",
   };
-}
-
-function webImageHtml(result: WebImageResult, subject: string) {
-  return `<figure class="document-media-block" contenteditable="false"><img src="${escapeHtml(
-    result.url,
-  )}" alt="${escapeHtml(subject)}"><figcaption>${escapeHtml(result.caption)} · ${escapeHtml(
-    result.source,
-  )}</figcaption></figure>`;
 }
 
 function inlineImageDataUrl(subject: string) {

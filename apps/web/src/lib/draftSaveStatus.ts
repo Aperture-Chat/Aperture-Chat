@@ -11,7 +11,9 @@ export type DraftServerSaveState =
 
 export type DraftSaveTone = "editing" | "saving" | "saved" | "local-only" | "not-stored" | "conflict";
 
-export type DraftSaveAction = { kind: "retry" } | { kind: "reload"; serverId: string };
+// "retry" resends the failed version save; "retry-live" resends a shared
+// draft's autosave, which is a different save.
+export type DraftSaveAction = { kind: "retry" } | { kind: "retry-live" } | { kind: "reload"; serverId: string };
 
 /** What the one save status beside Insert shows: a word, its full reason,
  * and the recovery action when the account copy is behind. */
@@ -26,11 +28,20 @@ export type DraftSaveStatus = {
 export type DraftLiveSaveState =
   | { kind: "synced"; seq: number }
   | { kind: "saving" }
-  | { kind: "offline"; message: string; retryInMs: number };
+  | { kind: "offline"; message: string; retryInMs: number }
+  | { kind: "refused"; message: string };
 
 function liveSaveStatus(live: DraftLiveSaveState): DraftSaveStatus {
   if (live.kind === "saving") {
     return { tone: "saving", label: "Saving…", detail: "Saving your changes for everyone sharing this draft.", action: null };
+  }
+  if (live.kind === "refused") {
+    return {
+      tone: "not-stored",
+      label: "Not saved",
+      detail: `${live.message} Your changes are kept in this window.`,
+      action: { kind: "retry-live" },
+    };
   }
   if (live.kind === "offline") {
     const seconds = Math.max(1, Math.round(live.retryInMs / 1000));
@@ -38,7 +49,7 @@ function liveSaveStatus(live: DraftLiveSaveState): DraftSaveStatus {
       tone: "local-only",
       label: "Not saved yet",
       detail: `${live.message} Your changes are kept in this window and save again in ${seconds} seconds.`,
-      action: { kind: "retry" },
+      action: { kind: "retry-live" },
     };
   }
   return {
