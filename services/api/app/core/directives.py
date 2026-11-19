@@ -558,7 +558,8 @@ def word_count(text: str) -> int:
 
 
 def _contains_markdown_image(text: str) -> bool:
-    return bool(re.search(r"!\[[^\]]*]\(https?://[^)\s]+", text))
+    # A web image, or one Aperture stored and serves itself (chat pictures).
+    return bool(re.search(r"!\[[^\]]*]\((?:https?://|/api/chat/generated-images/)[^)\s]+", text))
 
 
 def _contains_diagram(text: str) -> bool:

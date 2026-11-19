@@ -447,7 +447,8 @@ def test_stream_verifies_requirements_against_the_finished_reply(
             "kind": "requirements",
             "phase": "checked",
             "checks": [
-                {"label": "Include images or diagrams", "met": False},
+                # A streamed chat reply asks for picture spots (app.core.picture_spots).
+                {"label": "Include pictures", "met": False},
                 {"label": "Include a markdown table", "met": True},
             ],
         }

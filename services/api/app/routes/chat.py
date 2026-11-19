@@ -6,6 +6,7 @@ import mimetypes
 import re
 import time
 import zipfile
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from collections.abc import Callable, Collection, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -117,10 +118,22 @@ from app.core.directives import (
     directive_issues,
     directive_prompt_block,
     directive_results,
+    PICTURE_SPOTS_ID,
+    extract_chat_directives,
     extract_directives,
     extract_draft_directives,
     word_count as _word_count,
 )
+from app.core.chat_pictures import (
+    Illustration,
+    Missing,
+    Photo,
+    Placement,
+    find_picture,
+    picture_markdown,
+    search_commons,
+)
+from app.core.picture_spots import PictureSpots
 from app.core.dlp import scan_prompt
 from app.core.personal_data import StreamingConcealer, conceal
 from app.core.privacy import conceal_message_dicts, conceal_title, detection_summary, privacy_policy_for
@@ -130,6 +143,7 @@ from app.core.generated_images import (
     save_generated_image,
 )
 from app.core.knowledge_ingestion import extract_text
+from app.core.image_model_rank import image_model_rank
 from app.core.media import classify_media
 from app.core.media_transcription import (
     MISSING_TRANSCRIPTION_MODEL_DETAIL,
@@ -1525,6 +1539,7 @@ def complete(
     fallback = partial(
         _filter_fallback, store, actor, model, runtime_context, web_tenant_id, stream=bool(request.stream)
     )
+    pictures = _picture_factory(store, actor, request, model, runtime_context, web_tenant_id)
     if _runs_on_server(request):
         return _run_streaming_response(
             request,
@@ -1537,6 +1552,7 @@ def complete(
             registry=registry,
             step_runners=step_runners,
             fallback=fallback,
+            pictures=pictures,
         )
     if request.stream:
         return _streaming_response(
@@ -1549,6 +1565,7 @@ def complete(
             usage_context=usage_context,
             step_runners=step_runners,
             fallback=fallback,
+            pictures=pictures,
         )
     return _generate_completion(
         request,
@@ -1648,6 +1665,7 @@ def _run_streaming_response(
     registry: ChatRunRegistry,
     step_runners: Mapping[str, StepRunner] | None = None,
     fallback: FilterFallback | None = None,
+    pictures: PictureFactory | None = None,
 ) -> StreamingResponse:
     """Start the reply as a server-owned run and follow it from the start."""
     try:
@@ -1666,6 +1684,7 @@ def _run_streaming_response(
                 usage_context=usage_context,
                 step_runners=step_runners,
                 fallback=fallback,
+                pictures=pictures,
             ),
             on_finish=lambda finished: _finish_run(store, actor, usage_context, finished),
         )
@@ -4171,6 +4190,7 @@ def _streaming_response(
     usage_context: UsageBudgetRequestContext,
     step_runners: Mapping[str, StepRunner] | None = None,
     fallback: FilterFallback | None = None,
+    pictures: PictureFactory | None = None,
 ) -> StreamingResponse:
     # Unconfigured routes fail before the stream starts so the client gets an
     # honest 503 instead of fabricated deltas.
@@ -4190,6 +4210,7 @@ def _streaming_response(
             usage_context=usage_context,
             step_runners=step_runners,
             fallback=fallback,
+            pictures=pictures,
         ),
         media_type="text/event-stream",
         headers=_SSE_RESPONSE_HEADERS,
@@ -4463,6 +4484,7 @@ def _stream_events(
     usage_context: UsageBudgetRequestContext,
     step_runners: Mapping[str, StepRunner] | None = None,
     fallback: FilterFallback | None = None,
+    pictures: PictureFactory | None = None,
 ) -> Iterator[str]:
     """Yield Server-Sent Events: `data: {"delta": "..."}` lines then `data: [DONE]`.
 
@@ -4496,6 +4518,9 @@ def _stream_events(
     concealer: StreamingConcealer | None = None
     ask_gate = AskGate(enabled=runtime_context.get("clarify_mode") == "ask")
     asked: AskBlock | None = None
+    # Picture spots become pictures as the reply streams.
+    chat_pictures = pictures(usage_context) if pictures is not None else None
+    spots = chat_pictures.spots if chat_pictures is not None else None
     try:
         client = get_model_gateway_client()
         gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
@@ -4559,7 +4584,7 @@ def _stream_events(
             visible = "" if buffer_output else ask_gate.feed(text)
             if concealer is not None and visible:
                 visible = concealer.feed(visible)
-            return visible
+            return spots.feed(visible) if spots is not None else visible
 
         # Research steps: the turns that asked for them and their results, and
         # where in the reply the text written since the last of them begins.
@@ -4746,6 +4771,7 @@ def _stream_events(
             concealer=concealer,
             privacy_categories=privacy_categories,
             screen=screen,
+            spots=spots,
         )
         delivered, asked = delivery.text, delivery.asked
         hermes_summary = None if asked else hermes.capture_artifacts(
@@ -4784,6 +4810,7 @@ def _stream_events(
         close_error = _fail_usage_request(usage_context)
         failure = map_usage_budget_error(close_error or exc)
         accounting_failed = True
+        yield from _released_before_error(spots)
         yield _sse_data(
             {
                 "error": failure.detail,
@@ -4814,6 +4841,7 @@ def _stream_events(
                 route.provider_name,
                 exc,
             )
+            yield from _released_before_error(spots)
             yield _sse_data({"error": detail, "retryable": False})
     except ModelGatewayError as exc:
         # A filter that withholds the rest of a reply is said plainly; the
@@ -4853,6 +4881,7 @@ def _stream_events(
                 concealer=concealer,
                 privacy_categories=privacy_categories,
                 screen=screen,
+                spots=spots,
             )
             delivered, asked = delivery.text, delivery.asked
             try:
@@ -4880,6 +4909,7 @@ def _stream_events(
                     route.provider_name,
                     exc,
                 )
+                yield from _released_before_error(spots)
                 # The client resumes retryable failures automatically, re-sending the
                 # streamed partial as context; deterministic failures surface as-is.
                 yield _sse_data(
@@ -4892,9 +4922,15 @@ def _stream_events(
         _fail_usage_request(usage_context)
         raise
     finally:
+        if chat_pictures is not None:
+            # Before the permit is abandoned, so an unshown illustration is billed.
+            chat_pictures.settle_outstanding()
         _abandon_usage_request(usage_context)
     if completed:
-        yield from _closing_frames(runtime_context, delivered, asked, hermes_summary)
+        # Requirements are checked against what the reader got: a spot that
+        # found no picture does not count as an included picture.
+        checked = spots.shown if spots is not None else delivered
+        yield from _closing_frames(runtime_context, checked, asked, hermes_summary)
         done_payload: dict[str, Any] = {
             "done": True,
             "citations": [
@@ -5065,19 +5101,25 @@ def _deliver_output(
     concealer: StreamingConcealer | None,
     privacy_categories: list[str] | None,
     screen: Callable[[str], str] | None,
+    spots: PictureSpots[Placement] | None = None,
 ) -> Generator[str, None, _Delivery]:
     """Send what a finished stream still owes, then say what was delivered.
 
-    Streamed replies owe only text held back while they streamed. A screened
-    reply was held whole, so it is delivered here, and an ask block in it is
-    read from the screened text, so its questions are screened too.
+    Streamed replies owe only text held back while they streamed, and the
+    pictures still being found for their spots. A screened reply was held
+    whole, so it is delivered here, and an ask block in it is read from the
+    screened text, so its questions are screened too.
     """
     tail = _held_back_tail(ask_gate, concealer)
+    if spots is not None:
+        tail = spots.feed(tail)
     if tail:
         yield _sse_data({"delta": tail})
     full_text = _concealed(accumulated, privacy_categories)
     if screen is not None:
-        return (yield from _deliver_screened(full_text, screen, may_ask=ask_gate.enabled))
+        return (yield from _deliver_screened(full_text, screen, may_ask=ask_gate.enabled, spots=spots))
+    if spots is not None:
+        yield from _placed_pictures(spots)
     block = ask_gate.block
     asked = block.map_text(lambda text: _concealed(text, privacy_categories)) if block else None
     return _Delivery(asked.intro if asked else full_text, full_text, asked)
@@ -5375,16 +5417,42 @@ def _record_step_round(
 
 
 def _deliver_screened(
-    full_text: str, screen: Callable[[str], str], *, may_ask: bool
+    full_text: str,
+    screen: Callable[[str], str],
+    *,
+    may_ask: bool,
+    spots: PictureSpots[Placement] | None = None,
 ) -> Generator[str, None, _Delivery]:
     """A reply held whole for screening, delivered once screened. An ask block
-    is read from the screened text, so its questions are screened too."""
+    is read from the screened text, so its questions are screened too, and
+    picture spots are looked up from the screened text."""
     yield _sse_data({"activity": {"kind": "screen", "phase": "done"}})
     screened = screen(full_text)
     split = split_reply(screened) if may_ask else AskSplit(screened, None)
-    if split.text:
-        yield _sse_data({"delta": split.text})
+    shown = spots.feed(split.text) if spots is not None else split.text
+    if shown:
+        yield _sse_data({"delta": shown})
+    if spots is not None:
+        yield from _placed_pictures(spots)
     return _Delivery(split.text, full_text, split.block)
+
+
+def _released_before_error(spots: PictureSpots[Placement] | None) -> Iterator[str]:
+    """Text the reply already wrote but held behind a picture still being
+    found; a failing stream sends it before its error instead of losing it."""
+    held = spots.abandon() if spots is not None else ""
+    if held:
+        yield _sse_data({"delta": held})
+
+
+def _placed_pictures(spots: PictureSpots[Placement]) -> Iterator[str]:
+    """The pictures a finished reply is still waiting on, each sent once it
+    is found; the wire stays alive meanwhile."""
+    for piece in spots.close(tick_seconds=KEEPALIVE_INTERVAL_SECONDS):
+        if piece is None:
+            yield ": keep-alive\n\n"
+        elif piece:
+            yield _sse_data({"delta": piece})
 
 
 def _closing_frames(
@@ -5655,6 +5723,29 @@ def _completion_quality_issues(
     return directive_issues(_runtime_directives(runtime_context), _response_text(response))
 
 
+def _directive_extractor(request: ChatCompletionRequest) -> Callable[[str, list[str] | None], list[Directive]]:
+    """A Drafts paper and a streamed chat reply mark picture spots that are
+    filled with real pictures; any other reply has nowhere to fill them."""
+    if request.surface == "draft":
+        return extract_draft_directives
+    if request.surface == "chat" and request.stream:
+        return extract_chat_directives
+    return extract_directives
+
+
+def _places_picture_spots(runtime_context: dict[str, object]) -> bool:
+    return any(directive.id == PICTURE_SPOTS_ID for directive in _runtime_directives(runtime_context))
+
+
+_PICTURE_SPOTS_LINE = (
+    "- Images: Aperture places the pictures for this reply. Mark each place a picture belongs "
+    "with a line of its own in the form [[Picture: who or what, where, and when]] and Aperture "
+    "puts a freely licensed photo there with its credit, or a labelled AI illustration when no "
+    "photo exists. Do not write image URLs or Markdown image syntax, do not draw diagrams as a "
+    "stand-in for pictures, and never say you cannot add images."
+)
+
+
 def _runtime_directives(runtime_context: dict[str, object]) -> list[Directive]:
     directives = runtime_context.get("directives")
     if isinstance(directives, list):
@@ -5844,6 +5935,178 @@ def _filter_fallback(
         )
         return FilterSwitch(model, route)
     return None
+
+
+def _picture_illustrator(
+    store: SeedStore, actor: User, current: ModelConfig, tenant_id: str | None
+) -> tuple[ModelConfig, ModelGatewayRoute] | None:
+    """The best image model the person may use themselves, with a working
+    route, to draw an illustration when no licensed photo exists: from the
+    same tenant (or the platform), under no content rules the reply's model
+    does not also have."""
+    eligible = [
+        model
+        for model in store.models.values()
+        if model.platform_enabled
+        and not model.is_custom
+        and _is_image_generation_model(model)
+        and model.tenant_id in (None, current.tenant_id)
+        and set(model.content_filter_ids) <= set(current.content_filter_ids)
+        and model_access_allowed(actor, model)
+    ]
+    for model in sorted(eligible, key=lambda item: image_model_rank(item.upstream_model_id), reverse=True):
+        route = _route_or_none(store, model, tenant_id)
+        if route is not None and route.configured:
+            return model, route
+    return None
+
+
+class _ChatPictures:
+    """The picture spots of one streamed chat reply (see app.core.picture_spots).
+
+    Pictures are found one at a time on a worker thread (image models are
+    rate limited) while the reply keeps streaming; the audit trail, billing,
+    and signed links stay on the stream's thread. A photo is looked for only
+    with Web on for the message; an illustration is drawn only when its usage
+    can be billed the way this request must be.
+    """
+
+    # How long a reply that ended early waits for an illustration already
+    # being drawn, so the image model's call is billed and audited.
+    SETTLE_WAIT_SECONDS = 120.0
+
+    def __init__(
+        self,
+        store: SeedStore,
+        actor: User,
+        request: ChatCompletionRequest,
+        illustrator: tuple[ModelConfig, ModelGatewayRoute] | None,
+        usage_context: UsageBudgetRequestContext,
+        web_enabled: bool,
+    ) -> None:
+        self._store = store
+        self._actor = actor
+        self._thread_id = request.thread_id
+        # Exact metering refuses usage an image endpoint may not report.
+        self._illustrator = None if usage_context.requires_exact_metering else illustrator
+        self._usage_context = usage_context
+        self._web_enabled = web_enabled
+        # Set once the image model refuses its credential: no spot tries again.
+        self._illustrator_refused = False
+        self._submitted: list[Future[Placement]] = []
+        self._billed: set[int] = set()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chat-pictures")
+        self.spots: PictureSpots[Placement] = PictureSpots(self._start, self._render)
+
+    def settle_outstanding(self) -> None:
+        """Ends the reply's picture work. Lookups not yet begun are dropped; an
+        illustration drawn but never shown (the reply stopped or failed) is
+        still billed and audited, once."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        running = [future for future in self._submitted if not future.done()]
+        if running:
+            wait(running, timeout=self.SETTLE_WAIT_SECONDS)
+        for future in self._submitted:
+            if not future.done() or future.cancelled() or future.exception() is not None:
+                continue
+            placement = future.result()
+            if isinstance(placement, Photo) or placement.provider_payload is None:
+                continue
+            try:
+                self._bill_illustration(placement.provider_payload, placement)
+            except Exception:
+                logger.exception("Failed to bill an unshown chat illustration")
+
+    def _start(self, description: str) -> Future[Placement]:
+        if self._web_enabled:
+            # The words sent outside the deployment are recorded before they leave.
+            self._store.record_audit(
+                self._actor,
+                "assets.licensed_picture_search",
+                "wikimedia-commons",
+                {"query": description, "thread_id": self._thread_id, "surface": "chat"},
+            )
+        illustrate = self._illustrate if self._illustrator is not None else None
+        search = search_commons if self._web_enabled else None
+        future = self._executor.submit(find_picture, description, illustrate, search=search)
+        self._submitted.append(future)
+        return future
+
+    def _illustrate(self, prompt: str) -> dict[str, Any]:
+        if self._illustrator_refused:
+            raise ModelGatewayError("The image model's credential was refused earlier in this reply.")
+        _model, route = cast(tuple[ModelConfig, ModelGatewayRoute], self._illustrator)
+        try:
+            return get_model_gateway_client().generate_images(
+                route=route, messages=[{"role": "user", "content": prompt}]
+            )
+        except ModelGatewayAuthError as exc:
+            self._illustrator_refused = True
+            _handle_gateway_auth_failure(self._store, self._actor, route, exc)
+            raise
+
+    def _render(self, description: str, placement: Placement | None) -> str:
+        placement = placement if placement is not None else Missing(None)
+        payload = None if isinstance(placement, Photo) else placement.provider_payload
+        if payload is not None:
+            self._bill_illustration(payload, placement)
+        if isinstance(placement, Missing):
+            return picture_markdown(description, placement, None)
+        token = sign_asset_token(
+            placement.image_name, get_settings().secret_key, ttl_seconds=GENERATED_IMAGE_LINK_TTL_SECONDS
+        )
+        return picture_markdown(
+            description, placement, f"{GENERATED_IMAGE_URL_PREFIX}/{placement.image_name}?token={token}"
+        )
+
+    def _bill_illustration(self, payload: dict[str, Any], placement: Illustration | Missing) -> None:
+        if id(placement) in self._billed:
+            return
+        self._billed.add(id(placement))
+        model, route = cast(tuple[ModelConfig, ModelGatewayRoute], self._illustrator)
+        self._usage_context.settle_provider_child(
+            completion_id=new_accounting_id(),
+            usage=_raw_provider_usage(payload),
+            attribution=ProviderUsageAttribution(
+                model_id=model.id,
+                provider_name=route.provider_name,
+                surface="image",
+                message_count=1,
+                thread_id=self._thread_id,
+            ),
+        )
+        self._store.record_audit(
+            self._actor,
+            "chat.images_generated",
+            model.id,
+            {
+                **route.audit_metadata(),
+                "requested_count": 1,
+                "generated_count": 1 if isinstance(placement, Illustration) else 0,
+                "image_files": [placement.image_name] if isinstance(placement, Illustration) else [],
+                "thread_id": self._thread_id,
+                "purpose": "chat-picture-spot",
+            },
+        )
+
+
+PictureFactory = Callable[[UsageBudgetRequestContext], _ChatPictures]
+
+
+def _picture_factory(
+    store: SeedStore,
+    actor: User,
+    request: ChatCompletionRequest,
+    model: ModelConfig,
+    runtime_context: dict[str, object],
+    tenant_id: str | None,
+) -> PictureFactory | None:
+    """Pictures are placed in a streamed chat reply that asked for them."""
+    if not (request.surface == "chat" and request.stream and _places_picture_spots(runtime_context)):
+        return None
+    illustrator = _picture_illustrator(store, actor, model, tenant_id)
+    web_enabled = bool(runtime_context.get("web_enabled"))
+    return lambda usage_context: _ChatPictures(store, actor, request, illustrator, usage_context, web_enabled)
 
 
 def _route_or_none(store: SeedStore, model: ModelConfig, tenant_id: str | None) -> ModelGatewayRoute | None:
@@ -6199,8 +6462,7 @@ def _resolve_runtime_context(
     ):
         directives: list[Directive] = []
     else:
-        extract = extract_draft_directives if request.surface == "draft" else extract_directives
-        directives = extract(_asked_this_turn(request), memory_context["standing_instructions"])
+        directives = _directive_extractor(request)(_asked_this_turn(request), memory_context["standing_instructions"])
     return {
         "surface": request.surface if request.surface in {"chat", "draft"} else "chat",
         "thread_id": request.thread_id,
@@ -8633,7 +8895,9 @@ def _runtime_prompt(model_config: ModelConfig, runtime_context: dict[str, object
             "characters so boxes stay compact and scannable. Mind maps: one idea per "
             "indented line in plain words."
         ),
-        (
+        _PICTURE_SPOTS_LINE
+        if _places_picture_spots(runtime_context)
+        else (
             "- Images: Markdown images (![alt](https URL)) render in chat replies, on their own "
             "line and inside table cells. When the user asks for images or photos, embed only "
             "direct image URLs that appear verbatim in this conversation's web results, fetched "
