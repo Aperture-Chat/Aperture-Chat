@@ -365,6 +365,72 @@ def _foundry_route(model: str, auth_metadata: dict[str, object] | None = None) -
     )
 
 
+def test_a_foundry_claude_deployment_speaks_anthropic_messages_on_the_resource() -> None:
+    """Foundry answers Claude on /models with 404 api_not_supported; the same
+    resource serves it on /anthropic/v1/messages with x-api-key."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.read().decode())
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 3, "output_tokens": 1},
+            },
+        )
+
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(handler))
+    route = _foundry_route(
+        "claude-opus-5-5", {"header_name": "api-key", "max_tokens_param": "max_completion_tokens"}
+    )
+
+    result = gateway.complete(route=route, messages=[{"role": "user", "content": "hi"}])
+
+    assert captured["url"] == "https://myres.services.ai.azure.com/anthropic/v1/messages"
+    assert captured["headers"]["x-api-key"] == "az-foundry-secret"
+    assert captured["headers"]["anthropic-version"]
+    assert "api-key" not in captured["headers"]
+    assert captured["body"]["model"] == "claude-opus-5-5"
+    assert captured["body"]["max_tokens"] >= 256
+    assert result["choices"][0]["message"]["content"] == "ok"
+
+
+def test_a_foundry_claude_deployment_signed_in_with_a_token_sends_it_as_bearer() -> None:
+    """Foundry accepts an Entra token on its Anthropic endpoint as Authorization: Bearer."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={"id": "m", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "ok"}],
+                  "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}},
+        )
+
+    route = _foundry_route("claude-sonnet-5-5")
+    route = ModelGatewayRoute(**{**route.__dict__, "auth_type": "bearer", "secret_value": "entra-token"})
+    ModelGatewayClient(transport=httpx.MockTransport(handler)).complete(route=route, messages=[{"role": "user", "content": "hi"}])
+
+    assert captured["headers"]["authorization"] == "Bearer entra-token"
+    assert "x-api-key" not in captured["headers"]
+    assert captured["headers"]["anthropic-version"]
+
+
+def test_claude_haiku_5_takes_effort_and_refuses_temperature() -> None:
+    """Live Foundry: Haiku 5.5 answers temperature with "deprecated for this
+    model" and accepts output_config.effort."""
+    assert supports_reasoning_effort("claude-haiku-5-5")
+    assert deterministic_sampling(_foundry_route("claude-haiku-5-5")) == {}
+
+
 def test_azure_foundry_caps_replies_with_max_completion_tokens() -> None:
     """GPT-5-class deployments reject max_tokens outright, and every model on
     the Foundry inference endpoint accepts max_completion_tokens."""
@@ -1247,3 +1313,39 @@ def test_a_tool_call_index_far_past_the_calls_so_far_adds_one_call() -> None:
     assert _gathered(
         [{"tool_calls": [{"index": 5000, "function": {"name": "calculate", "arguments": "{}"}}]}]
     ) == [{"name": "calculate", "arguments": "{}"}]
+
+
+def test_a_foundry_claude_deployment_streams_from_the_anthropic_endpoint() -> None:
+    """Streamed replies take the same Anthropic surface as non-streamed ones."""
+    seen: list[str] = []
+    events = [
+        {"type": "message_start", "message": {"usage": {"input_tokens": 2}}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hi there"}},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}},
+        {"type": "message_stop"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, content=_anthropic_sse(events))
+
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(handler))
+    pieces = list(gateway.stream(route=_foundry_route("claude-opus-5-5"), messages=[{"role": "user", "content": "hi"}]))
+
+    assert "".join(pieces) == "Hi there"
+    assert seen == ["https://myres.services.ai.azure.com/anthropic/v1/messages"]
+
+
+def test_a_foundry_deployment_that_is_not_claude_keeps_the_models_endpoint() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
+
+    ModelGatewayClient(transport=httpx.MockTransport(handler)).complete(
+        route=_foundry_route("mistral-large-3"), messages=[{"role": "user", "content": "hi"}]
+    )
+
+    assert seen[0].startswith("https://myres.services.ai.azure.com/models/chat/completions")

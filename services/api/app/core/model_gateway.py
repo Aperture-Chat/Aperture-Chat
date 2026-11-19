@@ -15,7 +15,7 @@ import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -185,7 +185,7 @@ def _uses_openai_responses(route: ModelGatewayRoute) -> bool:
 
 # Model families with controllable reasoning depth. OpenAI o-series (o1/o3/o4)
 # and the GPT-5 family accept `reasoning_effort`; Claude Opus 4.5+, Sonnet
-# 4.6+, and the Claude 5 family accept `output_config.effort`; xAI Grok 4.3+,
+# 4.6+, and the Claude 5 family (Haiku included) accept `output_config.effort`; xAI Grok 4.3+,
 # 4.5, and 4.20 Multi-Agent accept effort via OpenRouter's unified reasoning
 # parameter (Grok 4.20 base and Grok Build list `reasoning` but not
 # `reasoning_effort` in OpenRouter's supported_parameters, so they stay out).
@@ -193,7 +193,7 @@ def _uses_openai_responses(route: ModelGatewayRoute) -> bool:
 # effort is only attached when the upstream model matches.
 _OPENAI_REASONING_MODELS = re.compile(r"(?:^|[^a-z0-9])(?:o[134](?:[^a-z0-9]|$)|gpt-5|gpt-oss)")
 _ANTHROPIC_REASONING_MODELS = re.compile(
-    r"claude-(?:opus-4[.-][5-9]|sonnet-4[.-][6-9]|(?:opus|sonnet|fable|mythos)-5)"
+    r"claude-(?:opus-4[.-][5-9]|sonnet-4[.-][6-9]|(?:opus|sonnet|haiku|fable|mythos)-5)"
 )
 _XAI_REASONING_MODELS = re.compile(r"grok-4[.-](?:[3-9](?:[^0-9]|$)|20-multi-agent)")
 
@@ -1723,10 +1723,27 @@ def _responses_stream_error_message(event: dict[str, Any]) -> str:
 
 
 def _anthropic_messages_url(route: ModelGatewayRoute) -> str:
+    if _provider_kind(route.provider_kind) == "azure-foundry":
+        # The Foundry base URL names the /models inference endpoint; Claude
+        # lives on the same resource under /anthropic.
+        parts = urlsplit(route.base_url or "")
+        return f"{parts.scheme}://{parts.netloc}/anthropic/v1/messages"
     base_url = (route.base_url or "https://api.anthropic.com").rstrip("/")
     if base_url.endswith("/messages"):
         return base_url
     return f"{base_url}/v1/messages" if not base_url.endswith("/v1") else f"{base_url}/messages"
+
+
+def _anthropic_auth_headers(route: ModelGatewayRoute, secret: str) -> dict[str, str]:
+    headers = {
+        "anthropic-version": str(route.auth_metadata.get("anthropic_version") or DEFAULT_ANTHROPIC_VERSION)
+    }
+    # Azure AI Foundry also takes an Entra token there, as a bearer token.
+    if _provider_kind(route.provider_kind) == "azure-foundry" and route.auth_type.lower() in {"bearer", "oauth"}:
+        headers["Authorization"] = secret if secret.lower().startswith("bearer ") else f"Bearer {secret}"
+    else:
+        headers["x-api-key"] = secret
+    return headers
 
 
 def _headers(route: ModelGatewayRoute) -> dict[str, str]:
@@ -1735,11 +1752,7 @@ def _headers(route: ModelGatewayRoute) -> dict[str, str]:
     kind = _provider_kind(route.provider_kind)
     dialect = _route_dialect(route)
     if dialect == "anthropic":
-        headers["x-api-key"] = secret
-        headers["anthropic-version"] = str(
-            route.auth_metadata.get("anthropic_version") or DEFAULT_ANTHROPIC_VERSION
-        )
-        return headers
+        return {**headers, **_anthropic_auth_headers(route, secret)}
     if kind == "openrouter":
         settings = get_settings()
         if settings.openrouter_app_referer:
@@ -2243,7 +2256,17 @@ def _provider_kind(kind: str) -> str:
     return kind.strip().lower()
 
 
+def serves_claude_on_anthropic_messages(provider_kind: str, upstream_model_id: str | None) -> bool:
+    """Azure AI Foundry serves Claude only on the resource's Anthropic Messages
+    surface (/anthropic/v1/messages); its /models inference endpoint answers a
+    Claude deployment with 404 api_not_supported."""
+    tail = (upstream_model_id or "").strip().lower().rsplit("/", 1)[-1]
+    return _provider_kind(provider_kind) == "azure-foundry" and tail.startswith("claude-")
+
+
 def _route_dialect(route: ModelGatewayRoute) -> str:
+    if serves_claude_on_anthropic_messages(route.provider_kind, route.upstream_model):
+        return "anthropic"
     return provider_dialect(route.provider_kind, route.auth_metadata)
 
 
