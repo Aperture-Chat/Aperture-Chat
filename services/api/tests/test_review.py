@@ -49,6 +49,12 @@ def headers(user_id: str = "user-jane") -> dict[str, str]:
     return {"x-aperture-user": user_id}
 
 
+# Waits on events the test itself controls return as soon as the event
+# happens; the limit only stops a broken test from hanging. A short limit
+# turned a slow CI runner into failed cells (4 usage records instead of 6).
+SAFETY_WAIT_SECONDS = 60
+
+
 class ControlledGateway:
     def __init__(self, *, block: bool = False, answer: str | None = None) -> None:
         self.release = Event()
@@ -75,7 +81,7 @@ class ControlledGateway:
             if self.active >= 3:
                 self.three_active.set()
         try:
-            if not self.release.wait(timeout=5):
+            if not self.release.wait(timeout=SAFETY_WAIT_SECONDS):
                 raise ModelGatewayError("test gateway timed out")
             user_prompt = str(messages[-1]["content"])
             if user_prompt.startswith("Question: reviewneedle forced failure"):
@@ -110,7 +116,7 @@ def review_api():
     api = TestClient(app)
     yield api, seed_store, review_store, runner, gateway
     gateway.release.set()
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
     runner.close()
     review_store.close()
     app.dependency_overrides.pop(get_review_store, None)
@@ -129,7 +135,7 @@ def test_three_by_three_run_has_terminal_answers_errors_pages_and_bounded_concur
     accepted = api.post(f"/api/review/matrices/{matrix_id}/run", headers=headers())
     assert accepted.status_code == 202
     assert accepted.json() == {"matrix_id": matrix_id, "status": "running", "cell_count": 9}
-    assert gateway.three_active.wait(timeout=2)
+    assert gateway.three_active.wait(timeout=SAFETY_WAIT_SECONDS)
 
     duplicate = api.post(f"/api/review/matrices/{matrix_id}/run", headers=headers())
     mutation = api.patch(
@@ -144,7 +150,7 @@ def test_three_by_three_run_has_terminal_answers_errors_pages_and_bounded_concur
     assert deletion.status_code == 409
 
     gateway.release.set()
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
     detail = api.get(f"/api/review/matrices/{matrix_id}", headers=headers())
 
     assert detail.status_code == 200
@@ -335,7 +341,7 @@ def test_review_run_and_rerun_gate_require_sql_activity_sink_capability(review_a
     app.dependency_overrides[get_review_runner] = lambda: runner
     gateway.release.set()
     assert api.post(f"/api/review/matrices/{matrix_id}/run", headers=headers()).status_code == 202
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
     cell_id = review_store.cells_for_matrix(matrix_id)[0].id
     app.dependency_overrides[get_review_runner] = lambda: blocked_runner
     blocked_rerun = api.post(
@@ -359,7 +365,7 @@ def test_terminal_cell_can_be_rerun_and_tracks_a_new_attempt(review_api) -> None
     matrix_id = created.json()["id"]
     first_run = api.post(f"/api/review/matrices/{matrix_id}/run", headers=headers())
     assert first_run.status_code == 202
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
     first_cell = api.get(f"/api/review/matrices/{matrix_id}", headers=headers()).json()["cells"][0]
     assert first_cell["status"] == "complete"
     assert first_cell["attempt"] == 1
@@ -370,7 +376,7 @@ def test_terminal_cell_can_be_rerun_and_tracks_a_new_attempt(review_api) -> None
     )
     assert rerun.status_code == 202
     assert rerun.json()["cell_count"] == 1
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     detail = api.get(f"/api/review/matrices/{matrix_id}", headers=headers()).json()
     assert detail["matrix"]["status"] == "complete"
@@ -390,7 +396,7 @@ def test_review_exports_escape_formula_like_column_labels(review_api) -> None:
     created = api.post("/api/review/matrices", json=payload, headers=headers())
     matrix_id = created.json()["id"]
     assert api.post(f"/api/review/matrices/{matrix_id}/run", headers=headers()).status_code == 202
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     csv_response = api.get(f"/api/review/matrices/{matrix_id}/export.csv", headers=headers())
     xlsx_response = api.get(f"/api/review/matrices/{matrix_id}/export.xlsx", headers=headers())
@@ -414,7 +420,7 @@ def test_review_answer_size_cap_fails_cell_honestly() -> None:
     review_store.create_matrix(matrix)
 
     runner.start_matrix(matrix.id, seed_store.users["user-jane"])
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     cell = review_store.cells_for_matrix(matrix.id)[0]
     assert cell.status == "failed"
@@ -446,7 +452,7 @@ def test_review_requires_only_verifiable_inline_citations(answer: str, expected_
     review_store.create_matrix(matrix)
 
     runner.start_matrix(matrix.id, seed_store.users["user-jane"])
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     cell = review_store.cells_for_matrix(matrix.id)[0]
     assert cell.status == "failed"
@@ -496,7 +502,7 @@ def test_platform_owner_review_usage_and_audit_are_attributed_to_matrix_tenant()
     review_store.create_matrix(matrix)
 
     runner.start_matrix(matrix.id, seed_store.users["user-owner"])
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     assert seed_store.usage_records[-1].tenant_id == matrix.tenant_id
     review_audit = next(
@@ -612,7 +618,7 @@ def test_review_lazy_admission_blocks_queued_cells_after_first_crosses_budget() 
     review_store.create_matrix(matrix)
 
     runner.start_matrix(matrix.id, actor)
-    assert runner.wait_for_idle(timeout=5)
+    assert runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     cells = {cell.column_id: cell for cell in review_store.cells_for_matrix(matrix.id)}
     assert gateway.calls == 1
@@ -657,7 +663,7 @@ def test_review_permit_close_failure_never_delivers_a_complete_cell() -> None:
     review_store.create_matrix(matrix)
 
     runner.start_matrix(matrix.id, seed_store.users["user-jane"])
-    assert runner.wait_for_idle(timeout=5)
+    assert runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     cell = review_store.cells_for_matrix(matrix.id)[0]
     assert cell.status == "failed"
@@ -700,7 +706,7 @@ def test_unexpected_review_claim_failure_is_terminal_before_provider_io(
     monkeypatch.setattr(review_store, "mark_cell_running", fail_claim)
 
     runner.start_matrix(matrix.id, seed_store.users["user-jane"])
-    assert runner.wait_for_idle(timeout=5)
+    assert runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     assert gateway.calls == 0
     assert list(seed_store.usage_records) == []
@@ -729,7 +735,7 @@ def test_bounded_runner_shutdown_marks_blocked_work_interrupted() -> None:
     matrix = _direct_matrix()
     review_store.create_matrix(matrix)
     runner.start_matrix(matrix.id, seed_store.users["user-jane"])
-    assert gateway.started.wait(timeout=2)
+    assert gateway.started.wait(timeout=SAFETY_WAIT_SECONDS)
 
     started = monotonic()
     runner.close(timeout=0.01)
@@ -739,7 +745,7 @@ def test_bounded_runner_shutdown_marks_blocked_work_interrupted() -> None:
     assert review_store.get_matrix(matrix.id).status == "interrupted"
     assert review_store.cells_for_matrix(matrix.id)[0].status == "interrupted"
     gateway.release.set()
-    runner.wait_for_idle(timeout=5)
+    runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
     assert review_store.get_matrix(matrix.id).status == "interrupted"
     records = [record for record in seed_store.usage_records if record.surface == "review"]
     assert len(records) == 1
@@ -774,13 +780,13 @@ def test_submit_and_close_register_future_atomically(monkeypatch) -> None:
 
     def blocked_claim(cell):
         claim_entered.set()
-        assert release_claim.wait(timeout=5)
+        assert release_claim.wait(timeout=SAFETY_WAIT_SECONDS)
         return original_claim(cell)
 
     def blocked_submit(*args, **kwargs):
         future = original_submit(*args, **kwargs)
         submit_entered.set()
-        assert release_submit.wait(timeout=5)
+        assert release_submit.wait(timeout=SAFETY_WAIT_SECONDS)
         return future
 
     monkeypatch.setattr(runner, "_claim_cell", blocked_claim)
@@ -808,8 +814,8 @@ def test_submit_and_close_register_future_atomically(monkeypatch) -> None:
     start_thread = Thread(target=start_run)
     close_thread = Thread(target=close_runner)
     start_thread.start()
-    assert submit_entered.wait(timeout=2)
-    assert claim_entered.wait(timeout=2)
+    assert submit_entered.wait(timeout=SAFETY_WAIT_SECONDS)
+    assert claim_entered.wait(timeout=SAFETY_WAIT_SECONDS)
     close_thread.start()
     try:
         assert not close_done.wait(timeout=0.05)
@@ -819,13 +825,13 @@ def test_submit_and_close_register_future_atomically(monkeypatch) -> None:
         release_submit.set()
         release_claim.set()
         gateway.release.set()
-        start_thread.join(timeout=2)
-        close_thread.join(timeout=2)
+        start_thread.join(timeout=SAFETY_WAIT_SECONDS)
+        close_thread.join(timeout=SAFETY_WAIT_SECONDS)
 
     assert start_errors == []
     assert close_errors == []
     assert close_elapsed[0] < 0.5
-    assert runner.wait_for_idle(timeout=5)
+    assert runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
     assert gateway.calls == 0
     assert review_store.get_matrix(matrix.id).status == "interrupted"
     assert review_store.cells_for_matrix(matrix.id)[0].status == "interrupted"
@@ -856,7 +862,7 @@ def test_tenant_and_owner_purge_cancel_workers_and_prevent_late_writes() -> None
     for matrix in (running, same_tenant, other_tenant):
         review_store.create_matrix(matrix)
     runner.start_matrix(running.id, seed_store.users["user-jane"])
-    assert gateway.started.wait(timeout=2)
+    assert gateway.started.wait(timeout=SAFETY_WAIT_SECONDS)
     usage_before = len(seed_store.usage_records)
 
     assert runner.purge_tenant("tenant-example") == 2
@@ -864,7 +870,7 @@ def test_tenant_and_owner_purge_cancel_workers_and_prevent_late_writes() -> None
     assert review_store.get_matrix(same_tenant.id) is None
     assert review_store.get_matrix(other_tenant.id) is not None
     gateway.release.set()
-    assert runner.wait_for_idle(timeout=5)
+    assert runner.wait_for_idle(timeout=SAFETY_WAIT_SECONDS)
 
     assert review_store.get_matrix(running.id) is None
     assert review_store.cells_for_matrix(running.id) == []
@@ -1051,7 +1057,7 @@ def test_duplicate_run_reservation_is_atomic_across_sqlite_connections(tmp_path:
     outcome_lock = Lock()
 
     def reserve(review_store: ReviewStore) -> None:
-        barrier.wait(timeout=2)
+        barrier.wait(timeout=SAFETY_WAIT_SECONDS)
         try:
             review_store.begin_run(
                 matrix.id,
