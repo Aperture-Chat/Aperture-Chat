@@ -199,10 +199,12 @@ def picture_markdown(description: str, placement: Placement, image_url: str | No
     if isinstance(placement, Photo):
         picture = placement.picture
         alt = _plain(picture.alt)
-        # Chat captions an image with its alt text, so the line under it is the credit.
+        # Chat captions an image with its alt text, so the line under it is the
+        # credit. The link sits outside the italics: chat shows emphasis as
+        # plain words, so a link inside it would read as raw markup.
         return (
             f"![{alt}]({image_url})\n\n"
-            f"*Image: {_sentence(_plain(picture.credit))} [Source]({_link_target(picture.source_url)})*"
+            f"*Image: {_sentence(_plain(picture.credit))}* [Source]({_link_target(picture.source_url)})"
         )
     if isinstance(placement, Illustration):
         return f"![AI-generated illustration: {_plain(description)}]({image_url})"

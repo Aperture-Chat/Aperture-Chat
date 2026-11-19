@@ -97,8 +97,8 @@ def test_photo_markdown_credits_the_author_license_and_source() -> None:
     # Chat captions an image with its alt text; the line under it is the credit.
     assert text == (
         "![Napoleon Crossing the Alps](/img/a.jpg?token=t)\n\n"
-        "*Image: Jacques-Louis David · Public domain · Wikimedia Commons. "
-        "[Source](https://commons.wikimedia.org/wiki/File:David_-_Napoleon.jpg)*"
+        "*Image: Jacques-Louis David · Public domain · Wikimedia Commons.* "
+        "[Source](https://commons.wikimedia.org/wiki/File:David_-_Napoleon.jpg)"
     )
 
 
@@ -136,7 +136,7 @@ def test_a_source_link_with_parentheses_stays_one_link() -> None:
     )
     text = picture_markdown("x", Photo(picture, "d.jpg"), "/img/d.jpg")
 
-    assert text.endswith("[Source](https://commons.wikimedia.org/wiki/File:Coronation_%281807%29.jpg)*")
+    assert text.endswith("[Source](https://commons.wikimedia.org/wiki/File:Coronation_%281807%29.jpg)")
 
 
 def test_search_widens_from_the_description_to_its_key_words() -> None:
