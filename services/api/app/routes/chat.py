@@ -136,6 +136,7 @@ from app.core.media_transcription import (
     MediaTranscriptionError,
     TranscriptionFailure,
     is_media_upload,
+    is_speech_model,
     transcribe_media_file,
     transcribe_with_fallback,
     transcription_candidates,
@@ -1103,6 +1104,14 @@ def _ai_title_payload_text(payload: object) -> str:
     return ""
 
 
+def _ai_title_payload_finish(payload: object) -> object:
+    if not isinstance(payload, Mapping):
+        return None
+    choices = payload.get("choices") or []
+    first = choices[0] if isinstance(choices, list) and choices else None
+    return first.get("finish_reason") if isinstance(first, Mapping) else None
+
+
 # A model can ignore "no markdown" and answer "## Engagement summary" or
 # "**Title:** NDA checklist"; the name is shown as plain text everywhere, so
 # the syntax is removed rather than displayed.
@@ -1218,7 +1227,15 @@ def generate_thread_title(
             usage_surface="chat",
             thread_id=existing.id,
         )
-        title = _clean_ai_title(_ai_title_payload_text(payload))
+        raw_title = _ai_title_payload_text(payload)
+        if withheld(_ai_title_payload_finish(payload), raw_title):
+            # The provider's filter answered in the model's place; its stock
+            # refusal is not a name, so the chat keeps the one it has.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"{route.provider_name}'s content filter withheld the chat name; the chat keeps its name.",
+            )
+        title = _clean_ai_title(raw_title)
         if not title:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1505,7 +1522,9 @@ def complete(
     _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
     # When a provider's safety filter keeps withholding the reply, another
     # model the person may use answers instead (see app.core.model_fallback).
-    fallback = partial(_filter_fallback, store, actor, model, runtime_context, web_tenant_id)
+    fallback = partial(
+        _filter_fallback, store, actor, model, runtime_context, web_tenant_id, stream=bool(request.stream)
+    )
     if _runs_on_server(request):
         return _run_streaming_response(
             request,
@@ -2817,6 +2836,8 @@ def _record_chat_audit(
     action: str,
     stream: bool,
     runtime_context: dict[str, object],
+    *,
+    extra: Mapping[str, object] | None = None,
 ) -> None:
     # `provider_secret` is redacted by record_audit's metadata redaction; we
     # never pass the real key here in the first place. Provider/runtime metadata
@@ -2836,6 +2857,7 @@ def _record_chat_audit(
             "message_count": runtime_context.get("message_count"),
             "runtime_context": _audit_runtime_context(runtime_context),
             "provider_secret": "[redacted]",
+            **(extra or {}),
         },
     )
 
@@ -4693,6 +4715,13 @@ def _stream_events(
                 or (finish_reason == "stop" and _ends_inside_code_fence(accumulated))
             )
             written = accumulated[answer_start:]
+            if finish_reason in CONTINUATION_FINISH_REASONS and not written:
+                # Thinking used the whole budget before a word was written;
+                # there is nothing to continue, so ask again with more room.
+                completion_budget = _budget_after_thinking_cutoff(
+                    request, model_config, completion_budget
+                )
+                continue
             if not wants_continuation or continuation_rounds >= MAX_CONTINUATION_CALLS or not written:
                 break
             if filter_cut:
@@ -5423,6 +5452,38 @@ def _completion_token_budget(request: ChatCompletionRequest, model_config: Model
     return max(256, min(requested, MAX_COMPLETION_TOKEN_BUDGET))
 
 
+class ThinkingBudgetExhausted(ModelGatewayError):
+    """A reasoning model spent its whole completion budget thinking and wrote
+    nothing. Asking again with the same budget thinks the same way, so the
+    failure is final rather than something the client should resend."""
+
+    def __init__(self, model_name: str, budget: int) -> None:
+        super().__init__(
+            f"{model_name} spent its whole {budget:,}-token output budget thinking "
+            "and wrote no reply. Ask for a smaller piece of the work, or choose "
+            "another model."
+        )
+
+    @property
+    def retryable(self) -> bool:
+        return False
+
+
+def _budget_after_thinking_cutoff(
+    request: ChatCompletionRequest, model_config: ModelConfig, budget: int
+) -> int:
+    """The budget to ask again with after thinking used up ``budget``.
+
+    A budget the caller chose is kept; otherwise the reply gets one more try
+    at the largest budget. When no larger budget is allowed, the reply ends
+    with ThinkingBudgetExhausted instead of an empty success.
+    """
+    caller_chose = request.max_completion_tokens is not None or request.max_tokens is not None
+    if caller_chose or budget >= MAX_COMPLETION_TOKEN_BUDGET:
+        raise ThinkingBudgetExhausted(model_config.name, budget)
+    return MAX_COMPLETION_TOKEN_BUDGET
+
+
 def _openai_generation_options(request: ChatCompletionRequest) -> dict[str, Any] | None:
     options = {
         "temperature": request.temperature,
@@ -5722,36 +5783,74 @@ class FilterSwitch:
 FilterFallback = Callable[[], "FilterSwitch | None"]
 
 
+def _may_answer_instead(actor: User, current: ModelConfig, model: ModelConfig) -> bool:
+    """Whether ``model`` may take over a reply ``current`` could not give."""
+    if not model.platform_enabled or model.is_custom or is_workspace_agent_profile(model):
+        return False
+    # A chat reply needs a chat model: no image or speech-to-text model answers.
+    if _is_image_generation_model(model) or is_speech_model(model):
+        return False
+    return (
+        model.tenant_id in (None, current.tenant_id)
+        and sorted(model.content_filter_ids) == sorted(current.content_filter_ids)
+        and model_access_allowed(actor, model)
+    )
+
+
 def _filter_fallback(
     store: SeedStore,
     actor: User,
     current: ModelConfig,
     runtime_context: dict[str, object],
     tenant_id: str | None,
+    *,
+    stream: bool = True,
 ) -> FilterSwitch | None:
     """Another model that may answer this request, with a working route.
 
     Only a model the person may use themselves, under the same content rules,
     from the same tenant (or the platform), and not a workspace agent; it is
-    recorded in the audit trail before it answers.
+    recorded in the audit trail before it answers. A workspace agent's reply
+    is never handed over: another model would answer without the agent's
+    instructions, knowledge, and tools.
+
+    With web search on, the model that answers must search the way the first
+    one did: OpenRouter searches with its own server tool, any other route
+    with the results Aperture already put in the request. A model whose route
+    cannot be resolved is passed over, not the end of the reply.
     """
-    eligible = [
-        model
-        for model in store.models.values()
-        if model.platform_enabled
-        and not model.is_custom
-        and not is_workspace_agent_profile(model)
-        and not _is_image_generation_model(model)
-        and model.tenant_id in (None, current.tenant_id)
-        and sorted(model.content_filter_ids) == sorted(current.content_filter_ids)
-        and model_access_allowed(actor, model)
-    ]
+    if is_workspace_agent_profile(current):
+        return None
+    searches_on_openrouter = None
+    if runtime_context.get("web_enabled"):
+        current_route = _route_or_none(store, current, tenant_id)
+        searches_on_openrouter = current_route is not None and _route_provider_kind(current_route) == "openrouter"
+    eligible = [model for model in store.models.values() if _may_answer_instead(actor, current, model)]
     for model in fallback_order(current, eligible):
-        route = _resolve_gateway_route(store, model, tenant_id=tenant_id)
-        if route.configured:
-            _record_chat_audit(store, actor, model, route, "chat.completion_fallback", True, runtime_context)
-            return FilterSwitch(model, route)
+        route = _route_or_none(store, model, tenant_id)
+        if route is None or not route.configured:
+            continue
+        if searches_on_openrouter is not None and (_route_provider_kind(route) == "openrouter") != searches_on_openrouter:
+            continue
+        _record_chat_audit(
+            store,
+            actor,
+            model,
+            route,
+            "chat.completion_fallback",
+            stream,
+            runtime_context,
+            extra={"fallback_from": current.id, "reason": "provider_content_filter"},
+        )
+        return FilterSwitch(model, route)
     return None
+
+
+def _route_or_none(store: SeedStore, model: ModelConfig, tenant_id: str | None) -> ModelGatewayRoute | None:
+    try:
+        return _resolve_gateway_route(store, model, tenant_id=tenant_id)
+    except HTTPException:
+        return None
 
 
 def _fallback_activity(current: ModelConfig, switch: FilterSwitch, served_by: object) -> dict[str, Any]:
