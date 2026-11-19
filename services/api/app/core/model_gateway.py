@@ -2260,8 +2260,9 @@ def serves_claude_on_anthropic_messages(provider_kind: str, upstream_model_id: s
     """Azure AI Foundry serves Claude only on the resource's Anthropic Messages
     surface (/anthropic/v1/messages); its /models inference endpoint answers a
     Claude deployment with 404 api_not_supported."""
-    tail = (upstream_model_id or "").strip().lower().rsplit("/", 1)[-1]
-    return _provider_kind(provider_kind) == "azure-foundry" and tail.startswith("claude-")
+    # A Foundry deployment name carries no vendor prefix.
+    deployment = (upstream_model_id or "").strip().lower()
+    return _provider_kind(provider_kind) == "azure-foundry" and deployment.startswith("claude-")
 
 
 def _route_dialect(route: ModelGatewayRoute) -> str:

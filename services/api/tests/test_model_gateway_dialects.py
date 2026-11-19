@@ -17,6 +17,7 @@ import pytest
 
 from app.core.model_discovery import ModelDiscoveryError, discover_provider_models
 from app.core.model_gateway import (
+    DEFAULT_ANTHROPIC_VERSION,
     ModelGatewayClient,
     ModelGatewayError,
     ModelGatewayRoute,
@@ -396,7 +397,7 @@ def test_a_foundry_claude_deployment_speaks_anthropic_messages_on_the_resource()
 
     assert captured["url"] == "https://myres.services.ai.azure.com/anthropic/v1/messages"
     assert captured["headers"]["x-api-key"] == "az-foundry-secret"
-    assert captured["headers"]["anthropic-version"]
+    assert captured["headers"]["anthropic-version"] == DEFAULT_ANTHROPIC_VERSION
     assert "api-key" not in captured["headers"]
     assert captured["body"]["model"] == "claude-opus-5-5"
     assert captured["body"]["max_tokens"] >= 256
