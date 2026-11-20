@@ -41,9 +41,9 @@ provider credentials stay in your deployment.
 <td width="33%" valign="top">
 
 **Any approved model**<br>
-Connect OpenAI, Anthropic, Azure OpenAI, Azure AI Foundry, Google Gemini,
-OpenRouter, Ollama, and other OpenAI-compatible providers, then decide who may
-use each model.
+Connect OpenAI, Anthropic, Azure OpenAI, Azure AI Foundry (Claude included),
+Google Gemini, OpenRouter, Ollama, and other OpenAI-compatible providers, then
+decide who may use each model.
 
 </td>
 <td width="33%" valign="top">
@@ -64,13 +64,14 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.25](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.25)**:
-> When a provider's safety filter keeps refusing a reply, another model you
-> may use answers it, and a reply the filter cuts off goes on instead of
-> stopping mid-sentence. Drafts keeps writing when you leave it.
-> v0.5.24 made Azure AI Foundry models work across families and checks a tool
-> approval again when the tool runs.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0524) and
+> **Current release: [v0.5.26](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.26)**:
+> Ask for pictures in a chat reply or a paper and get freely licensed photos
+> with their credits, or a labelled illustration; papers keep their pictures
+> when they save. Claude deployments on Azure AI Foundry now work, and a
+> reply that runs out of room while thinking says so.
+> v0.5.25 let another model answer when a provider's safety filter keeps
+> refusing a reply.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0525) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -100,6 +101,7 @@ policies appropriate for your organization's data.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
 - **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it. If the connection drops, the reply picks up where it stopped, and an empty answer to "continue" is asked again instead of ending the reply.
 - **When a provider's filter refuses.** Some providers run their own safety filter (Azure does for the OpenAI models it hosts) and send "I'm sorry, but I cannot assist with that request." in place of the answer. Aperture asks again twice. If the filter keeps refusing, another model you are allowed to use answers instead, and the work trace names it. A reply the filter cuts off partway goes on from where it stopped. Each switch is recorded in the audit log.
+- **Pictures in replies.** Ask for pictures, photos, or images and the reply places them where they belong. With **Web** on, each one is a freely licensed photo from Wikimedia Commons (public domain, CC0, CC BY, or CC BY-SA) with its credit and a link to its source. Otherwise, or when no photo fits, an image model you may use draws an illustration that is labelled as one. When neither is possible, the reply says so in that place.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
 - **Client-matter numbers.** File a chat under a client-matter number from the **Matter** row in **Send options**. Numbers you type are saved for reuse, and the same numbers tag knowledge bases, so records staff can find a matter's chats in retention and its knowledge bases in Library search.
 - **Dictation.** Speak into the composer's microphone. Transcription uses a Gemini Flash model or a speech model such as Whisper or gpt-4o-transcribe (on Groq, OpenAI, Azure OpenAI, or Azure AI Foundry), and a busy or unreachable model hands the recording to the next one.
@@ -132,6 +134,7 @@ policies appropriate for your organization's data.
 - **Research while it writes.** A writing request can search your knowledge, search the web, read a linked page, or work out a figure before it writes, and the steps it took are listed in the draft chat.
 - **Check.** The **Check** key in the document status bar reads the page and lists blanks and placeholders still to fill in, defined terms that are never used or never defined, references to a numbered section the document does not have, references to an exhibit or schedule that is missing from the ones attached, and numbering that skips or repeats. Choose an item to jump to it. The checks run in the browser without a model.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting. A **Legal & business** group adds actions such as **Tighten this clause**, **Break into numbered sub-clauses**, **Lead with the conclusion**, and **Make figures consistent**; decks add **Write a takeaway title**, and spreadsheets add **Add variance columns** and **Check that the totals add up**.
+- **Pictures in papers.** Ask for a paper with pictures, or choose **Add a picture**, and the editor finds a freely licensed photo (with **Web** on) or draws a labelled illustration, with the credit and source under each photo. Pictures are stored inside the document, so they stay when it saves; a document can hold up to 8 MB. When a save is refused, the status says why, and **Retry** tries again.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts (including statement, big-number, and picture-with-bullets), and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and seven theme designs, a slide sorter, snapping guides, and presenter view round it out.
 - **Share and edit together.** Every draft starts private. **Share** offers **Only me**, **My group**, or **Specific people**; group shares follow current group membership, and a draft in a matter is shared only with people on that matter. A shared draft saves itself into one live copy, two people can edit at once, and their changes merge (documents by paragraph and word, decks by slide, spreadsheets by cell) while colored initials show who else is in it. Only the owner changes sharing, archives, or deletes it.
 - **Versions you can trust.** Save versions, compare and return to versions while a draft is open, preview history, and archive drafts. On a shared draft every saved version records who saved it and **Bring back** restores it for everyone. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
@@ -216,7 +219,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.25
+#   APERTURE_IMAGE_TAG=v0.5.26
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -237,7 +240,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.25 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.26 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -272,10 +275,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.25` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.26` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.25-dev`, `v0.5.25-test`, `v0.5.25-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.26-dev`, `v0.5.26-test`, `v0.5.26-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

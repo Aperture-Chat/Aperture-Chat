@@ -65,6 +65,8 @@ export type DraftCollaboration = {
   noteLocalChange(): void;
   /** Resolves once the server holds what the editor shows. */
   flush(): Promise<void>;
+  /** Try a failed autosave again now instead of waiting for its timer. */
+  retry(): Promise<void>;
   hasUnsavedChanges(): boolean;
   /** Save the live copy as the next numbered version. */
   saveVersion(): Promise<DraftSnapshot>;
@@ -415,6 +417,9 @@ function useSessionControls(sessionRef: { current: DraftLiveSession | null }) {
       noteLocalChange: () => sessionRef.current?.noteLocalChange(),
       flush: async () => {
         await sessionRef.current?.flush();
+      },
+      retry: async () => {
+        await sessionRef.current?.retry();
       },
       hasUnsavedChanges: () => {
         try {

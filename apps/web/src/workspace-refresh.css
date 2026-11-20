@@ -141,7 +141,14 @@ span.mini-avatar.avatar-initials {
   padding-right: 0;
   margin-right: 0;
 }
-.conversation.is-empty { position: relative; min-height: calc(100dvh - 66px); max-width: 1240px; gap: 24px; padding: clamp(32px, 6vh, 72px) clamp(20px, 4vw, 64px) 32px; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto auto auto 1fr; }
+/* The empty chat fills exactly the window below the header. Its 1fr spacer
+ * rows hold the greeting in the top one, so they need a definite height to
+ * split: under a bare min-height the browser grows the empty bottom row to the
+ * greeting's height, the page scrolls, and the logo slides under the header.
+ * The column takes the window height and the flex column hands the rest to the
+ * conversation; safe centering keeps the top reachable when it cannot fit. */
+.chat-main:has(> .conversation.is-empty) { height: 100dvh; }
+.conversation.is-empty { position: relative; min-height: 0; max-width: 1240px; gap: 24px; padding: clamp(32px, 6vh, 72px) clamp(20px, 4vw, 64px) 32px; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto auto auto 1fr; align-content: center; align-content: safe center; }
 .conversation.is-empty::before { content: ""; pointer-events: none; position: absolute; top: 8%; right: 7%; width: min(56%, 530px); aspect-ratio: 1; border: 1px solid color-mix(in srgb, var(--teal-2) 10%, transparent); border-radius: 50%; }
 .conversation.is-empty::after { content: ""; pointer-events: none; position: absolute; top: 13%; right: 11%; width: min(48%, 460px); aspect-ratio: 1; border: 1px solid color-mix(in srgb, var(--teal-2) 6%, transparent); border-radius: 50%; }
 .empty-chat { position: relative; z-index: 1; width: min(820px, 100%); justify-self: center; justify-items: start; gap: 20px; padding-bottom: 8px; }
@@ -252,7 +259,7 @@ button:focus-visible, a:focus-visible { outline-width: 2px; outline-offset: 3px;
   .sidebar-top > .icon-button { min-width: 44px; min-height: 44px; }
   .console-page { padding-top: 76px; }
   .workspace-header { min-height: 64px; }
-  .conversation.is-empty { min-height: calc(100dvh - 64px); padding-bottom: 24px; }
+  .conversation.is-empty { padding-bottom: 24px; }
   .console-header { align-items: flex-start; }
   .tab-content { padding: 20px 0 0; }
   .sidebar-resize-handle { display: none; }
@@ -324,7 +331,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 /* The welcome always precedes the full-width composer, including wide desktop
  * layouts. Branding and orbital outlines must never take width from writing. */
 @media (min-width: 641px) and (max-height: 760px) {
-  .conversation.is-empty { grid-template-rows: auto auto auto auto; align-content: center; padding-block: 28px; gap: 18px; }
+  .conversation.is-empty { grid-template-rows: auto auto auto auto; align-content: center; align-content: safe center; padding-block: 28px; gap: 18px; }
   .empty-chat { gap: 12px; padding-bottom: 0; }
   .empty-chat h2 { font-size: clamp(32px, 3.4vw, 42px); }
   .conversation.is-empty .composer textarea { min-height: 64px; }

@@ -447,7 +447,8 @@ def test_stream_verifies_requirements_against_the_finished_reply(
             "kind": "requirements",
             "phase": "checked",
             "checks": [
-                {"label": "Include images or diagrams", "met": False},
+                # A streamed chat reply asks for picture spots (app.core.picture_spots).
+                {"label": "Include pictures", "met": False},
                 {"label": "Include a markdown table", "met": True},
             ],
         }
@@ -533,3 +534,102 @@ def test_stream_reports_hermes_artifacts_before_done(monkeypatch: pytest.MonkeyP
         "skills": ["Citation style"],
         "automations": [],
     }
+
+
+def _thinking_cutoff_stream(rounds: list[tuple[str, str]], calls: list[dict]):
+    """Fake gateway: each round yields its text and reports its finish reason.
+
+    A round with no text and a "length" finish is a reasoning model that spent
+    the whole completion budget thinking before writing anything.
+    """
+
+    def fake_stream(*args, **kwargs):
+        calls.append(kwargs)
+        text, finish_reason = rounds[len(calls) - 1]
+        usage_sink = kwargs.get("usage_sink")
+        if usage_sink is not None:
+            usage_sink.update({"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30})
+            usage_sink["finish_reason"] = finish_reason
+        return iter([text] if text else [])
+
+    return fake_stream
+
+
+def _stream_reply(payload_extra: dict | None = None) -> list[object]:
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "Write a whole game in one HTML file."}],
+            "stream": True,
+            **(payload_extra or {}),
+        },
+        headers=_headers(),
+    )
+    assert response.status_code == 200
+    return _events(response.text)
+
+
+def test_stream_retries_with_the_largest_budget_when_thinking_used_up_the_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.routes.chat import MAX_COMPLETION_TOKEN_BUDGET
+
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.routes.chat._gateway_stream",
+        _thinking_cutoff_stream([("", "length"), ("<html>game</html>", "stop")], calls),
+    )
+
+    events = _stream_reply()
+
+    deltas = [event["delta"] for event in events if isinstance(event, dict) and "delta" in event]
+    assert deltas == ["<html>game</html>"]
+    assert any(isinstance(event, dict) and event.get("done") for event in events)
+    assert len(calls) == 2
+    assert calls[1]["max_tokens"] == MAX_COMPLETION_TOKEN_BUDGET
+    assert calls[1]["max_tokens"] > calls[0]["max_tokens"]
+    # The retry asks the same question again; there is no partial to continue.
+    assert calls[1]["messages"] == calls[0]["messages"]
+
+
+def test_stream_reports_a_final_error_when_thinking_used_up_every_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.routes.chat._gateway_stream",
+        _thinking_cutoff_stream([("", "length"), ("", "length")], calls),
+    )
+
+    events = _stream_reply()
+
+    assert len(calls) == 2
+    error = next(event for event in events if isinstance(event, dict) and "error" in event)
+    assert "thinking" in error["error"]
+    assert "24,000" in error["error"]
+    # Asking again would think the same way, so the client must not resend it.
+    assert error["retryable"] is False
+    assert not any(isinstance(event, dict) and event.get("done") for event in events)
+
+
+@pytest.mark.parametrize("budget_field", ["max_completion_tokens", "max_tokens"])
+def test_stream_keeps_a_budget_the_caller_chose_when_thinking_used_it_up(
+    monkeypatch: pytest.MonkeyPatch, budget_field: str
+) -> None:
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.routes.chat._gateway_stream",
+        _thinking_cutoff_stream([("", "length")], calls),
+    )
+
+    events = _stream_reply({budget_field: 2000})
+
+    assert len(calls) == 1
+    assert calls[0]["max_tokens"] == 2000
+    error = next(event for event in events if isinstance(event, dict) and "error" in event)
+    assert "2,000" in error["error"]
+    assert error["retryable"] is False

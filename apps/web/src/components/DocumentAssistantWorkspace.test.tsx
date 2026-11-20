@@ -3089,18 +3089,24 @@ Summary: This divider should not masquerade as a document page.`,
 });
 
 test("lets users edit the title and insert formatted document objects", async () => {
+  // A picture is stored inside the document as a licensed JPEG with its
+  // credit; a bare web link was dropped when the draft saved.
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
       json: async () => ({
-        query: {
-          pages: {
-            "1": {
-              title: "Star Wars",
-              thumbnail: { source: "https://example.com/star-wars.jpg" },
-            },
+        pictures: [
+          {
+            data_url: "data:image/jpeg;base64,U1RBUldBUlM=",
+            alt: "Star Wars toys on a shelf",
+            credit: "Jane Doe · CC BY-SA 4.0 · Wikimedia Commons",
+            license: "CC BY-SA 4.0",
+            artist: "Jane Doe",
+            source_url: "https://commons.wikimedia.org/wiki/File:Star_Wars_toys.jpg",
           },
-        },
+        ],
       }),
     }),
   );
@@ -3131,9 +3137,12 @@ test("lets users edit the title and insert formatted document objects", async ()
 
   await waitFor(() => {
     expect(documentBody().innerHTML).toContain("document-media-block");
-    expect(screen.getByText(/Found and inserted a web image/)).toBeInTheDocument();
+    expect(screen.getByText(/Found and inserted a freely licensed photo/)).toBeInTheDocument();
   });
-  expect(documentBody().innerHTML).toContain("https://example.com/star-wars.jpg");
+  expect(documentBody().querySelector("figure.document-picture img")?.getAttribute("src")).toBe("data:image/jpeg;base64,U1RBUldBUlM=");
+  expect(documentBody().querySelector("figure.document-picture figcaption")?.textContent).toContain(
+    "Jane Doe · CC BY-SA 4.0 · Wikimedia Commons",
+  );
 
   vi.unstubAllGlobals();
 });

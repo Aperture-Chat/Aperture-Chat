@@ -387,6 +387,64 @@ describe("DraftLiveSession timing and recovery", () => {
     expect(ana.view.statuses.at(-1)).toMatchObject({ kind: "offline", retryInMs: 2000 });
   });
 
+  it("stops retrying a save the server refuses as too large, says why, and saves once the draft is smaller", async () => {
+    const server = new FakeServer(start);
+    const ana = editor(server, "ana");
+    await ana.session.start(start);
+    server.offline = true;
+    server.failWith = Object.assign(new Error("Draft content is limited to 8000000 UTF-8 bytes."), { status: 413 });
+
+    ana.type("<p>Six big pictures.</p><p>Two.</p>");
+    await ana.timers.advance(LIVE_SAVE_DELAY_MS);
+    const refused = ana.view.statuses.at(-1);
+    expect(refused).toMatchObject({ kind: "refused" });
+    expect(refused?.kind === "refused" && refused.message).toMatch(/too large to save.*picture/i);
+    expect(ana.timers.pendingCount).toBe(0);
+    await ana.timers.advance(60_000);
+    expect(server.attempts).toBe(1);
+    expect(ana.session.hasUnsavedChanges()).toBe(true);
+
+    server.offline = false;
+    ana.type("<p>One small picture.</p><p>Two.</p>");
+    await ana.timers.advance(LIVE_SAVE_DELAY_MS);
+    expect(server.doc.content).toBe("<p>One small picture.</p><p>Two.</p>");
+    expect(ana.view.statuses.at(-1)).toEqual({ kind: "synced", seq: 1 });
+  });
+
+  it("retries a refused save right away when asked", async () => {
+    const server = new FakeServer(start);
+    const ana = editor(server, "ana");
+    await ana.session.start(start);
+    server.offline = true;
+    server.failWith = Object.assign(new Error("Too large."), { status: 413 });
+    ana.type("<p>Big.</p><p>Two.</p>");
+    await ana.timers.advance(LIVE_SAVE_DELAY_MS);
+    expect(server.attempts).toBe(1);
+
+    server.offline = false;
+    await ana.session.retry();
+    expect(server.attempts).toBe(2);
+    expect(server.doc.content).toBe("<p>Big.</p><p>Two.</p>");
+    expect(ana.view.statuses.at(-1)).toEqual({ kind: "synced", seq: 1 });
+  });
+
+  it("a manual retry during an outage replaces the timed retry instead of adding a second save", async () => {
+    const server = new FakeServer(start);
+    const ana = editor(server, "ana");
+    await ana.session.start(start);
+    server.offline = true;
+    ana.type("<p>Offline.</p><p>Two.</p>");
+    await ana.timers.advance(LIVE_SAVE_DELAY_MS);
+    expect(ana.timers.pendingCount).toBe(1);
+
+    server.offline = false;
+    await ana.session.retry();
+    expect(ana.timers.pendingCount).toBe(0);
+    await ana.timers.advance(30_000);
+    expect(server.attempts).toBe(2);
+    expect(ana.view.statuses.at(-1)).toEqual({ kind: "synced", seq: 1 });
+  });
+
   it("says the server could not be reached when the failure has no words", async () => {
     const server = new FakeServer(start);
     const ana = editor(server, "ana");

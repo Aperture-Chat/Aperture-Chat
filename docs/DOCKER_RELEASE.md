@@ -236,6 +236,77 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.25
+
+This release carries over the Azure and Azure AI Foundry hardening made in
+S.F. Steward v0.6.24 to v0.6.26, plus the picture features built there.
+
+- **Claude on Azure AI Foundry.** Foundry serves Claude only on its Anthropic
+  endpoint (`/anthropic/v1/messages`) and answers Claude on its `/models`
+  endpoint with `404 api_not_supported`, so a Foundry provider could not use
+  its Claude Opus, Sonnet, or Haiku 5.5 deployments. An `azure-foundry` model
+  whose deployment name starts with `claude-` now uses that endpoint on the
+  same resource and key: `x-api-key`, or `Authorization: Bearer` when the
+  provider signs in with a token. Chat and streaming both go there. Claude
+  Haiku 5 now takes reasoning effort, on the server and in the effort control.
+- **A reply that thinks through its budget says so.** A reasoning model could
+  spend its whole output budget on hidden thinking; the reply ended empty, as
+  a success, and the browser asked again every minute. A streamed reply that
+  reaches the length limit before writing anything is now asked once more
+  with the largest budget. If it still writes nothing, or the request set its
+  own budget, it ends with an error that names the model and the budget.
+- **The filter fallback, corrected.** When a provider's filter keeps
+  withholding a reply, the model chosen to answer instead is never a
+  speech-to-text model, and a workspace agent's reply is never handed to a
+  bare model (it would answer without the agent's instructions, knowledge,
+  and tools). With web search on, the model that answers must search the way
+  the first one did, so a switch neither drops the search nor runs it twice.
+  A candidate whose route cannot be resolved is skipped instead of ending the
+  reply with no error. `chat.completion_fallback` audit rows now record
+  `fallback_from`, the reason, and whether the reply was streamed.
+- **Chats are not named after a refusal.** AI chat naming refuses a reply the
+  provider's filter withheld, so a chat is no longer named "I'm sorry, but I
+  cannot assist with that request."
+- **Pictures in chat replies.** A streamed reply that asks for pictures,
+  photos, or images marks where each belongs, and the server fills each place
+  as the reply streams: a freely licensed Wikimedia Commons photo with its
+  credit and source (only when **Web** is on for the message), else an
+  illustration from the best image model the person may use, labelled as an
+  illustration, else a line saying no picture was added. Illustrations are
+  billed as image usage and audited as `chat.images_generated`; temporary
+  access accounts get no illustrations.
+- **Pictures in papers.** Drafts papers that ask for pictures, and **Add a
+  picture**, place pictures the same way in the browser. Pictures are stored
+  inside the document as data, so they are kept when it saves. Before, the
+  writer could only use web image links, which the server's sanitizer removes,
+  so pictures vanished on save. Deck pictures are unchanged.
+- **Commons searches.** `POST /api/assets/licensed-pictures` searches
+  Wikimedia Commons, keeps only public domain, CC0, CC BY, and CC BY-SA
+  files, downloads only from Wikimedia hosts with no redirects and capped size
+  and pixels, and re-encodes each to a bounded JPEG. Every search is audited
+  as `assets.licensed_picture_search` with the words sent. Only the words of
+  the request leave the deployment, never a document's title or text.
+- **Saves that say why.** Documents may now hold 8 MB, like decks and
+  workbooks (the database already allowed it). A save refused as too large
+  says so and waits for a change or **Retry**; **Retry** on a shared draft
+  retries the live copy, and the warning no longer pushes the toolbar out of
+  shape.
+- **New chat stays in view.** In a zoomed-out window, or one about 780 to
+  1,000 pixels tall, the empty New chat screen no longer scrolls the logo
+  under the header.
+- **What an operator has to do.** Nothing is required. There is no database
+  migration, no new environment variable, no new Compose service, and no new
+  dependency. Picture photos need the API to reach `commons.wikimedia.org` and
+  `upload.wikimedia.org` over HTTPS; where outbound traffic is blocked, papers
+  and replies fall back to illustrations or say no picture was added.
+  Illustrations need an enabled image-generation model. Rolling back to
+  v0.5.25 is an image swap, but there a document saved above 2 MB here cannot
+  be saved again until it is smaller.
+- **Not shown or tried yet.** Claude on Foundry and the thinking-budget retry
+  are proven by tests here and were tried against a live Foundry resource in
+  S.F. Steward, not on an Aperture instance. The README and training do not
+  picture chat or paper pictures yet.
+
 ## New Since v0.5.24
 
 - **A provider's safety filter no longer answers for the model.** Some

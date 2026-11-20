@@ -85,7 +85,7 @@ export function supportsReasoningEffort(
   if (/(?:^|[^a-z0-9])o[134](?:[^a-z0-9]|$)/.test(route)) return true;
   if (route.includes("gpt-5") || route.includes("gpt-oss")) return true;
   if (/grok-4[.-](?:[3-9](?:[^0-9]|$)|20-multi-agent)/.test(route)) return true;
-  return /claude-(?:opus-4[.-][5-9]|sonnet-4[.-][6-9]|(?:opus|sonnet|fable|mythos)-5)/.test(route);
+  return /claude-(?:opus-4[.-][5-9]|sonnet-4[.-][6-9]|(?:opus|sonnet|haiku|fable|mythos)-5)/.test(route);
 }
 
 const MODEL_LAB_LABELS: Record<string, string> = {

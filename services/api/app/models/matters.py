@@ -54,7 +54,10 @@ SIGNED_BIGINT_MAX = 9_223_372_036_854_775_807
 MAX_MATTER_NAME_CHARS = 200
 MAX_MATTER_RETENTION_DAYS = 36_500
 MAX_DRAFT_TITLE_CHARS = 240
-MAX_DRAFT_CONTENT_BYTES = 2_000_000
+# Pictures live inside a document as data URLs (about 900 KB each once the
+# editor re-encodes them), so a paper with pictures needs the same room as a
+# deck; the database cap on every draft kind is 8 MB as well.
+MAX_DRAFT_CONTENT_BYTES = MAX_DECK_CONTENT_BYTES
 MAX_DRAFT_REVISIONS = 200
 MAX_DRAFT_LIST_LIMIT = 200
 MAX_DRAFT_REVISION_LIST_LIMIT = 200

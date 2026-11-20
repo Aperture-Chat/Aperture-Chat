@@ -47,7 +47,7 @@ test("a shared draft reports its autosave, not the version it last saved", () =>
     tone: "local-only",
     label: "Not saved yet",
     detail: "Could not reach the API. Your changes are kept in this window and save again in 4 seconds.",
-    action: { kind: "retry" },
+    action: { kind: "retry-live" },
   });
 });
 
@@ -55,5 +55,15 @@ test("a version save that failed still outranks a shared draft's autosave", () =
   expect(draftSaveStatus(false, { kind: "local-only", message: "Version save failed." }, { kind: "synced", seq: 2 })).toMatchObject({
     tone: "local-only",
     label: "Local only",
+  });
+});
+
+test("a shared draft the server refused to save says why and offers Retry", () => {
+  const message = "This draft is too large to save.";
+  expect(draftSaveStatus(true, { kind: "idle" }, { kind: "refused", message })).toEqual({
+    tone: "not-stored",
+    label: "Not saved",
+    detail: `${message} Your changes are kept in this window.`,
+    action: { kind: "retry-live" },
   });
 });

@@ -922,3 +922,60 @@ def test_ai_title_generation_drops_markdown_the_model_was_told_not_to_send(
 
     assert response.status_code == 200
     assert response.json()["title"] == "Engagement summary"
+
+
+@pytest.mark.parametrize(
+    ("content", "finish_reason"),
+    [
+        # The provider's stock text with its filter report (Azure's own shape).
+        ("I'm sorry, but I cannot assist with that request.", "content_filter"),
+        # The same words without the report, as some routers pass them on.
+        ("I’m sorry, but I cannot assist with that request.", "stop"),
+        # A filter report whose text is something else entirely.
+        ("Engagement summary", "content_filter"),
+    ],
+)
+def test_ai_title_generation_never_names_a_chat_with_a_provider_filters_stand_in(
+    monkeypatch: pytest.MonkeyPatch, content: str, finish_reason: str
+) -> None:
+    thread_id = "thread-jane-ai-title-filtered"
+    create_response = client.put(
+        f"/api/chat/threads/{thread_id}",
+        json={
+            "title": "Summarize the three steps",
+            "model_id": "gpt-4o-mini",
+            "group_id": "group-litigation",
+            "messages": [
+                {"id": "msg-f-1", "role": "user", "content": "Summarize the three steps.", "createdAt": "10:00 AM", "status": "ok"},
+                {"id": "msg-f-2", "role": "assistant", "content": "Disclosures, discovery, motions.", "createdAt": "10:01 AM", "status": "ok"},
+            ],
+        },
+        headers=headers("user-jane"),
+    )
+    assert create_response.status_code == 200
+
+    class FilteredGateway:
+        def complete(self, **_kwargs: object) -> dict[str, object]:
+            # The provider's filter answered in the model's place.
+            return {
+                "id": "gen-ai-title-filtered",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 12, "total_tokens": 52},
+            }
+
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_test_route)
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: FilteredGateway())
+
+    response = client.post(
+        f"/api/chat/threads/{thread_id}/title/generate?expected_title=Summarize%20the%20three%20steps",
+        headers=headers("user-jane"),
+    )
+
+    assert response.status_code == 503
+    assert "content filter" in response.json()["detail"]
+    assert get_store().chat_threads[thread_id].title == "Summarize the three steps"
+    assert not [
+        event
+        for event in get_store().audit_events
+        if event.action == "chat.thread_renamed" and event.target == thread_id
+    ]

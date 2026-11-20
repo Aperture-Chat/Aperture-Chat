@@ -1129,14 +1129,13 @@ def test_decks_persist_as_canonical_json_drafts_with_their_own_bounds(matters_ap
     assert edited.status_code == 200
     assert edited.json()["document"]["current_revision"] == 2
 
-    # Bounds: an oversized deck is 413 at the deck ceiling, an oversized HTML
-    # document is still 413 at the tighter document bound.
+    # Bounds: an oversized deck or HTML document is 413 at the shared ceiling.
     huge_deck = client.post(
         "/api/drafts",
         json={"title": "Huge", "content": "{" + " " * 8_000_001 + "}", "kind": "deck"},
     )
     assert huge_deck.status_code == 413
-    big_html = "<p>" + "x" * 2_000_001 + "</p>"
+    big_html = "<p>" + "x" * 8_000_001 + "</p>"
     assert client.post("/api/drafts", json={"title": "Big", "content": big_html}).status_code == 413
     assert (
         client.put(f"/api/drafts/{document['document']['id']}", json={"expected_revision": 2, "content": big_html}).status_code
