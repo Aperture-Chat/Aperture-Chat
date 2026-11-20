@@ -2599,8 +2599,8 @@ class DraftRevisionRow(Base):
             "length(trim(title)) >= 1 AND length(title) <= 240",
             name="title_bounded",
         ),
-        # Outer ceiling shared by every kind; the 2,000,000-byte HTML bound is
-        # enforced in Python for documents (see app.models.matters).
+        # Outer ceiling shared by every kind; app.models.matters enforces the
+        # same 8,000,000-byte bound in Python for documents, decks, and workbooks.
         CheckConstraint(
             "octet_length(content) <= 8000000",
             name="content_utf8_bytes_ceiling",

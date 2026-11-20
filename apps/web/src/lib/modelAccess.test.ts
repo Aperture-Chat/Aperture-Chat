@@ -162,6 +162,8 @@ test("supportsReasoningEffort activates only for reasoning-capable model familie
     supportsReasoningEffort(routeModel("claude-sonnet", "Claude Sonnet 4.6", "anthropic/claude-sonnet-4.6")),
   ).toBe(true);
   expect(supportsReasoningEffort(routeModel("claude-opus", "Claude Opus 4.8", "claude-opus-4-8"))).toBe(true);
+  // Claude Haiku 5 takes effort too (Azure AI Foundry, live).
+  expect(supportsReasoningEffort(routeModel("foundry-claude-haiku", "Claude Haiku 5.5", "claude-haiku-5-5"))).toBe(true);
   expect(supportsReasoningEffort(routeModel("groq-gpt-oss-120b", "GPT OSS 120B", "openai/gpt-oss-120b"))).toBe(true);
   // Grok versions with OpenRouter effort control (per supported_parameters).
   expect(

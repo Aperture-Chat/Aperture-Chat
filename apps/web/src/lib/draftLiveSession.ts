@@ -36,7 +36,10 @@ export type LiveTransport = {
 export type LiveStatus =
   | { kind: "synced"; seq: number }
   | { kind: "saving" }
-  | { kind: "offline"; message: string; retryInMs: number };
+  | { kind: "offline"; message: string; retryInMs: number }
+  // The server answered and will refuse the same save again: no timer
+  // resends it; the next edit or an explicit retry does.
+  | { kind: "refused"; message: string };
 
 export type LiveRemoteChange = { byName: string | null; byUserId: string | null; merged: boolean; conflicts: number };
 
@@ -61,6 +64,14 @@ export type LiveTimers = {
 export const LIVE_SAVE_DELAY_MS = 700;
 export const LIVE_SAVE_MAX_WAIT_MS = 3000;
 const RETRY_STEPS_MS = [2000, 4000, 8000, 15000, 30000];
+const CONTENT_TOO_LARGE = 413;
+
+/** Why the server will refuse this save every time, or null when waiting
+ * could help (no connection, a restart, a busy server). */
+function refusalReason(error: unknown): string | null {
+  if (!(error instanceof Error) || (error as Error & { status?: unknown }).status !== CONTENT_TOO_LARGE) return null;
+  return "This draft is too large to save. Pictures take up most of a draft's room: remove or shrink one and it saves again.";
+}
 const MAX_MERGE_ROUNDS = 6;
 
 const browserTimers: LiveTimers = {
@@ -151,6 +162,23 @@ export class DraftLiveSession {
     }
     await this.saveNow();
     if (this.hasUnsavedChanges()) throw new Error("The live draft could not be saved.");
+  }
+
+  /** Try a failed save again now instead of waiting for the next timer. */
+  retry(): Promise<void> {
+    if (this.retryTimer !== null) {
+      this.timers.clear(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.takeRetryNeeds();
+    return this.saveNow();
+  }
+
+  /** What the failed attempt still owes: a catch-up, a save, or both. */
+  private takeRetryNeeds(): void {
+    this.wantsPull ||= this.retryNeeds.pull;
+    this.wantsSave ||= this.retryNeeds.save;
+    this.retryNeeds = { pull: false, save: false };
   }
 
   /** True while the editor shows something the server does not hold yet. */
@@ -246,7 +274,7 @@ export class DraftLiveSession {
       try {
         result = await this.transport.put({ expectedSeq: shadow.seq, title: mine.title, content: mine.content });
       } catch (error) {
-        this.scheduleRetry(error, { save: true });
+        this.saveFailed(error);
         return;
       }
       if (this.stopped) return;
@@ -271,6 +299,14 @@ export class DraftLiveSession {
     return true;
   }
 
+  /** A refusal waits for a change or an explicit retry; anything else is
+   * retried on the backoff timer. */
+  private saveFailed(error: unknown): void {
+    const refusal = refusalReason(error);
+    if (refusal) this.hooks.status({ kind: "refused", message: refusal });
+    else this.scheduleRetry(error, { save: true });
+  }
+
   /** Stops this drain and tries again after a growing delay. Only the timer
    * retries, so an outage never becomes a tight loop of failing requests. */
   private scheduleRetry(error: unknown, retry: { pull?: boolean; save?: boolean }): void {
@@ -285,9 +321,7 @@ export class DraftLiveSession {
     if (this.retryTimer !== null) this.timers.clear(this.retryTimer);
     this.retryTimer = this.timers.set(() => {
       this.retryTimer = null;
-      this.wantsPull ||= this.retryNeeds.pull;
-      this.wantsSave ||= this.retryNeeds.save;
-      this.retryNeeds = { pull: false, save: false };
+      this.takeRetryNeeds();
       void this.drain();
     }, delay);
   }

@@ -1084,8 +1084,51 @@ def test_draft_rules_never_become_user_requirements():
     wrapped = "User request: Write an MLA essay on Washington crossing the Delaware.\n\nDraft type: Research paper\n\nInclude a code block only when asked for code. Use tables and images when appropriate. Cite sources."
     assert extract_draft_directives(wrapped) == []
     requested = wrapped.replace("Write an MLA essay", "Include images and write an MLA essay")
-    assert [d.id for d in extract_draft_directives(requested)] == ["images"]
+    assert [d.id for d in extract_draft_directives(requested)] == ["images:spots"]
     assert extract_draft_directives("You are a presentation writer producing a slide deck as structured JSON. Include image slides.") == []
+
+
+def test_a_paper_that_asks_for_pictures_marks_picture_spots_instead_of_image_links():
+    """Drafts keep only pictures stored inside the document, so an image link
+    in a paper was dropped on save. Papers mark where each picture belongs and
+    the editor fills the spot with a licensed photo or a labelled illustration."""
+    from app.core.directives import directive_issues, extract_draft_directives
+
+    prompt = "User request: Write a 5 page paper on Napoleon and add images of his life\n\nDraft type: Research paper"
+    images = next(d for d in extract_draft_directives(prompt) if d.id.startswith("images"))
+    assert "[[Picture:" in images.instruction
+    assert "https://" not in images.instruction
+    assert directive_issues([images], "Intro.\n\n[[Picture: Napoleon at Brienne military school, 1780s]]\n\nMore.") == []
+    assert directive_issues([images], "Intro with no pictures at all.")
+    # Chat answers still embed verifiable image links.
+    from app.core.directives import extract_directives
+
+    [chat_images] = extract_directives("Explain Napoleon's campaigns with images")
+    assert "![caption](https://" in chat_images.instruction
+
+
+def test_a_paper_that_asks_for_a_chart_or_diagram_keeps_the_diagram_rule():
+    """Picture spots are for photos; a chart or diagram is drawn in the paper."""
+    from app.core.directives import extract_draft_directives
+
+    [chart] = [d for d in extract_draft_directives("User request: Write a memo with a chart comparing damages\n\nDraft type: Memo") if d.id.startswith("images")]
+    assert chart.id == "images"
+    assert "diagram" in chart.instruction
+    [photos] = [d for d in extract_draft_directives("User request: Write a memo with photos of the site\n\nDraft type: Memo") if d.id.startswith("images")]
+    assert photos.id == "images:spots"
+
+
+def test_image_generation_prompts_from_drafts_carry_no_requirements():
+    """Drafts asks an image model for one picture ("Generate one ..."); mining
+    that prompt sent the image model a document checklist."""
+    from app.core.directives import extract_draft_directives
+
+    for prompt in (
+        "Generate one professional photograph for a law firm presentation: Photo of a courthouse with pictures of its columns. Natural, editorial style.",
+        "Generate one painterly editorial illustration, clearly an illustration and not a photograph, for a document: Napoleon's coronation.",
+        "Generate one simple, flat line icon representing: contracts.",
+    ):
+        assert extract_draft_directives(prompt) == []
 
 
 def test_spreadsheet_assistant_prompts_skip_requirement_mining():
@@ -1128,4 +1171,4 @@ def test_every_deck_editor_prompt_skips_requirement_mining():
     ):
         assert extract_draft_directives(f"{opening}\n{contract}\n\nUser request:\nInclude images in a 10 page deck") == []
     # A document draft that merely mentions decks is still mined.
-    assert "images" in [d.id for d in extract_draft_directives("User request: Include images in a memo about slide decks\n\nDraft type: Memo")]
+    assert "images:spots" in [d.id for d in extract_draft_directives("User request: Include images in a memo about slide decks\n\nDraft type: Memo")]
