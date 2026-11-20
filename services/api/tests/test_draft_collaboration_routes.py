@@ -212,6 +212,37 @@ def test_the_live_copy_autosaves_with_compare_and_set(api) -> None:
     assert (old["revision"]["content"], old["author_name"]) == ("<p>First.</p>", "Ana Owner")
 
 
+def _pasted_picture(index: int) -> str:
+    # The editor accepts a pasted picture up to about 900 KB once re-encoded.
+    return f'<figure><img src="data:image/jpeg;base64,/9j/{"A" * 880_000}{index}" alt="Picture {index}"></figure>'
+
+
+def test_a_shared_paper_with_several_pictures_autosaves_and_saves_a_version(api) -> None:
+    """Three pasted pictures pushed a paper past the old 2 MB document bound, so
+    every autosave was refused with 413 and the edits stayed in the browser."""
+    as_user, _directory, _repository = api
+    draft_id = _create_memo(as_user("ana"))
+    _share(as_user("ana"), draft_id, people=["ben"])
+    paper = "<h1>Napoleon</h1>" + "".join(_pasted_picture(index) for index in range(3))
+    assert len(paper.encode("utf-8")) > 2_000_000
+
+    saved = as_user("ana").put(
+        f"/api/drafts/{draft_id}/live",
+        json={"expected_seq": 0, "client_id": "client-ana-1", "content": paper},
+    )
+    assert saved.status_code == 200, saved.text[:200]
+    version = as_user("ana").post(f"/api/drafts/{draft_id}/live/version", json={"client_id": "client-ana-1"})
+    assert version.status_code == 200
+    assert version.json()["revision"]["content"].count("data:image/jpeg;base64,") == 3
+    assert as_user("ben").get(f"/api/drafts/{draft_id}/live").json()["live"]["content"] == saved.json()["live"]["content"]
+
+    too_big = as_user("ana").put(
+        f"/api/drafts/{draft_id}/live",
+        json={"expected_seq": 1, "client_id": "client-ana-1", "content": "<p>" + "x" * 8_000_001 + "</p>"},
+    )
+    assert too_big.status_code == 413
+
+
 def test_shared_with_me_names_the_owner_and_mine_counts_my_shares(api) -> None:
     as_user, _directory, _repository = api
     draft_id = _create_memo(as_user("ana"))

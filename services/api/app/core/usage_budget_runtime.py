@@ -361,6 +361,12 @@ class UsageBudgetRequestContext:
         return self._status
 
     @property
+    def requires_exact_metering(self) -> bool:
+        """Temporary access settles only exact provider-reported tokens."""
+
+        return self._requires_exact_metering
+
+    @property
     def settled_child_count(self) -> int:
         return len(self._completion_hashes)
 

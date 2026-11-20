@@ -24,7 +24,8 @@ import { MAX_SHEET_CONTENT_BYTES, SHEET_SANITIZER_VERSION } from "../sheet/sheet
 
 /** Server-enforced limits (app/models/matters.py). */
 export const MAX_DRAFT_TITLE_CHARS = 240;
-export const MAX_DRAFT_CONTENT_BYTES = 2_000_000;
+// Same room as a deck: pictures are stored inside the document.
+export const MAX_DRAFT_CONTENT_BYTES = MAX_DECK_CONTENT_BYTES;
 export const MAX_DRAFT_REVISIONS = 200;
 export const MAX_DRAFT_LIST_LIMIT = 200;
 export const DRAFT_SANITIZER_VERSION = "sanitized-html-v1";

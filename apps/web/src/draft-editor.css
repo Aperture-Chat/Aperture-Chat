@@ -3613,8 +3613,11 @@ figure.document-media-align-right {
   color: #92400e;
 }
 
+/* A warning carries a button; shrinking it below its content pushed Retry
+   out through the border. */
 .document-save-state.is-local-only,
 .document-save-state.is-conflict {
+  flex-shrink: 0;
   padding: 2px 3px 2px 2px;
   border-color: var(--orange-border);
   background: var(--orange-soft);
@@ -3623,7 +3626,9 @@ figure.document-media-align-right {
 
 /* Nothing outside this tab holds the work, so the whole warning shows on a
    row of its own under the tools. */
-.document-toolbar-compact:has(> .document-save-state.is-not-stored) {
+.document-toolbar-compact:has(> .document-save-state.is-not-stored),
+.document-toolbar-compact:has(> .document-save-state.is-local-only),
+.document-toolbar-compact:has(> .document-save-state.is-conflict) {
   flex-wrap: wrap;
 }
 

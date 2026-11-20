@@ -3,6 +3,7 @@ again, and its stand-in text is never delivered as the reply."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import httpx
@@ -202,6 +203,11 @@ def test_without_another_model_the_reply_ends_with_the_reason(monkeypatch: pytes
         (lambda model: setattr(model, "group_ids", ["group-hr"]), "not the person's to use"),
         (lambda model: setattr(model, "is_custom", True), "a workspace agent"),
         (lambda model: setattr(model, "tenant_id", "tenant-example"), "another tenant's"),
+        (lambda model: setattr(model, "platform_enabled", False), "switched off"),
+        (lambda model: setattr(model, "agentic_companion", "hermes"), "a companion agent"),
+        (lambda model: setattr(model, "upstream_model_id", "openai/gpt-image-1"), "makes images, not replies"),
+        # Aperture refuses chat on speech-to-text models, so one can never answer instead.
+        (lambda model: setattr(model, "upstream_model_id", "gpt-4o-transcribe"), "speech to text only"),
     ],
 )
 def test_a_model_the_reply_may_not_switch_to_is_never_used(
@@ -214,6 +220,24 @@ def test_a_model_the_reply_may_not_switch_to_is_never_used(
     _ask()
 
     assert {call["route"].upstream_model for call in calls} == {"gpt-4o-mini"}, reason
+
+
+def test_a_reply_from_a_workspace_agent_is_never_handed_to_a_bare_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Another model would answer without the agent's instructions, knowledge, and
+    # tools, so an agent's withheld reply ends with the reason instead.
+    from app.routes import chat as chat_routes
+
+    _only_models("gpt-4o-mini", "gpt-4.1")
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _route)
+    store = get_store()
+    agent = store.models["gpt-4o-mini"].model_copy(
+        update={"is_custom": True, "meta_prompt": "Answer only as the firm's intake agent."}
+    )
+
+    switch = chat_routes._filter_fallback(store, store.users["user-jane"], agent, {}, agent.tenant_id)
+
+    assert switch is None
+    assert not [event for event in store.audit_events if event.action == "chat.completion_fallback"]
 
 
 def test_the_stand_in_without_a_filter_finish_is_asked_again(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -375,3 +399,83 @@ def test_a_draft_with_no_model_to_switch_to_fails_with_the_reason(monkeypatch: p
     assert response.status_code == 502
     assert "content filter withheld" in response.json()["detail"]
     assert asked == ["gpt-4o-mini"] * (1 + MAX_FILTER_RETRIES)
+
+
+def _fallback_with_routes(monkeypatch: pytest.MonkeyPatch, kinds: dict[str, str | None], runtime_context: dict, **kwargs):
+    """Run the fallback choice with each model's route kind given by ``kinds``
+    (None: the route cannot be resolved). Returns the switch and the order the
+    candidates were tried in."""
+    from fastapi import HTTPException
+
+    from app.routes import chat as chat_routes
+
+    tried: list[str] = []
+
+    def resolve(_store, model, *, tenant_id: str | None) -> ModelGatewayRoute:
+        tried.append(model.id)
+        kind = kinds.get(model.id, "openai-compatible")
+        if kind is None:
+            raise HTTPException(status_code=503, detail="Provider not found.")
+        return dataclasses.replace(_route(_store, model, tenant_id=tenant_id), provider_kind=kind)
+
+    monkeypatch.setattr("app.routes.chat._resolve_gateway_route", resolve)
+    store = get_store()
+    current = store.models["gpt-4o-mini"]
+    switch = chat_routes._filter_fallback(
+        store, store.users["user-jane"], current, runtime_context, current.tenant_id, **kwargs
+    )
+    return switch, tried
+
+
+def test_a_candidate_whose_route_cannot_be_resolved_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    # One model with a missing provider must not end the reply; the next one answers.
+    _only_models("gpt-4o-mini", "gpt-4.1", "gpt-4o")
+    switch, tried = _fallback_with_routes(monkeypatch, {"gpt-4.1": None}, {})
+
+    assert switch is not None and switch.model.id == "gpt-4o"
+    assert tried[:2] == ["gpt-4.1", "gpt-4o"]
+
+
+@pytest.mark.parametrize(
+    ("current_kind", "expected"),
+    [
+        # OpenRouter searched with its own server tool; only an OpenRouter route
+        # can carry that search on.
+        ("openrouter", "gpt-4o"),
+        # Aperture searched and put the results in the request; an OpenRouter
+        # route would search a second time.
+        ("openai-compatible", "gpt-4.1"),
+    ],
+)
+def test_with_web_on_the_model_that_answers_searches_the_same_way(
+    monkeypatch: pytest.MonkeyPatch, current_kind: str, expected: str
+) -> None:
+    _only_models("gpt-4o-mini", "gpt-4.1", "gpt-4o")
+    kinds = {"gpt-4o-mini": current_kind, "gpt-4.1": "openai-compatible", "gpt-4o": "openrouter"}
+
+    switch, _tried = _fallback_with_routes(monkeypatch, kinds, {"web_enabled": True})
+
+    assert switch is not None and switch.model.id == expected
+
+
+def test_with_web_off_any_route_may_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    _only_models("gpt-4o-mini", "gpt-4.1", "gpt-4o")
+    kinds = {"gpt-4o-mini": "openrouter", "gpt-4.1": "openai-compatible", "gpt-4o": "openrouter"}
+
+    switch, _tried = _fallback_with_routes(monkeypatch, kinds, {})
+
+    assert switch is not None and switch.model.id == "gpt-4.1"
+
+
+@pytest.mark.parametrize("stream", [True, False])
+def test_the_switch_audit_names_the_model_it_replaced_and_why(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    _only_models("gpt-4o-mini", "gpt-4.1")
+    switch, _tried = _fallback_with_routes(monkeypatch, {}, {}, stream=stream)
+
+    assert switch is not None
+    audit = [event for event in get_store().audit_events if event.action == "chat.completion_fallback"]
+    assert len(audit) == 1
+    assert audit[0].target == "gpt-4.1"
+    assert audit[0].metadata["fallback_from"] == "gpt-4o-mini"
+    assert audit[0].metadata["reason"] == "provider_content_filter"
+    assert audit[0].metadata["stream"] is stream

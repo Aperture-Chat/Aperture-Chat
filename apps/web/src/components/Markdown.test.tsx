@@ -1094,3 +1094,18 @@ describe("numbered lists", () => {
     expect(list?.querySelectorAll("li")).toHaveLength(2);
   });
 });
+
+test("a chat picture's credit line shows its source as a link, not as markup", () => {
+  // The line the server writes under a Commons photo in a chat reply.
+  const credit =
+    "*Image: Jorge Royan · CC BY-SA 3.0 · Wikimedia Commons.* " +
+    "[Source](https://commons.wikimedia.org/wiki/File:Paris_-_The_Eiffel_Tower_in_spring_-_2307.jpg)";
+  const { container } = render(<Markdown content={credit} />);
+
+  const link = screen.getByRole("link", { name: "Source" });
+  expect(link.getAttribute("href")).toBe(
+    "https://commons.wikimedia.org/wiki/File:Paris_-_The_Eiffel_Tower_in_spring_-_2307.jpg",
+  );
+  expect(container.querySelector("em")?.textContent).toBe("Image: Jorge Royan · CC BY-SA 3.0 · Wikimedia Commons.");
+  expect(container.textContent).not.toContain("](");
+});

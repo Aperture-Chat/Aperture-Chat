@@ -12,9 +12,13 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field, field_validator
 
+from app.core.licensed_pictures import PictureSearchUnavailable, find_licensed_pictures
 from app.core.net_guard import REDIRECT_GUARD_HOOKS, EgressBlocked, validate_public_url
 from app.models.schemas import User
+from app.repositories.deps import get_store
+from app.repositories.seed import SeedStore
 from app.routes.dependencies import current_user
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
@@ -88,3 +92,69 @@ def proxy_export_image(
         raise HTTPException(
             status_code=502, detail="The image could not be fetched from its host"
         ) from error
+
+
+class LicensedPictureRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=300)
+    # The paper's subject, searched when the precise description finds nothing.
+    subject: str | None = Field(default=None, max_length=120)
+    limit: int = Field(default=1, ge=1, le=4)
+
+    @field_validator("query")
+    @classmethod
+    def _real_words(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if len(cleaned) < 2:
+            raise ValueError("Describe the picture to search for.")
+        return cleaned
+
+
+class LicensedPictureOut(BaseModel):
+    data_url: str
+    alt: str
+    credit: str
+    license: str
+    artist: str
+    source_url: str
+
+
+class LicensedPictureResponse(BaseModel):
+    pictures: list[LicensedPictureOut]
+
+
+@router.post("/licensed-pictures")
+def find_pictures(
+    payload: LicensedPictureRequest,
+    user: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> LicensedPictureResponse:
+    """Freely licensed photos (Wikimedia Commons) ready to place in a draft,
+    each with the credit line its license asks for. An empty list means
+    nothing suitable was found, not an error."""
+
+    # The words sent outside the deployment are recorded before they leave.
+    store.record_audit(
+        user,
+        "assets.licensed_picture_search",
+        "wikimedia-commons",
+        {"query": payload.query, "subject": payload.subject},
+    )
+    try:
+        found = find_licensed_pictures(
+            payload.query, limit=payload.limit, subject=payload.subject, transport=transport
+        )
+    except PictureSearchUnavailable as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return LicensedPictureResponse(
+        pictures=[
+            LicensedPictureOut(
+                data_url=picture.data_url,
+                alt=picture.alt,
+                credit=picture.credit,
+                license=picture.license,
+                artist=picture.artist,
+                source_url=picture.source_url,
+            )
+            for picture in found
+        ]
+    )
