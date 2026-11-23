@@ -1865,18 +1865,53 @@ test("external navigation uses a stable guard that reads current unsaved edits a
   expect(changed).toHaveBeenLastCalledWith(null);
 });
 
-test("a fresh drafting model default prefers text while keeping image models in menu order", () => {
+test("image models stay out of the drafting model picker and settings", () => {
   render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} />);
 
   const trigger = screen.getByRole("button", { name: "Document drafting model" });
   expect(trigger).toHaveTextContent("Draft text model");
-  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBeNull();
 
   fireEvent.click(trigger);
   const options = within(screen.getByRole("listbox", { name: "Select drafting model" })).getAllByRole("option");
-  expect(options).toHaveLength(2);
-  expect(options[0]).toHaveTextContent("Draft image model");
-  expect(options[1]).toHaveTextContent("Draft text model");
+  expect(options.map((option) => option.textContent)).toEqual([expect.stringContaining("Draft text model")]);
+  expect(screen.queryByRole("button", { name: "Set Draft image model as default drafting model" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  const agentSelector = screen.getByLabelText("Drafting agent");
+  expect(within(agentSelector).getAllByRole("option").map((option) => option.textContent)).toEqual([
+    expect.stringContaining("Draft text model"),
+  ]);
+});
+
+test("a saved image-model drafting default falls back to a text model", () => {
+  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-image-model");
+  render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} />);
+  expect(screen.getByRole("button", { name: "Document drafting model" }))
+    .toHaveTextContent("Draft text model");
+});
+
+test("a workspace with only an image model has no drafting model to pick", () => {
+  const data = dataWithImageFirstDraftModels();
+  render(<DocumentAssistantWorkspace data={{ ...data, models: [data.models[0]] }} />);
+  const trigger = screen.getByRole("button", { name: "Document drafting model" });
+  expect(trigger).toBeDisabled();
+  expect(trigger).toHaveTextContent("No models connected");
+});
+
+test("an image model hidden from drafting still powers deck pictures", () => {
+  render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  expect(screen.getByRole("button", { name: "Toggle AI slide images" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  const dialog = screen.getByRole("dialog", { name: "Slide picture" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "Picture description" }), {
+    target: { value: "A city skyline at dusk" },
+  });
+  const generate = within(dialog).getByRole("button", { name: "Generate AI picture" });
+  expect(generate).toBeEnabled();
+  expect(generate).toHaveAttribute("data-tooltip", "Generate a picture with Draft image model");
 });
 
 test("an unavailable drafting model falls back to text when an image model is first", () => {
@@ -1893,39 +1928,6 @@ test("an unavailable drafting model falls back to text when an image model is fi
   view.rerender(<DocumentAssistantWorkspace data={data} />);
   expect(screen.getByRole("button", { name: "Document drafting model" }))
     .toHaveTextContent("Draft text model");
-});
-
-test("an explicitly selected image drafting model survives a data refresh", () => {
-  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-text-model");
-  const data = dataWithImageFirstDraftModels();
-  const view = render(<DocumentAssistantWorkspace data={data} />);
-
-  fireEvent.click(screen.getByRole("button", { name: "Document drafting model" }));
-  fireEvent.click(screen.getByRole("option", { name: /Draft image model/ }));
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
-
-  view.rerender(<DocumentAssistantWorkspace data={{ ...data, models: [...data.models] }} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
-  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBe("draft-text-model");
-});
-
-test("a starred image drafting model is preserved and restored after becoming available", () => {
-  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-image-model");
-  const data = dataWithImageFirstDraftModels();
-  const view = render(<DocumentAssistantWorkspace data={data} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
-
-  view.rerender(<DocumentAssistantWorkspace data={{ ...data, models: [data.models[1]] }} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft text model");
-  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBe("draft-image-model");
-
-  view.rerender(<DocumentAssistantWorkspace data={data} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
 });
 
 test("starring a drafting model in the topbar menu makes it the persistent default", () => {

@@ -166,8 +166,14 @@ export function modelCapabilityRank(model: ModelConfig) {
  * usable model exists. Missing metadata stays eligible; input image support
  * does not imply image generation. */
 export function modelsForTextDefault(models: ModelConfig[]) {
-  const nonImageModels = models.filter((model) => !model.capabilities?.output_modalities?.includes("image"));
+  const nonImageModels = models.filter((model) => !isImageGenerationModel(model));
   return nonImageModels.length > 0 ? nonImageModels : models;
+}
+
+/** Image-output models make pictures. Drafts keeps them behind the scenes for
+ * deck and document pictures instead of offering them as a drafting model. */
+export function isImageGenerationModel(model: Pick<ModelConfig, "capabilities">) {
+  return Boolean(model.capabilities?.output_modalities?.includes("image"));
 }
 
 export function preferredModel(models: ModelConfig[]) {

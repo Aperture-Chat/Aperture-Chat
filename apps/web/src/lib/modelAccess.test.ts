@@ -4,6 +4,7 @@ import type { BootstrapData, ModelConfig } from "./types";
 import {
   agentProfileVisibleToUser,
   approvedWorkspaceModels,
+  isImageGenerationModel,
   isModelUsable,
   preferredModel,
   supportsReasoningEffort,
@@ -50,6 +51,14 @@ test("first-use model preference uses reported outputs instead of an image-like 
   expect(preferredModel([image, text])?.id).toBe(text.id);
   expect(preferredModel([image, unreported])?.id).toBe(unreported.id);
   expect(preferredModel([])).toBeNull();
+});
+
+test("only a model that reports image output counts as an image model", () => {
+  expect(isImageGenerationModel({ capabilities: { output_modalities: ["text", "image"] } })).toBe(true);
+  expect(isImageGenerationModel({ capabilities: { output_modalities: ["text"], input_modalities: ["image"] } })).toBe(false);
+  // Partial or missing capability data is a text model, never a crash.
+  expect(isImageGenerationModel({ capabilities: { input_modalities: ["image"] } })).toBe(false);
+  expect(isImageGenerationModel({ capabilities: null })).toBe(false);
 });
 
 function withCatalogOnlyModel(me: BootstrapData["me"]) {
