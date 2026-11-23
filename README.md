@@ -129,6 +129,13 @@ policies appropriate for your organization's data.
 - **Spreadsheets.** Build multi-sheet workbooks with Excel-style formulas, tables, pivot tables, and charts, open and export `.xlsx` and `.csv` files, and ask the **Spreadsheet Assistant** to edit a selection or build whole tables.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
 - **Drafting model and reasoning.** The **Model:** menu lists only models that write text. An image model you may use still draws slide pictures and illustrations in the background. **Assistant settings** offers the same **Fast**, **Balanced**, and **Smart** levels as chat, for documents, decks, and spreadsheets, and remembers your choice for both.
+
+<p align="center">
+  <img src="docs/images/drafts-reasoning-light.png" alt="Drafts Assistant settings with the drafting agent, Reasoning set to Smart with the help line Takes longer and thinks it through, and the citation and question switches" width="760">
+</p>
+
+<sub>The drafting model shown (<code>Foundry GPT-5.5 stand-in</code>) is a scripted stand-in registered as an Azure AI Foundry deployment; the settings panel is the application's own. See <a href="docs/images/README.md">how the pictures were made</a>.</sub>
+
 - **Keeps writing when you leave.** Go to chat or anywhere else while the assistant is writing a draft, and it finishes. Open **Drafts** again to find the finished draft. Reloading or closing the browser still stops it.
 - **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Asks before it writes.** When a drafting request leaves something open, the assistant asks one to three multiple-choice questions under your request, for documents, decks, and spreadsheets, then writes with your answers. **Decide for me** skips them, and **Ask me when unclear** in the assistant's settings turns them off; chat shares the same switch.

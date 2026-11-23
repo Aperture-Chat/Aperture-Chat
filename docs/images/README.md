@@ -25,6 +25,14 @@ reports Azure's filter. `qa-stub` streamed a fixed answer. The retries, the
 switch to the other model, and the work trace are the application's own. No
 real provider filter was pictured.
 
+One picture was added on November 22, 2026 from the v0.5.27 interface:
+`drafts-reasoning-light.png`. It was taken by the clean-install check on an
+empty data volume with the release Compose file. The drafting model in it,
+"Foundry GPT-5.5 stand-in", is a scripted stand-in on a small local server
+registered as an Azure AI Foundry deployment named `gpt-5.5`. The
+**Assistant settings** panel, the **Reasoning** stops, and the help line are
+the application's own. No real model was called.
+
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
@@ -85,6 +93,8 @@ real provider filter was pictured.
   decide for me**.
 - `drafts-questions-light.png`: the Document Assistant paused under a request
   with question 1 of 2 before it writes anything.
+- `drafts-reasoning-light.png`: Drafts **Assistant settings** with **Smart**
+  chosen under **Reasoning** and its help line, beside an empty document.
 - `drafts-check-light.png`: the **Check** panel beside a five-line consulting
   agreement typed into the editor, listing three blanks and two defined-term
   findings.
