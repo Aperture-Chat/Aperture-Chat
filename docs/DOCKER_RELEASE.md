@@ -268,7 +268,11 @@ Drafts.
   still draws AI slide pictures, slide backgrounds, and paper illustrations
   behind the scenes. A saved
   picture-model default falls back to a text model, and a workspace with only
-  a picture model shows "No models connected".
+  a picture model shows "No models connected". A picture model with no
+  reported capabilities, such as an Azure AI Foundry deployment added by hand,
+  is known by its deployment name (`gpt-image-1`, `MAI-Image-1`, `dall-e-3`,
+  `imagen-4`), the way the server already knew it, so it is hidden from the
+  menu and still draws pictures.
 - **Foundry Claude tests.** The Azure AI Foundry Claude tests now pin the
   `anthropic-version` header for token sign-in too. No product code changed.
 - **What an operator has to do.** Nothing. There is no database migration, no

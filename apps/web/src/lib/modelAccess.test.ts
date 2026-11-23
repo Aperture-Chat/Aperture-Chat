@@ -61,6 +61,19 @@ test("only a model that reports image output counts as an image model", () => {
   expect(isImageGenerationModel({ capabilities: null })).toBe(false);
 });
 
+test("an image deployment with no capability data is known by its name, as the server knows it", () => {
+  // Azure AI Foundry deployments added by hand carry no capability data.
+  for (const upstream of ["gpt-image-1", "MAI-Image-1", "openai/dall-e-3", "imagen-4", "google/gemini-3.1-flash-image-preview"]) {
+    expect(isImageGenerationModel({ capabilities: null, upstream_model_id: upstream })).toBe(true);
+  }
+  expect(isImageGenerationModel({ capabilities: { output_modalities: [] }, upstream_model_id: "gpt-image-1" })).toBe(true);
+  for (const upstream of ["gpt-5.5", "openai/gpt-4o-mini", "imagery-mini", "claude-sonnet-5-5", null]) {
+    expect(isImageGenerationModel({ capabilities: null, upstream_model_id: upstream })).toBe(false);
+  }
+  // Reported outputs win over the name.
+  expect(isImageGenerationModel({ capabilities: { output_modalities: ["text"] }, upstream_model_id: "gpt-image-1" })).toBe(false);
+});
+
 function withCatalogOnlyModel(me: BootstrapData["me"]) {
   const catalogOnlyModel: ModelConfig = {
     ...connectedOpenRouterModel,

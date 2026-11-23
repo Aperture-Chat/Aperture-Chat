@@ -170,10 +170,19 @@ export function modelsForTextDefault(models: ModelConfig[]) {
   return nonImageModels.length > 0 ? nonImageModels : models;
 }
 
+// Mirrors _IMAGE_OUTPUT_UPSTREAM_PATTERN in services/api/app/routes/chat.py:
+// gpt-image-1, MAI-Image-1, dall-e-3, imagen-4, gemini-…-flash-image-preview.
+const IMAGE_OUTPUT_UPSTREAM_PATTERN = /(?:^|[/-])(?:image|dall-e|imagen)(?:$|[-/.])/i;
+
 /** Image-output models make pictures. Drafts keeps them behind the scenes for
- * deck and document pictures instead of offering them as a drafting model. */
-export function isImageGenerationModel(model: Pick<ModelConfig, "capabilities">) {
-  return Boolean(model.capabilities?.output_modalities?.includes("image"));
+ * deck and document pictures instead of offering them as a drafting model.
+ * Reported output modalities decide; a model with none reported (an Azure AI
+ * Foundry deployment added by hand) is known by its deployment name, as the
+ * server knows it. */
+export function isImageGenerationModel(model: Pick<ModelConfig, "capabilities"> & { upstream_model_id?: string | null }) {
+  const outputs = model.capabilities?.output_modalities ?? [];
+  if (outputs.length > 0) return outputs.includes("image");
+  return IMAGE_OUTPUT_UPSTREAM_PATTERN.test(model.upstream_model_id ?? "");
 }
 
 export function preferredModel(models: ModelConfig[]) {

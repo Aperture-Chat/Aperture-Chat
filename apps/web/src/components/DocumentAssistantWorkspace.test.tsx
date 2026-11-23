@@ -1883,6 +1883,29 @@ test("image models stay out of the drafting model picker and settings", () => {
   ]);
 });
 
+test("an Azure AI Foundry image deployment with no capability data stays out of Drafts but draws pictures", () => {
+  const data = dataWithImageFirstDraftModels();
+  const foundryImage = { ...data.models[0], id: "foundry-gpt-image", name: "Foundry image deployment", upstream_model_id: "gpt-image-1", capabilities: null };
+  render(<DocumentAssistantWorkspace data={{ ...data, models: [foundryImage, data.models[1]] }} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Document drafting model" }));
+  const options = within(screen.getByRole("listbox", { name: "Select drafting model" })).getAllByRole("option");
+  expect(options.map((option) => option.textContent)).toEqual([expect.stringContaining("Draft text model")]);
+  fireEvent.keyDown(screen.getByRole("listbox", { name: "Select drafting model" }), { key: "Escape" });
+
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  const dialog = screen.getByRole("dialog", { name: "Slide picture" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "Picture description" }), {
+    target: { value: "A city skyline at dusk" },
+  });
+  expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toHaveAttribute(
+    "data-tooltip",
+    "Generate a picture with Foundry image deployment",
+  );
+});
+
 test("a saved image-model drafting default falls back to a text model", () => {
   window.localStorage.setItem("aperture-document-draft-model-v1", "draft-image-model");
   render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} />);
