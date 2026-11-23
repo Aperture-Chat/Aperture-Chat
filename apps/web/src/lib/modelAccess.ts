@@ -67,7 +67,7 @@ export function agentProfileCreatorMatches(data: BootstrapData, model: ModelConf
  * metadata (captured at model sync, e.g. OpenRouter supported_parameters) is
  * authoritative when present — it covers every vendor, including families the
  * heuristics below never will. Without capability data, fall back to known
- * families: OpenAI o-series (o1/o3/o4) and the GPT-5 family, Claude Opus
+ * families: OpenAI o-series (o1/o3/o4) and the GPT-5 and GPT-6 families, Claude Opus
  * 4.5+ / Sonnet 4.6+ / the Claude 5 family, and xAI Grok 4.3+, 4.5, and
  * 4.20 Multi-Agent (Grok 4.20 base and Grok Build expose reasoning but no
  * effort control). The composer's Fast–Smart slider only activates for
@@ -83,7 +83,7 @@ export function supportsReasoningEffort(
   if (supportedParameters.length > 0) return supportedParameters.includes("reasoning_effort");
   const route = `${model.id} ${model.name} ${model.upstream_model_id ?? ""}`.toLowerCase();
   if (/(?:^|[^a-z0-9])o[134](?:[^a-z0-9]|$)/.test(route)) return true;
-  if (route.includes("gpt-5") || route.includes("gpt-oss")) return true;
+  if (/gpt-[56]/.test(route) || route.includes("gpt-oss")) return true;
   if (/grok-4[.-](?:[3-9](?:[^0-9]|$)|20-multi-agent)/.test(route)) return true;
   return /claude-(?:opus-4[.-][5-9]|sonnet-4[.-][6-9]|(?:opus|sonnet|haiku|fable|mythos)-5)/.test(route);
 }
@@ -166,8 +166,23 @@ export function modelCapabilityRank(model: ModelConfig) {
  * usable model exists. Missing metadata stays eligible; input image support
  * does not imply image generation. */
 export function modelsForTextDefault(models: ModelConfig[]) {
-  const nonImageModels = models.filter((model) => !model.capabilities?.output_modalities?.includes("image"));
+  const nonImageModels = models.filter((model) => !isImageGenerationModel(model));
   return nonImageModels.length > 0 ? nonImageModels : models;
+}
+
+// Mirrors _IMAGE_OUTPUT_UPSTREAM_PATTERN in services/api/app/routes/chat.py:
+// gpt-image-1, MAI-Image-1, dall-e-3, imagen-4, gemini-…-flash-image-preview.
+const IMAGE_OUTPUT_UPSTREAM_PATTERN = /(?:^|[/-])(?:image|dall-e|imagen)(?:$|[-/.])/i;
+
+/** Image-output models make pictures. Drafts keeps them behind the scenes for
+ * deck and document pictures instead of offering them as a drafting model.
+ * Reported output modalities decide; a model with none reported (an Azure AI
+ * Foundry deployment added by hand) is known by its deployment name, as the
+ * server knows it. */
+export function isImageGenerationModel(model: Pick<ModelConfig, "capabilities"> & { upstream_model_id?: string | null }) {
+  const outputs = model.capabilities?.output_modalities ?? [];
+  if (outputs.length > 0) return outputs.includes("image");
+  return IMAGE_OUTPUT_UPSTREAM_PATTERN.test(model.upstream_model_id ?? "");
 }
 
 export function preferredModel(models: ModelConfig[]) {

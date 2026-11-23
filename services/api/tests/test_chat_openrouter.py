@@ -3467,6 +3467,31 @@ def test_minimal_reasoning_effort_degrades_to_low_for_grok_on_openrouter(monkeyp
     assert sent["provider"] == {"sort": "throughput"}
 
 
+def test_balanced_reasoning_keeps_grok_at_its_usual_pace_on_openrouter(monkeypatch) -> None:
+    _activate_provider("provider-openrouter")
+    # xAI documents only low/high effort, so Balanced ("medium") leaves the
+    # parameter off and Grok runs at its own default.
+    get_store().models["openrouter-openai-gpt-5-5"].upstream_model_id = "x-ai/grok-4.5"
+    captured: dict[str, object] = {}
+    fake = _gateway(transport=httpx.MockTransport(_reasoning_completion_handler(captured)))
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: fake)
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-openai-gpt-5-5",
+            "messages": [{"role": "user", "content": "An ordinary question."}],
+            "reasoning_effort": "medium",
+        },
+        headers=headers("user-owner"),
+    )
+
+    assert response.status_code == 200
+    sent = json.loads(captured["body"])
+    assert "reasoning" not in sent
+    assert "provider" not in sent
+
+
 def test_minimal_reasoning_effort_degrades_to_low_off_gpt5(monkeypatch) -> None:
     _activate_provider("provider-openai")
     get_store().models["o3-mini"].platform_enabled = True

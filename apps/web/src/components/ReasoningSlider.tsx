@@ -5,12 +5,16 @@ export type ReasoningLevel = "fast" | "balanced" | "smart";
 
 export const REASONING_LEVELS: ReasoningLevel[] = ["fast", "balanced", "smart"];
 
-// Fast asks for the smallest reasoning spend the model supports plus
-// throughput-priority provider routing; the API degrades "minimal" to "low"
-// for models without a minimal level.
-export const REASONING_EFFORT_BY_LEVEL: Record<ReasoningLevel, "minimal" | "high" | null> = {
+export type ReasoningEffort = "minimal" | "medium" | "high";
+
+// Providers receive low, medium, and high. Fast is sent as "minimal", the
+// app's fast-path marker: the API forwards it to providers as "low" and also
+// answers concisely, skips research steps, and prefers throughput routing.
+// Balanced is explicit because model defaults differ (Sonnet 5.5 defaults to
+// high, Opus and Haiku 5.5 to medium).
+export const REASONING_EFFORT_BY_LEVEL: Record<ReasoningLevel, ReasoningEffort> = {
   fast: "minimal",
-  balanced: null,
+  balanced: "medium",
   smart: "high",
 };
 
@@ -43,7 +47,7 @@ const REASONING_STOPS: RailSwitchOption<ReasoningLevel>[] = [
 
 const REASONING_HELP: Record<ReasoningLevel, string> = {
   fast: "Quicker answers, less time thinking.",
-  balanced: "The model's usual pace.",
+  balanced: "A middle ground between speed and depth.",
   smart: "Takes longer and thinks it through.",
 };
 
@@ -51,7 +55,7 @@ export function reasoningHelp(level: ReasoningLevel, supported: boolean, modelNa
   return supported ? REASONING_HELP[level] : `${modelName} does not support reasoning levels.`;
 }
 
-/** Every level named on its own stop, for the chat composer's Send options. */
+/** Every level named on its own stop, for chat's Send options and the Drafts settings. */
 export function ReasoningRail({
   level,
   supported,
@@ -70,60 +74,5 @@ export function ReasoningRail({
       disabled={!supported}
       onChange={onChange}
     />
-  );
-}
-
-export function ReasoningSlider({
-  level,
-  supported,
-  modelName,
-  onChange,
-}: {
-  level: ReasoningLevel;
-  supported: boolean;
-  modelName: string;
-  onChange: (level: ReasoningLevel) => void;
-}) {
-  const value = supported ? REASONING_LEVELS.indexOf(level) : 1;
-  const activeLevel = supported ? level : "balanced";
-  const tooltip = supported
-    ? "Reasoning level: Fast favors quicker answers, Smart makes the model think longer for more detailed output"
-    : `${modelName} does not support reasoning levels`;
-  return (
-    <div
-      className={`reasoning-slider${supported ? "" : " is-disabled"}${
-        supported && activeLevel !== "balanced" ? " is-active" : ""
-      }`}
-      data-tooltip={tooltip}
-    >
-      <span
-        className={`reasoning-slider-label${activeLevel === "fast" ? " is-current" : ""}`}
-        aria-hidden="true"
-      >
-        Fast
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={2}
-        step={1}
-        value={value}
-        disabled={!supported}
-        aria-label="Model reasoning level"
-        aria-valuetext={
-          activeLevel === "fast" ? "Fast" : activeLevel === "smart" ? "Smart" : "Balanced"
-        }
-        onChange={(event) => {
-          const next = REASONING_LEVELS[Number(event.target.value)];
-          if (next) onChange(next);
-        }}
-      />
-      <span
-        className={`reasoning-slider-label${activeLevel === "smart" ? " is-current" : ""}`}
-        aria-hidden="true"
-      >
-        Smart
-      </span>
-    </div>
   );
 }
