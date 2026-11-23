@@ -3421,18 +3421,16 @@ a.nav-item {
   gap: 6px;
 }
 
-.draft-setting-field span {
+.draft-setting-field > span {
   color: var(--muted);
   font-size: var(--control-label-size);
   font-weight: 750;
 }
 
-/* The slider's own end labels keep their composer styling inside the
-   drafts settings field. */
-.draft-setting-field .reasoning-slider-label {
-  color: var(--faint);
-  font-size: var(--control-label-size);
-  font-weight: 600;
+.draft-setting-field .draft-setting-help {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
 .draft-settings-panel select {
@@ -6102,103 +6100,6 @@ a.nav-item {
 
 .composer-tools .composer-tools-clear svg {
   color: currentColor;
-}
-
-/* Fast–Smart reasoning slider: lives inside the composer's reasoning
-   popover and the Drafts assistant settings panel. */
-.reasoning-slider {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 8px;
-  min-height: 32px;
-}
-
-.reasoning-slider-label {
-  font-size: var(--control-label-size);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--faint);
-  user-select: none;
-  transition: color var(--speed) var(--ease);
-}
-
-.reasoning-slider.is-active .reasoning-slider-label.is-current {
-  color: var(--teal-strong);
-}
-
-.reasoning-slider input[type="range"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 72px;
-  height: 16px;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
-.reasoning-slider input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: var(--radius-pill);
-  background: var(--border-strong);
-}
-
-.reasoning-slider input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid var(--teal);
-  box-shadow: var(--shadow-sm);
-  transition:
-    background var(--speed) var(--ease),
-    border-color var(--speed) var(--ease);
-}
-
-.reasoning-slider input[type="range"]::-moz-range-track {
-  height: 4px;
-  border-radius: var(--radius-pill);
-  background: var(--border-strong);
-}
-
-.reasoning-slider input[type="range"]::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid var(--teal);
-  box-shadow: var(--shadow-sm);
-}
-
-.reasoning-slider.is-active input[type="range"]::-webkit-slider-thumb {
-  background: var(--teal);
-}
-
-.reasoning-slider.is-active input[type="range"]::-moz-range-thumb {
-  background: var(--teal);
-}
-
-.reasoning-slider input[type="range"]:focus-visible {
-  outline: none;
-}
-
-.reasoning-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--teal-ring);
-}
-
-.reasoning-slider input[type="range"]:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px var(--teal-ring);
-}
-
-.reasoning-slider.is-disabled {
-  opacity: 0.45;
-}
-
-.reasoning-slider.is-disabled input[type="range"] {
-  cursor: not-allowed;
 }
 
 .context-window-indicator {

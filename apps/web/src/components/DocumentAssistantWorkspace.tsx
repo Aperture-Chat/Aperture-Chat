@@ -443,9 +443,10 @@ import {
 } from "../lib/documentPictures";
 import { findLicensedPictures } from "../lib/api/assets";
 import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "../lib/documentDiagrams";
-import { approvedWorkspaceModels, isModelUsable, modelsForTextDefault, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
+import { approvedWorkspaceModels, isImageGenerationModel, isModelUsable, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
 import {
-  ReasoningSlider,
+  ReasoningRail,
+  reasoningHelp,
   REASONING_EFFORT_BY_LEVEL,
   loadReasoningLevel,
   storeReasoningLevel,
@@ -2219,10 +2220,8 @@ export function DocumentAssistantWorkspace({
     [data, uploadedWordTemplates],
   );
   const draftAgents = useMemo(() => draftingAgentsFromData(data), [data]);
-  const defaultDraftAgentId = useMemo(() => {
-    const candidates = modelsForTextDefault(approvedWorkspaceModels(data));
-    return candidates.find((model) => model.is_custom)?.id ?? candidates[0]?.id ?? "";
-  }, [data]);
+  // Custom agents lead the list, so the first entry is the fresh default.
+  const defaultDraftAgentId = draftAgents[0]?.id ?? "";
   const importedDraftState = useMemo(
     () => (initialDraft && isDocumentTransfer(initialDraft) ? buildImportedDraftState(initialDraft) : null),
     [initialDraft?.id],
@@ -2835,9 +2834,7 @@ export function DocumentAssistantWorkspace({
   const imageGenerationAgent = useMemo(
     () =>
       data.models.find(
-        (model) =>
-          isModelUsable(data, model) &&
-          model.capabilities?.output_modalities?.includes("image"),
+        (model) => isModelUsable(data, model) && isImageGenerationModel(model),
       ) ?? null,
     [data],
   );
@@ -12640,14 +12637,12 @@ export function DocumentAssistantWorkspace({
                       ))}
                     </SelectControl>
                   </label>
-                  <div className="draft-setting-field">
+                  <div className="draft-setting-field" role="group" aria-label="Reasoning level">
                     <span>Reasoning</span>
-                    <ReasoningSlider
-                      level={reasoningLevel}
-                      supported={reasoningSupported}
-                      modelName={selectedAgent?.name ?? "No model available"}
-                      onChange={updateReasoningLevel}
-                    />
+                    <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
+                    <small className="draft-setting-help">
+                      {reasoningHelp(reasoningLevel, reasoningSupported, selectedAgent?.name ?? "This model")}
+                    </small>
                   </div>
                   <label className="draft-switch-row">
                     <span>
@@ -16064,8 +16059,10 @@ function persistedWordTemplateToDraftTemplate(template: PersistedWordTemplate): 
   };
 }
 
+/** Models that can draft text. Image models are left out: Drafts uses one
+ * automatically for deck and document pictures. */
 function draftingAgentsFromData(data: BootstrapData): DraftAgentOption[] {
-  const enabledModels = approvedWorkspaceModels(data);
+  const enabledModels = approvedWorkspaceModels(data).filter((model) => !isImageGenerationModel(model));
   const orderedModels = [
     ...enabledModels.filter((model) => model.is_custom),
     ...enabledModels.filter((model) => !model.is_custom),

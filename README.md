@@ -64,14 +64,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.26](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.26)**:
-> Ask for pictures in a chat reply or a paper and get freely licensed photos
-> with their credits, or a labelled illustration; papers keep their pictures
-> when they save. Claude deployments on Azure AI Foundry now work, and a
-> reply that runs out of room while thinking says so.
-> v0.5.25 let another model answer when a provider's safety filter keeps
-> refusing a reply.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0525) and
+> **Current release: [v0.5.27](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.27)**:
+> **Fast**, **Balanced**, and **Smart** now ask every model for low, medium,
+> and high reasoning, in chat and in Drafts, and the Drafts model menu lists
+> only models that write text.
+> v0.5.26 added pictures in chat replies and papers, and Claude on Azure AI
+> Foundry.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0526) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -96,6 +95,7 @@ policies appropriate for your organization's data.
 <sub>Also scripted: a stand-in model (<code>qa-filtered</code>) answered every try with the filter's refusal and named Azure as its server, and a second stand-in (<code>qa-stub</code>) wrote the answer. The retries, the switch, and the trace are the application's own.</sub>
 
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
+- **Reasoning levels.** Under **Reasoning** in **Send options**, choose **Fast**, **Balanced**, or **Smart**. They ask the model for low, medium, and high reasoning, the same on every model that supports it. **Fast** also keeps the answer short and skips research steps.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
 - **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, a page step reads only an address from the search results, your own messages, or your knowledge sources, and Fast replies skip them.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
@@ -128,6 +128,14 @@ policies appropriate for your organization's data.
 - **One workspace, three formats.** Switch between **Document**, **Deck**, and **Spreadsheet** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
 - **Spreadsheets.** Build multi-sheet workbooks with Excel-style formulas, tables, pivot tables, and charts, open and export `.xlsx` and `.csv` files, and ask the **Spreadsheet Assistant** to edit a selection or build whole tables.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
+- **Drafting model and reasoning.** The **Model:** menu lists only models that write text. An image model you may use still draws slide pictures and illustrations in the background. **Assistant settings** offers the same **Fast**, **Balanced**, and **Smart** levels as chat, for documents, decks, and spreadsheets, and remembers your choice for both.
+
+<p align="center">
+  <img src="docs/images/drafts-reasoning-light.png" alt="Drafts Assistant settings with the drafting agent, Reasoning set to Smart with the help line Takes longer and thinks it through, and the citation and question switches" width="760">
+</p>
+
+<sub>The drafting model shown (<code>Foundry GPT-5.5 stand-in</code>) is a scripted stand-in registered as an Azure AI Foundry deployment; the settings panel is the application's own. See <a href="docs/images/README.md">how the pictures were made</a>.</sub>
+
 - **Keeps writing when you leave.** Go to chat or anywhere else while the assistant is writing a draft, and it finishes. Open **Drafts** again to find the finished draft. Reloading or closing the browser still stops it.
 - **Start from chat.** Ask for a document, a deck, or a spreadsheet in chat and choose **Write in Drafts** or **Build in deck editor** on the card that appears; the request and its context carry over with no retyping.
 - **Asks before it writes.** When a drafting request leaves something open, the assistant asks one to three multiple-choice questions under your request, for documents, decks, and spreadsheets, then writes with your answers. **Decide for me** skips them, and **Ask me when unclear** in the assistant's settings turns them off; chat shares the same switch.
@@ -219,7 +227,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.26
+#   APERTURE_IMAGE_TAG=v0.5.27
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -240,7 +248,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.26 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.27 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -275,10 +283,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.26` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.27` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.26-dev`, `v0.5.26-test`, `v0.5.26-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.27-dev`, `v0.5.27-test`, `v0.5.27-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
