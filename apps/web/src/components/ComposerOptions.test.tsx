@@ -339,7 +339,7 @@ describe("ReasoningRail", () => {
 
   test("the help line follows the chosen level", () => {
     expect(reasoningHelp("fast", true, "Model")).toBe("Quicker answers, less time thinking.");
-    expect(reasoningHelp("balanced", true, "Model")).toBe("The model's usual pace.");
+    expect(reasoningHelp("balanced", true, "Model")).toBe("A middle ground between speed and depth.");
     expect(reasoningHelp("smart", true, "Model")).toBe("Takes longer and thinks it through.");
     expect(reasoningHelp("smart", false, "GPT Mini")).toBe("GPT Mini does not support reasoning levels.");
   });

@@ -422,7 +422,7 @@ def test_a_foundry_claude_deployment_signed_in_with_a_token_sends_it_as_bearer()
 
     assert captured["headers"]["authorization"] == "Bearer entra-token"
     assert "x-api-key" not in captured["headers"]
-    assert captured["headers"]["anthropic-version"]
+    assert captured["headers"]["anthropic-version"] == DEFAULT_ANTHROPIC_VERSION
 
 
 def test_claude_haiku_5_takes_effort_and_refuses_temperature() -> None:
@@ -1350,3 +1350,94 @@ def test_a_foundry_deployment_that_is_not_claude_keeps_the_models_endpoint() -> 
     )
 
     assert seen[0].startswith("https://myres.services.ai.azure.com/models/chat/completions")
+
+
+# The composer's Reasoning setting sends "minimal" for Fast, "medium" for
+# Balanced, and "high" for Smart. Every native provider must receive exactly
+# low, medium, and high for those three positions.
+_COMPOSER_LEVELS = [("minimal", "low"), ("medium", "medium"), ("high", "high")]
+
+
+def _anthropic_ok(captured: dict[str, object]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read().decode())
+        return httpx.Response(
+            200,
+            json={"id": "m", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "ok"}],
+                  "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}},
+        )
+
+    return handler
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])
+@pytest.mark.parametrize(("sent", "expected"), _COMPOSER_LEVELS)
+def test_foundry_claude_receives_low_medium_high_for_fast_balanced_smart(model, sent, expected) -> None:
+    captured: dict[str, object] = {}
+    ModelGatewayClient(transport=httpx.MockTransport(_anthropic_ok(captured))).complete(
+        route=_foundry_route(model),
+        messages=[{"role": "user", "content": "hi"}],
+        options={"reasoning_effort": sent},
+    )
+
+    assert captured["body"]["output_config"] == {"effort": expected}
+
+
+@pytest.mark.parametrize("model", ["gpt-5.5", "gpt-5", "gpt-6.1-sol"])
+@pytest.mark.parametrize(("sent", "expected"), _COMPOSER_LEVELS)
+def test_foundry_gpt_receives_low_medium_high_for_fast_balanced_smart(model, sent, expected) -> None:
+    captured: dict[str, object] = {}
+    ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured))).complete(
+        route=_foundry_route(model),
+        messages=[{"role": "user", "content": "hi"}],
+        options={"reasoning_effort": sent},
+    )
+
+    assert captured["body"]["reasoning_effort"] == expected
+
+
+@pytest.mark.parametrize(("sent", "expected"), _COMPOSER_LEVELS)
+def test_responses_models_receive_low_medium_high_for_fast_balanced_smart(sent, expected) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read().decode())
+        return httpx.Response(
+            200,
+            json={"id": "r", "status": "completed", "output": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
+        )
+
+    ModelGatewayClient(transport=httpx.MockTransport(handler)).complete(
+        route=_openai_route("gpt-5.5-pro"),
+        messages=[{"role": "user", "content": "hi"}],
+        options={"reasoning_effort": sent},
+    )
+
+    assert captured["body"]["reasoning"] == {"effort": expected}
+
+
+def test_direct_xai_keeps_its_default_for_balanced() -> None:
+    """xAI documents only low/high effort, so Balanced sends no effort."""
+    captured: dict[str, object] = {}
+    route = _vendor_route("xai", base_url="https://api.x.ai/v1")
+    route = ModelGatewayRoute(
+        **{**route.__dict__, "upstream_model": "grok-3-mini", "supported_parameters": frozenset({"reasoning_effort"})}
+    )
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured)))
+
+    gateway.complete(route=route, messages=[{"role": "user", "content": "hi"}], options={"reasoning_effort": "medium"})
+    assert "reasoning_effort" not in captured["body"]
+
+    gateway.complete(route=route, messages=[{"role": "user", "content": "hi"}], options={"reasoning_effort": "minimal"})
+    assert captured["body"]["reasoning_effort"] == "low"
+
+
+def test_an_empty_reasoning_effort_sends_no_effort() -> None:
+    captured: dict[str, object] = {}
+    ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured))).complete(
+        route=_foundry_route("gpt-5.5"),
+        messages=[{"role": "user", "content": "hi"}],
+        options={"reasoning_effort": ""},
+    )
+
+    assert "reasoning_effort" not in captured["body"]

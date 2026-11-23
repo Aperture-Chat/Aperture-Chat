@@ -23,6 +23,7 @@ import {
   REASONING_EFFORT_BY_LEVEL,
   loadReasoningLevel,
   storeReasoningLevel,
+  type ReasoningEffort,
   type ReasoningLevel,
 } from "./ReasoningSlider";
 import {
@@ -846,7 +847,7 @@ function runtimeOptionsFromState(
   selectedAgentId: string | null,
   selectedKnowledgeBaseId: string | null,
   selectedToolIds: string[] = [],
-  reasoningEffort: "minimal" | "high" | null = null,
+  reasoningEffort: ReasoningEffort | null = null,
 ): ChatRuntimeOptions {
   const knowledgeEnabled = composerTools.Knowledge;
   const selectedAgent =

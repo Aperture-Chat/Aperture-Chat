@@ -62,9 +62,9 @@ export type ChatRuntimeOptions = {
   contextAttachmentIds?: string[];
   maxCompletionTokens?: number;
   /**
-   * Reasoning depth for reasoning-capable models: "minimal" favors the
-   * fastest useful answer, "high" makes the model think longer.
-   * Omitted = provider default.
+   * Reasoning depth for reasoning-capable models: the composer sends
+   * "minimal" for Fast (the fastest useful answer; providers receive "low"),
+   * "medium" for Balanced, and "high" for Smart. Omitted = provider default.
    */
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | null;
   /** Whether the assistant may pause to ask clarifying questions, must make

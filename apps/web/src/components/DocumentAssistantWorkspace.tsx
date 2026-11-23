@@ -445,7 +445,8 @@ import { findLicensedPictures } from "../lib/api/assets";
 import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "../lib/documentDiagrams";
 import { approvedWorkspaceModels, isImageGenerationModel, isModelUsable, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
 import {
-  ReasoningSlider,
+  ReasoningRail,
+  reasoningHelp,
   REASONING_EFFORT_BY_LEVEL,
   loadReasoningLevel,
   storeReasoningLevel,
@@ -12636,14 +12637,12 @@ export function DocumentAssistantWorkspace({
                       ))}
                     </SelectControl>
                   </label>
-                  <div className="draft-setting-field">
+                  <div className="draft-setting-field" role="group" aria-label="Reasoning level">
                     <span>Reasoning</span>
-                    <ReasoningSlider
-                      level={reasoningLevel}
-                      supported={reasoningSupported}
-                      modelName={selectedAgent?.name ?? "No model available"}
-                      onChange={updateReasoningLevel}
-                    />
+                    <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
+                    <small className="draft-setting-help">
+                      {reasoningHelp(reasoningLevel, reasoningSupported, selectedAgent?.name ?? "This model")}
+                    </small>
                   </div>
                   <label className="draft-switch-row">
                     <span>
@@ -16059,9 +16058,9 @@ function persistedWordTemplateToDraftTemplate(template: PersistedWordTemplate): 
     sourceFilename: template.filename,
   };
 }
+
 /** Models that can draft text. Image models are left out: Drafts uses one
  * automatically for deck and document pictures. */
-
 function draftingAgentsFromData(data: BootstrapData): DraftAgentOption[] {
   const enabledModels = approvedWorkspaceModels(data).filter((model) => !isImageGenerationModel(model));
   const orderedModels = [

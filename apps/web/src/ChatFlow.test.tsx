@@ -738,7 +738,11 @@ test("the composer tucks the reasoning rail inside the send options menu", async
   });
 });
 
-test("a reasoning stop chosen in send options reaches the chat request", async () => {
+// Fast travels as "minimal", the fast-path marker the API sends on as "low".
+test.each([
+  ["Fast", "Quicker answers, less time thinking.", "minimal"],
+  ["Smart", "Takes longer and thinks it through.", "high"],
+])("the %s reasoning stop chosen in send options reaches the chat request", async (stop, help, effort) => {
   const model = sampleData.models.find((item) => item.id === "agent-client-update")!;
   const capabilities = model.capabilities;
   model.capabilities = { ...capabilities, supported_parameters: ["reasoning_effort"] };
@@ -748,15 +752,31 @@ test("a reasoning stop chosen in send options reaches the chat request", async (
     fireEvent.click(screen.getByRole("button", { name: "Send options" }));
     const rail = await screen.findByRole("radiogroup", { name: "Model reasoning level" });
     expect(within(rail).getByRole("radio", { name: "Balanced" })).toBeChecked();
-    fireEvent.click(within(rail).getByRole("radio", { name: "Smart" }));
-    expect(within(rail).getByRole("radio", { name: "Smart" })).toBeChecked();
-    expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent("Takes longer and thinks it through.");
+    fireEvent.click(within(rail).getByRole("radio", { name: stop }));
+    expect(within(rail).getByRole("radio", { name: stop })).toBeChecked();
+    expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(help);
 
     fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.change(textarea, { target: { value: "Think this through." } });
     fireEvent.keyDown(textarea, { key: "Enter" });
     await waitFor(() => expect(chatRequests).toHaveLength(1));
-    expect(chatRequests[0].reasoning_effort).toBe("high");
+    expect(chatRequests[0].reasoning_effort).toBe(effort);
+  } finally {
+    model.capabilities = capabilities;
+  }
+});
+
+test("Balanced asks a reasoning model for medium effort", async () => {
+  const model = sampleData.models.find((item) => item.id === "agent-client-update")!;
+  const capabilities = model.capabilities;
+  model.capabilities = { ...capabilities, supported_parameters: ["reasoning_effort"] };
+  try {
+    await renderApp();
+    const textarea = await screen.findByLabelText("Message");
+    fireEvent.change(textarea, { target: { value: "An ordinary question." } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(chatRequests).toHaveLength(1));
+    expect(chatRequests[0].reasoning_effort).toBe("medium");
   } finally {
     model.capabilities = capabilities;
   }

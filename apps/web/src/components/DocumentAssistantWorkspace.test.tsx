@@ -4561,7 +4561,7 @@ test("deck requests use the selected workspace sources", async () => {
 
 test("connects local source files and drafting settings to the workspace state", () => {
   // Approve one non-reasoning and one reasoning-capable model so the
-  // reasoning slider's disabled and enabled states are both exercised.
+  // reasoning rail's disabled and enabled states are both exercised.
   const data = {
     ...sampleData,
     models: sampleData.models.map((model) =>
@@ -4609,18 +4609,47 @@ test("connects local source files and drafting settings to the workspace state",
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Require source citations")).not.toBeChecked();
 
-  // The Fast–Smart reasoning slider replaced the retired approval toggle.
+  // The Fast, Balanced, and Smart rail replaced the retired approval toggle.
   // It stays honestly disabled while a non-reasoning model is selected.
-  expect(screen.getByLabelText("Model reasoning level")).toBeDisabled();
+  const lockedRail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+  expect(within(lockedRail).getByRole("radio", { name: "Smart" })).toBeDisabled();
+  expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(
+    "does not support reasoning levels",
+  );
 
   fireEvent.change(agentSelector, {
     target: { value: "openrouter-openai-gpt-5-5" },
   });
-  const reasoningSlider = screen.getByLabelText("Model reasoning level");
-  expect(reasoningSlider).toBeEnabled();
-  fireEvent.change(reasoningSlider, { target: { value: "2" } });
-  expect(screen.getByLabelText("Model reasoning level")).toHaveValue("2");
+  const rail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+  expect(within(rail).getByRole("radio", { name: "Smart" })).toBeEnabled();
+  fireEvent.click(within(rail).getByRole("radio", { name: "Smart" }));
+  expect(within(rail).getByRole("radio", { name: "Smart" })).toBeChecked();
   expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
+});
+
+// Drafts names the same three stops as chat, and each reaches the model as
+// the same effort: Fast travels as "minimal" (the API sends it on as "low"),
+// Balanced as "medium", and Smart as "high".
+test.each([
+  ["Fast", "Quicker answers, less time thinking.", "minimal"],
+  ["Balanced", "A middle ground between speed and depth.", "medium"],
+  ["Smart", "Takes longer and thinks it through.", "high"],
+])("the %s reasoning stop in Drafts settings reaches the drafting request", async (stop, help, effort) => {
+  const chatRequests = installChatCompletionFetchMock(providerPagedDraft("Reasoning Memo", 1, "Reasoning memo"));
+  render(<DocumentAssistantWorkspace data={dataWithApprovedDraftModel("openrouter-openai-gpt-5-5")} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  fireEvent.change(screen.getByLabelText("Drafting agent"), { target: { value: "openrouter-openai-gpt-5-5" } });
+  const rail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+  fireEvent.click(within(rail).getByRole("radio", { name: stop }));
+  expect(within(rail).getByRole("radio", { name: stop })).toBeChecked();
+  expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(help);
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Write a one page memo." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect((chatRequests[0] as { reasoning_effort: string | null }).reasoning_effort).toBe(effort);
 });
 
 // ---------------------------------------------------------------------------
