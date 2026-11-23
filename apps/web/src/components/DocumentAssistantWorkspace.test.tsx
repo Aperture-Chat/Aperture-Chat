@@ -1865,18 +1865,76 @@ test("external navigation uses a stable guard that reads current unsaved edits a
   expect(changed).toHaveBeenLastCalledWith(null);
 });
 
-test("a fresh drafting model default prefers text while keeping image models in menu order", () => {
+test("image models stay out of the drafting model picker and settings", () => {
   render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} />);
 
   const trigger = screen.getByRole("button", { name: "Document drafting model" });
   expect(trigger).toHaveTextContent("Draft text model");
-  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBeNull();
 
   fireEvent.click(trigger);
   const options = within(screen.getByRole("listbox", { name: "Select drafting model" })).getAllByRole("option");
-  expect(options).toHaveLength(2);
-  expect(options[0]).toHaveTextContent("Draft image model");
-  expect(options[1]).toHaveTextContent("Draft text model");
+  expect(options.map((option) => option.textContent)).toEqual([expect.stringContaining("Draft text model")]);
+  expect(screen.queryByRole("button", { name: "Set Draft image model as default drafting model" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  const agentSelector = screen.getByLabelText("Drafting agent");
+  expect(within(agentSelector).getAllByRole("option").map((option) => option.textContent)).toEqual([
+    expect.stringContaining("Draft text model"),
+  ]);
+});
+
+test("an Azure AI Foundry image deployment with no capability data stays out of Drafts but draws pictures", () => {
+  const data = dataWithImageFirstDraftModels();
+  const foundryImage = { ...data.models[0], id: "foundry-gpt-image", name: "Foundry image deployment", upstream_model_id: "gpt-image-1", capabilities: null };
+  render(<DocumentAssistantWorkspace data={{ ...data, models: [foundryImage, data.models[1]] }} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Document drafting model" }));
+  const options = within(screen.getByRole("listbox", { name: "Select drafting model" })).getAllByRole("option");
+  expect(options.map((option) => option.textContent)).toEqual([expect.stringContaining("Draft text model")]);
+  fireEvent.keyDown(screen.getByRole("listbox", { name: "Select drafting model" }), { key: "Escape" });
+
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  const dialog = screen.getByRole("dialog", { name: "Slide picture" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "Picture description" }), {
+    target: { value: "A city skyline at dusk" },
+  });
+  expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toHaveAttribute(
+    "data-tooltip",
+    "Generate a picture with Foundry image deployment",
+  );
+});
+
+test("a saved image-model drafting default falls back to a text model", () => {
+  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-image-model");
+  render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} />);
+  expect(screen.getByRole("button", { name: "Document drafting model" }))
+    .toHaveTextContent("Draft text model");
+});
+
+test("a workspace with only an image model has no drafting model to pick", () => {
+  const data = dataWithImageFirstDraftModels();
+  render(<DocumentAssistantWorkspace data={{ ...data, models: [data.models[0]] }} />);
+  const trigger = screen.getByRole("button", { name: "Document drafting model" });
+  expect(trigger).toBeDisabled();
+  expect(trigger).toHaveTextContent("No models connected");
+});
+
+test("an image model hidden from drafting still powers deck pictures", () => {
+  render(<DocumentAssistantWorkspace data={dataWithImageFirstDraftModels()} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  expect(screen.getByRole("button", { name: "Toggle AI slide images" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  const dialog = screen.getByRole("dialog", { name: "Slide picture" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "Picture description" }), {
+    target: { value: "A city skyline at dusk" },
+  });
+  const generate = within(dialog).getByRole("button", { name: "Generate AI picture" });
+  expect(generate).toBeEnabled();
+  expect(generate).toHaveAttribute("data-tooltip", "Generate a picture with Draft image model");
 });
 
 test("an unavailable drafting model falls back to text when an image model is first", () => {
@@ -1893,39 +1951,6 @@ test("an unavailable drafting model falls back to text when an image model is fi
   view.rerender(<DocumentAssistantWorkspace data={data} />);
   expect(screen.getByRole("button", { name: "Document drafting model" }))
     .toHaveTextContent("Draft text model");
-});
-
-test("an explicitly selected image drafting model survives a data refresh", () => {
-  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-text-model");
-  const data = dataWithImageFirstDraftModels();
-  const view = render(<DocumentAssistantWorkspace data={data} />);
-
-  fireEvent.click(screen.getByRole("button", { name: "Document drafting model" }));
-  fireEvent.click(screen.getByRole("option", { name: /Draft image model/ }));
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
-
-  view.rerender(<DocumentAssistantWorkspace data={{ ...data, models: [...data.models] }} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
-  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBe("draft-text-model");
-});
-
-test("a starred image drafting model is preserved and restored after becoming available", () => {
-  window.localStorage.setItem("aperture-document-draft-model-v1", "draft-image-model");
-  const data = dataWithImageFirstDraftModels();
-  const view = render(<DocumentAssistantWorkspace data={data} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
-
-  view.rerender(<DocumentAssistantWorkspace data={{ ...data, models: [data.models[1]] }} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft text model");
-  expect(window.localStorage.getItem("aperture-document-draft-model-v1")).toBe("draft-image-model");
-
-  view.rerender(<DocumentAssistantWorkspace data={data} />);
-  expect(screen.getByRole("button", { name: "Document drafting model" }))
-    .toHaveTextContent("Draft image model");
 });
 
 test("starring a drafting model in the topbar menu makes it the persistent default", () => {
@@ -4559,7 +4584,7 @@ test("deck requests use the selected workspace sources", async () => {
 
 test("connects local source files and drafting settings to the workspace state", () => {
   // Approve one non-reasoning and one reasoning-capable model so the
-  // reasoning slider's disabled and enabled states are both exercised.
+  // reasoning rail's disabled and enabled states are both exercised.
   const data = {
     ...sampleData,
     models: sampleData.models.map((model) =>
@@ -4607,18 +4632,47 @@ test("connects local source files and drafting settings to the workspace state",
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Require source citations")).not.toBeChecked();
 
-  // The Fast–Smart reasoning slider replaced the retired approval toggle.
+  // The Fast, Balanced, and Smart rail replaced the retired approval toggle.
   // It stays honestly disabled while a non-reasoning model is selected.
-  expect(screen.getByLabelText("Model reasoning level")).toBeDisabled();
+  const lockedRail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+  expect(within(lockedRail).getByRole("radio", { name: "Smart" })).toBeDisabled();
+  expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(
+    "does not support reasoning levels",
+  );
 
   fireEvent.change(agentSelector, {
     target: { value: "openrouter-openai-gpt-5-5" },
   });
-  const reasoningSlider = screen.getByLabelText("Model reasoning level");
-  expect(reasoningSlider).toBeEnabled();
-  fireEvent.change(reasoningSlider, { target: { value: "2" } });
-  expect(screen.getByLabelText("Model reasoning level")).toHaveValue("2");
+  const rail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+  expect(within(rail).getByRole("radio", { name: "Smart" })).toBeEnabled();
+  fireEvent.click(within(rail).getByRole("radio", { name: "Smart" }));
+  expect(within(rail).getByRole("radio", { name: "Smart" })).toBeChecked();
   expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
+});
+
+// Drafts names the same three stops as chat, and each reaches the model as
+// the same effort: Fast travels as "minimal" (the API sends it on as "low"),
+// Balanced as "medium", and Smart as "high".
+test.each([
+  ["Fast", "Quicker answers, less time thinking.", "minimal"],
+  ["Balanced", "A middle ground between speed and depth.", "medium"],
+  ["Smart", "Takes longer and thinks it through.", "high"],
+])("the %s reasoning stop in Drafts settings reaches the drafting request", async (stop, help, effort) => {
+  const chatRequests = installChatCompletionFetchMock(providerPagedDraft("Reasoning Memo", 1, "Reasoning memo"));
+  render(<DocumentAssistantWorkspace data={dataWithApprovedDraftModel("openrouter-openai-gpt-5-5")} brandName="Aperture Chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  fireEvent.change(screen.getByLabelText("Drafting agent"), { target: { value: "openrouter-openai-gpt-5-5" } });
+  const rail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+  fireEvent.click(within(rail).getByRole("radio", { name: stop }));
+  expect(within(rail).getByRole("radio", { name: stop })).toBeChecked();
+  expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(help);
+
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), {
+    target: { value: "Write a one page memo." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect((chatRequests[0] as { reasoning_effort: string | null }).reasoning_effort).toBe(effort);
 });
 
 // ---------------------------------------------------------------------------

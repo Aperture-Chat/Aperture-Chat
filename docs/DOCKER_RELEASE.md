@@ -236,6 +236,58 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.26
+
+This release carries over the reasoning and picture-model changes made in
+S.F. Steward v0.6.27 and v0.6.28, and brings the same **Reasoning** levels to
+Drafts.
+
+- **Fast, Balanced, and Smart are low, medium, and high.** **Balanced** used
+  to send no effort, so each model used its own default (Claude Sonnet 5.5
+  defaults to high, Opus and Haiku 5.5 to medium), and **Fast** reached GPT-5
+  models as "minimal", a level newer GPT models no longer take. Now every
+  provider Aperture Chat talks to directly (OpenAI, Azure OpenAI, Azure AI
+  Foundry, Anthropic, and the other native dialects) receives **Fast** as
+  low, **Balanced** as medium, and **Smart** as high. **Fast** still asks for
+  a short chat answer, skips research steps, and prefers the quickest
+  provider on OpenRouter. xAI documents only low and high for Grok, so
+  **Balanced** leaves Grok at its own default. **Balanced**'s help line now
+  reads "A middle ground between speed and depth."
+- **Reasoning in Drafts.** **Assistant settings** in Drafts now shows the same
+  three named stops as chat's **Send options**, **Fast**, **Balanced**, and
+  **Smart**, with the same help line. The choice is shared with chat and is
+  sent the same way for documents, decks, and workbooks. Before, Drafts had a
+  slider labelled only Fast and Smart, and its middle position sent no effort.
+- **GPT-6 models get the Reasoning control.** GPT-6.1 Sol and the rest of the
+  GPT-6 family now count as models that take a reasoning effort, in the
+  browser and in the API, as the GPT-5 family already did.
+- **Drafts lists only models that write text.** Picture models (gpt-image,
+  MAI image, Gemini image, and other image-output models) cannot draft a
+  document, yet the Drafts **Model:** menu and the **Drafting agent** setting
+  offered them. They are gone from both. An image model the person may use
+  still draws AI slide pictures, slide backgrounds, and paper illustrations
+  behind the scenes. A saved
+  picture-model default falls back to a text model, and a workspace with only
+  a picture model shows "No models connected". A picture model with no
+  reported capabilities, such as an Azure AI Foundry deployment added by hand,
+  is known by its deployment name (`gpt-image-1`, `MAI-Image-1`, `dall-e-3`,
+  `imagen-4`), the way the server already knew it, so it is hidden from the
+  menu and still draws pictures.
+- **Foundry Claude tests.** The Azure AI Foundry Claude tests now pin the
+  `anthropic-version` header for token sign-in too. No product code changed.
+- **What an operator has to do.** Nothing. There is no database migration, no
+  new environment variable, no new Compose service, and no new dependency.
+  Only API and web code, tests, and the version number change, so rolling
+  back to v0.5.26 is an image swap. Models that took their own default under
+  **Balanced** now receive medium; for Claude Sonnet 5.5 that is less
+  reasoning than before, for most others it is the same.
+- **Not shown or tried yet.** The effort each provider receives is proven by
+  tests and by the clean-install check's stand-in model, not by a live call
+  to each provider from an Aperture instance. S.F. Steward has run the same
+  gateway change against a live Azure AI Foundry resource. The training
+  lessons still say "Balanced for the model's usual pace" and show the old
+  Drafts slider; they are tied to recorded media.
+
 ## New Since v0.5.25
 
 This release carries over the Azure and Azure AI Foundry hardening made in

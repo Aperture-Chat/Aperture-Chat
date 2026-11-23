@@ -184,14 +184,14 @@ def _uses_openai_responses(route: ModelGatewayRoute) -> bool:
     return bool(_OPENAI_RESPONSES_ONLY_MODELS.search(tail))
 
 # Model families with controllable reasoning depth. OpenAI o-series (o1/o3/o4)
-# and the GPT-5 family accept `reasoning_effort`; Claude Opus 4.5+, Sonnet
+# and the GPT-5 and GPT-6 families accept `reasoning_effort`; Claude Opus 4.5+, Sonnet
 # 4.6+, and the Claude 5 family (Haiku included) accept `output_config.effort`; xAI Grok 4.3+,
 # 4.5, and 4.20 Multi-Agent accept effort via OpenRouter's unified reasoning
 # parameter (Grok 4.20 base and Grok Build list `reasoning` but not
 # `reasoning_effort` in OpenRouter's supported_parameters, so they stay out).
 # Non-reasoning models (e.g. gpt-4o) reject these parameters upstream, so
 # effort is only attached when the upstream model matches.
-_OPENAI_REASONING_MODELS = re.compile(r"(?:^|[^a-z0-9])(?:o[134](?:[^a-z0-9]|$)|gpt-5|gpt-oss)")
+_OPENAI_REASONING_MODELS = re.compile(r"(?:^|[^a-z0-9])(?:o[134](?:[^a-z0-9]|$)|gpt-[56]|gpt-oss)")
 _ANTHROPIC_REASONING_MODELS = re.compile(
     r"claude-(?:opus-4[.-][5-9]|sonnet-4[.-][6-9]|(?:opus|sonnet|haiku|fable|mythos)-5)"
 )
@@ -1512,7 +1512,7 @@ def _openai_responses_payload(
         and effort
         and supports_reasoning_effort(route.upstream_model, route.supported_parameters)
     ):
-        payload["reasoning"] = {"effort": effort}
+        payload["reasoning"] = {"effort": _native_effort(effort)}
     return payload
 
 
@@ -1843,9 +1843,7 @@ def _anthropic_payload(
         and effort
         and supports_reasoning_effort(route.upstream_model, route.supported_parameters)
     ):
-        # Anthropic's effort scale has no "minimal"; the fast path maps to
-        # its lowest level (thinking already stays off below "high").
-        payload["output_config"] = {"effort": "low" if effort == "minimal" else effort}
+        payload["output_config"] = {"effort": _native_effort(effort)}
         if effort == "high":
             # Deeper reasoning: let the model decide when and how much to think.
             payload["thinking"] = {"type": "adaptive"}
@@ -2030,12 +2028,32 @@ def _translate_anthropic_response(
     }
 
 
-def _supports_minimal_effort(upstream_model_id: str | None) -> bool:
-    """Only the GPT-5 family accepts "minimal" natively on direct OpenAI
-    dialects; everything else degrades to "low" (OpenRouter normalizes
-    per-provider itself, so this gate only applies off-OpenRouter)."""
-    tail = (upstream_model_id or "").strip().lower().rsplit("/", 1)[-1]
-    return "gpt-5" in tail
+def _native_effort(effort: str) -> str:
+    """The effort a native provider dialect receives.
+
+    The composer sends "minimal" for Fast, which every native dialect receives
+    as "low": Claude has no "minimal", and GPT-5.1 and later replaced it. So
+    Fast, Balanced, and Smart always arrive as low, medium, and high.
+    OpenRouter normalizes per provider itself and keeps the app's value.
+    """
+    return "low" if effort == "minimal" else effort
+
+
+def _is_grok(route: ModelGatewayRoute) -> bool:
+    tail = (route.upstream_model or "").strip().lower().rsplit("/", 1)[-1]
+    return tail.startswith("grok-")
+
+
+def _apply_openrouter_reasoning(payload: dict[str, Any], effort: str, *, grok: bool) -> None:
+    """OpenRouter's unified reasoning parameter, normalized per provider
+    (live-verified: "minimal" accepted for both OpenAI and Anthropic
+    upstreams; Anthropic maps it to its smallest thinking budget). Grok gets
+    its smallest documented level instead of trusting that."""
+    payload["reasoning"] = {"effort": _native_effort(effort) if grok else effort}
+    if effort == "minimal":
+        # Fast mode also prefers the highest-throughput provider for
+        # multi-provider models instead of the default price-led routing.
+        payload.setdefault("provider", {})["sort"] = "throughput"
 
 
 def _apply_reasoning_effort(payload: dict[str, Any], route: ModelGatewayRoute) -> None:
@@ -2043,41 +2061,31 @@ def _apply_reasoning_effort(payload: dict[str, Any], route: ModelGatewayRoute) -
 
     The parameter is dropped entirely for models without reasoning control so
     non-reasoning upstreams (e.g. gpt-4o) never see a parameter they reject.
-    "minimal" is the fast path: the smallest reasoning spend the model
-    supports, plus throughput-priority provider routing on OpenRouter.
+    The composer sends "minimal" for Fast, "medium" for Balanced, and "high"
+    for Smart; Fast also gets throughput-priority provider routing on
+    OpenRouter.
     """
     effort = payload.pop("reasoning_effort", None)
     if not isinstance(effort, str) or not effort:
         return
     if not supports_reasoning_effort(route.upstream_model, route.supported_parameters):
         return
+    grok = _is_grok(route)
+    if grok and effort == "medium":
+        # xAI documents only low/high effort, so Balanced keeps Grok's default.
+        return
     if _provider_kind(route.provider_kind) == "openrouter":
-        # OpenRouter's unified reasoning parameter, normalized per provider
-        # (live-verified: "minimal" accepted for both OpenAI and Anthropic
-        # upstreams; Anthropic maps it to its smallest thinking budget).
-        # xAI documents only low/high effort, so the fast path sends the
-        # smallest level Grok supports instead of trusting normalization.
-        fast_path = effort == "minimal"
-        tail = (route.upstream_model or "").strip().lower().rsplit("/", 1)[-1]
-        if fast_path and tail.startswith("grok-"):
-            effort = "low"
-        payload["reasoning"] = {"effort": effort}
-        if fast_path:
-            # Fast mode also prefers the highest-throughput provider for
-            # multi-provider models instead of the default price-led routing.
-            payload.setdefault("provider", {})["sort"] = "throughput"
-    else:
-        # Direct xAI rejects reasoning_effort on its always-reasoning Grok 4
-        # family (only OpenRouter's unified parameter normalizes it), so on
-        # the native API effort rides only on catalog-confirmed support.
-        if (
-            _provider_kind(route.provider_kind) in {"xai", "grok"}
-            and "reasoning_effort" not in route.supported_parameters
-        ):
-            return
-        if effort == "minimal" and not _supports_minimal_effort(route.upstream_model):
-            effort = "low"
-        payload["reasoning_effort"] = effort
+        _apply_openrouter_reasoning(payload, effort, grok=grok)
+        return
+    # Direct xAI rejects reasoning_effort on its always-reasoning Grok 4
+    # family (only OpenRouter's unified parameter normalizes it), so on the
+    # native API effort rides only on catalog-confirmed support.
+    if (
+        _provider_kind(route.provider_kind) in {"xai", "grok"}
+        and "reasoning_effort" not in route.supported_parameters
+    ):
+        return
+    payload["reasoning_effort"] = _native_effort(effort)
 
 
 def _apply_completion_token_budget(

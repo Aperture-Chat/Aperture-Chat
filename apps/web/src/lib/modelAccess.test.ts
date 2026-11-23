@@ -4,6 +4,7 @@ import type { BootstrapData, ModelConfig } from "./types";
 import {
   agentProfileVisibleToUser,
   approvedWorkspaceModels,
+  isImageGenerationModel,
   isModelUsable,
   preferredModel,
   supportsReasoningEffort,
@@ -50,6 +51,27 @@ test("first-use model preference uses reported outputs instead of an image-like 
   expect(preferredModel([image, text])?.id).toBe(text.id);
   expect(preferredModel([image, unreported])?.id).toBe(unreported.id);
   expect(preferredModel([])).toBeNull();
+});
+
+test("only a model that reports image output counts as an image model", () => {
+  expect(isImageGenerationModel({ capabilities: { output_modalities: ["text", "image"] } })).toBe(true);
+  expect(isImageGenerationModel({ capabilities: { output_modalities: ["text"], input_modalities: ["image"] } })).toBe(false);
+  // Partial or missing capability data is a text model, never a crash.
+  expect(isImageGenerationModel({ capabilities: { input_modalities: ["image"] } })).toBe(false);
+  expect(isImageGenerationModel({ capabilities: null })).toBe(false);
+});
+
+test("an image deployment with no capability data is known by its name, as the server knows it", () => {
+  // Azure AI Foundry deployments added by hand carry no capability data.
+  for (const upstream of ["gpt-image-1", "MAI-Image-1", "openai/dall-e-3", "imagen-4", "google/gemini-3.1-flash-image-preview"]) {
+    expect(isImageGenerationModel({ capabilities: null, upstream_model_id: upstream })).toBe(true);
+  }
+  expect(isImageGenerationModel({ capabilities: { output_modalities: [] }, upstream_model_id: "gpt-image-1" })).toBe(true);
+  for (const upstream of ["gpt-5.5", "openai/gpt-4o-mini", "imagery-mini", "claude-sonnet-5-5", null]) {
+    expect(isImageGenerationModel({ capabilities: null, upstream_model_id: upstream })).toBe(false);
+  }
+  // Reported outputs win over the name.
+  expect(isImageGenerationModel({ capabilities: { output_modalities: ["text"] }, upstream_model_id: "gpt-image-1" })).toBe(false);
 });
 
 function withCatalogOnlyModel(me: BootstrapData["me"]) {
@@ -164,6 +186,8 @@ test("supportsReasoningEffort activates only for reasoning-capable model familie
   expect(supportsReasoningEffort(routeModel("claude-opus", "Claude Opus 4.8", "claude-opus-4-8"))).toBe(true);
   // Claude Haiku 5 takes effort too (Azure AI Foundry, live).
   expect(supportsReasoningEffort(routeModel("foundry-claude-haiku", "Claude Haiku 5.5", "claude-haiku-5-5"))).toBe(true);
+  // Live Foundry GPT-6.1 Sol takes low, medium, and high effort.
+  expect(supportsReasoningEffort(routeModel("foundry-gpt-6-1-sol", "GPT-6.1 Sol", "gpt-6.1-sol"))).toBe(true);
   expect(supportsReasoningEffort(routeModel("groq-gpt-oss-120b", "GPT OSS 120B", "openai/gpt-oss-120b"))).toBe(true);
   // Grok versions with OpenRouter effort control (per supported_parameters).
   expect(
