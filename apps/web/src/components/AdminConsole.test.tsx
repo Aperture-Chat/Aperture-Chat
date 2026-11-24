@@ -620,6 +620,163 @@ test("admin group editor persists membership and expanded default-on permissions
   );
 });
 
+test("a tenant admin creates a group with Add me on and joins it", async () => {
+  const createdGroup: Group = {
+    id: "group-trial-team",
+    tenant_id: "tenant-example",
+    name: "Trial Team",
+    distinguished_name: "Platform-managed group",
+    entra_object_id: "",
+    synced: true,
+    user_count: 1,
+    permissions: {},
+    created_by_user_id: "user-admin",
+  };
+  const adminApi: AdminConsoleApi = { createGroup: vi.fn(async () => createdGroup) };
+
+  renderAdmin(adminApi);
+  selectTab("Groups");
+  fireEvent.click(await screen.findByRole("button", { name: "Add Group" }));
+  expect(screen.getByRole("switch", { name: "Add me to this group" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Trial Team" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+
+  await waitFor(() =>
+    expect(adminApi.createGroup).toHaveBeenCalledWith(
+      "user-admin",
+      expect.objectContaining({ name: "Trial Team", add_me: true }),
+      expect.any(Object),
+    ),
+  );
+  expect(await screen.findByText("Trial Team was created, and you are a member.")).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Remove me from Trial Team" })).toHaveAttribute("aria-checked", "true");
+  const card = screen.getByLabelText("Select Trial Team for removal").closest(".managed-group-card") as HTMLElement;
+  expect(within(card).getByText("1 platform member")).toBeInTheDocument();
+});
+
+test("a tenant admin can turn Add me off before creating a group", async () => {
+  const createdGroup: Group = {
+    id: "group-trial-team",
+    tenant_id: "tenant-example",
+    name: "Trial Team",
+    distinguished_name: "Platform-managed group",
+    entra_object_id: "",
+    synced: true,
+    user_count: 0,
+    permissions: {},
+    created_by_user_id: "user-admin",
+  };
+  const adminApi: AdminConsoleApi = { createGroup: vi.fn(async () => createdGroup) };
+
+  renderAdmin(adminApi);
+  selectTab("Groups");
+  fireEvent.click(await screen.findByRole("button", { name: "Add Group" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Add me to this group" }));
+  fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Trial Team" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+
+  await waitFor(() =>
+    expect(adminApi.createGroup).toHaveBeenCalledWith(
+      "user-admin",
+      expect.objectContaining({ name: "Trial Team", add_me: false }),
+      expect.any(Object),
+    ),
+  );
+  expect(await screen.findByText("Trial Team was added as a platform group.")).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Add me to Trial Team" })).toHaveAttribute("aria-checked", "false");
+});
+
+test("a platform owner sees no Add me switch and never asks to join a new group", async () => {
+  const data = cloneData();
+  data.me = data.users.find((user) => user.role === "PLATFORM_OWNER")!;
+  const adminApi: AdminConsoleApi = {
+    createGroup: vi.fn(async (_actor, payload) => ({ ...payload, id: "group-new", user_count: 0 }) as Group),
+  };
+
+  renderAdmin(adminApi, data);
+  selectTab("Groups");
+  fireEvent.click(await screen.findByRole("button", { name: "Add Group" }));
+  expect(screen.queryByRole("switch", { name: "Add me to this group" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Owner Team" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+
+  await waitFor(() => expect(adminApi.createGroup).toHaveBeenCalled());
+  const payload = vi.mocked(adminApi.createGroup!).mock.calls[0][1] as { add_me?: boolean };
+  expect(payload.add_me).toBe(false);
+});
+
+test("a tenant admin adds and removes themself in a group they created", async () => {
+  const data = cloneData();
+  data.groups = data.groups.map((group) =>
+    group.id === "group-corporate" ? { ...group, created_by_user_id: "user-admin" } : group,
+  );
+  const adminApi: AdminConsoleApi = {
+    updateUser: vi.fn(),
+    setOwnGroupMembership: vi.fn(async (_actor, groupId, member) => ({
+      ...data.me,
+      group_ids: member ? [...data.me.group_ids, groupId] : data.me.group_ids,
+    })),
+  };
+
+  renderAdmin(adminApi, data);
+  selectTab("Groups");
+  fireEvent.click(await screen.findByText("Corporate"));
+  const card = screen.getByLabelText("Select Corporate for removal").closest(".managed-group-card") as HTMLElement;
+  expect(within(card).getByText("0 platform members")).toBeInTheDocument();
+  expect(screen.getByText(/You created this group, so you can add yourself\./)).toBeInTheDocument();
+  const myRow = screen.getByRole("row", { name: /Alex Morgan/ });
+  expect(within(myRow).getByText("You")).toBeInTheDocument();
+
+  fireEvent.click(within(myRow).getByRole("switch", { name: "Add me to Corporate" }));
+
+  await waitFor(() =>
+    expect(adminApi.setOwnGroupMembership).toHaveBeenCalledWith("user-admin", "group-corporate", true, expect.any(Object)),
+  );
+  expect(await screen.findByText("You are now a member of Corporate.")).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Remove me from Corporate" })).toHaveAttribute("aria-checked", "true");
+  expect(within(card).getByText("1 platform member")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("switch", { name: "Remove me from Corporate" }));
+
+  await waitFor(() =>
+    expect(adminApi.setOwnGroupMembership).toHaveBeenLastCalledWith("user-admin", "group-corporate", false, expect.any(Object)),
+  );
+  expect(await screen.findByText("You are no longer a member of Corporate.")).toBeInTheDocument();
+  expect(within(card).getByText("0 platform members")).toBeInTheDocument();
+  expect(adminApi.updateUser).not.toHaveBeenCalled();
+});
+
+test("a tenant admin cannot join someone else's group or add another administrator", async () => {
+  const data = cloneData();
+  data.groups = data.groups.map((group) =>
+    group.id === "group-corporate" ? { ...group, created_by_user_id: "user-drew" } : group,
+  );
+  renderAdmin({ setOwnGroupMembership: vi.fn(), updateUser: vi.fn() }, data);
+  selectTab("Groups");
+  fireEvent.click(await screen.findByText("Corporate"));
+
+  expect(screen.getByText(/Only the platform owner can add administrators to a group\./)).toBeInTheDocument();
+  const mySwitch = screen.getByRole("switch", { name: "Add Alex Morgan to Corporate" });
+  expect(mySwitch).toBeDisabled();
+  expect(mySwitch).toHaveAttribute("data-tooltip", "You can add yourself only to groups you created");
+  const peerSwitch = screen.getByRole("switch", { name: "Add Drew Parker to Corporate" });
+  expect(peerSwitch).toBeDisabled();
+  expect(peerSwitch).toHaveAttribute("data-tooltip", "Only the platform owner can add or remove administrators");
+});
+
+test("other administrators stay locked even in a group the tenant admin created", async () => {
+  const data = cloneData();
+  data.groups = data.groups.map((group) =>
+    group.id === "group-corporate" ? { ...group, created_by_user_id: "user-admin" } : group,
+  );
+  renderAdmin({ setOwnGroupMembership: vi.fn(), updateUser: vi.fn() }, data);
+  selectTab("Groups");
+  fireEvent.click(await screen.findByText("Corporate"));
+
+  expect(screen.getByRole("switch", { name: "Add me to Corporate" })).toBeEnabled();
+  expect(screen.getByRole("switch", { name: "Add Drew Parker to Corporate" })).toBeDisabled();
+});
+
 test("admin group import adds platform users to the selected group", async () => {
   const data = cloneData();
   const maya = data.visibleUsers.find((user) => user.id === "user-maya")!;

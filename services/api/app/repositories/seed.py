@@ -2657,6 +2657,7 @@ class SeedStore:
             self.users.pop(user_id, None)
             self.password_credentials.pop(user_id, None)
             self.temporary_password_user_ids.discard(user_id)
+            self._forget_group_creator_locked(user_id)
             # Memory rows must go with the account: snapshot validation
             # rejects a memory whose owner no longer exists, and the content
             # is private to the deleted user anyway. Count only, never text.
@@ -2669,7 +2670,16 @@ class SeedStore:
                 self.user_memories.pop(memory_id, None)
             self.user_memory_settings.pop(user_id, None)
             removed["user_memories"] = len(memory_ids)
+            _release_tools_of_deleted_user(self.tool_configs.values(), user_id)
             return removed
+
+    def _forget_group_creator_locked(self, user_id: str) -> None:
+        # User ids can be reused (create_user takes any id; SSO ids derive
+        # from the email). Forget the creator so a later account with this id
+        # cannot add itself to these groups; the owner still manages them.
+        for group in self.groups.values():
+            if group.created_by_user_id == user_id:
+                group.created_by_user_id = None
 
     def record_audit(
         self,
@@ -6008,6 +6018,18 @@ _AUDIT_TARGET_TYPES = (
     ("issue_", "support-ticket"),
     ("hub_", "community-report"),
 )
+
+
+def _release_tools_of_deleted_user(tool_configs: Iterable[ToolConfig], user_id: str) -> None:
+    """A later account may reuse a deleted account's id, and must inherit none
+    of its tools. Its Only me connections turn off and lose their owner, which
+    leaves them to platform owners alone, and it stops being anyone's creator."""
+    for config in tool_configs:
+        if config.created_by_user_id == user_id:
+            config.created_by_user_id = None
+        if config.only_me and config.owner_user_id == user_id:
+            config.owner_user_id = None
+            config.enabled = False
 
 
 def _audit_action_type(action: str, metadata: dict[str, object]) -> str:

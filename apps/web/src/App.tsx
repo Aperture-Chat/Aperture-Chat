@@ -26,6 +26,7 @@ import {
   bulkCreateAdminGroups,
   bulkDeleteAdminGroups,
   createAdminGroup,
+  setAdminOwnGroupMembership,
   createAdminToolConfig,
   createAdminContentFilter,
   updateAdminContentFilter,
@@ -964,6 +965,8 @@ export function App() {
       deleteGroup: async (actorUserId, groupId) => {
         await deleteAdminGroup(actorUserId, groupId);
       },
+      setOwnGroupMembership: (actorUserId, groupId, member) =>
+        setAdminOwnGroupMembership(actorUserId, groupId, member),
       deleteGroups: async (actorUserId, groupIds) => {
         const result = await bulkDeleteAdminGroups(actorUserId, {
           group_ids: groupIds,

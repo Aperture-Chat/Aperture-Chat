@@ -12,8 +12,9 @@ from app.core.policy import (
     knowledge_config_visible_to_user,
     model_access_allowed,
     tool_authoring_allowed,
+    tool_config_visible_to,
 )
-from app.models.schemas import ChatSession, KnowledgeConfig, Role, User
+from app.models.schemas import ChatSession, KnowledgeConfig, Role, ToolConfig, User
 from app.repositories.deps import get_store
 from app.repositories.seed import SeedStore
 from app.routes.dependencies import current_user
@@ -102,17 +103,7 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
             if knowledge_config_visible_to_user(actor, record)
         ]
         snapshot["toolConfigs"] = [
-            record
-            for record in store.tool_configs.values()
-            if record.tenant_id == actor.tenant_id
-            # Another user's private (owner-scoped, unshared) tools stay out
-            # of the payload; admins keep the full tenant catalog.
-            and (
-                is_tenant_admin(actor)
-                or not record.owner_user_id
-                or record.allowed_group_ids
-                or record.owner_user_id == actor.id
-            )
+            record for record in store.tool_configs.values() if _tool_in_workspace_payload(actor, record)
         ]
         snapshot["promptTemplates"] = [
             record for record in store.prompt_templates.values() if record.tenant_id == actor.tenant_id
@@ -142,6 +133,22 @@ class KnowledgeConfigView(KnowledgeConfig):
     """A knowledge base as the workspace shows it, with its matter's name."""
 
     matter_label: str | None = None
+
+
+def _tool_in_workspace_payload(actor: User, record: ToolConfig) -> bool:
+    """Another user's private (owner-scoped, unshared) tool stays out of the
+    payload, and so does another admin's Only me connection; admins otherwise
+    keep the full tenant catalog."""
+    return (
+        record.tenant_id == actor.tenant_id
+        and tool_config_visible_to(actor, record)
+        and bool(
+            is_tenant_admin(actor)
+            or not record.owner_user_id
+            or record.allowed_group_ids
+            or record.owner_user_id == actor.id
+        )
+    )
 
 
 def _with_matter_labels(store: SeedStore, records: list[KnowledgeConfig]) -> list[KnowledgeConfigView]:
