@@ -64,13 +64,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.27](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.27)**:
-> **Fast**, **Balanced**, and **Smart** now ask every model for low, medium,
-> and high reasoning, in chat and in Drafts, and the Drafts model menu lists
-> only models that write text.
-> v0.5.26 added pictures in chat replies and papers, and Claude on Azure AI
-> Foundry.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0526) and
+> **Current release: [v0.5.28](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.28)**:
+> You can now delete and add blocks on a slide, let **Auto** pick the
+> reasoning level, and keep a connection to **Only me**, and agents receive
+> attached prompts and skills of up to 65,000 characters.
+> v0.5.27 made **Fast**, **Balanced**, and **Smart** ask every model for low,
+> medium, and high reasoning, in chat and in Drafts.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0527) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -95,14 +95,14 @@ policies appropriate for your organization's data.
 <sub>Also scripted: a stand-in model (<code>qa-filtered</code>) answered every try with the filter's refusal and named Azure as its server, and a second stand-in (<code>qa-stub</code>) wrote the answer. The retries, the switch, and the trace are the application's own.</sub>
 
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
-- **Reasoning levels.** Under **Reasoning** in **Send options**, choose **Fast**, **Balanced**, or **Smart**. They ask the model for low, medium, and high reasoning, the same on every model that supports it. **Fast** also keeps the answer short and skips research steps.
+- **Reasoning levels.** Under **Reasoning** in **Send options**, choose **Fast**, **Balanced**, or **Smart**. They ask the model for low, medium, and high reasoning, the same on every model that supports it. **Fast** also keeps the answer short and skips research steps. Check **Auto** and Aperture picks the level for each message from its words and attachments, without asking a model. The rail then shows the level it picked.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
 - **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, a page step reads only an address from the search results, your own messages, or your knowledge sources, and Fast replies skip them.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
 - **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it. If the connection drops, the reply picks up where it stopped, and an empty answer to "continue" is asked again instead of ending the reply.
 - **When a provider's filter refuses.** Some providers run their own safety filter (Azure does for the OpenAI models it hosts) and send "I'm sorry, but I cannot assist with that request." in place of the answer. Aperture asks again twice. If the filter keeps refusing, another model you are allowed to use answers instead, and the work trace names it. A reply the filter cuts off partway goes on from where it stopped. Each switch is recorded in the audit log.
-- **Pictures in replies.** Ask for pictures, photos, or images and the reply places them where they belong. With **Web** on, each one is a freely licensed photo from Wikimedia Commons (public domain, CC0, CC BY, or CC BY-SA) with its credit and a link to its source. Otherwise, or when no photo fits, an image model you may use draws an illustration that is labelled as one. When neither is possible, the reply says so in that place.
-- **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
+- **Pictures in replies.** Ask for pictures, photos, or images and the reply places them where they belong. With **Web** on, each one is a freely licensed photo from Wikimedia Commons (public domain, CC0, CC BY, or CC BY-SA) with its credit and a link to its source. Otherwise, or when no photo fits, an image model you may use draws an illustration that is labelled as one. When neither is possible, the reply says so in that place. The OpenRouter model sync also brings in models that only make pictures, such as MAI-Image.
+- **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. A code block that is still being written keeps its newest lines in view until you scroll up in it. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
 - **Client-matter numbers.** File a chat under a client-matter number from the **Matter** row in **Send options**. Numbers you type are saved for reuse, and the same numbers tag knowledge bases, so records staff can find a matter's chats in retention and its knowledge bases in Library search.
 - **Dictation.** Speak into the composer's microphone. Transcription uses a Gemini Flash model or a speech model such as Whisper or gpt-4o-transcribe (on Groq, OpenAI, Azure OpenAI, or Azure AI Foundry), and a busy or unreachable model hands the recording to the next one.
 - **Work traces.** Review the steps, sources, and provider-reported usage behind each reply, live while it streams. Provider-reported usage depends on the provider.
@@ -128,7 +128,7 @@ policies appropriate for your organization's data.
 - **One workspace, three formats.** Switch between **Document**, **Deck**, and **Spreadsheet** in Drafts. Manual editing, import, saving, and export work even before AI drafting is configured.
 - **Spreadsheets.** Build multi-sheet workbooks with Excel-style formulas, tables, pivot tables, and charts, open and export `.xlsx` and `.csv` files, and ask the **Spreadsheet Assistant** to edit a selection or build whole tables.
 - **Drafting context.** Choose templates, upload a Word template, attach files, select knowledge, and control web search from the assistant rail. **Open in editor** opens a Word or PDF file with its page setup, headers, footers, and tables intact, a Markdown or text file as the document, or a PowerPoint file as the deck. Ask for page layout in plain words and it is applied without rewriting a word.
-- **Drafting model and reasoning.** The **Model:** menu lists only models that write text. An image model you may use still draws slide pictures and illustrations in the background. **Assistant settings** offers the same **Fast**, **Balanced**, and **Smart** levels as chat, for documents, decks, and spreadsheets, and remembers your choice for both.
+- **Drafting model and reasoning.** The **Model:** menu lists only models that write text. An image model you may use still draws slide pictures and illustrations in the background. **Assistant settings** offers the same **Fast**, **Balanced**, and **Smart** levels and **Auto** box as chat, for documents, decks, and spreadsheets, and remembers your choice for both. When the assistant takes another pass to finish or fix its answer, that pass uses the same level.
 
 <p align="center">
   <img src="docs/images/drafts-reasoning-light.png" alt="Drafts Assistant settings with the drafting agent, Reasoning set to Smart with the help line Takes longer and thinks it through, and the citation and question switches" width="760">
@@ -144,6 +144,15 @@ policies appropriate for your organization's data.
 - **Edit with AI.** Select text and choose **Ask AI**, or rework a whole slide with **Edit slide with AI**. Every suggestion is reviewed before it replaces anything, and word-level edits keep the original formatting. A **Legal & business** group adds actions such as **Tighten this clause**, **Break into numbered sub-clauses**, **Lead with the conclusion**, and **Make figures consistent**; decks add **Write a takeaway title**, and spreadsheets add **Add variance columns** and **Check that the totals add up**.
 - **Pictures in papers.** Ask for a paper with pictures, or choose **Add a picture**, and the editor finds a freely licensed photo (with **Web** on) or draws a labelled illustration, with the credit and source under each photo. Pictures are stored inside the document, so they stay when it saves; a document can hold up to 8 MB. When a save is refused, the status says why, and **Retry** tries again.
 - **Editor tools.** A `/` command menu, Markdown shortcuts, find and replace, a heading outline, zoom, and table and picture tools. For decks, a slide panel adds slides, changes layouts (including statement, big-number, and picture-with-bullets), and places pictures with alt text; a floating text toolbar formats text, overflowing text shrinks to fit as in PowerPoint, and seven theme designs, a slide sorter, snapping guides, and presenter view round it out.
+- **Delete and add slide blocks.** Select any block on a slide, such as the title, a list, or the picture, and delete it with its delete button or the Delete key. Undo brings it back with its words. **Put back deleted blocks** returns the blocks the slide's layout came with, empty. To add something, choose the plus in the slide's largest empty area, or right-click an empty spot. The menu offers **Ask AI**, **Text box**, **Bullet list**, and **Picture**, and a slide holds up to 12 added blocks. Added blocks appear in the slide thumbnails and the PowerPoint export.
+- **When AI pictures are off.** If no image model is available to you, **Generate AI picture** in the slide picture panel is greyed out and says what is missing and who can fix it.
+
+<p align="center">
+  <img src="docs/images/deck-add-block-light.png" alt="Slide editor with the add menu open in a slide's empty space, offering Ask AI, Text box, Bullet list, and Picture" width="760">
+</p>
+
+<sub>The model named in this picture (<code>qa-stub</code>) is a scripted stand-in that was not asked for anything; the slide text was typed by hand and the menu is the application's own. See <a href="docs/images/README.md">how the pictures were made</a>.</sub>
+
 - **Share and edit together.** Every draft starts private. **Share** offers **Only me**, **My group**, or **Specific people**; group shares follow current group membership, and a draft in a matter is shared only with people on that matter. A shared draft saves itself into one live copy, two people can edit at once, and their changes merge (documents by paragraph and word, decks by slide, spreadsheets by cell) while colored initials show who else is in it. Only the owner changes sharing, archives, or deletes it.
 - **Versions you can trust.** Save versions, compare and return to versions while a draft is open, preview history, and archive drafts. On a shared draft every saved version records who saved it and **Bring back** restores it for everyone. Entries marked **Local only** stay in the browser, so export a copy before switching devices.
 - **Academic formatting.** MLA-aware layout with double spacing, first-line indents, and reference formatting.
@@ -175,7 +184,9 @@ policies appropriate for your organization's data.
 | --- | --- |
 | ![Agents page with three agents, their models, audiences, knowledge, and readiness](docs/images/agents-light.png) | ![Automations page with weekly, weekday, and one-time automations and their next runs](docs/images/automations-light.png) |
 
-- **Agents** bundle instructions, a model, knowledge, tools, prompts, and skills into a reusable assistant. Choose who can use each one, check its readiness, and start from a template or duplicate an existing agent. Templates include **Contract Reviewer**, **Deposition Summarizer**, **Financial Analyst**, and **Client Memo Writer**.
+- **Agents** bundle instructions, a model, knowledge, tools, prompts, and skills into a reusable assistant. Choose who can use each one, check its readiness, and start from a template or duplicate an existing agent. Templates fold away under **Start from a template** and include **Contract Reviewer**, **Deposition Summarizer**, **Financial Analyst**, and **Client Memo Writer**.
+- **Models that write.** The **AI model** list on an agent's profile leaves out models that only make pictures, because an agent needs a model that writes. Its answers can still include pictures. An agent saved on a picture model says so and asks you to choose another model before saving.
+- **Long prompts and skills.** An agent receives each attached prompt or skill up to 65,000 characters, in chat and in automations. The Library editor counts the characters against that limit.
 - **Automations** run a prompt through one or more models or agents, once, weekly, or on a cron schedule in the time zone you choose. A live preview lists the next runs, and invalid schedules are rejected before they are saved. Recipes such as **Weekly matter status**, **Month-end variance commentary**, and **Regulatory watch** fill in a starting prompt and schedule.
 - **Delivered where you work.** Each run arrives as a new chat or a new draft, and the last 10 runs, including **Run now**, are kept in the run history. Scheduled automations pause after three failures in a row.
 
@@ -195,6 +206,11 @@ policies appropriate for your organization's data.
 - **Sync** re-fetches web pages and API sources and never touches uploaded files. API requests pass the outbound guards and refuse redirects.
 - **Cloud sources.** Connect Google Drive, Box, SharePoint, OneDrive, or iManage with the provider's credentials and permissions. A successful connection does not grant every user access to every document.
 - **Tools** hold MCP connections, prompt templates, and skills. Connections are tested before they are saved, and tool use remains subject to workspace policy: access is checked when a tool is approved and again at the moment it runs.
+- **Only me.** An administrator sets who can use an MCP connection under **Who can use it**: **Only me**, **Everyone**, or **Specific groups**. With **Only me**, other workspace administrators cannot see it, open it, or read its audit events. Platform owners still see every connection. Only the person who created the connection, or a platform owner, can choose **Only me**.
+
+<p align="center">
+  <img src="docs/images/tools-only-me-light.png" alt="A connection in the Library's Tools with Who can use it set to Only me, beside Everyone and Specific groups, and the line Only you can use this connection" width="760">
+</p>
 
 ### Administration and identity
 
@@ -209,6 +225,7 @@ policies appropriate for your organization's data.
 | **User** | Granted chat, drafting, agent, knowledge, and tool workflows. |
 
 - **Sign-in.** OIDC with Entra ID, Google Workspace, Okta, or a custom provider; optional [WorkOS AuthKit](docs/WORKOS_SSO.md) with your own WorkOS account; SCIM 2.0 provisioning with its bearer token; local accounts with temporary-password rotation, authenticator setup, and recovery.
+- **Groups you created.** A workspace administrator can join or leave a group they created. Turn on **Add me to this group** when creating it, or use your own switch in the group's **Member** column later. Adding other administrators to a group stays with the platform owner.
 - **Secrets.** Provider and connector secrets are encrypted at rest and masked in the UI and API. Managing or revealing provider secrets requires platform-owner authorization; workspace admins can replace their own connectors' credentials but never read them back.
 - **Personal data.** Optionally conceal Social Security, card, and account numbers, contact details, health identifiers, and secrets wherever chats are stored, shown, or exported, and keep them from the model. Detection runs inside your deployment.
 - **Training datasets.** Optionally capture de-identified ratings and corrections, route them by practice area and department, review them, and download fine-tuning datasets for an open-weight model.
@@ -227,7 +244,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.27
+#   APERTURE_IMAGE_TAG=v0.5.28
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -248,7 +265,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.27 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.28 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -283,10 +300,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.27` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.28` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.27-dev`, `v0.5.27-test`, `v0.5.27-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.28-dev`, `v0.5.28-test`, `v0.5.28-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
