@@ -2085,6 +2085,9 @@ def _model_from_payload(
             "access_request_status",
             "access_requested_at",
             "access_reviewed_at",
+            # The GitHub star request clock shipped later still; None means
+            # the clock starts on the person's next visit.
+            "star_prompt",
         ):
             canonical_payload.setdefault(field_name, None)
     try:

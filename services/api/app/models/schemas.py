@@ -314,6 +314,31 @@ class PlatformSettingsUpdateRequest(BaseModel):
     users_can_browse_model_catalog: bool | None = None
 
 
+StarPromptAnswer = Literal["star", "later"]
+
+
+class StarPromptAsk(BaseModel):
+    """One showing of the GitHub star request and how it was answered."""
+
+    asked_at: datetime
+    answer: StarPromptAnswer | None = None
+
+
+class StarPrompt(BaseModel):
+    """When this person's star-request clock began and each time they were asked."""
+
+    started_at: datetime
+    asks: list[StarPromptAsk] = Field(default_factory=list, max_length=2)
+
+
+class StarPromptCheck(BaseModel):
+    ask: Literal[1, 2] | None = None
+
+
+class StarPromptAnswerRequest(BaseModel):
+    answer: StarPromptAnswer
+
+
 class User(BaseModel):
     id: str
     tenant_id: str | None = None
@@ -331,6 +356,7 @@ class User(BaseModel):
     last_active: str = "Never"
     auth_method: str = "sso"
     first_run_guide_seen_at: str | None = None
+    star_prompt: StarPrompt | None = None
     first_name: str | None = None
     last_name: str | None = None
     access_request_status: Literal["pending", "approved"] | None = None

@@ -19,6 +19,7 @@ import { AutomationsConsole } from "./components/AutomationsConsole";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { SessionRestoreScreen } from "./components/SessionRestoreScreen";
 import { FirstRunWelcome } from "./components/FirstRunWelcome";
+import { GitHubStarPrompt } from "./components/GitHubStarPrompt";
 import { ModelAccessExplainer } from "./components/ModelAccessExplainer";
 import {
   createAdminConnectorConfig,
@@ -1652,6 +1653,13 @@ export function App() {
               setHelpDrawerRequestKey((key) => key + 1);
             }
           }}
+        />
+      )}
+      {sessionHydrated && sessionUserId && !viewAsRole && (
+        <GitHubStarPrompt
+          userId={data.me.id}
+          brandName={chatBrandName}
+          held={firstRunGuideRequest !== null || Boolean(pwaInstallPlatform)}
         />
       )}
       {content}

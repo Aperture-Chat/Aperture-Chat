@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 
 from app.core import oidc, workos
 from app.core.config import get_settings
+from app.core.star_prompt import answer_star_prompt, check_star_prompt
 from app.core.policy import api_access_allowed
 from app.core.rate_limit import ProcessLocalTokenBucket
 from app.core.sessions import (
@@ -23,6 +24,9 @@ from app.core.sessions import (
     verify_oidc_state,
 )
 from app.models.schemas import (
+    StarPrompt,
+    StarPromptAnswerRequest,
+    StarPromptCheck,
     AuthBootstrapOwnerRequest,
     AccessRequestCreateRequest,
     AccessRequestCreateResponse,
@@ -961,15 +965,19 @@ def update_profile(
     return user
 
 
+def _active_user(store: SeedStore, actor: User) -> User:
+    user = store.users.get(actor.id)
+    if user is None or not user.active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown or inactive user.")
+    return user
+
+
 @router.post("/first-run-guide/seen", response_model=User)
 def mark_first_run_guide_seen(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> User:
-    user = store.users.get(actor.id)
-    if user is None or not user.active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown or inactive user.")
-
+    user = _active_user(store, actor)
     if user.first_run_guide_seen_at:
         return user
 
@@ -982,6 +990,36 @@ def mark_first_run_guide_seen(
     )
     store.save_runtime_state()
     return user
+
+
+def _keep_star_prompt(store: SeedStore, user: User, prompt: StarPrompt | None) -> None:
+    if prompt != user.star_prompt:
+        user.star_prompt = prompt
+        store.save_runtime_state()
+
+
+@router.post("/star-prompt/check", response_model=StarPromptCheck)
+def check_github_star_prompt(
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> StarPromptCheck:
+    """Say whether to ask this person for a GitHub star now (and count it as asked)."""
+    user = _active_user(store, actor)
+    prompt, ask = check_star_prompt(user.star_prompt, now_utc())
+    _keep_star_prompt(store, user, prompt)
+    return StarPromptCheck(ask=ask)
+
+
+@router.post("/star-prompt/answer", status_code=status.HTTP_204_NO_CONTENT)
+def answer_github_star_prompt(
+    payload: StarPromptAnswerRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> Response:
+    user = _active_user(store, actor)
+    prompt = answer_star_prompt(user.star_prompt, payload.answer)
+    _keep_star_prompt(store, user, prompt)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/password")

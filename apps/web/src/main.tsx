@@ -26,6 +26,7 @@ import "./clarify-card.css";
 import "./components/account-drawer.css";
 import "./components/document-viewer.css";
 import "./components/session-panel.css";
+import "./components/github-star-prompt.css";
 // After the tactile layer: phone-width layout and touch-target adjustments.
 import "./mobile.css";
 
