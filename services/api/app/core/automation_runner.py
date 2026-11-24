@@ -78,8 +78,10 @@ RUN_HISTORY_LIMIT = 10
 AGENT_STEP_KNOWLEDGE_LIMIT = 4
 AGENT_STEP_PASSAGE_CHARS = 1200
 AGENT_STEP_QUERY_CHARS = 2000
-# Bytes of instruction text quoted from each template or skill file.
-AGENT_STEP_EXCERPT_CHARS = 4000
+# Characters of instruction text quoted from each template or skill file.
+# Matches PROMPT_LIBRARY_EXCERPT_CHARS in app/routes/chat.py and the limit
+# the Library editor shows (ToolLibraryManager.tsx).
+AGENT_STEP_EXCERPT_CHARS = 65_000
 DRAFT_TITLE_CHARS = 200
 
 

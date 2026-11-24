@@ -9296,7 +9296,7 @@ def _prompt_cites_strictly(runtime_context: dict[str, object]) -> bool:
 # Attached prompt templates and skill files are authored instructions, so they
 # get a larger budget than retrieved snippets. The Library editor shows this
 # limit to authors; keep the two in sync (ToolLibraryManager.tsx).
-PROMPT_LIBRARY_EXCERPT_CHARS = 4000
+PROMPT_LIBRARY_EXCERPT_CHARS = 65_000
 
 
 def _prompt_excerpt(text: str, *, limit: int = 1000) -> str:

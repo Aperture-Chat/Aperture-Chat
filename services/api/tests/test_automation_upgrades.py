@@ -590,3 +590,37 @@ def test_bootstrap_carries_next_run_for_owners_and_admins() -> None:
         automations = client.get("/api/bootstrap", headers=headers(user)).json()["automations"]
         match = next(item for item in automations if item["id"] == created["id"])
         assert match["next_run_at"] is not None, user
+
+
+def test_agent_step_quotes_long_skill_files_up_to_65000_characters(monkeypatch) -> None:
+    _activate_openrouter()
+    agent_id = _agent_profile(knowledge_config_ids=[])
+    store = get_store()
+    long_skill = "Step " + "x" * 59_990 + " END-OF-SKILL"
+    store.skill_files["skill-upgrades"] = store.skill_files["skill-upgrades"].model_copy(
+        update={"content": long_skill}
+    )
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        "app.routes.automations.get_model_gateway_client",
+        lambda: _gateway(captured, reply="Done."),
+    )
+    created = client.post(
+        "/api/automations",
+        json=_payload(steps=[{"model_id": agent_id, "instruction": "Go."}], prompt="Run it."),
+        headers=headers(),
+    ).json()
+    run = client.post(f"/api/automations/{created['id']}/run", headers=headers())
+    assert run.status_code == 200, run.text
+    system = next(m["content"] for m in captured[0]["messages"] if m["role"] == "system")
+    assert long_skill in system
+
+    store.skill_files["skill-upgrades"] = store.skill_files["skill-upgrades"].model_copy(
+        update={"content": "y" * 70_000}
+    )
+    captured.clear()
+    run = client.post(f"/api/automations/{created['id']}/run", headers=headers())
+    assert run.status_code == 200, run.text
+    system = next(m["content"] for m in captured[0]["messages"] if m["role"] == "system")
+    assert "y" * 64_997 + "..." in system
+    assert "y" * 64_998 not in system

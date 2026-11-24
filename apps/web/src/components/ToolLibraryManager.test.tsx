@@ -303,11 +303,20 @@ test("improving a prompt shows an indeterminate indicator and can be undone", as
   expect(screen.getByLabelText("Content")).toHaveValue(originalContent);
 });
 
-test("long content warns that agents only receive the first 4,000 characters", () => {
+test("content up to 65,000 characters fits what agents receive", () => {
   renderToolLibrary("skill");
   fireEvent.click(screen.getByRole("button", { name: "New skill" }));
-  fireEvent.change(screen.getByLabelText("Content"), { target: { value: "word ".repeat(900) } });
-  expect(screen.getByText(/only see the first 4,000 characters/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Content"), { target: { value: "word ".repeat(12_000) } });
+  expect(screen.getByText(/up to 65,000 characters are included/)).toBeInTheDocument();
+  expect(screen.getByText("59,999 / 65,000")).toBeInTheDocument();
+  expect(screen.queryByText(/only see the first/)).not.toBeInTheDocument();
+});
+
+test("long content warns that agents only receive the first 65,000 characters", () => {
+  renderToolLibrary("skill");
+  fireEvent.click(screen.getByRole("button", { name: "New skill" }));
+  fireEvent.change(screen.getByLabelText("Content"), { target: { value: "word ".repeat(13_200) } });
+  expect(screen.getByText(/only see the first 65,000 characters/)).toBeInTheDocument();
 });
 
 test("placeholder timestamps are not shown as real times", () => {
