@@ -1023,6 +1023,8 @@ export type Group = {
   user_count: number;
   default_group?: boolean;
   permissions: Record<string, boolean>;
+  /** The admin who created the group; a tenant admin may add only themself to groups they created. */
+  created_by_user_id?: string | null;
 };
 
 export type Connector = {
@@ -1219,6 +1221,10 @@ export type ToolConfig = {
   allowed_group_ids: string[];
   /** Set only for user-authored tools; admin-created tools leave this unset. */
   owner_user_id?: string | null;
+  /** Only its owner can use it; other tenant admins never see it. */
+  only_me?: boolean;
+  /** Who added it; null for connections saved before this was recorded. */
+  created_by_user_id?: string | null;
   scopes: string[];
   connected_model_ids: string[];
   endpoint?: string;
@@ -1327,6 +1333,8 @@ export type AdminGroupCreateRequest = {
   synced?: boolean;
   user_count?: number;
   permissions?: Record<string, boolean>;
+  /** A tenant admin creator joins the new group. Never true for a platform owner. */
+  add_me?: boolean;
 };
 
 export type AdminGroupUpdateRequest = Partial<
@@ -1481,6 +1489,8 @@ export type ToolConfigRecord = TenantScopedConfigRecord & {
   approval_required: boolean;
   allowed_group_ids: string[];
   owner_user_id?: string | null;
+  only_me?: boolean;
+  created_by_user_id?: string | null;
 };
 
 export type AdminConnectorConfigCreateRequest = {
@@ -1568,6 +1578,7 @@ export type AdminToolConfigCreateRequest = {
   enabled?: boolean;
   approval_required?: boolean;
   allowed_group_ids?: string[];
+  only_me?: boolean;
   settings?: ConfigSettings;
   secret_value?: string | null;
 };
@@ -1579,6 +1590,7 @@ export type AdminToolConfigUpdateRequest = {
   enabled?: boolean | null;
   approval_required?: boolean | null;
   allowed_group_ids?: string[] | null;
+  only_me?: boolean | null;
   settings?: ConfigSettings | null;
   secret_value?: string | null;
 };

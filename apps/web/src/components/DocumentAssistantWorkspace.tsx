@@ -45,6 +45,7 @@ import {
   DOCUMENT_SELECTION_CHIP_GROUPS,
   DOCUMENT_WRITE_ACTIONS,
   SLIDE_ACTIONS,
+  SLIDE_ADD_ACTIONS,
   SLIDE_CHIP_GROUPS,
   NO_AI_EDIT_INTENT,
   aiActionMatches,
@@ -180,6 +181,7 @@ import {
   Superscript,
   Table2,
   Trash2,
+  Type,
   TriangleAlert,
   Underline,
   Undo2,
@@ -210,6 +212,7 @@ import {
   type FormEvent,
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -322,6 +325,7 @@ import {
 import {
   DECK_LAYOUT_LABELS,
   DECK_SCHEMA_VERSION,
+  MAX_DECK_ADDED_BLOCKS,
   MAX_DECK_BULLETS_PER_SLIDE,
   MAX_DECK_CONTENT_BYTES,
   MAX_DECK_SLIDES,
@@ -330,7 +334,10 @@ import {
   blankSlideDeck,
   contentLooksLikeDeck,
   createDeckSlide,
+  deckAddedKind,
   deckBackgroundKey,
+  deckBlocksStillRemoved,
+  deckPictureRegions,
   deckRichText,
   deckRichTextParagraphs,
   deckRegionPlainText,
@@ -347,9 +354,15 @@ import {
   parseSlideDeck,
   pruneDeckBackgroundLibrary,
   serializeSlideDeck,
+  withDeckAddedContent,
   withDeckBackground,
+  withDeckBlockAdded,
+  withDeckBlockBox,
+  withDeckBlocksRestored,
+  withoutDeckBlock,
   withDeckSlidePicture,
   type DeckDesign,
+  type DeckAddedKind,
   type DeckBullet,
   type DeckRichText,
   type DeckSlide,
@@ -382,10 +395,11 @@ import {
 } from "../lib/sheet/sheetModel";
 import {
   DECK_LINE_HEIGHT,
-  DECK_LIST_REGIONS,
   DECK_LOGO_BOX,
   DECK_PREVIEW_HEIGHT_PX,
   DECK_PREVIEW_WIDTH_PX,
+  deckRegionIsList,
+  deckRegionLabel,
   deckRoleColor,
   resolvedMediaBox,
   resolvedTextRegions,
@@ -400,6 +414,15 @@ import { deckFromDocumentHtml, textRunsFromElement } from "../lib/deck/deckFromD
 import { workbookFromMarkdown, type DraftTransferFormat } from "../lib/draftTransfer";
 import { measureCellText } from "./spreadsheet/SheetGrid";
 import { deckFontStack, deckRegionFit, type DeckTextFit } from "../lib/deck/deckTextFit";
+import {
+  deckAddMenuOpens,
+  deckAddPlace,
+  deckAddPlaceAt,
+  deckAddPoint,
+  deckNewBlockBox,
+  revisedAddedBlocks,
+  type DeckAddPlace,
+} from "../lib/deck/deckFreeSpace";
 import {
   applyDeckTextSize,
   deckLayoutSizeAt,
@@ -443,15 +466,24 @@ import {
 } from "../lib/documentPictures";
 import { findLicensedPictures } from "../lib/api/assets";
 import { hasUnrenderedDocumentDiagram, hydrateDocumentDiagramFigures } from "../lib/documentDiagrams";
-import { approvedWorkspaceModels, isImageGenerationModel, isModelUsable, supportsReasoningEffort, webSearchSupportedForModel } from "../lib/modelAccess";
 import {
+  approvedWorkspaceModels,
+  isImageGenerationModel,
+  pictureModelNotice,
+  pictureModelNoticeText,
+  supportsReasoningEffort,
+  usablePictureModel,
+  webSearchSupportedForModel,
+} from "../lib/modelAccess";
+import {
+  ReasoningAutoCheckbox,
   ReasoningRail,
   reasoningHelp,
   REASONING_EFFORT_BY_LEVEL,
-  loadReasoningLevel,
-  storeReasoningLevel,
+  type ReasoningEffort,
   type ReasoningLevel,
 } from "./ReasoningSlider";
+import { reasoningLevelForSend, useReasoningPreference, type ReasoningSignals } from "../lib/reasoningAuto";
 import { fetchServerTime, formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { useViewportWidth } from "../lib/useViewport";
 import { useModalFocus } from "../lib/useModalFocus";
@@ -781,7 +813,14 @@ type DeckAiSession = {
   error: string | null;
   messages: ChatWireMessage[];
   pendingMessages: ChatWireMessage[];
+  /** Slide mode, opened from the slide's plus: where the author asked for
+   * something to be added. Null for an ordinary slide edit. */
+  addPlace: DeckAddPlace | null;
 };
+
+/** The slide's "add" menu: the place a new block will take, and the spot on
+ * the slide (in slide pixels) the menu opens at. */
+type DeckAddMenu = { place: DeckAddPlace; x: number; y: number };
 
 type DeckAiSelectionOffer = {
   text: string;
@@ -789,12 +828,13 @@ type DeckAiSelectionOffer = {
   left: number;
 };
 
-/** The picture blade: which slide it serves (region null when the slide's
- * layout holds no picture), the description, and the work in flight. */
+/** The picture blade: which slide and which of its picture blocks it serves
+ * ("image" is the layout's own; null when the slide has no picture block),
+ * the description, and the work in flight. */
 type DeckPictureDialogState = {
   open: boolean;
   slideId: string | null;
-  region: "image" | null;
+  region: string | null;
   prompt: string;
   working: false | "generate" | "web" | "upload";
   error: string | null;
@@ -2316,20 +2356,36 @@ export function DocumentAssistantWorkspace({
   const [textColor, setTextColor] = useState(TEXT_COLOR_SWATCHES[0]);
   const [citationsOpen, setCitationsOpen] = useState(false);
   const [requireCitations, setRequireCitations] = useState(importedDraftState?.requiresCitations ?? false);
-  // Fast–Smart reasoning level for drafting; shares the sticky per-user
-  // preference with the chat composer's slider.
-  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(() =>
-    loadReasoningLevel(completionUserId),
-  );
+  // Fast–Smart reasoning level for drafting, or Auto; the sticky per-user
+  // preference is shared with the chat composer.
+  const reasoningPreference = useReasoningPreference(completionUserId);
+  // What Auto picked for the latest request; none yet shows the neutral middle.
+  const [autoReasoningPick, setAutoReasoningPick] = useState<ReasoningLevel | null>(null);
+  const sheetAskReasoningRef = useRef(new WeakMap<AbortSignal, ReasoningEffort | null>());
   // The slider only engages for models with real reasoning control; the API
   // enforces the same gate before anything reaches the provider.
   const reasoningTargetModel = data.models.find((model) => model.id === selectedAgent?.id);
   const reasoningSupported = supportsReasoningEffort(reasoningTargetModel);
-  const reasoningEffortForSend = reasoningSupported ? REASONING_EFFORT_BY_LEVEL[reasoningLevel] : null;
 
-  function updateReasoningLevel(level: ReasoningLevel) {
-    setReasoningLevel(level);
-    storeReasoningLevel(completionUserId, level);
+  /** The effort one user action is sent at, resolved once when it starts:
+   * every model call of that action reuses it, so its passes never differ.
+   * Auto reads the request as asked, the files sent with it, and the working
+   * document it acts on ("" when the action writes something new). */
+  function reasoningEffortForRequest(text: string, workingDocument = ""): ReasoningEffort | null {
+    if (!reasoningSupported) return null;
+    const signals: ReasoningSignals = {
+      text,
+      attachmentCount: draftAttachmentRuntime().attachmentIds.length,
+      documentLength: workingDocument.length,
+    };
+    const level = reasoningLevelForSend(reasoningPreference, signals);
+    if (reasoningPreference.auto) setAutoReasoningPick(level);
+    return REASONING_EFFORT_BY_LEVEL[level];
+  }
+
+  function setReasoningAuto(auto: boolean) {
+    setAutoReasoningPick(null);
+    reasoningPreference.setAuto(auto);
   }
   const [codeArtifact, setCodeArtifact] = useState<CodeArtifact | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<DraftSourceFile[]>([]);
@@ -2752,6 +2808,10 @@ export function DocumentAssistantWorkspace({
   const deckEditSessionUndoRef = useRef<string | null>(null);
   const deckDragRef = useRef<{ slideId: string; pointerId: number } | null>(null);
   const deckStageViewportRef = useRef<HTMLDivElement | null>(null);
+  const deckRestoreBlocksRef = useRef<HTMLButtonElement | null>(null);
+  const deckAddKeyRef = useRef<HTMLButtonElement | null>(null);
+  const [deckAddMenu, setDeckAddMenu] = useState<DeckAddMenu | null>(null);
+  const deckLayoutControlRef = useRef<HTMLButtonElement | null>(null);
   const deckFilmstripRef = useRef<HTMLDivElement | null>(null);
   const [deckStageBox, setDeckStageBox] = useState({ scale: 1, left: 0, top: 0 });
   // Block showing its resize frame; any slide element (text or image) can be
@@ -2831,13 +2891,11 @@ export function DocumentAssistantWorkspace({
   /** First image-output model the user can genuinely invoke (enabled,
    * connected provider, group access) — the AI image button only claims to
    * work when this exists. */
-  const imageGenerationAgent = useMemo(
-    () =>
-      data.models.find(
-        (model) => isModelUsable(data, model) && isImageGenerationModel(model),
-      ) ?? null,
-    [data],
-  );
+  const imageGenerationAgent = useMemo(() => usablePictureModel(data), [data]);
+  /** Why AI pictures are off, in one line: which switch the owner flips, or
+   * what everyone else asks their administrator for. Empty when they are on. */
+  const imageGenerationNotice = useMemo(() => pictureModelNotice(data), [data]);
+  const imageUnavailableText = imageGenerationNotice ? pictureModelNoticeText(imageGenerationNotice) : "";
   const draftNowIso = useCallback(
     () => new Date(Date.now() + serverClockOffsetMs).toISOString(),
     [serverClockOffsetMs],
@@ -2888,6 +2946,19 @@ export function DocumentAssistantWorkspace({
   const selectedPicture = selectedSlide ? deckSlidePicture(selectedSlide) : null;
   const selectedMediaBox =
     selectedSlide && deckState ? resolvedMediaBox(selectedSlide, deckThemeDesign(deckState.theme)) : null;
+  // The picture blade shows the block it was opened for, added or the layout's.
+  const deckBladePictureRegion = deckImageDialog.region ?? "image";
+  const deckBladePicture = selectedSlide ? deckSlidePicture(selectedSlide, deckBladePictureRegion) : null;
+  const deckBladePictureBox =
+    selectedSlide && deckState
+      ? resolvedMediaBox(selectedSlide, deckThemeDesign(deckState.theme), deckBladePictureRegion)
+      : null;
+  // Where the slide's plus sits: the middle of its largest empty area.
+  const deckTheme = deckState?.theme ?? null;
+  const deckDefaultAddPlace = useMemo(
+    () => (selectedSlide && deckTheme ? deckAddPlace(selectedSlide, deckTheme) : null),
+    [selectedSlide, deckTheme],
+  );
   const selectedSlideHasOwnBackground = Boolean(
     selectedSlide?.backgroundId || selectedSlide?.background,
   );
@@ -4097,7 +4168,7 @@ export function DocumentAssistantWorkspace({
     // A bullet box stays bullets: when an edit leaves loose lines (typing over
     // a select-all, a paste), it is redrawn as bullets with the caret kept,
     // so Enter and Tab go on making and indenting bullets.
-    if (DECK_LIST_REGIONS.has(region) && element.textContent?.trim() && !element.querySelector("li")) {
+    if (deckRegionIsList(region) && element.textContent?.trim() && !element.querySelector("li")) {
       const selection = window.getSelection?.();
       const offsets =
         selection && selection.rangeCount > 0 && element.contains(selection.getRangeAt(0).commonAncestorContainer)
@@ -4362,7 +4433,7 @@ export function DocumentAssistantWorkspace({
       strikethrough: state.strikethrough,
       sizePt: deckTextSizeOf(block, hasSelection ? range : null),
       layoutSizePt: deckLayoutSizeAt(probe, block) ?? (spec ? Math.round(spec.sizePt) : null),
-      isList: DECK_LIST_REGIONS.has(region),
+      isList: deckRegionIsList(region),
       hasSelection,
       fit,
     };
@@ -4566,7 +4637,7 @@ export function DocumentAssistantWorkspace({
 
   /** Opens the picture blade on a slide: on its picture when its layout holds
    * one, otherwise with the layouts that do (region null). */
-  function openDeckImageDialog(slideId: string, region: "image" | null, trigger?: HTMLElement | null) {
+  function openDeckImageDialog(slideId: string, region: string | null, trigger?: HTMLElement | null) {
     if (deckImageDialog.open && deckImageDialog.working) {
       setStatus("A picture is still on its way. Wait for it, then choose another slide.");
       return;
@@ -4579,7 +4650,7 @@ export function DocumentAssistantWorkspace({
     // A real description only: the picture's own, the words around it, or the
     // deck's name — never a placeholder word that would search for nothing.
     const suggestion =
-      (slide ? deckSlidePicture(slide)?.alt.trim() : "") ||
+      (slide ? deckSlidePicture(slide, region ?? "image")?.alt.trim() : "") ||
       (slide ? deckPictureContextAlt(slide) : "") ||
       (documentTitle.trim() !== EMPTY_DOCUMENT_TITLE ? documentTitle.trim() : "");
     setDeckImageDialog((current) => {
@@ -4631,8 +4702,10 @@ export function DocumentAssistantWorkspace({
     setDeckState({
       ...deckState,
       slides: deckState.slides.map((slide) => {
-        const picture = slide.id === slideId ? deckSlidePicture(slide) : null;
-        return picture?.src ? withDeckSlidePicture(slide, { ...picture, alt: alt.slice(0, 500) }) : slide;
+        const picture = slide.id === slideId ? deckSlidePicture(slide, deckBladePictureRegion) : null;
+        return picture?.src
+          ? withDeckSlidePicture(slide, { ...picture, alt: alt.slice(0, 500) }, deckBladePictureRegion)
+          : slide;
       }),
     });
   }
@@ -4675,26 +4748,26 @@ export function DocumentAssistantWorkspace({
         (deckImageDialog.promptEdited && deckImageDialog.prompt.trim()) ||
         (slide ? deckPictureContextAlt(slide) : "") ||
         file.name.replace(/\.[a-z0-9]+$/i, "");
-      if (applyDeckSlideImage(slideId, dataUrl, alt)) setStatus(`${file.name} placed on the slide.`);
+      if (applyDeckSlideImage(slideId, dataUrl, alt, undefined, region)) setStatus(`${file.name} placed on the slide.`);
       settle((current) => ({ ...current, working: false }));
     } catch {
       settle((current) => ({ ...current, working: false, error: `${file.name} could not be read.` }));
     }
   }
 
-  function applyDeckSlideImage(slideId: string, src: string, alt: string, caption?: string): boolean {
+  function applyDeckSlideImage(slideId: string, src: string, alt: string, caption?: string, region = "image"): boolean {
     const deck = flushDeckTextEdits();
     if (!deck) return false;
     const target = deck.slides.find((slide) => slide.id === slideId);
-    if (!target || !deckSlidePicture(target)) {
+    if (!target || !deckSlidePicture(target, region)) {
       setStatus("That slide no longer holds a picture.");
       return false;
     }
     const slides = deck.slides.map((slide) => {
       if (slide.id !== slideId) return slide;
-      const placed = withDeckSlidePicture(slide, { src, alt });
+      const placed = withDeckSlidePicture(slide, { src, alt }, region);
       // A suggested caption fills an empty caption; it never overwrites one.
-      if (placed.layout !== "image-caption" || deckRunsText(placed.caption).trim() || !caption) return placed;
+      if (region !== "image" || placed.layout !== "image-caption" || deckRunsText(placed.caption).trim() || !caption) return placed;
       return { ...placed, caption: deckRichText(caption) };
     });
     const next = { ...deck, slides };
@@ -4710,11 +4783,11 @@ export function DocumentAssistantWorkspace({
     return true;
   }
 
-  function removeDeckSlideImage(slideId: string) {
+  function removeDeckSlideImage(slideId: string, region = "image") {
     const deck = flushDeckTextEdits();
     if (!deck) return;
     const slides = deck.slides.map((slide) =>
-      slide.id === slideId ? withDeckSlidePicture(slide, { src: "", alt: "" }) : slide,
+      slide.id === slideId ? withDeckSlidePicture(slide, { src: "", alt: "" }, region) : slide,
     );
     commitDeck({ ...deck, slides }, "Slide image removed.", serializeSlideDeck(deck));
   }
@@ -4858,7 +4931,7 @@ export function DocumentAssistantWorkspace({
     kind: "photo" | "background" | "illustration" = "photo",
   ): Promise<string> {
     if (!imageGenerationAgent) {
-      throw new ChatRequestError("No image-generation model is enabled for your workspace.");
+      throw new ChatRequestError(imageUnavailableText);
     }
     // Backgrounds must never contain text or slide-like layouts: given slide
     // wording as a subject, image models happily paint a duplicate slide,
@@ -4976,7 +5049,7 @@ export function DocumentAssistantWorkspace({
     if (!imageGenerationAgent) {
       setDeckImageDialog((current) => ({
         ...current,
-        error: "No image-generation model is enabled for your workspace.",
+        error: imageUnavailableText,
       }));
       return;
     }
@@ -4987,7 +5060,7 @@ export function DocumentAssistantWorkspace({
     setDeckImageDialog((current) => ({ ...current, working: "generate", error: null }));
     try {
       const dataUrl = await generateSlideImageDataUrl(request);
-      if (!applyDeckSlideImage(slideId, dataUrl, request)) {
+      if (!applyDeckSlideImage(slideId, dataUrl, request, undefined, region)) {
         settle((current) => ({ ...current, working: false }));
         return;
       }
@@ -5037,7 +5110,7 @@ export function DocumentAssistantWorkspace({
   function pickDeckWebImage(choice: DeckWebImageChoice) {
     const { slideId, region, prompt } = deckImageDialog;
     if (!slideId || !region) return;
-    if (applyDeckSlideImage(slideId, choice.url, prompt.trim() || choice.caption, `${choice.caption} (${choice.source})`)) {
+    if (applyDeckSlideImage(slideId, choice.url, prompt.trim() || choice.caption, `${choice.caption} (${choice.source})`, region)) {
       setStatus(`Web image placed: ${choice.caption} (${choice.source}).`);
     }
   }
@@ -5136,6 +5209,7 @@ export function DocumentAssistantWorkspace({
       error: null,
       messages: [],
       pendingMessages: [],
+      addPlace: null,
     };
     setDeckAiSelectionOffer(null);
     if (entry && range) {
@@ -5226,7 +5300,7 @@ export function DocumentAssistantWorkspace({
             selectedText: session.selectedText,
             surface: "slide",
           })
-        : providerSlideEditPrompt({ ...deckNow, title: deckTitle }, slide, instruction);
+        : providerSlideEditPrompt({ ...deckNow, title: deckTitle }, slide, instruction, session.addPlace);
     void requestDeckAi([{ role: "user", content: prompt }], label);
   }
 
@@ -5309,7 +5383,7 @@ export function DocumentAssistantWorkspace({
         );
       } else {
         const deckNow = flushDeckTextEdits() ?? deckState;
-        let parsed = parseAiSlideReply(raw, deckNow, session.slideId);
+        let parsed = parseAiSlideReply(raw, deckNow, session.slideId, session.addPlace);
         if (!parsed.ok) {
           // One corrective retry with the validator's reason, as for decks.
           const retry: ChatWireMessage[] = [
@@ -5320,7 +5394,7 @@ export function DocumentAssistantWorkspace({
           reply = await ask(retry);
           if (requestId !== deckAiRequestRef.current) return;
           raw = splitAssistantThinking(reply.content).visibleContent.trim();
-          parsed = parseAiSlideReply(raw, deckNow, session.slideId);
+          parsed = parseAiSlideReply(raw, deckNow, session.slideId, session.addPlace);
         }
         if (!parsed.ok) throw new Error(`The model's slide did not pass validation: ${parsed.error}`);
         // Fit check before review: one measured fix turn in this
@@ -5494,7 +5568,7 @@ export function DocumentAssistantWorkspace({
     if (!imageGenerationAgent) {
       setDeckAiImageDialog((current) => ({
         ...current,
-        error: "No image-generation model is enabled for your workspace.",
+        error: imageUnavailableText,
       }));
       return;
     }
@@ -6070,8 +6144,14 @@ export function DocumentAssistantWorkspace({
 
   /** The inline spreadsheet assistant's model call: streamed, with the
    * draft's knowledge sources and attachments, abortable from the editor. */
-  const askSpreadsheetModel: SheetAiAsk = async (prompt, { signal, onText }) => {
+  const askSpreadsheetModel: SheetAiAsk = async (prompt, { signal, onText, instruction }) => {
     if (!selectedAgent) throw new Error(draftAiUnavailableReason);
+    // One editor request (its first ask, a retry, a fix round) shares one
+    // abort signal, so the signal keys its one reasoning level. Auto reads
+    // the user's own words, not the built prompt that wraps them.
+    const efforts = sheetAskReasoningRef.current;
+    if (!efforts.has(signal)) efforts.set(signal, reasoningEffortForRequest(instruction ?? prompt, currentDraftText()));
+    const reasoningEffort = efforts.get(signal) ?? null;
     const sources = spreadsheetSourceText();
     const reply = await sendChatStream(completionUserId, {
       model: selectedAgent.id,
@@ -6086,7 +6166,7 @@ export function DocumentAssistantWorkspace({
         knowledgeConfigIds: activeSourceIds,
         ...draftAttachmentRuntime(),
         maxCompletionTokens: 12000,
-        reasoningEffort: reasoningEffortForSend,
+        reasoningEffort,
       },
       onDelta: (fullText) => onText?.(splitAssistantThinking(fullText).visibleContent),
     });
@@ -6121,6 +6201,7 @@ export function DocumentAssistantWorkspace({
       );
     const finish = (outcome: SheetRunOutcome) => record((steps) => sheetRunFinished(steps, outcome));
     setStatus(revising ? "Updating the workbook..." : "Building the workbook...");
+    const reasoningEffort = reasoningEffortForRequest(request, revising ? currentDraftText() : "");
     const ask = async (prompt: string) => {
       const askedAt = Date.now();
       const reply = await sendChat(completionUserId, {
@@ -6135,7 +6216,7 @@ export function DocumentAssistantWorkspace({
           knowledgeConfigIds: activeSourceIds,
           ...draftAttachmentRuntime(),
           maxCompletionTokens: 16000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort,
           workSteps: true,
         },
       });
@@ -6274,6 +6355,10 @@ export function DocumentAssistantWorkspace({
     });
     setDraftTrace({ steps: traceSteps, activeIndex: 0, complete: false, startedAt: Date.now() });
     setStatus(revising ? "Revising the deck..." : "Drafting the deck...");
+    const reasoningEffort = reasoningEffortForRequest(
+      request,
+      revising ? (currentDeck?.slides ?? []).map(deckSlideOutline).join("\n\n") : "",
+    );
 
     const askProvider = async (prompt: string) => {
       const reply = await sendChat(completionUserId, {
@@ -6288,7 +6373,7 @@ export function DocumentAssistantWorkspace({
           knowledgeConfigIds: activeSourceIds,
           ...draftAttachmentRuntime(),
           maxCompletionTokens: 12000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort,
           workSteps: true,
         },
       });
@@ -6308,7 +6393,7 @@ export function DocumentAssistantWorkspace({
           citationsEnabled: false,
           knowledgeConfigIds: [],
           maxCompletionTokens: 6000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort,
         },
       });
       return splitAssistantThinking(reply.content ?? "").visibleContent;
@@ -6857,11 +6942,7 @@ export function DocumentAssistantWorkspace({
   ) {
     const applyTo = (deck: SlideDeck): SlideDeck => ({
       ...deck,
-      slides: deck.slides.map((slide) =>
-        slide.id === slideId
-          ? { ...slide, boxes: { ...(slide.boxes ?? {}), [region]: box } }
-          : slide,
-      ),
+      slides: deck.slides.map((slide) => (slide.id === slideId ? withDeckBlockBox(slide, region, box) : slide)),
     });
     if (commit) {
       if (!deckState) return;
@@ -6961,8 +7042,10 @@ export function DocumentAssistantWorkspace({
     const boxes = Object.entries(resolvedTextRegions(slide, design))
       .filter(([name]) => name !== region && deckSlideRegionContent(slide, name) !== null)
       .map(([, spec]) => spec.box);
-    const media = region === "image" ? null : resolvedMediaBox(slide, design);
-    return media ? [...boxes, media] : boxes;
+    const pictures = deckPictureRegions(slide)
+      .filter((name) => name !== region)
+      .flatMap((name) => resolvedMediaBox(slide, design, name) ?? []);
+    return [...boxes, ...pictures];
   }
 
   function beginDeckBlockMove(event: ReactPointerEvent<HTMLElement>) {
@@ -7155,6 +7238,150 @@ export function DocumentAssistantWorkspace({
       }),
     };
     commitDeck(next, "Block restored to the layout size.", serializeSlideDeck(deck));
+  }
+
+  /** Deletes the selected block from its slide. Its words or picture go with
+   * it, on screen and in the exported file, as one undo step. */
+  function deleteDeckBlock() {
+    const active = deckActiveBlock;
+    if (!active) return;
+    endDeckEditSession();
+    const deck = flushDeckTextEdits();
+    if (!deck) return;
+    commitDeck(
+      {
+        ...deck,
+        slides: deck.slides.map((slide) =>
+          slide.id === active.slideId ? withoutDeckBlock(slide, active.region) : slide,
+        ),
+      },
+      `Deleted the ${deckBlockName(active.region)} from this slide. Undo brings it back.`,
+      serializeSlideDeck(deck),
+    );
+    setDeckActiveBlock(null);
+    setDeckTextTarget(null);
+    // The deleted block held the focus. It moves to the way back (or, for a
+    // block the author had added, to the layout key), so Undo and the other
+    // deck keys keep working.
+    window.requestAnimationFrame(() => (deckRestoreBlocksRef.current ?? deckLayoutControlRef.current)?.focus());
+  }
+
+  /** Slide pixels for a pointer position over the stage. */
+  function deckSlidePoint(stage: HTMLElement, clientX: number, clientY: number) {
+    const rect = stage.getBoundingClientRect();
+    const scale = deckStageBox.scale || 1;
+    return { x: Math.round((clientX - rect.left) / scale), y: Math.round((clientY - rect.top) / scale) };
+  }
+
+  /** The plus: opens the add menu for the slide's largest empty area; a
+   * second press puts it away. */
+  function toggleDeckAddMenu() {
+    if (deckAddMenu || !deckDefaultAddPlace) {
+      setDeckAddMenu(null);
+      return;
+    }
+    setDeckAddMenu({ place: deckDefaultAddPlace, ...deckAddPoint(deckDefaultAddPlace) });
+  }
+
+  /** A right-click on empty slide space opens the add menu right there. On
+   * a block the browser's own menu (paste, spelling) is left alone. */
+  function handleDeckStageContextMenu(event: ReactMouseEvent<HTMLElement>) {
+    if (!selectedSlide || !deckState) return;
+    const point = deckSlidePoint(event.currentTarget, event.clientX, event.clientY);
+    const place = deckAddPlaceAt(selectedSlide, deckState.theme, point);
+    if (!place) return;
+    event.preventDefault();
+    setDeckAddMenu({ place, ...point });
+  }
+
+  function closeDeckAddMenu() {
+    setDeckAddMenu(null);
+    deckAddKeyRef.current?.focus();
+  }
+
+  /** Adds an empty block of a kind where the add menu was opened, selected
+   * and ready: a text box or list takes the caret, a picture opens the
+   * picture blade. One undo step. */
+  function addDeckBlock(kind: DeckAddedKind) {
+    const menu = deckAddMenu;
+    setDeckAddMenu(null);
+    if (!menu || !selectedSlide) return;
+    endDeckEditSession();
+    const deck = flushDeckTextEdits();
+    const slide = deck?.slides.find((item) => item.id === selectedSlide.id);
+    if (!deck || !slide) return;
+    const result = withDeckBlockAdded(slide, kind, deckNewBlockBox(kind, menu.place));
+    if (!result) {
+      setStatus(`A slide holds up to ${MAX_DECK_ADDED_BLOCKS} added blocks. Delete one to add another.`);
+      return;
+    }
+    commitDeck(
+      { ...deck, slides: deck.slides.map((item) => (item.id === slide.id ? result.slide : item)) },
+      `Added a ${deckBlockName(result.region)} to this slide.`,
+      serializeSlideDeck(deck),
+    );
+    setDeckActiveBlock({ slideId: slide.id, region: result.region });
+    if (kind === "picture") {
+      openDeckImageDialog(slide.id, result.region, deckAddKeyRef.current);
+      return;
+    }
+    window.requestAnimationFrame(() => deckBlockRefs.current.get(`${slide.id}:${result.region}`)?.element.focus());
+  }
+
+  /** "Ask AI" in the add menu: the slide's AI edit, told where the author
+   * wants something added. */
+  function askDeckAiToAdd() {
+    const menu = deckAddMenu;
+    setDeckAddMenu(null);
+    if (!menu || !selectedSlide) return;
+    if (!selectedAgent) {
+      setStatus(draftAiUnavailableReason);
+      return;
+    }
+    setDeckLayoutMenuOpen(null);
+    closeDeckImageDialog();
+    flushDeckTextEdits();
+    deckAiEditRangeRef.current = null;
+    setDeckAiSelectionOffer(null);
+    deckBladeTriggerRef.current = deckAddKeyRef.current;
+    setDeckAi({
+      mode: "slide",
+      phase: "compose",
+      slideId: selectedSlide.id,
+      region: null,
+      selectedText: "",
+      runLabel: "",
+      stream: "",
+      proposalText: "",
+      proposalSlides: [],
+      proposalRaw: "",
+      error: null,
+      messages: [],
+      pendingMessages: [],
+      addPlace: menu.place,
+    });
+  }
+
+  /** Delete or Backspace on any of the frame's handles deletes the block. */
+  function handleDeckFrameKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    event.preventDefault();
+    deleteDeckBlock();
+  }
+
+  /** Puts every block deleted from a slide back, empty. */
+  function restoreDeckBlocks(slideId: string) {
+    const deck = flushDeckTextEdits();
+    if (!deck) return;
+    commitDeck(
+      {
+        ...deck,
+        slides: deck.slides.map((slide) => (slide.id === slideId ? withDeckBlocksRestored(slide) : slide)),
+      },
+      "The deleted blocks are back on this slide, empty.",
+      serializeSlideDeck(deck),
+    );
+    deckLayoutControlRef.current?.focus();
   }
 
   function rememberDocumentSnapshot(title: string, html: string, summary: string) {
@@ -8362,7 +8589,7 @@ export function DocumentAssistantWorkspace({
           knowledgeConfigIds: sourceIdsForDraft,
           ...draftAttachmentRuntime(),
           maxCompletionTokens: pageTotal > 1 ? 24000 : 12000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort: reasoningEffortForRequest(requestText),
           workSteps: true,
         },
       });
@@ -8737,6 +8964,7 @@ export function DocumentAssistantWorkspace({
       useTemplateContext: Boolean(revisionTemplate),
       useWebSearch,
     });
+    const reasoningEffort = reasoningEffortForRequest(request, currentDraftText);
     await runDocumentChange(agent, request, {
       workingMessage: requestedAdditionalPages
         ? `Expanding the current document by ${requestedAdditionalPages} page${requestedAdditionalPages === 1 ? "" : "s"} through ${agent.name}.`
@@ -8793,7 +9021,7 @@ export function DocumentAssistantWorkspace({
               currentDraftText,
               requestedAdditionalPages,
             ),
-            reasoningEffort: reasoningEffortForSend,
+            reasoningEffort,
             workSteps: true,
           },
         });
@@ -8882,6 +9110,7 @@ export function DocumentAssistantWorkspace({
     const holder = window.document.createElement("div");
     holder.innerHTML = contentRef.current;
     const blocks = documentBlocks(holder);
+    const reasoningEffort = reasoningEffortForRequest(request, blocks.map((block) => block.text).join("\n"));
     await runDocumentChange(agent, request, {
       workingMessage: `Changing ${documentTitle} through ${agent.name}.`,
       workingStatus: `Calling ${agent.name} to change ${documentTitle}.`,
@@ -8915,7 +9144,7 @@ export function DocumentAssistantWorkspace({
             knowledgeConfigIds: activeSourceIds,
             ...draftAttachmentRuntime(),
             maxCompletionTokens: revisionCompletionTokenBudget(blocks.map((block) => block.text).join(" "), 0),
-            reasoningEffort: reasoningEffortForSend,
+            reasoningEffort,
           },
         });
         ensureUnchanged();
@@ -12638,10 +12867,24 @@ export function DocumentAssistantWorkspace({
                     </SelectControl>
                   </label>
                   <div className="draft-setting-field" role="group" aria-label="Reasoning level">
-                    <span>Reasoning</span>
-                    <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
+                    <div className="draft-setting-field-head">
+                      <span>Reasoning</span>
+                      <ReasoningAutoCheckbox
+                        checked={reasoningPreference.auto}
+                        disabled={!reasoningSupported}
+                        onChange={setReasoningAuto}
+                      />
+                    </div>
+                    <ReasoningRail
+                      level={reasoningPreference.auto ? autoReasoningPick ?? "balanced" : reasoningPreference.level}
+                      supported={reasoningSupported}
+                      auto={reasoningPreference.auto}
+                      onChange={reasoningPreference.setLevel}
+                    />
                     <small className="draft-setting-help">
-                      {reasoningHelp(reasoningLevel, reasoningSupported, selectedAgent?.name ?? "This model")}
+                      {reasoningPreference.auto && reasoningSupported
+                        ? "Aperture picks the level for each request."
+                        : reasoningHelp(reasoningPreference.level, reasoningSupported, selectedAgent?.name ?? "This model")}
                     </small>
                   </div>
                   <label className="draft-switch-row">
@@ -13076,7 +13319,7 @@ export function DocumentAssistantWorkspace({
                   data-tooltip={
                     imageGenerationAgent
                       ? "Also generate an AI image for every slide when the assistant drafts a deck"
-                      : "No image-generation model is enabled for your workspace"
+                      : imageUnavailableText
                   }
                   onClick={() => {
                     notifyRail(
@@ -14322,7 +14565,7 @@ export function DocumentAssistantWorkspace({
                     data-tooltip={
                       imageGenerationAgent
                         ? "Generate an AI image from this slide's content and set it as the background"
-                        : "No image-generation model is enabled for your workspace"
+                        : imageUnavailableText
                     }
                     onClick={openDeckAiImageDialog}
                   >
@@ -14383,7 +14626,7 @@ export function DocumentAssistantWorkspace({
                           data-tooltip={
                             imageGenerationAgent
                               ? `Generate with ${imageGenerationAgent.name} and set as this slide's background`
-                              : "No image-generation model is enabled for your workspace"
+                              : imageUnavailableText
                           }
                           disabled={deckAiImageDialog.working || !deckAiImageDialog.prompt.trim()}
                         >
@@ -14796,11 +15039,13 @@ export function DocumentAssistantWorkspace({
                         }`}
                         aria-busy={deckAiWorking}
                         onPointerDown={(event) => {
+                          setDeckAddMenu(null);
                           const target = event.target as HTMLElement;
                           if (!target.closest("[data-deck-block], [data-deck-handle], .deck-media-slot")) {
                             setDeckActiveBlock(null);
                           }
                         }}
+                        onContextMenu={handleDeckStageContextMenu}
                         style={{
                           width: DECK_PREVIEW_WIDTH_PX,
                           height: DECK_PREVIEW_HEIGHT_PX,
@@ -14812,50 +15057,47 @@ export function DocumentAssistantWorkspace({
                       >
                         <DeckSlideDecorations slide={selectedSlide} theme={deckState.theme} />
                         <DeckSlideMedia slide={selectedSlide} theme={deckState.theme} />
-                        {selectedPicture && selectedMediaBox && (
-                          <div
-                            className={`deck-media-slot ${
-                              selectedPicture.src ? "has-image" : "is-empty"
-                            }`}
-                            onClick={() =>
-                              setDeckActiveBlock({ slideId: selectedSlide.id, region: "image" })
-                            }
-                            style={{
-                              left: selectedMediaBox.x,
-                              top: selectedMediaBox.y,
-                              width: selectedMediaBox.w,
-                              height: selectedMediaBox.h,
-                            }}
-                          >
-                            {!selectedPicture.src && (
-                              <>
-                                <ImageIcon size={26} />
-                                <span>No image yet</span>
-                              </>
-                            )}
-                            <span className="deck-media-slot-actions">
-                              <button
-                                type="button"
-                                data-tooltip="Upload, find on the web, or generate a picture for this slide"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openDeckImageDialog(selectedSlide.id, "image", event.currentTarget);
-                                }}
-                              >
-                                {selectedPicture.src ? "Replace image" : "Add image"}
-                              </button>
-                              {selectedPicture.src && (
+                        {deckPictureRegions(selectedSlide).map((pictureRegion) => {
+                          const picture = deckSlidePicture(selectedSlide, pictureRegion);
+                          const mediaBox = resolvedMediaBox(selectedSlide, deckThemeDesign(deckState.theme), pictureRegion);
+                          if (!picture || !mediaBox) return null;
+                          return (
+                            <div
+                              key={pictureRegion}
+                              className={`deck-media-slot ${picture.src ? "has-image" : "is-empty"}`}
+                              onClick={() => setDeckActiveBlock({ slideId: selectedSlide.id, region: pictureRegion })}
+                              style={{ left: mediaBox.x, top: mediaBox.y, width: mediaBox.w, height: mediaBox.h }}
+                            >
+                              {!picture.src && (
+                                <>
+                                  <ImageIcon size={26} />
+                                  <span>No image yet</span>
+                                </>
+                              )}
+                              <span className="deck-media-slot-actions">
                                 <button
                                   type="button"
-                                  data-tooltip="Remove this slide's image"
-                                  onClick={() => removeDeckSlideImage(selectedSlide.id)}
+                                  data-tooltip="Upload, find on the web, or generate a picture for this slide"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openDeckImageDialog(selectedSlide.id, pictureRegion, event.currentTarget);
+                                  }}
                                 >
-                                  Remove
+                                  {picture.src ? "Replace image" : "Add image"}
                                 </button>
-                              )}
-                            </span>
-                          </div>
-                        )}
+                                {picture.src && (
+                                  <button
+                                    type="button"
+                                    data-tooltip="Remove this slide's image"
+                                    onClick={() => removeDeckSlideImage(selectedSlide.id, pictureRegion)}
+                                  >
+                                    Remove
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
                         {Object.entries(resolvedTextRegions(selectedSlide, deckThemeDesign(deckState.theme))).map(
                           ([region, spec]) => {
                             if (deckSlideRegionContent(selectedSlide, region) === null) return null;
@@ -14866,7 +15108,7 @@ export function DocumentAssistantWorkspace({
                                 data-deck-block=""
                                 role="textbox"
                                 aria-multiline="true"
-                                aria-label={`${DECK_LAYOUT_LABELS[selectedSlide.layout]} slide ${region}`}
+                                aria-label={deckBlockAriaLabel(selectedSlide, region)}
                                 className={`deck-block deck-block--${region} ${
                                   isBullets ? "is-bullets" : ""
                                 }`}
@@ -14925,6 +15167,7 @@ export function DocumentAssistantWorkspace({
                             return (
                               <div
                                 className="deck-block-frame"
+                                onKeyDown={handleDeckFrameKeyDown}
                                 style={{
                                   left: frameBox.x,
                                   top: frameBox.y,
@@ -14948,7 +15191,7 @@ export function DocumentAssistantWorkspace({
                                   type="button"
                                   className="deck-block-move"
                                   data-deck-handle=""
-                                  aria-label={`Move the ${deckActiveBlock.region} block`}
+                                  aria-label={`Move the ${deckBlockPhrase(deckActiveBlock.region)}`}
                                   data-tooltip="Drag to move. It snaps to the slide's center and to other blocks; hold Option to move freely. Arrow keys nudge."
                                   onPointerDown={beginDeckBlockMove}
                                   onPointerMove={moveDeckBlockMove}
@@ -14958,13 +15201,23 @@ export function DocumentAssistantWorkspace({
                                 >
                                   <GripHorizontal size={14} />
                                 </button>
+                                <button
+                                  type="button"
+                                  className="deck-block-delete"
+                                  data-deck-handle=""
+                                  aria-label={`Delete the ${deckBlockPhrase(deckActiveBlock.region)}`}
+                                  data-tooltip="Delete this block from the slide. Undo brings it back."
+                                  onClick={deleteDeckBlock}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
                                 {DECK_RESIZE_CORNERS.map((corner) => (
                                   <button
                                     key={corner}
                                     type="button"
                                     data-deck-handle=""
                                     className={`deck-block-handle deck-block-handle--${corner}`}
-                                    aria-label={`Resize the ${deckActiveBlock.region} block from the ${DECK_CORNER_LABELS[corner]} corner`}
+                                    aria-label={`Resize the ${deckBlockPhrase(deckActiveBlock.region)} from the ${DECK_CORNER_LABELS[corner]} corner`}
                                     data-tooltip="Drag to resize this block. Arrow keys nudge; double-click restores the layout size."
                                     onPointerDown={(event) => beginDeckBlockResize(event, corner)}
                                     onPointerMove={moveDeckBlockResize}
@@ -14978,17 +15231,66 @@ export function DocumentAssistantWorkspace({
                             );
                           })()}
                       </div>
-                      <button
-                        type="button"
-                        className="deck-layout-control"
-                        aria-haspopup="dialog"
-                        aria-expanded={deckBladeKind === "switch"}
-                        data-tooltip="Change this slide's layout"
-                        onClick={(event) => toggleDeckLayoutMenu("switch", event.currentTarget)}
-                      >
-                        <LayoutTemplate size={14} />
-                        {DECK_LAYOUT_LABELS[selectedSlide.layout]}
-                      </button>
+                      {deckDefaultAddPlace && (
+                        <button
+                          type="button"
+                          ref={deckAddKeyRef}
+                          className="deck-add-key"
+                          aria-label="Add to this slide"
+                          aria-haspopup="menu"
+                          aria-expanded={Boolean(deckAddMenu)}
+                          data-tooltip="Add a text box, a bullet list, or a picture here, or ask AI. You can also right-click any empty spot."
+                          style={{
+                            left: deckStageBox.left + deckAddPoint(deckDefaultAddPlace).x * deckStageBox.scale,
+                            top: deckStageBox.top + deckAddPoint(deckDefaultAddPlace).y * deckStageBox.scale,
+                          }}
+                          // Keeps the focus in the open menu, so a second press closes it
+                          // instead of the menu's blur closing it and the press reopening it.
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={toggleDeckAddMenu}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      )}
+                      {deckAddMenu && (
+                        <DeckAddMenuPanel
+                          left={deckStageBox.left + deckAddMenu.x * deckStageBox.scale}
+                          top={deckStageBox.top + deckAddMenu.y * deckStageBox.scale}
+                          opensUp={deckAddMenuOpens(deckAddMenu, deckStageBox.scale).up}
+                          opensLeft={deckAddMenuOpens(deckAddMenu, deckStageBox.scale).left}
+                          aiUnavailable={selectedAgent ? null : draftAiUnavailableReason}
+                          onAskAi={askDeckAiToAdd}
+                          onAdd={addDeckBlock}
+                          onClose={closeDeckAddMenu}
+                          onDismiss={() => setDeckAddMenu(null)}
+                        />
+                      )}
+                      <div className="deck-stage-controls">
+                        {selectedSlide.removed && (
+                          <button
+                            type="button"
+                            ref={deckRestoreBlocksRef}
+                            className="deck-layout-control deck-blocks-restore"
+                            data-tooltip="Bring back every block you deleted from this slide. They come back empty."
+                            onClick={() => restoreDeckBlocks(selectedSlide.id)}
+                          >
+                            <Undo2 size={14} />
+                            Put back deleted blocks
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          ref={deckLayoutControlRef}
+                          className="deck-layout-control"
+                          aria-haspopup="dialog"
+                          aria-expanded={deckBladeKind === "switch"}
+                          data-tooltip="Change this slide's layout"
+                          onClick={(event) => toggleDeckLayoutMenu("switch", event.currentTarget)}
+                        >
+                          <LayoutTemplate size={14} />
+                          {DECK_LAYOUT_LABELS[selectedSlide.layout]}
+                        </button>
+                      </div>
                     </div>
                     <div className={`deck-notes-strip ${deckNotesOpen ? "is-open" : ""}`}>
                       <button
@@ -15115,7 +15417,7 @@ export function DocumentAssistantWorkspace({
                   <AiEditComposer
                     embedded
                     getAnchor={getDeckAiAnchor}
-                    title={deckAi.mode === "slide" ? "Edit slide with AI" : "Edit slide text with AI"}
+                    title={deckAi.addPlace ? "Add to slide with AI" : deckAi.mode === "slide" ? "Edit slide with AI" : "Edit slide text with AI"}
                     targetLabel={
                       deckAi.mode === "slide"
                         ? `Slide ${Math.max(1, deckState.slides.findIndex((slide) => slide.id === deckAi.slideId) + 1)} · ${
@@ -15126,12 +15428,20 @@ export function DocumentAssistantWorkspace({
                         : `“${deckAi.selectedText.length > 90 ? `${deckAi.selectedText.slice(0, 90)}…` : deckAi.selectedText}”`
                     }
                     placeholder={
-                      deckAi.mode === "slide"
-                        ? "Tell AI how to change this slide…"
-                        : "Tell AI how to change the highlighted text…"
+                      deckAi.addPlace
+                        ? "Tell AI what to add to this slide…"
+                        : deckAi.mode === "slide"
+                          ? "Tell AI how to change this slide…"
+                          : "Tell AI how to change the highlighted text…"
                     }
-                    actions={deckAi.mode === "slide" ? SLIDE_ACTIONS : DOCUMENT_SELECTION_ACTIONS.filter((action) => action.group === "improve")}
-                    chipGroups={deckAi.mode === "slide" ? SLIDE_CHIP_GROUPS : DOCUMENT_SELECTION_CHIP_GROUPS}
+                    actions={
+                      deckAi.addPlace
+                        ? SLIDE_ADD_ACTIONS
+                        : deckAi.mode === "slide"
+                          ? SLIDE_ACTIONS
+                          : DOCUMENT_SELECTION_ACTIONS.filter((action) => action.group === "improve")
+                    }
+                    chipGroups={deckAi.addPlace ? [] : deckAi.mode === "slide" ? SLIDE_CHIP_GROUPS : DOCUMENT_SELECTION_CHIP_GROUPS}
                     phase={deckAi.phase}
                     agentName={selectedAgent?.name ?? "AI"}
                     streamText={deckAi.stream}
@@ -15178,13 +15488,13 @@ export function DocumentAssistantWorkspace({
                     />
                     <DeckPicturePanel
                       picture={
-                        selectedPicture
+                        deckBladePicture
                           ? {
                               label: "Slide picture",
-                              w: selectedMediaBox?.w ?? 640,
-                              h: selectedMediaBox?.h ?? 334,
-                              src: selectedPicture.src,
-                              alt: selectedPicture.alt,
+                              w: deckBladePictureBox?.w ?? 640,
+                              h: deckBladePictureBox?.h ?? 334,
+                              src: deckBladePicture.src,
+                              alt: deckBladePicture.alt,
                             }
                           : null
                       }
@@ -15199,12 +15509,12 @@ export function DocumentAssistantWorkspace({
                       onDropFile={(file) => void placeDeckPictureFile(file)}
                       onFindWeb={() => void findDeckWebImages()}
                       onPickWeb={pickDeckWebImage}
-                      generateUnavailable={imageGenerationAgent ? null : "No image-generation model is enabled for your workspace"}
+                      generateNotice={imageGenerationNotice}
                       generatorName={imageGenerationAgent?.name ?? null}
                       onAltFocus={beginDeckEditSession}
                       onAltChange={setDeckPictureAlt}
                       onAltBlur={endDeckEditSession}
-                      onRemove={() => removeDeckSlideImage(selectedSlide.id)}
+                      onRemove={() => removeDeckSlideImage(selectedSlide.id, deckBladePictureRegion)}
                       noPlaceholder={
                         deckImageDialog.region
                           ? null
@@ -20581,6 +20891,7 @@ function deckRegionHtml(slide: DeckSlide, region: string): string {
  * region is flat rich text. Derived from the layout, not from the current
  * content, so an emptied region keeps its kind. */
 function deckRegionIsBullets(slide: DeckSlide, region: string): boolean {
+  if (deckAddedKind(region)) return deckRegionIsList(region);
   if (slide.layout === "title-bullets" || slide.layout === "image-bullets") return region === "bullets";
   if (slide.layout === "two-column") return region === "left" || region === "right";
   return false;
@@ -20597,7 +20908,7 @@ function normalizeDeckRuns(
   theme: DeckTheme | undefined,
 ): DeckTextRun[] {
   if (!theme) return runs;
-  const spec = slideTextRegions(slide.layout, deckThemeDesign(theme))[region];
+  const spec = resolvedTextRegions(slide, deckThemeDesign(theme))[region];
   if (!spec) return runs;
   const defaultColor = (slide.textColor ?? deckRoleColor(theme, spec.colorRole)).toLowerCase();
   const defaultFont = theme.fonts[spec.font]?.toLowerCase() ?? "";
@@ -20625,6 +20936,7 @@ function deckSlideWithRegionFromElement(
       ...bullet,
       runs: normalizeDeckRuns(bullet.runs, slide, region, theme),
     }));
+    if (deckAddedKind(region)) return withDeckAddedContent(slide, region, bullets);
     if ((slide.layout === "title-bullets" || slide.layout === "image-bullets") && region === "bullets") {
       return { ...slide, bullets };
     }
@@ -20633,6 +20945,7 @@ function deckSlideWithRegionFromElement(
     return slide;
   }
   const text = normalizeDeckRuns(textRunsFromElement(element), slide, region, theme);
+  if (deckAddedKind(region)) return withDeckAddedContent(slide, region, text);
   switch (slide.layout) {
     case "title":
     case "section":
@@ -20673,12 +20986,14 @@ function deckSlideWithRegionFromElement(
 
 /** Switches a slide's layout, remapping content by role. Content without a
  * slot in the new layout is dropped from the new slide but counted so the
- * caller can tell the user (the old slide stays reachable via undo). */
+ * caller can tell the user (the old slide stays reachable via undo). A layout
+ * always arrives whole: applying one, even the slide's own, puts back any
+ * block the author had deleted. */
 function remapDeckSlideLayout(
   slide: DeckSlide,
   layout: DeckSlideLayout,
 ): { slide: DeckSlide; hiddenCount: number } {
-  if (slide.layout === layout) return { slide, hiddenCount: 0 };
+  if (slide.layout === layout) return { slide: withDeckBlocksRestored(slide), hiddenCount: 0 };
   // Formatting survives the layout switch: regions move as runs, not strings.
   const title: DeckRichText =
     slide.layout === "quote" ? slide.quote : "title" in slide ? slide.title : [];
@@ -20715,7 +21030,9 @@ function remapDeckSlideLayout(
   const base = {
     ...createDeckSlide(layout, slide.id),
     notes: slide.notes,
-    // The background picture belongs to the slide, not to its layout.
+    // The background picture and the blocks the author added belong to the
+    // slide, not to its layout.
+    ...(slide.added ? { added: slide.added } : {}),
     ...(slide.backgroundId ? { backgroundId: slide.backgroundId } : {}),
     ...(slide.background ? { background: slide.background } : {}),
   } as DeckSlide;
@@ -20780,6 +21097,7 @@ function remapDeckSlideLayout(
 }
 
 function deckRegionPlaceholder(slide: DeckSlide, region: string): string {
+  if (deckAddedKind(region)) return deckRegionIsList(region) ? "Add a bullet…" : "Type here";
   if (slide.layout === "big-number") return region === "title" ? "42%" : "What the number measures";
   if (slide.layout === "statement") return region === "title" ? "One big idea" : "A line that supports it";
   if (region === "title") return slide.layout === "section" ? "Section title" : "Slide title";
@@ -20790,6 +21108,37 @@ function deckRegionPlaceholder(slide: DeckSlide, region: string): string {
   if (region === "body") return "Closing message";
   if (region === "caption") return "Caption";
   return "";
+}
+
+/** What each block is called in a status line ("Deleted the picture…"). */
+const DECK_BLOCK_NAMES: Record<string, string> = {
+  title: "title",
+  subtitle: "subtitle",
+  bullets: "bullets",
+  left: "left column",
+  right: "right column",
+  quote: "quote",
+  attribution: "attribution",
+  caption: "caption",
+  body: "text",
+  image: "picture",
+};
+
+/** A block's name in a status line: "title", "picture", "text box". */
+function deckBlockName(region: string): string {
+  return deckAddedKind(region) ? deckRegionLabel(region).toLowerCase() : DECK_BLOCK_NAMES[region];
+}
+
+/** A block as its frame's keys name it: "the title block", "the text box". */
+function deckBlockPhrase(region: string): string {
+  return deckAddedKind(region) ? deckRegionLabel(region).toLowerCase() : `${region} block`;
+}
+
+/** A text block's accessible name: its layout and region, or for a block
+ * the author added its kind and number ("Added text box 2"). */
+function deckBlockAriaLabel(slide: DeckSlide, region: string): string {
+  if (!deckAddedKind(region)) return `${DECK_LAYOUT_LABELS[slide.layout]} slide ${region}`;
+  return `Added ${deckRegionLabel(region).toLowerCase()} ${region.slice(region.indexOf("-") + 1)}`;
 }
 
 type DeckResizeCorner = "nw" | "ne" | "sw" | "se";
@@ -20805,8 +21154,7 @@ const DECK_CORNER_LABELS: Record<DeckResizeCorner, string> = {
 
 /** The on-screen box for any adjustable slide element, override-aware. */
 function deckBlockBoxForRegion(slide: DeckSlide, region: string, design: DeckDesign): DeckBox | null {
-  if (region === "image") return resolvedMediaBox(slide, design);
-  return resolvedTextRegions(slide, design)[region]?.box ?? null;
+  return resolvedMediaBox(slide, design, region) ?? resolvedTextRegions(slide, design)[region]?.box ?? null;
 }
 
 /** Applies a corner drag to a box, clamped to the 960×540 canvas with the
@@ -20964,26 +21312,100 @@ function DeckSlideDecorations({ slide, theme }: { slide: DeckSlide; theme: DeckT
   );
 }
 
+/** The slide's add menu: Ask AI first, then each kind of block. It opens at
+ * a spot on the stage, flipping up or left near the slide's far edges, takes
+ * the focus, and closes on Escape or when focus leaves it. */
+function DeckAddMenuPanel({
+  left,
+  top,
+  opensUp,
+  opensLeft,
+  aiUnavailable,
+  onAskAi,
+  onAdd,
+  onClose,
+  onDismiss,
+}: {
+  left: number;
+  top: number;
+  opensUp: boolean;
+  opensLeft: boolean;
+  /** Why AI cannot help right now, or null when it can. */
+  aiUnavailable: string | null;
+  onAskAi: () => void;
+  onAdd: (kind: DeckAddedKind) => void;
+  /** Escape: close and hand the focus back to the plus. */
+  onClose: () => void;
+  /** Focus went elsewhere: close and leave the focus where it went. */
+  onDismiss: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+  }, []);
+  return (
+    <div
+      ref={menuRef}
+      className={`document-insert-menu deck-add-menu ${opensUp ? "opens-up" : ""} ${opensLeft ? "opens-left" : ""}`}
+      role="menu"
+      aria-label="Add to this slide"
+      style={{ left, top }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        onClose();
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDismiss();
+      }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className="deck-add-menu-ai"
+        disabled={Boolean(aiUnavailable)}
+        data-tooltip={aiUnavailable ?? "Tell AI what to add here and it writes it for you"}
+        onClick={onAskAi}
+      >
+        <Sparkles size={15} />
+        Ask AI
+      </button>
+      <span className="deck-add-menu-rule" role="separator" />
+      <button type="button" role="menuitem" onClick={() => onAdd("text")}>
+        <Type size={15} />
+        Text box
+      </button>
+      <button type="button" role="menuitem" onClick={() => onAdd("list")}>
+        <List size={15} />
+        Bullet list
+      </button>
+      <button type="button" role="menuitem" onClick={() => onAdd("picture")}>
+        <ImageIcon size={15} />
+        Picture
+      </button>
+    </div>
+  );
+}
+
 /** Shared media overlays (slide image, brand logo) for canvas renderers. */
 function DeckSlideMedia({ slide, theme }: { slide: DeckSlide; theme: DeckTheme }) {
-  const mediaBox = resolvedMediaBox(slide, deckThemeDesign(theme));
-  const picture = deckSlidePicture(slide);
   const logoBox = deckLogoRenderBox(theme);
   return (
     <>
-      {picture?.src && mediaBox && (
-        <img
-          className="deck-media-image"
-          src={picture.src}
-          alt={picture.alt}
-          style={{
-            left: mediaBox.x,
-            top: mediaBox.y,
-            width: mediaBox.w,
-            height: mediaBox.h,
-          }}
-        />
-      )}
+      {deckPictureRegions(slide).map((region) => {
+        const mediaBox = resolvedMediaBox(slide, deckThemeDesign(theme), region);
+        const picture = deckSlidePicture(slide, region);
+        if (!picture?.src || !mediaBox) return null;
+        return (
+          <img
+            key={region}
+            className="deck-media-image"
+            src={picture.src}
+            alt={picture.alt}
+            style={{ left: mediaBox.x, top: mediaBox.y, width: mediaBox.w, height: mediaBox.h }}
+          />
+        );
+      })}
       {theme.logo && logoBox && !slide.backgroundId && (
         <img
           className="deck-logo-image"
@@ -21821,23 +22243,44 @@ function slideJsonForPrompt(slide: DeckSlide) {
     background: _background,
     backgroundId: _backgroundId,
     boxes: _boxes,
+    removed: _removed,
     textColor: _textColor,
     ...content
   } = slide as DeckSlide & { background?: unknown };
-  const picture = deckSlidePicture(content as DeckSlide);
-  if (picture) return withDeckSlidePicture(content as DeckSlide, { src: "", alt: picture.alt });
-  return content;
+  const shown = {
+    ...content,
+    ...(slide.added
+      ? {
+          added: slide.added.map(({ box: _box, ...block }) =>
+            "image" in block ? { ...block, image: { src: "", alt: block.image.alt } } : block,
+          ),
+        }
+      : {}),
+  } as DeckSlide;
+  const picture = deckSlidePicture(shown);
+  if (picture) return withDeckSlidePicture(shown, { src: "", alt: picture.alt });
+  return shown;
 }
 
 /** Puts back what the model never sees for slides it kept (same id): the
  * picture background, text color, image, and, when the layout is unchanged,
- * the resized text boxes. */
-function restoreKeptSlideFields(entry: Record<string, unknown>, kept: DeckSlide | undefined) {
-  if (!kept) return entry;
-  const restored: Record<string, unknown> = { ...entry };
+ * the resized text boxes and the blocks the author deleted. */
+function restoreKeptSlideFields(
+  entry: Record<string, unknown>,
+  kept: DeckSlide | undefined,
+  theme: DeckTheme,
+  addPlace?: DeckAddPlace | null,
+) {
+  // Added blocks keep their place, and new ones are given one; a slide the
+  // model wrote from scratch has none.
+  const restored: Record<string, unknown> = { ...entry, added: revisedAddedBlocks(entry.added, kept, theme, addPlace) };
+  if (!kept) return restored;
   if (kept.backgroundId && restored.backgroundId === undefined) restored.backgroundId = kept.backgroundId;
   if (kept.textColor && restored.textColor === undefined) restored.textColor = kept.textColor;
   if (kept.boxes && restored.boxes === undefined && restored.layout === kept.layout) restored.boxes = kept.boxes;
+  // Deleting a block is the author's call: a reply never deletes one, and
+  // brings one back only by writing words into it.
+  if (kept.removed && restored.layout === kept.layout) restored.removed = deckBlocksStillRemoved(kept, restored);
   const keptPicture = deckSlidePicture(kept);
   if (keptPicture?.src && restored.image !== undefined) {
     const image = (restored.image && typeof restored.image === "object" ? restored.image : {}) as Record<string, unknown>;
@@ -21877,7 +22320,13 @@ function extractDeckJsonBlock(reply: string): string | null {
 
 /** Prompt for editing one slide in place: the slide's own JSON plus the deck's
  * slide titles for context. The reply is one slide, or several for a split. */
-function providerSlideEditPrompt(deck: SlideDeck, slide: DeckSlide, instruction: string) {
+function providerSlideEditPrompt(
+  deck: SlideDeck,
+  slide: DeckSlide,
+  instruction: string,
+  addPlace?: DeckAddPlace | null,
+) {
+  const room = addPlace ? deckNewBlockBox("list", addPlace) : null;
   const index = deck.slides.findIndex((item) => item.id === slide.id);
   const outline = deck.slides
     .map((item, position) => `${position + 1}. ${deckSlideOutline(item).split("\n")[0] || item.layout}`)
@@ -21892,6 +22341,13 @@ function providerSlideEditPrompt(deck: SlideDeck, slide: DeckSlide, instruction:
     "- Keep text and speaker notes you were not asked to change.",
     "- Pictures are not shown to you: leave image src empty and the editor keeps the current picture.",
     "- Slide text stays tight: short phrases of at most ~12 words, never paragraphs.",
+    '- A slide can carry extra boxes in "added", beside its layout\'s fields: {"id":"text-1","text":"..."} is a text box, {"id":"list-1","bullets":[...]} a bullet list, {"id":"picture-1","image":{...}} a picture. Keep every one you were not asked to change, with its id.',
+    '- To add a box, append an entry to "added" whose id starts with "text-" or "list-" (for example {"id":"text-new","text":"..."}). The editor decides where it goes: never write a position or size.',
+    ...(room
+      ? [
+          `- The author pointed at an empty part of this slide and wants something added there. Put what the instruction asks for in ONE new "added" entry and leave everything else on the slide exactly as it is. The space is about ${room.w} by ${room.h} pixels on a 960 by 540 slide, so keep it short.`,
+        ]
+      : []),
     "",
     ...deckLayoutRules(deckThemeDesign(deck.theme)),
     "",
@@ -21915,7 +22371,12 @@ type SlideEditResult =
 /** Validates a single-slide AI reply by placing it in the deck and running
  * the one deck validator, so an edited slide can never be something the
  * deck (or its exports) cannot hold. */
-function parseAiSlideReply(reply: string, deck: SlideDeck, slideId: string): SlideEditResult {
+function parseAiSlideReply(
+  reply: string,
+  deck: SlideDeck,
+  slideId: string,
+  addPlace?: DeckAddPlace | null,
+): SlideEditResult {
   const block = extractDeckJsonBlock(reply);
   if (!block) return { ok: false, error: "The reply contained no slide JSON." };
   let candidate: unknown;
@@ -21936,7 +22397,7 @@ function parseAiSlideReply(reply: string, deck: SlideDeck, slideId: string): Sli
     const entry = item && typeof item === "object" && !Array.isArray(item) ? { ...(item as Record<string, unknown>) } : {};
     if (index === 0) {
       entry.id = slideId;
-      return restoreKeptSlideFields(entry, original);
+      return restoreKeptSlideFields(entry, original, deck.theme, addPlace);
     }
     let id = typeof entry.id === "string" && entry.id.trim() && !takenIds.has(entry.id) ? entry.id : "";
     if (!id) id = nextDeckSlideId({ ...deck, slides: deck.slides });
@@ -21998,7 +22459,7 @@ function parseAiDeckReply(
       record.slides = record.slides.map((slide) => {
         if (!slide || typeof slide !== "object" || Array.isArray(slide)) return slide;
         const entry = slide as Record<string, unknown>;
-        return restoreKeptSlideFields(entry, typeof entry.id === "string" ? keptSlides.get(entry.id) : undefined);
+        return restoreKeptSlideFields(entry, typeof entry.id === "string" ? keptSlides.get(entry.id) : undefined, theme);
       });
     }
   }
@@ -22090,7 +22551,7 @@ function applyDeckFitReply(
     if (!original) continue;
     if (typeof entry.layout !== "string") entry.layout = original.layout;
     if (typeof entry.notes !== "string") entry.notes = original.notes;
-    replacements.set(entry.id, restoreKeptSlideFields(entry, original));
+    replacements.set(entry.id, restoreKeptSlideFields(entry, original, deck.theme));
   }
   if (!replacements.size) return { ok: false, error: "The reply did not return any of the slides to fix." };
   const raw = JSON.parse(serializeSlideDeck(deck)) as Record<string, unknown> & { slides: Array<Record<string, unknown>> };

@@ -189,6 +189,24 @@
   grid-column: 1 / -1;
 }
 
+/* Reasoning's Auto box sits in the top-right corner, on the title line. It
+   is placed out of the grid so the row keeps its height and the help line
+   below keeps the row's full width; only the title makes room for it. */
+.composer-option-row.is-stacked:has(> .reasoning-auto) {
+  position: relative;
+}
+
+.composer-option-row > .reasoning-auto {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  min-height: 22px;
+}
+
+.composer-option-row:has(> .reasoning-auto) .composer-option-copy strong {
+  padding-right: 72px;
+}
+
 .composer-option-well {
   flex: none;
   display: grid;
@@ -796,6 +814,21 @@
 
   .matter-chooser-entry input {
     font-size: 16px;
+  }
+
+  /* A bigger target, still on the title line and inside the row. It is
+     tall enough to reach the help line, so that line wraps short of it. */
+  .composer-option-row > .reasoning-auto {
+    top: 0;
+    min-height: 34px;
+  }
+
+  .composer-option-row:has(> .reasoning-auto) .composer-option-copy {
+    padding-right: 76px;
+  }
+
+  .composer-option-row:has(> .reasoning-auto) .composer-option-copy strong {
+    padding-right: 0;
   }
 
   .composer-options-heading .icon-button {

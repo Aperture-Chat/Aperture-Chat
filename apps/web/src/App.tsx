@@ -19,12 +19,14 @@ import { AutomationsConsole } from "./components/AutomationsConsole";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { SessionRestoreScreen } from "./components/SessionRestoreScreen";
 import { FirstRunWelcome } from "./components/FirstRunWelcome";
+import { GitHubStarPrompt } from "./components/GitHubStarPrompt";
 import { ModelAccessExplainer } from "./components/ModelAccessExplainer";
 import {
   createAdminConnectorConfig,
   bulkCreateAdminGroups,
   bulkDeleteAdminGroups,
   createAdminGroup,
+  setAdminOwnGroupMembership,
   createAdminToolConfig,
   createAdminContentFilter,
   updateAdminContentFilter,
@@ -963,6 +965,8 @@ export function App() {
       deleteGroup: async (actorUserId, groupId) => {
         await deleteAdminGroup(actorUserId, groupId);
       },
+      setOwnGroupMembership: (actorUserId, groupId, member) =>
+        setAdminOwnGroupMembership(actorUserId, groupId, member),
       deleteGroups: async (actorUserId, groupIds) => {
         const result = await bulkDeleteAdminGroups(actorUserId, {
           group_ids: groupIds,
@@ -1652,6 +1656,13 @@ export function App() {
               setHelpDrawerRequestKey((key) => key + 1);
             }
           }}
+        />
+      )}
+      {sessionHydrated && sessionUserId && !viewAsRole && (
+        <GitHubStarPrompt
+          userId={data.me.id}
+          brandName={chatBrandName}
+          held={firstRunGuideRequest !== null || Boolean(pwaInstallPlatform)}
         />
       )}
       {content}

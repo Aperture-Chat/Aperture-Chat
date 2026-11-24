@@ -99,6 +99,22 @@ export const DECK_BOX_REGIONS = [
 export const DECK_BOX_MIN_W = 40;
 export const DECK_BOX_MIN_H = 24;
 
+/** What an author can add to a slide beyond its layout's own blocks. */
+export type DeckAddedKind = "text" | "list" | "picture";
+
+/** A block the author added to a slide. Its id names its kind ("text-1",
+ * "list-2", "picture-1") and serves as its region name everywhere a layout
+ * block's name would, so one block can never be two kinds. It always carries
+ * its own box: no layout places it. */
+export type DeckAddedBlock = { id: string; box: DeckSlideBox } & (
+  | { text: DeckRichText }
+  | { bullets: DeckBullet[] }
+  | { image: DeckImageRef }
+);
+
+export const MAX_DECK_ADDED_BLOCKS = 12;
+const ADDED_BLOCK_ID = /^(text|list|picture)-[a-z0-9]{1,12}$/;
+
 type DeckSlideBase = {
   id: string;
   notes: string;
@@ -114,6 +130,14 @@ type DeckSlideBase = {
   /** User-resized block boxes, keyed by region ("title", "body", "image"…).
    * Absent regions keep the layout's default geometry. */
   boxes?: Record<string, DeckSlideBox>;
+  /** Blocks the author deleted from this slide ("title", "image"…), sorted.
+   * A deleted block holds no words or picture and is neither drawn nor
+   * exported; applying a layout puts every block back. */
+  removed?: string[];
+  /** Blocks the author added, in the order they were added (later ones draw
+   * on top). They belong to the slide, not its layout, and survive a layout
+   * change. */
+  added?: DeckAddedBlock[];
 };
 
 export type DeckSlide = DeckSlideBase &
@@ -753,7 +777,15 @@ export function parseSlideDeck(value: unknown): ParseSlideDeckResult {
       // User-resized block boxes: unknown regions and broken geometry drop
       // with a warning; usable values clamp to the 960×540 slide canvas
       // (deckGeometry's preview dimensions) so a box can never leave it.
-      const withBoxes = (slide: DeckSlide): DeckSlide => {
+      const withBoxes = (slide: DeckSlide): DeckSlide =>
+        withAddedBlocks(
+          withRemovedBlocks(withBoxOverrides(slide), raw.removed, `slides[${index}].removed`, warnings),
+          raw.added,
+          `slides[${index}].added`,
+          errors,
+          warnings,
+        );
+      const withBoxOverrides = (slide: DeckSlide): DeckSlide => {
         if (raw.boxes === undefined || raw.boxes === null) return slide;
         if (!isRecord(raw.boxes)) {
           warnings.push(`slides[${index}].boxes was not an object and was dropped`);
@@ -765,19 +797,12 @@ export function parseSlideDeck(value: unknown): ParseSlideDeckResult {
             warnings.push(`slides[${index}].boxes.${region} is not an adjustable block and was dropped`);
             continue;
           }
-          const { x, y, w, h } = value as Record<string, unknown>;
-          if (![x, y, w, h].every((entry) => typeof entry === "number" && Number.isFinite(entry))) {
+          const box = parseSlideBox(value);
+          if (!box) {
             warnings.push(`slides[${index}].boxes.${region} had unusable geometry and was dropped`);
             continue;
           }
-          const width = Math.round(Math.min(Math.max(w as number, DECK_BOX_MIN_W), 960));
-          const height = Math.round(Math.min(Math.max(h as number, DECK_BOX_MIN_H), 540));
-          boxes[region] = {
-            x: Math.round(Math.min(Math.max(x as number, 0), 960 - width)),
-            y: Math.round(Math.min(Math.max(y as number, 0), 540 - height)),
-            w: width,
-            h: height,
-          };
+          boxes[region] = box;
         }
         return Object.keys(boxes).length ? { ...slide, boxes } : slide;
       };
@@ -812,6 +837,89 @@ export function parseSlideDeck(value: unknown): ParseSlideDeckResult {
     };
   }
   return { ok: true, deck, warnings };
+}
+
+/** A block box clamped to the 960×540 slide canvas and the minimum block
+ * size, or null when the value holds no usable geometry. */
+function parseSlideBox(value: unknown): DeckSlideBox | null {
+  if (!isRecord(value)) return null;
+  const { x, y, w, h } = value;
+  if (![x, y, w, h].every((entry) => typeof entry === "number" && Number.isFinite(entry))) return null;
+  const width = Math.round(Math.min(Math.max(w as number, DECK_BOX_MIN_W), 960));
+  const height = Math.round(Math.min(Math.max(h as number, DECK_BOX_MIN_H), 540));
+  return {
+    x: Math.round(Math.min(Math.max(x as number, 0), 960 - width)),
+    y: Math.round(Math.min(Math.max(y as number, 0), 540 - height)),
+    w: width,
+    h: height,
+  };
+}
+
+/** Reads the blocks an author added to a slide. A block with a bad name, a
+ * repeated name, or no usable box is dropped with a warning; its words and
+ * picture are checked as strictly as a layout block's. */
+function withAddedBlocks(
+  slide: DeckSlide,
+  value: unknown,
+  label: string,
+  errors: string[],
+  warnings: string[],
+): DeckSlide {
+  if (value === undefined || value === null) return slide;
+  if (!Array.isArray(value)) {
+    warnings.push(`${label} was not a list and was dropped`);
+    return slide;
+  }
+  const added: DeckAddedBlock[] = [];
+  value.forEach((entry, index) => {
+    const frame = addedBlockFrame(entry, added);
+    if (!frame) {
+      warnings.push(`${label}[${index}] was not a usable added block and was dropped`);
+    } else if (added.length === MAX_DECK_ADDED_BLOCKS) {
+      warnings.push(`${label} truncated to ${MAX_DECK_ADDED_BLOCKS} blocks`);
+    } else {
+      added.push(addedBlockContent(frame, `${label}[${index}]`, errors, warnings));
+    }
+  });
+  return added.length ? { ...slide, added } : slide;
+}
+
+type AddedBlockFrame = { id: string; kind: DeckAddedKind; box: DeckSlideBox; entry: Record<string, unknown> };
+
+/** An added block's name, kind, and box, or null when the entry has no
+ * usable name or box, or repeats a name already taken. */
+function addedBlockFrame(entry: unknown, taken: DeckAddedBlock[]): AddedBlockFrame | null {
+  if (!isRecord(entry) || typeof entry.id !== "string") return null;
+  const { id } = entry;
+  const kind = deckAddedKind(id);
+  const box = parseSlideBox(entry.box);
+  if (!kind || !box || taken.some((block) => block.id === id)) return null;
+  return { id, kind, box, entry };
+}
+
+/** The block with its words or picture read from the entry, by its kind. */
+function addedBlockContent(frame: AddedBlockFrame, at: string, errors: string[], warnings: string[]): DeckAddedBlock {
+  const { id, kind, box, entry } = frame;
+  if (kind === "text") return { id, box, text: parseRichText(entry.text, MAX_RUN_TEXT_CHARS, `${at}.text`, errors) };
+  if (kind === "list") return { id, box, bullets: parseBullets(entry.bullets ?? [], `${at}.bullets`, errors, warnings) };
+  return { id, box, image: parseImageRef(entry.image ?? {}, `${at}.image`, errors) };
+}
+
+/** Applies a stored list of deleted blocks. Names the layout lacks drop with
+ * a warning; a deleted block's words are cleared here, so no stored deck can
+ * carry text that is on no slide. */
+function withRemovedBlocks(slide: DeckSlide, value: unknown, label: string, warnings: string[]): DeckSlide {
+  if (value === undefined || value === null) return slide;
+  if (!Array.isArray(value)) {
+    warnings.push(`${label} was not a list and was dropped`);
+    return slide;
+  }
+  const blocks = deckSlideBlocks(slide.layout);
+  return value.reduce<DeckSlide>((current, region) => {
+    if (blocks.includes(region)) return withoutDeckBlock(current, region);
+    warnings.push(`${label} named "${String(region).slice(0, 20)}", which this layout does not have; it was dropped`);
+    return current;
+  }, slide);
 }
 
 function utf8Length(value: string) {
@@ -850,22 +958,154 @@ export const DECK_LAYOUT_REGIONS: Record<DeckSlideLayout, readonly string[]> = {
 /** Text content of one region on a slide, or null when the layout has no
  * such region. Bullet regions return their bullets; the rest run lists. */
 export function deckSlideRegionContent(slide: DeckSlide, region: string): DeckRichText | DeckBullet[] | null {
-  if (!DECK_LAYOUT_REGIONS[slide.layout].includes(region)) return null;
+  const added = addedBlock(slide, region);
+  if (added) return "text" in added ? added.text : "bullets" in added ? added.bullets : null;
+  if (!DECK_LAYOUT_REGIONS[slide.layout].includes(region) || deckBlockRemoved(slide, region)) return null;
   return (slide as unknown as Record<string, DeckRichText | DeckBullet[]>)[region];
 }
 
 /** The layouts that carry a slide picture. */
 export const DECK_PICTURE_LAYOUTS: readonly DeckSlideLayout[] = ["image-caption", "image-bullets"];
 
-/** The picture a slide carries, or null when its layout has none. */
-export function deckSlidePicture(slide: DeckSlide): DeckImageRef | null {
-  return slide.layout === "image-caption" || slide.layout === "image-bullets" ? slide.image : null;
+/** True for a slide that shows a picture block: its layout has one and the
+ * author has not deleted it. */
+function holdsPicture(
+  slide: DeckSlide,
+): slide is Extract<DeckSlide, { layout: "image-caption" | "image-bullets" }> {
+  return (slide.layout === "image-caption" || slide.layout === "image-bullets") && !deckBlockRemoved(slide, "image");
 }
 
-/** The slide with its picture replaced; a slide whose layout holds no
- * picture comes back unchanged. */
-export function withDeckSlidePicture(slide: DeckSlide, image: DeckImageRef): DeckSlide {
-  return slide.layout === "image-caption" || slide.layout === "image-bullets" ? { ...slide, image } : slide;
+/** The picture in one of a slide's picture blocks: its layout's ("image",
+ * the default) or one the author added. Null when the slide has no such
+ * block. */
+export function deckSlidePicture(slide: DeckSlide, region = "image"): DeckImageRef | null {
+  if (region === "image") return holdsPicture(slide) ? slide.image : null;
+  const added = addedBlock(slide, region);
+  return added && "image" in added ? added.image : null;
+}
+
+/** The slide with one picture block's picture replaced; a slide with no
+ * such block comes back unchanged. */
+export function withDeckSlidePicture(slide: DeckSlide, image: DeckImageRef, region = "image"): DeckSlide {
+  if (region === "image") return holdsPicture(slide) ? { ...slide, image } : slide;
+  return deckSlidePicture(slide, region) ? withAddedBlock(slide, region, { image }) : slide;
+}
+
+/** Every picture block on a slide, in drawing order: the layout's, then the
+ * ones the author added. */
+export function deckPictureRegions(slide: DeckSlide): string[] {
+  const added = (slide.added ?? []).filter((block) => "image" in block).map((block) => block.id);
+  return holdsPicture(slide) ? ["image", ...added] : added;
+}
+
+/* ------------------------------ added blocks ------------------------------ */
+
+/** The kind of block an added block's name stands for; null for a layout
+ * block's name or anything else. */
+export function deckAddedKind(region: string): DeckAddedKind | null {
+  return (ADDED_BLOCK_ID.exec(region)?.[1] as DeckAddedKind | undefined) ?? null;
+}
+
+function addedBlock(slide: DeckSlide, region: string): DeckAddedBlock | undefined {
+  return slide.added?.find((block) => block.id === region);
+}
+
+/** The slide with one added block's fields replaced. */
+function withAddedBlock(slide: DeckSlide, region: string, fields: Partial<DeckAddedBlock>): DeckSlide {
+  const added = (slide.added ?? []).map((block) => (block.id === region ? ({ ...block, ...fields } as DeckAddedBlock) : block));
+  return { ...slide, added };
+}
+
+/** An empty block of a kind, as it is when the author first adds it. */
+function emptyAddedBlock(kind: DeckAddedKind, id: string, box: DeckSlideBox): DeckAddedBlock {
+  if (kind === "text") return { id, box, text: [] };
+  if (kind === "list") return { id, box, bullets: [{ runs: [{ text: "" }], level: 0 }] };
+  return { id, box, image: { src: "", alt: "" } };
+}
+
+/** Adds an empty block of a kind at a box and says what it is called. Null
+ * when the slide already holds as many added blocks as it may. */
+export function withDeckBlockAdded(
+  slide: DeckSlide,
+  kind: DeckAddedKind,
+  box: DeckSlideBox,
+): { slide: DeckSlide; region: string } | null {
+  const added = slide.added ?? [];
+  if (added.length >= MAX_DECK_ADDED_BLOCKS) return null;
+  let number = 1;
+  while (added.some((block) => block.id === `${kind}-${number}`)) number += 1;
+  const region = `${kind}-${number}`;
+  return { slide: { ...slide, added: [...added, emptyAddedBlock(kind, region, box)] }, region };
+}
+
+/** The slide with the words of one added text box or bullet list replaced. */
+export function withDeckAddedContent(slide: DeckSlide, region: string, content: DeckRichText | DeckBullet[]): DeckSlide {
+  const kind = addedBlock(slide, region) && deckAddedKind(region);
+  if (kind === "text") return withAddedBlock(slide, region, { text: content as DeckRichText });
+  if (kind === "list") return withAddedBlock(slide, region, { bullets: content as DeckBullet[] });
+  return slide;
+}
+
+/** The slide with one block moved or resized: an added block keeps its box
+ * itself, a layout block's is kept as an override of the layout's. */
+export function withDeckBlockBox(slide: DeckSlide, region: string, box: DeckSlideBox): DeckSlide {
+  if (addedBlock(slide, region)) return withAddedBlock(slide, region, { box });
+  return { ...slide, boxes: { ...(slide.boxes ?? {}), [region]: box } };
+}
+
+/* ----------------------------- deleted blocks ----------------------------- */
+
+/** Every block a layout draws: its text regions, then its picture. */
+export function deckSlideBlocks(layout: DeckSlideLayout): string[] {
+  return [...DECK_LAYOUT_REGIONS[layout], ...(DECK_PICTURE_LAYOUTS.includes(layout) ? ["image"] : [])];
+}
+
+/** True when the author deleted this block from the slide. */
+export function deckBlockRemoved(slide: DeckSlide, region: string): boolean {
+  return Boolean(slide.removed?.includes(region));
+}
+
+/** The slide without one of its blocks. The block's words or picture go with
+ * it, so nothing that is off the slide can reach an export or a prompt. A
+ * block the layout does not have, or one already deleted, changes nothing. */
+export function withoutDeckBlock(slide: DeckSlide, region: string): DeckSlide {
+  if (addedBlock(slide, region)) return withoutAddedBlock(slide, region);
+  if (!deckSlideBlocks(slide.layout).includes(region)) return slide;
+  const removed = [...new Set(slide.removed).add(region)].sort();
+  const emptied = region === "image" ? { image: { src: "", alt: "" } } : { [region]: [] };
+  return { ...slide, ...emptied, removed } as DeckSlide;
+}
+
+/** An added block is simply gone once deleted: no layout brings it back. */
+function withoutAddedBlock(slide: DeckSlide, region: string): DeckSlide {
+  const { added = [], ...rest } = slide;
+  const left = added.filter((block) => block.id !== region);
+  return (left.length ? { ...rest, added: left } : rest) as DeckSlide;
+}
+
+/** The slide with every deleted block back, empty, as a new slide of its
+ * layout has it. A block the author had moved returns to that place. */
+export function withDeckBlocksRestored(slide: DeckSlide): DeckSlide {
+  if (!slide.removed) return slide;
+  const { removed, ...rest } = slide;
+  const fresh = createDeckSlide(slide.layout, slide.id) as unknown as Record<string, unknown>;
+  return { ...rest, ...Object.fromEntries(removed.map((region) => [region, fresh[region]])) } as DeckSlide;
+}
+
+/** True when a region value written by a model carries any words. */
+function hasWords(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(hasWords);
+  if (!isRecord(value)) return false;
+  return hasWords(value.text) || hasWords(value.runs);
+}
+
+/** The deleted blocks a revised slide keeps deleted. A revision never sees
+ * which blocks are gone, so one it left empty stays gone, and one it wrote
+ * words into comes back with those words. */
+export function deckBlocksStillRemoved(kept: DeckSlide, revised: Record<string, unknown>): string[] {
+  if (!kept.removed) return [];
+  return kept.removed.filter((region) => !hasWords(revised[region]));
 }
 
 /** Plain text of a region's content, bullets one per line. */
@@ -956,5 +1196,13 @@ export function deckSlideOutline(slide: DeckSlide): string {
       push(deckRunsText(slide.body));
       break;
   }
+  (slide.added ?? []).flatMap(addedBlockOutline).forEach(push);
   return lines.join("\n");
+}
+
+/** One added block's lines in a slide's outline. */
+function addedBlockOutline(block: DeckAddedBlock): string[] {
+  if ("text" in block) return [deckRunsText(block.text)];
+  if ("bullets" in block) return block.bullets.map((bullet) => `${"  ".repeat(bullet.level)}- ${deckRunsText(bullet.runs)}`);
+  return [block.image.alt ? `[Image: ${block.image.alt}]` : ""];
 }

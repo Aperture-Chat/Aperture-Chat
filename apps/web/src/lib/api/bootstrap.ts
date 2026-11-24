@@ -318,6 +318,8 @@ export function mapToolConfigRecordToDisplay(record: ToolConfigRecord): ToolConf
     approval_required: record.approval_required,
     allowed_group_ids: record.allowed_group_ids,
     owner_user_id: record.owner_user_id,
+    only_me: Boolean(record.only_me),
+    created_by_user_id: record.created_by_user_id ?? null,
     scopes: stringArraySetting(record.settings, "scopes"),
     connected_model_ids: stringArraySetting(record.settings, "connected_model_ids"),
     endpoint: record.endpoint_url ?? stringSetting(record.settings, "endpoint"),

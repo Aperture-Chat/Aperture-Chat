@@ -3406,7 +3406,9 @@ a.nav-item {
   white-space: nowrap;
 }
 
-.draft-settings-panel label {
+/* The shared reasoning Auto box keeps its own styling. `:where` keeps this
+   rule as weak as the plain `label` it replaces, so field rules still win. */
+.draft-settings-panel label:where(:not(.reasoning-auto)) {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3421,10 +3423,21 @@ a.nav-item {
   gap: 6px;
 }
 
-.draft-setting-field > span {
+.draft-setting-field > span,
+.draft-setting-field-head > span {
   color: var(--muted);
   font-size: var(--control-label-size);
   font-weight: 750;
+}
+
+/* The label line holds the Auto box at its right edge; a minimum height
+   keeps the field still when the box is toggled. */
+.draft-setting-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
 }
 
 .draft-setting-field .draft-setting-help {
@@ -15094,6 +15107,10 @@ button.owner-doc-card:hover {
 .tool-config-form label,
 .agent-builder-form label {
   display: grid;
+  /* Pack the caption and control at the top: a taller neighbor (the AI model
+     field with Sync models under it) stretches the row, and stretched grid
+     rows pushed the Agent name box down out of line. */
+  align-content: start;
   gap: 6px;
   min-width: 0;
   color: var(--muted);
@@ -24887,8 +24904,7 @@ button.retention-tagged-title:focus-visible strong {
   .panel-collapse-button,
   .panel-actions button,
   .date-range-filter-presets button,
-  .audit-summary-card,
-  .toggle {
+  .audit-summary-card {
     min-height: 44px;
     touch-action: manipulation;
   }
@@ -25722,16 +25738,17 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 }
 
 @media (max-width: 700px) {
-  /* The touch target is 44px tall; the visible track remains a horizontal pill. */
+  /* The touch target is 44px tall; the visible track remains a horizontal pill.
+     The well belongs to the track, never the invisible touch square around it. */
   button.toggle, button.toggle.is-on {
     width: 44px; min-width: 44px; height: 44px; min-height: 44px;
-    max-height: 44px; padding: 0; background: transparent;
+    max-height: 44px; padding: 0; background: transparent; box-shadow: none;
+    touch-action: manipulation;
   }
   button.toggle::before {
     content: ""; position: absolute; left: 0; top: 10px; width: 44px; height: 24px;
-    border-radius: 999px; background: var(--border-strong);
+    border-radius: 999px;
   }
-  button.toggle.is-on::before { background: var(--teal); }
   button.toggle > span { top: 13px; left: 3px; width: 18px; height: 18px; }
   button.toggle.is-on > span { transform: translateX(20px); }
   .tool-library-popout {

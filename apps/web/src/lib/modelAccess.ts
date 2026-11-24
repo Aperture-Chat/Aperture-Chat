@@ -14,6 +14,65 @@ export function isModelUsable(data: BootstrapData, model: ModelConfig) {
   return Boolean(providerForModel(data, model)?.connected) && userCanAccessModel(data, model);
 }
 
+/** The first image model the signed-in person can use right now, or null. */
+export function usablePictureModel(data: BootstrapData): ModelConfig | null {
+  return data.models.find((model) => isModelUsable(data, model) && isImageGenerationModel(model)) ?? null;
+}
+
+/** Why no picture can be generated, and what the reader can do about it. */
+export type PictureModelNotice = { headline: string; fix: string };
+
+/** Says why nobody here can generate a picture right now; null when someone
+ * can. Each reader is told the step that is theirs to take: the platform
+ * owner turns a model on, a tenant administrator shares it with a group, and
+ * everyone else is told whom to ask. */
+export function pictureModelNotice(data: BootstrapData): PictureModelNotice | null {
+  if (usablePictureModel(data)) return null;
+  const pictureModels = data.models.filter(isImageGenerationModel);
+  const connected = pictureModels.filter((model) => providerForModel(data, model)?.connected);
+  if (data.me.role === "PLATFORM_OWNER") return ownerPictureNotice(pictureModels, connected);
+  const admin = data.me.role === "TENANT_ADMIN";
+  const on = connected.find((model) => model.platform_enabled);
+  if (on) {
+    return {
+      headline: "An image model is on, but your group cannot use it.",
+      fix: admin
+        ? `In the Admin console, open Models & workspace and share ${on.name} with your group.`
+        : "Ask your administrator to share it with your group.",
+    };
+  }
+  return {
+    headline: "The image model is turned off.",
+    fix: admin ? "Ask the platform owner to turn one on." : "Ask your administrator to turn one on.",
+  };
+}
+
+/** The platform owner's notice: nothing set up, a provider down, or a model
+ * switched off, each with the place in their console that fixes it. */
+function ownerPictureNotice(pictureModels: ModelConfig[], connected: ModelConfig[]): PictureModelNotice {
+  if (!pictureModels.length) {
+    return {
+      headline: "No image model is set up.",
+      fix: "In the Platform Owner Console, open Models, sync your provider's models, then turn on an image model.",
+    };
+  }
+  if (!connected.length) {
+    return {
+      headline: "The image model's provider is not connected.",
+      fix: `In the Platform Owner Console, reconnect ${pictureModels[0].provider_name}.`,
+    };
+  }
+  return {
+    headline: "The image model is turned off.",
+    fix: `In the Platform Owner Console, open Models and turn on ${connected[0].name}.`,
+  };
+}
+
+/** The notice as one line, for a tooltip or an error. */
+export function pictureModelNoticeText(notice: PictureModelNotice): string {
+  return `${notice.headline} ${notice.fix}`;
+}
+
 export function usableModels(data: BootstrapData) {
   return data.models.filter((model) => isModelUsable(data, model));
 }

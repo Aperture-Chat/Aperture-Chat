@@ -70,6 +70,7 @@ const DECK_SHORTCUTS: ShortcutGroup[] = [
     items: [
       ["Drag the frame", "Move a text box (snaps to guides)"],
       ["Arrow keys", "Nudge the selected box (Shift: 10×)"],
+      ["Delete", "Delete the selected box (on its move grip or a corner)"],
       ["Esc", "Leave the text box"],
     ],
   },

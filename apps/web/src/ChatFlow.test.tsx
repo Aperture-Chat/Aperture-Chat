@@ -782,6 +782,132 @@ test("Balanced asks a reasoning model for medium effort", async () => {
   }
 });
 
+/** Gives the persona's default model real reasoning control for one test. */
+async function withReasoningControl(run: () => Promise<void>) {
+  const model = sampleData.models.find((item) => item.id === "agent-client-update")!;
+  const capabilities = model.capabilities;
+  model.capabilities = { ...capabilities, supported_parameters: ["reasoning_effort"] };
+  try {
+    await run();
+  } finally {
+    model.capabilities = capabilities;
+  }
+}
+
+function autoReasoningBox() {
+  return screen.getByRole("checkbox", { name: "Auto: choose the reasoning level automatically" });
+}
+
+async function openSendOptions() {
+  fireEvent.click(screen.getByRole("button", { name: "Send options" }));
+  return screen.findByRole("radiogroup", { name: "Model reasoning level" });
+}
+
+test("Auto reasoning is off by default and the manual level is sent", async () => {
+  await withReasoningControl(async () => {
+    await renderApp();
+    await screen.findByLabelText("Message");
+    const rail = await openSendOptions();
+    expect(autoReasoningBox()).not.toBeChecked();
+    expect(autoReasoningBox()).toBeEnabled();
+    fireEvent.click(within(rail).getByRole("radio", { name: "Smart" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    sendFromComposer("hi");
+    await waitFor(() => expect(chatRequests).toHaveLength(1));
+    expect(chatRequests[0].reasoning_effort).toBe("high");
+  });
+});
+
+test("checking Auto is remembered in a later session", async () => {
+  await withReasoningControl(async () => {
+    const first = await renderApp();
+    await screen.findByLabelText("Message");
+    await openSendOptions();
+    fireEvent.click(autoReasoningBox());
+    expect(autoReasoningBox()).toBeChecked();
+    expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(
+      "Aperture picks the level for each message.",
+    );
+    first.unmount();
+
+    await renderApp();
+    await screen.findByLabelText("Message");
+    await openSendOptions();
+    expect(autoReasoningBox()).toBeChecked();
+  });
+});
+
+test.each([
+  ["a trivial message", "thanks!", "Fast", "minimal"],
+  ["a clearly complex message", "Compare the indemnification clauses and weigh the risks for our client.", "Smart", "high"],
+])("with Auto on, %s is sent at the level Auto picks", async (_name, text, stop, effort) => {
+  window.localStorage.setItem("aperture-reasoning-auto-user-admin", "on");
+  await withReasoningControl(async () => {
+    await renderApp();
+    const textarea = await screen.findByLabelText("Message");
+    fireEvent.change(textarea, { target: { value: text } });
+    const rail = await openSendOptions();
+    expect(within(rail).getByRole("radio", { name: stop })).toBeChecked();
+    for (const option of within(rail).getAllByRole("radio")) expect(option).toBeDisabled();
+    fireEvent.click(within(rail).getByRole("radio", { name: "Balanced" }));
+    expect(within(rail).getByRole("radio", { name: stop })).toBeChecked();
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(chatRequests).toHaveLength(1));
+    expect(chatRequests[0].reasoning_effort).toBe(effort);
+  });
+});
+
+test("unchecking Auto restores the user's own level untouched", async () => {
+  await withReasoningControl(async () => {
+    await renderApp();
+    const textarea = await screen.findByLabelText("Message");
+    fireEvent.change(textarea, { target: { value: "hi" } });
+    const rail = await openSendOptions();
+    fireEvent.click(within(rail).getByRole("radio", { name: "Smart" }));
+    fireEvent.click(autoReasoningBox());
+    expect(within(rail).getByRole("radio", { name: "Fast" })).toBeChecked();
+    fireEvent.click(autoReasoningBox());
+    expect(within(rail).getByRole("radio", { name: "Smart" })).toBeChecked();
+    expect(within(rail).getByRole("radio", { name: "Fast" })).toBeEnabled();
+    expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent(
+      "Takes longer and thinks it through.",
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(chatRequests).toHaveLength(1));
+    expect(chatRequests[0].reasoning_effort).toBe("high");
+  });
+});
+
+test("Continue in chat sends at the level Auto picks for the held request", async () => {
+  window.localStorage.setItem("aperture-reasoning-auto-user-admin", "on");
+  await withReasoningControl(async () => {
+    await renderApp();
+    await screen.findByLabelText("Message");
+    // The held request leaves the composer empty, which alone reads Balanced.
+    sendFromComposer("Draft a memo on the indemnification risk in our vendor contract.");
+    await keepRequestInChat();
+    await waitFor(() => expect(chatRequests).toHaveLength(1));
+    expect(chatRequests[0].reasoning_effort).toBe("high");
+  });
+});
+
+test("a model without reasoning levels disables Auto and sends no effort", async () => {
+  window.localStorage.setItem("aperture-reasoning-auto-user-admin", "on");
+  await renderApp();
+  const textarea = await screen.findByLabelText("Message");
+  await openSendOptions();
+  expect(autoReasoningBox()).toBeDisabled();
+  expect(screen.getByRole("group", { name: "Reasoning level" })).toHaveTextContent("does not support reasoning levels");
+  fireEvent.keyDown(document, { key: "Escape" });
+  fireEvent.change(textarea, { target: { value: "Compare these two options in depth." } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  // No effort travels: the request carries none for the provider to apply.
+  expect(chatRequests[0].reasoning_effort ?? null).toBeNull();
+});
+
 test("composer grows with the draft, caps its height, and shrinks when cleared", async () => {
   await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));

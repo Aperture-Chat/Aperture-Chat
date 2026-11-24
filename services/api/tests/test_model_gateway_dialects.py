@@ -260,6 +260,9 @@ def test_openrouter_discovery_captures_capability_metadata() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params.get("zdr") == "true"
+        # OpenRouter lists text-output models only unless asked; picture
+        # models are requested by name, and nothing else (speech, embeddings).
+        assert request.url.params.get("output_modalities") == "text,image"
         return httpx.Response(200, json=catalog)
 
     models, source = discover_provider_models(
@@ -1441,3 +1444,122 @@ def test_an_empty_reasoning_effort_sends_no_effort() -> None:
     )
 
     assert "reasoning_effort" not in captured["body"]
+
+
+def _openrouter_route(upstream: str) -> ModelGatewayRoute:
+    return ModelGatewayRoute(
+        provider_id="provider-openrouter",
+        provider_name="OpenRouter",
+        provider_kind="openrouter",
+        auth_type="bearer",
+        upstream_model=upstream,
+        base_url="https://openrouter.ai/api/v1",
+        configured=True,
+        status_message="ok",
+        secret_value="sk-or-test",
+    )
+
+
+def test_openrouter_user_catalog_falls_back_to_the_same_zdr_listing() -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, dict(request.url.params)))
+        if request.url.path.endswith("/models/user"):
+            return httpx.Response(404)
+        return httpx.Response(200, json={"data": [{"id": "vendor/draws", "architecture": {"output_modalities": ["image"]}}]})
+
+    models, source = discover_provider_models(
+        _catalog_provider("openrouter", catalog_scope="user"), "sk-or-test", transport=httpx.MockTransport(handler)
+    )
+    assert source == "openrouter:/models?zdr=true"
+    assert seen[-1] == ("/api/v1/models", {"zdr": "true", "output_modalities": "text,image"})
+    assert [model.capabilities.output_modalities for model in models if model.capabilities] == [["image"]]
+
+
+def test_a_picture_only_openrouter_model_is_asked_on_the_images_endpoint() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers["authorization"]
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "created": 1,
+                "data": [
+                    {"b64_json": "QUJD", "media_type": "image/jpeg"},
+                    {"b64_json": "REVG"},
+                    {"url": "https://example.test/signed.png"},
+                    "not an image",
+                ],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 4175, "total_tokens": 4175, "cost": 0.04},
+            },
+        )
+
+    reply = ModelGatewayClient(transport=httpx.MockTransport(handler)).generate_images(
+        route=_openrouter_route("microsoft/mai-image-2.7"),
+        messages=[
+            {"role": "system", "content": "House style."},
+            {"role": "user", "content": "An earlier request"},
+            {"role": "assistant", "content": "Done."},
+            {"role": "user", "content": [{"type": "text", "text": "A harbor at dawn"}, {"type": "image_url", "image_url": {"url": "x"}}]},
+            {"role": "user", "content": "Generate image 2 of the 3 requested."},
+        ],
+        image_only=True,
+    )
+
+    assert captured["url"] == "https://openrouter.ai/api/v1/images"
+    assert captured["auth"] == "Bearer sk-or-test"
+    # The words to draw: the user's last turn, without the system text or earlier turns.
+    assert captured["body"] == {
+        "model": "microsoft/mai-image-2.7",
+        "prompt": "A harbor at dawn\n\nGenerate image 2 of the 3 requested.",
+        "n": 1,
+    }
+    # The reply reads like a chat reply with pictures, which is what callers save.
+    message = reply["choices"][0]["message"]
+    assert [image["image_url"]["url"] for image in message["images"]] == [
+        "data:image/jpeg;base64,QUJD",
+        "data:image/png;base64,REVG",
+    ]
+    assert reply["usage"] == {"prompt_tokens": 0, "completion_tokens": 4175, "total_tokens": 4175, "cost": 0.04}
+
+
+def test_picture_models_that_also_write_keep_the_chat_request() -> None:
+    captured: dict[str, object] = {}
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(_capture_handler(captured)))
+    messages = [{"role": "user", "content": "A harbor at dawn"}]
+
+    gateway.generate_images(route=_openrouter_route("google/gemini-3.1-flash-image"), messages=messages)
+    assert str(captured["url"]).endswith("/chat/completions")
+    assert captured["body"]["modalities"] == ["image", "text"]
+    # Only OpenRouter has the Images endpoint: another provider's picture-only
+    # deployment is still asked the way it always was.
+    elsewhere = ModelGatewayRoute(
+        provider_id="provider-other",
+        provider_name="Other",
+        provider_kind="openai-compatible",
+        auth_type="bearer",
+        upstream_model="gpt-image-1",
+        base_url="https://example.test/v1",
+        configured=True,
+        status_message="ok",
+        secret_value="sk-test",
+    )
+    gateway.generate_images(route=elsewhere, messages=messages, image_only=True)
+    assert captured["url"] == "https://example.test/v1/chat/completions"
+
+
+def test_a_picture_only_model_needs_words_to_draw_and_a_missing_usage_stays_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"b64_json": "QUJD"}]})
+
+    gateway = ModelGatewayClient(transport=httpx.MockTransport(handler))
+    route = _openrouter_route("krea/krea-2-large")
+    reply = gateway.generate_images(route=route, messages=[{"role": "user", "content": "A lighthouse"}], image_only=True)
+    assert "usage" not in reply
+    for empty in ([], [{"role": "user", "content": "   "}], [{"role": "assistant", "content": "A lighthouse"}]):
+        with pytest.raises(ModelGatewayError, match="nothing to draw"):
+            gateway.generate_images(route=route, messages=empty, image_only=True)

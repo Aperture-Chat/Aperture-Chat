@@ -768,7 +768,7 @@ fieldset.provider-builder-form { min-inline-size: 0; margin-inline: 0; }
 .document-assistant-page .draft-tool-drawer .draft-version-card strong { font-size: 13px; font-weight: 650; }
 
 .document-assistant-page .draft-settings-panel { gap: 14px; border: 0; background: transparent; padding: 2px 0 0; }
-.document-assistant-page .draft-settings-panel .draft-setting-field > span { color: var(--text-strong); font-size: 12.5px; font-weight: 650; }
+.document-assistant-page .draft-settings-panel :is(.draft-setting-field, .draft-setting-field-head) > span { color: var(--text-strong); font-size: 12.5px; font-weight: 650; }
 .document-assistant-page .draft-settings-panel .draft-switch-row { font-weight: inherit; }
 .document-assistant-page .draft-settings-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; border: 1px solid var(--draft-edge); border-radius: 12px; background: var(--surface); color: var(--text-strong); font-size: 12.5px; font-weight: 650; }
 .document-assistant-page .draft-settings-action:hover:not(:disabled) { border-color: var(--teal-2, var(--teal)); color: var(--teal-strong); }

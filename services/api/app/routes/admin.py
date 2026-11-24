@@ -54,6 +54,7 @@ from app.core.policy import (
     assert_can_modify_user,
     assert_knowledge_authoring,
     assert_tool_authoring,
+    can_self_join_group,
     hermes_companion_allowed,
     hermes_locked_for,
     is_platform_owner,
@@ -61,6 +62,7 @@ from app.core.policy import (
     is_workspace_agent_profile,
     require_admin_or_owner,
     same_tenant,
+    tool_config_visible_to,
 )
 from app.core.sessions import sign_oidc_state
 from app.models.schemas import (
@@ -91,6 +93,7 @@ from app.models.schemas import (
     GroupBulkCreateRequest,
     GroupBulkDeleteRequest,
     GroupCreateRequest,
+    GroupSelfMembershipRequest,
     GroupUpdateRequest,
     KnowledgeConfig,
     KnowledgeConfigCreateRequest,
@@ -913,6 +916,62 @@ def create_groups_bulk(
     return [_create_group(group_payload, actor, store) for group_payload in payload.groups]
 
 
+@router.put("/groups/{group_id}/membership/me")
+def set_own_group_membership(
+    group_id: str,
+    payload: GroupSelfMembershipRequest,
+    actor: User = Depends(current_user),
+    store: SeedStore = Depends(get_store),
+) -> User:
+    """Add or remove the calling tenant admin in a group they created.
+
+    Unlike an admin changing another person's groups, this does not advance
+    the session watermark: signed sessions carry no group claims and every
+    request resolves group_ids live, so the change already applies to all of
+    the actor's sessions, and revoking them would only sign the requester out.
+    """
+    require_admin_or_owner(actor)
+    expected_role = actor.role
+    expected_tenant_id = actor.tenant_id
+    with store._store_lock:
+        _assert_current_admin_actor(
+            actor, store, expected_role=expected_role, expected_tenant_id=expected_tenant_id
+        )
+        group = _get_group(group_id, actor, store)
+        _assert_self_group_membership_allowed(actor, group)
+        group_ids = _group_ids_with_membership(actor.group_ids, group.id, payload.member)
+        if group_ids != actor.group_ids:
+            actor.group_ids = group_ids
+            store.record_audit(
+                actor, "admin.group_self_membership", group.id, {"member": payload.member}
+            )
+            store.save_runtime_state()
+        return actor
+
+
+PLATFORM_OWNER_NOT_GROUP_MEMBER = "Platform owners are not group members."
+
+
+def _assert_self_group_membership_allowed(actor: User, group: Group) -> None:
+    if is_platform_owner(actor):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=PLATFORM_OWNER_NOT_GROUP_MEMBER
+        )
+    if not can_self_join_group(actor, group):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can add yourself only to groups you created.",
+        )
+
+
+def _group_ids_with_membership(group_ids: list[str], group_id: str, member: bool) -> list[str]:
+    if member == (group_id in group_ids):
+        return list(group_ids)
+    if member:
+        return [*group_ids, group_id]
+    return [existing for existing in group_ids if existing != group_id]
+
+
 @router.patch("/groups/{group_id}")
 def update_group(
     group_id: str,
@@ -1407,6 +1466,7 @@ def update_agent_profile(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No agent profile updates provided."
         )
+    _keep_hidden_tools(actor, store, model, payload, updates)
     effective_tenant_id = (
         str(updates["tenant_id"]) if updates.get("tenant_id") is not None else model.tenant_id
     )
@@ -2218,7 +2278,91 @@ def tool_configs(
     store: SeedStore = Depends(get_store),
 ) -> list[ToolConfig]:
     require_admin_or_owner(actor)
-    return _visible_tenant_records(store.tool_configs, actor)
+    return [config for config in store.tool_configs.values() if tool_config_visible_to(actor, config)]
+
+
+def _get_tool_config(config_id: str, actor: User, store: SeedStore) -> ToolConfig:
+    config = _get_tenant_record(config_id, store.tool_configs, actor)
+    if not tool_config_visible_to(actor, config):
+        # Someone else's Only me connection: answer as if it did not exist.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown configuration.")
+    return config
+
+
+ONLY_ME_WITH_GROUPS = "Only me connections can't also be shared with groups."
+
+
+def _assert_only_me_choice(
+    actor: User, chosen: bool | None, only_me: bool, group_ids: list[str] | None
+) -> None:
+    """Only me is an administrator's option, and it never comes with group shares."""
+    if chosen and not _is_agent_profile_admin(actor):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can choose Only me; connections you add are already private to you.",
+        )
+    if only_me and group_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ONLY_ME_WITH_GROUPS)
+
+
+def _only_me_audience(
+    actor: User, store: SeedStore, config: ToolConfig, payload: ToolConfigUpdateRequest
+) -> tuple[bool, str | None, list[str]]:
+    """The (only_me, owner_user_id, allowed_group_ids) an update leaves behind.
+
+    Turning Only me on pins the tool to its owner (the actor adopts an unowned
+    admin tool) and clears its groups. Turning it off hands an administrator's
+    tool back to the workspace or the chosen groups; a regular user's tool goes
+    back to being private to them.
+    """
+    only_me = config.only_me if payload.only_me is None else payload.only_me
+    groups = config.allowed_group_ids if payload.allowed_group_ids is None else payload.allowed_group_ids
+    _assert_only_me_choice(actor, payload.only_me, only_me, payload.allowed_group_ids)
+    if only_me:
+        owner = config.owner_user_id if config.only_me else _only_me_owner(actor, config)
+        return True, owner, []
+    return False, _owner_outside_only_me(store, config), groups
+
+
+def _only_me_change_audit(config: ToolConfig, audience: tuple[bool, str | None, list[str]]) -> dict:
+    """When Only me flips, the trail records who ends up owning the tool and
+    which group shares the change removed, not just what was asked for."""
+    only_me, owner, groups = audience
+    if only_me == config.only_me:
+        return {}
+    cleared = [group_id for group_id in config.allowed_group_ids if group_id not in groups]
+    return {"owner_user_id": owner, "cleared_group_ids": cleared}
+
+
+def _new_tool_owner(actor: User, only_me: bool) -> str | None:
+    """Administrators' shared tools stay unowned; Only me and user tools are the actor's."""
+    return actor.id if only_me or not _is_agent_profile_admin(actor) else None
+
+
+def _only_me_owner(actor: User, config: ToolConfig) -> str:
+    """Who owns a connection that is being made Only me.
+
+    Only the person it belongs to (the owner of a user-authored tool, else its
+    creator) may do it, so one admin cannot take another's connection. A
+    platform owner may do it to any connection: it goes to that person when
+    known, otherwise to the platform owner.
+    """
+    rightful = config.owner_user_id or config.created_by_user_id
+    if is_platform_owner(actor):
+        return rightful or actor.id
+    if rightful != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can make a connection Only me only if you created it.",
+        )
+    return actor.id
+
+
+def _owner_outside_only_me(store: SeedStore, config: ToolConfig) -> str | None:
+    if not config.only_me:
+        return config.owner_user_id
+    owner = store.users.get(config.owner_user_id or "")
+    return owner.id if owner is not None and not _is_agent_profile_admin(owner) else None
 
 
 def _stdio_launch(settings: dict | None) -> tuple[str, tuple[str, ...]] | None:
@@ -2325,6 +2469,7 @@ def create_tool_config(
     store: SeedStore = Depends(get_store),
 ) -> ToolConfig:
     assert_tool_authoring(actor, store.groups)
+    _assert_only_me_choice(actor, payload.only_me, payload.only_me, payload.allowed_group_ids)
     if not _is_agent_profile_admin(actor):
         _assert_user_tool_shape(actor, store, payload.tool_type, payload.settings)
     if not is_platform_owner(actor):
@@ -2356,7 +2501,9 @@ def create_tool_config(
         enabled=payload.enabled,
         approval_required=payload.approval_required,
         allowed_group_ids=payload.allowed_group_ids,
-        owner_user_id=None if _is_agent_profile_admin(actor) else actor.id,
+        owner_user_id=_new_tool_owner(actor, payload.only_me),
+        only_me=payload.only_me,
+        created_by_user_id=actor.id,
         settings=payload.settings,
         secret_set=False,
         masked_secret=None,
@@ -2372,6 +2519,30 @@ def create_tool_config(
     return config
 
 
+def _assert_user_tool_update(
+    actor: User, store: SeedStore, config: ToolConfig, payload: ToolConfigUpdateRequest
+) -> None:
+    """What a granted standard user may change: their own tool, unshared."""
+    assert_tool_authoring(actor, store.groups)
+    _assert_owned_config_scope(actor, config.owner_user_id, "tool")
+    if payload.allowed_group_ids not in (None, []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sharing a tool with groups is managed by administrators.",
+        )
+    if payload.settings is not None:
+        # Switching an older user-owned script off, or renaming it, stays
+        # possible; changing what it runs does not.
+        _assert_user_tool_shape(actor, store, config.tool_type, payload.settings)
+    if payload.enabled is True and not config.enabled and config.tool_type != "mcp":
+        # Custom scripts are admin-only now. One that is still on keeps
+        # working, but once off only an administrator turns it back on.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can turn custom script tools back on.",
+        )
+
+
 @router.patch("/tool-configs/{config_id}")
 def update_tool_config(
     config_id: str,
@@ -2379,26 +2550,11 @@ def update_tool_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> ToolConfig:
-    config = _get_tenant_record(config_id, store.tool_configs, actor)
+    config = _get_tool_config(config_id, actor, store)
     if not _is_agent_profile_admin(actor):
-        assert_tool_authoring(actor, store.groups)
-        _assert_owned_config_scope(actor, config.owner_user_id, "tool")
-        if payload.allowed_group_ids not in (None, []):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Sharing a tool with groups is managed by administrators.",
-            )
-        if payload.settings is not None:
-            # Switching an older user-owned script off, or renaming it, stays
-            # possible; changing what it runs does not.
-            _assert_user_tool_shape(actor, store, config.tool_type, payload.settings)
-        if payload.enabled is True and not config.enabled and config.tool_type != "mcp":
-            # Custom scripts are admin-only now. One that is still on keeps
-            # working, but once off only an administrator turns it back on.
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only administrators can turn custom script tools back on.",
-            )
+        _assert_user_tool_update(actor, store, config, payload)
+    audience = _only_me_audience(actor, store, config, payload)
+    audience_audit = _only_me_change_audit(config, audience)
     updates = payload.model_dump(exclude_unset=True)
     if payload.tool_type is not None and payload.tool_type != config.tool_type:
         # A tool's type selects its runtime (MCP server, sandboxed script,
@@ -2426,11 +2582,14 @@ def update_tool_config(
     if payload.allowed_group_ids is not None:
         _assert_group_scope(actor, payload.allowed_group_ids, store, tenant_id=config.tenant_id)
     _apply_config_updates(config, updates)
+    config.only_me, config.owner_user_id, config.allowed_group_ids = audience
     masked_secret = _save_secret_if_present(store, "tool", config.id, payload.secret_value)
     if masked_secret is not None:
         config.secret_set = True
         config.masked_secret = masked_secret
-    store.record_audit(actor, "admin.tool_config_updated", config.id, _tool_audit_metadata(updates))
+    store.record_audit(
+        actor, "admin.tool_config_updated", config.id, _tool_audit_metadata({**updates, **audience_audit})
+    )
     return config
 
 
@@ -2440,7 +2599,7 @@ def delete_tool_config(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> dict[str, str]:
-    config = _get_tenant_record(config_id, store.tool_configs, actor)
+    config = _get_tool_config(config_id, actor, store)
     if not _is_agent_profile_admin(actor):
         assert_tool_authoring(actor, store.groups)
         _assert_owned_config_scope(actor, config.owner_user_id, "tool")
@@ -2468,7 +2627,7 @@ def clear_tool_config_secret(
     store: SeedStore = Depends(get_store),
 ) -> ToolConfig:
     """Remove a tool's saved access token / OAuth client secret from the vault."""
-    config = _get_tenant_record(config_id, store.tool_configs, actor)
+    config = _get_tool_config(config_id, actor, store)
     if not _is_agent_profile_admin(actor):
         assert_tool_authoring(actor, store.groups)
         _assert_owned_config_scope(actor, config.owner_user_id, "tool")
@@ -2992,8 +3151,19 @@ def tenant_audit_events(
     # (key reveals, provider mutations) are recorded without a tenant and never
     # appear here. Owners previewing this surface see all tenant-scoped events.
     tenant_id = actor.tenant_id if actor.role != Role.PLATFORM_OWNER else None
-    events = store.tenant_audit_events_newest_first(tenant_id, limit)
+    events = [
+        event
+        for event in store.tenant_audit_events_newest_first(tenant_id, limit)
+        if _audit_event_visible_to(actor, store, event)
+    ]
     return decorate_audit_events(events)
+
+
+def _audit_event_visible_to(actor: User, store: SeedStore, event: AuditEvent) -> bool:
+    """An event about a tool the viewer cannot see (another admin's Only me
+    connection) stays out of their trail; platform owners see every event."""
+    tool = store.tool_configs.get(event.target)
+    return tool is None or tool_config_visible_to(actor, tool)
 
 
 def _usage_filter_user_ids(selected: list[str] | None, visible: set[str]) -> set[str]:
@@ -3833,6 +4003,12 @@ def _admin_can_see_alert(actor: User, alert: SecurityAlert, store: SeedStore) ->
 
 
 def _create_group(payload: GroupCreateRequest, actor: User, store: SeedStore) -> Group:
+    if payload.add_me and is_platform_owner(actor):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=PLATFORM_OWNER_NOT_GROUP_MEMBER
+        )
+    expected_actor_role = actor.role
+    expected_actor_tenant_id = actor.tenant_id
     tenant_id = _tenant_id_for_config(actor, payload.tenant_id, store)
     name = payload.name.strip()
     if not name:
@@ -3847,6 +4023,15 @@ def _create_group(payload: GroupCreateRequest, actor: User, store: SeedStore) ->
     )
     permissions = normalize_group_permissions(payload.permissions)
     with store._store_lock:
+        if payload.add_me:
+            # The creator's own membership changes, so recheck them under the
+            # lock exactly as set_own_group_membership does.
+            _assert_current_admin_actor(
+                actor,
+                store,
+                expected_role=expected_actor_role,
+                expected_tenant_id=expected_actor_tenant_id,
+            )
         _assert_downstream_api_group_grant_allowed(
             store,
             current_enabled=False,
@@ -3861,8 +4046,13 @@ def _create_group(payload: GroupCreateRequest, actor: User, store: SeedStore) ->
             synced=payload.synced,
             user_count=max(0, payload.user_count),
             permissions=permissions,
+            created_by_user_id=actor.id,
         )
         store.groups[group.id] = group
+        if payload.add_me:
+            # Same grant as PUT /groups/{id}/membership/me, so no session
+            # watermark advance; see set_own_group_membership.
+            actor.group_ids = _group_ids_with_membership(actor.group_ids, group.id, True)
         store.record_audit(
             actor,
             "admin.group_created",
@@ -3871,6 +4061,7 @@ def _create_group(payload: GroupCreateRequest, actor: User, store: SeedStore) ->
                 "tenant_id": group.tenant_id,
                 "name": group.name,
                 "entra_object_id": group.entra_object_id,
+                "creator_joined": payload.add_me,
             },
         )
         store.save_runtime_state()
@@ -4050,20 +4241,54 @@ def _assert_agent_profile_references(
             store.content_filters,
         ),
     )
+    # Tools already on the profile stay valid even when the editor cannot see
+    # them (another admin's Only me connection); only added ones are checked.
+    kept_tool_ids = set(getattr(existing, "tool_config_ids", ()))
     for label, record_ids, collection in references:
         for record_id in record_ids:
             if label == "content filter" and is_builtin_filter_id(record_id):
                 continue
-            record = collection.get(record_id)
-            if record is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown {label}."
-                )
-            if record.tenant_id != tenant_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Agent profile {label} is outside the target tenant.",
-                )
+            _assert_profile_reference(
+                actor, label, collection.get(record_id), tenant_id, record_id in kept_tool_ids
+            )
+
+
+def _assert_profile_reference(
+    actor: User, label: str, record: Any, tenant_id: str, kept: bool
+) -> None:
+    unknown = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown {label}.")
+    if record is None:
+        raise unknown
+    if record.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Agent profile {label} is outside the target tenant.",
+        )
+    if isinstance(record, ToolConfig) and not kept and not tool_config_visible_to(actor, record):
+        # Someone else's Only me connection: as if it did not exist.
+        raise unknown
+
+
+def _keep_hidden_tools(
+    actor: User,
+    store: SeedStore,
+    model: ModelConfig,
+    payload: ModelUpdateRequest,
+    updates: dict[str, Any],
+) -> None:
+    """The editor never sees another admin's Only me connection on a shared
+    profile, so saving the list they see keeps it rather than dropping it."""
+    submitted = payload.tool_config_ids
+    if submitted is None:
+        return
+    hidden = [tool_id for tool_id in model.tool_config_ids if _tool_hidden_from(actor, store, tool_id)]
+    kept = [tool_id for tool_id in hidden if tool_id not in submitted]
+    payload.tool_config_ids = updates["tool_config_ids"] = [*submitted, *kept]
+
+
+def _tool_hidden_from(actor: User, store: SeedStore, tool_id: str) -> bool:
+    tool = store.tool_configs.get(tool_id)
+    return tool is not None and not tool_config_visible_to(actor, tool)
 
 
 def _is_agent_profile_model(model: ModelConfig) -> bool:

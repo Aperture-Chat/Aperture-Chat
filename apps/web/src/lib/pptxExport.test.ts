@@ -1,6 +1,15 @@
 import { expect, test } from "vitest";
 import { buildPptxExportDocument } from "./pptxExport";
-import { deckRichText, blankSlideDeck, type SlideDeck } from "./deck/deckModel";
+import {
+  deckRichText,
+  blankSlideDeck,
+  createDeckSlide,
+  withDeckAddedContent,
+  withDeckBlockAdded,
+  withDeckSlidePicture,
+  withoutDeckBlock,
+  type SlideDeck,
+} from "./deck/deckModel";
 
 function zipEntryNames(zip: Uint8Array): string[] {
   const decoder = new TextDecoder();
@@ -515,4 +524,72 @@ test("a deck's design exports its own shapes, inverse text, and picture placemen
   const orbitStatement = storedZipEntry(orbit.bytes, "ppt/slides/slide4.xml");
   // accent1 #087d8b mixed 85% toward white, behind the statement.
   expect(orbitStatement).toMatch(/<a:prstGeom prst="ellipse"><a:avLst\/><\/a:prstGeom><a:solidFill><a:srgbClr val="DAECEE"\/>/);
+});
+
+test("a deleted block is left out of the PowerPoint file; the rest of the slide exports", async () => {
+  const deck = blankSlideDeck("Deleted");
+  const cover = {
+    ...createDeckSlide("title", "s1"),
+    title: deckRichText("Quarterly review"),
+    subtitle: deckRichText("Prepared for the board"),
+  };
+  const office = withDeckSlidePicture(
+    { ...createDeckSlide("image-caption", "s2"), title: deckRichText("New office"), caption: deckRichText("Opens in May") },
+    { src: `data:image/jpeg;base64,${SMALL_JPEG}`, alt: "Office" },
+  );
+  deck.slides = [cover, office];
+  const whole = await buildPptxExportDocument(deck);
+  expect(storedZipEntry(whole.bytes, "ppt/slides/slide1.xml")).toContain("Prepared for the board");
+  expect(storedZipEntry(whole.bytes, "ppt/slides/slide2.xml")).toContain("<p:pic>");
+
+  deck.slides = [withoutDeckBlock(cover, "subtitle"), withoutDeckBlock(office, "image")];
+  const { bytes } = await buildPptxExportDocument(deck);
+  const first = storedZipEntry(bytes, "ppt/slides/slide1.xml");
+  expect(first).toContain("Quarterly review");
+  expect(first).not.toContain("Prepared for the board");
+  expect(first.match(/txBox="1"/g)).toHaveLength(1);
+  const second = storedZipEntry(bytes, "ppt/slides/slide2.xml");
+  expect(second).toContain("New office");
+  expect(second).toContain("Opens in May");
+  expect(second).not.toContain("<p:pic>");
+  expect(zipEntryNames(bytes).filter((name) => name.startsWith("ppt/media/"))).toEqual([]);
+  expectWellFormedXml(first);
+  expectWellFormedXml(second);
+});
+
+test("blocks an author added export as their own text boxes and pictures, where they were put", async () => {
+  const deck = blankSlideDeck("Added");
+  let slide = withDeckSlidePicture(
+    { ...createDeckSlide("image-caption", "s1"), title: deckRichText("New office") },
+    { src: `data:image/jpeg;base64,${SMALL_JPEG}`, alt: "Office" },
+  );
+  slide = withDeckAddedContent(withDeckBlockAdded(slide, "text", { x: 100, y: 400, w: 300, h: 60 })!.slide, "text-1", deckRichText("Opens in May"));
+  slide = withDeckAddedContent(withDeckBlockAdded(slide, "list", { x: 500, y: 300, w: 400, h: 200 })!.slide, "list-1", [
+    { runs: [{ text: "Two floors" }], level: 0 },
+    { runs: [{ text: "Roof terrace" }], level: 1 },
+  ]);
+  slide = withDeckSlidePicture(
+    withDeckBlockAdded(slide, "picture", { x: 20, y: 30, w: 200, h: 100 })!.slide,
+    { src: `data:image/jpeg;base64,${SMALL_JPEG_ALT}`, alt: "Floor plan" },
+    "picture-1",
+  );
+  // An added picture with nothing in it exports nothing.
+  slide = withDeckBlockAdded(slide, "picture", { x: 700, y: 30, w: 200, h: 100 })!.slide;
+  deck.slides = [slide];
+  const { bytes } = await buildPptxExportDocument(deck);
+  const xml = storedZipEntry(bytes, "ppt/slides/slide1.xml");
+  expectWellFormedXml(xml);
+  expect(xml).toContain("Opens in May");
+  expect(xml).toContain("Two floors");
+  expect(xml).toContain("Roof terrace");
+  // 12700 EMU per preview pixel: the added text box and the added picture.
+  expect(xml).toContain('<a:off x="1270000" y="5080000"/><a:ext cx="3810000" cy="762000"/>');
+  expect(xml).toContain('<a:off x="254000" y="381000"/><a:ext cx="2540000" cy="1270000"/>');
+  expect(xml.match(/<p:pic>/g)).toHaveLength(2);
+  expect(zipEntryNames(bytes).filter((name) => name.startsWith("ppt/media/"))).toHaveLength(2);
+  const rels = storedZipEntry(bytes, "ppt/slides/_rels/slide1.xml.rels");
+  expect(rels.match(/relationships\/image"/g)).toHaveLength(2);
+  // Each picture shape points at its own file.
+  const embeds = [...xml.matchAll(/r:embed="([^"]+)"/g)].map((match) => match[1]);
+  expect(new Set(embeds).size).toBe(2);
 });

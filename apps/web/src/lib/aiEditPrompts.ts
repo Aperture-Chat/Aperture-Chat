@@ -334,6 +334,32 @@ export const SLIDE_ACTIONS: AiEditAction[] = [
   },
 ];
 
+/** What the AI can add to an empty part of a slide in one click. The reply
+ * is the same structured slide JSON, with one new block in it. */
+export const SLIDE_ADD_ACTIONS: AiEditAction[] = [
+  {
+    id: "slide-add-takeaway",
+    label: "Add a key takeaway",
+    group: "slide",
+    keywords: "summary point conclusion",
+    instruction: "Add a one-sentence key takeaway that sums up what this slide shows.",
+  },
+  {
+    id: "slide-add-explanation",
+    label: "Add a short explanation",
+    group: "slide",
+    keywords: "explain context note",
+    instruction: "Add two or three plain sentences that explain what this slide shows.",
+  },
+  {
+    id: "slide-add-next-steps",
+    label: "Add next steps",
+    group: "slide",
+    keywords: "actions follow up list",
+    instruction: "Add a short bullet list of the next steps that follow from this slide.",
+  },
+];
+
 export const SLIDE_CHIP_GROUPS: AiEditChipGroup[] = [
   { id: "tone", label: "Tone", chips: AI_TONE_CHIPS },
   {

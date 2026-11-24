@@ -11,8 +11,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { Globe2, Image as ImageIcon, Sparkles, Trash2, Upload } from "lucide-react";
+import { CircleAlert, Globe2, Image as ImageIcon, Sparkles, Trash2, Upload } from "lucide-react";
 import { DECK_PREVIEW_WIDTH_PX } from "../lib/deck/deckGeometry";
+import { pictureModelNoticeText, type PictureModelNotice } from "../lib/modelAccess";
 import {
   DECK_LAYOUT_LABELS,
   DECK_PICTURE_LAYOUTS,
@@ -213,7 +214,8 @@ type PictureProps = {
   onFindWeb: () => void;
   onPickWeb: (choice: DeckWebImageChoice) => void;
   /** Null when generation is available; otherwise why it is not. */
-  generateUnavailable: string | null;
+  /** Why AI pictures cannot be generated right now, or null when they can. */
+  generateNotice: PictureModelNotice | null;
   generatorName: string | null;
   onAltFocus: () => void;
   onAltChange: (alt: string) => void;
@@ -240,7 +242,7 @@ export function DeckPicturePanel({
   onDropFile,
   onFindWeb,
   onPickWeb,
-  generateUnavailable,
+  generateNotice,
   generatorName,
   onAltFocus,
   onAltChange,
@@ -354,14 +356,23 @@ export function DeckPicturePanel({
           </button>
           <button
             type="submit"
-            data-tooltip={generateUnavailable ?? `Generate a picture with ${generatorName ?? "the image model"}`}
-            disabled={busy || !prompt.trim() || Boolean(generateUnavailable)}
+            data-tooltip={
+              generateNotice ? pictureModelNoticeText(generateNotice) : `Generate a picture with ${generatorName ?? "the image model"}`
+            }
+            disabled={busy || !prompt.trim() || Boolean(generateNotice)}
           >
             <Sparkles size={14} />
             {working === "generate" ? "Generating…" : "Generate AI picture"}
           </button>
         </div>
-        {generateUnavailable && <p className="deck-blade-hint">{generateUnavailable}</p>}
+        {generateNotice && (
+          <p className="deck-blade-notice" role="status">
+            <CircleAlert size={15} aria-hidden="true" />
+            <span>
+              <strong>{generateNotice.headline}</strong> {generateNotice.fix}
+            </span>
+          </p>
+        )}
         {error && (
           <p className="document-link-error" role="alert">
             {error}

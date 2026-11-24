@@ -107,6 +107,18 @@ def can_modify_user(actor: User, target: User, *, tenant_admins_can_create_admin
     return False
 
 
+def can_self_join_group(actor: User, group: Group) -> bool:
+    """A tenant admin may add or remove only themselves, and only in groups they created.
+
+    Placing any other administrator in a group stays with ``can_modify_user``.
+    """
+    return (
+        is_tenant_admin(actor)
+        and group.created_by_user_id == actor.id
+        and group.tenant_id == actor.tenant_id
+    )
+
+
 def assert_can_modify_user(actor: User, target: User, *, tenant_admins_can_create_admins: bool = False) -> None:
     if not can_modify_user(actor, target, tenant_admins_can_create_admins=tenant_admins_can_create_admins):
         raise HTTPException(
@@ -661,20 +673,39 @@ def assert_group_permission(user: User, groups: Mapping[str, Group], permission:
         )
 
 
+def tool_config_visible_to(user: User, config: ToolConfig) -> bool:
+    """Whether ``config`` exists for ``user`` at all: listed, managed, or run.
+
+    Platform owners see every tool. Everyone else sees their own tenant's
+    tools, except another person's "Only me" connection, which stays hidden
+    even from tenant admins.
+    """
+    if is_platform_owner(user):
+        return True
+    if user.tenant_id != config.tenant_id:
+        return False
+    return not config.only_me or user.id == config.owner_user_id
+
+
 def tool_access_allowed(user: User, config: ToolConfig) -> bool:
     if not config.enabled:
         return False
     if is_platform_owner(user):
         return True
-    if user.tenant_id != config.tenant_id:
-        return False
-    if is_pending_platform_user(user):
-        return False
-    if config.allowed_group_ids and not set(user.group_ids).intersection(config.allowed_group_ids):
-        return False
-    if config.owner_user_id and not config.allowed_group_ids:
+    return (
+        tool_config_visible_to(user, config)
+        and not is_pending_platform_user(user)
+        and _tool_shared_with(user, config)
+    )
+
+
+def _tool_shared_with(user: User, config: ToolConfig) -> bool:
+    if config.allowed_group_ids:
+        return bool(set(user.group_ids).intersection(config.allowed_group_ids))
+    if config.owner_user_id:
         # A user-authored tool with no group shares is private to its author;
-        # tenant admins keep management access.
+        # tenant admins keep management access. (An Only me tool never gets
+        # here for anyone but its owner: tool_config_visible_to hides it.)
         return user.id == config.owner_user_id or is_tenant_admin(user)
     return True
 

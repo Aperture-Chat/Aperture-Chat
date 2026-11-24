@@ -7,7 +7,15 @@
  * by construction — same principle as PREVIEW_CONTENT_WIDTH_PX in docxExport.
  */
 
-import { DECK_LAYOUT_REGIONS, type DeckDesign, type DeckSlide, type DeckSlideLayout, type DeckTheme } from "./deckModel";
+import {
+  DECK_LAYOUT_REGIONS,
+  deckAddedKind,
+  deckBlockRemoved,
+  type DeckDesign,
+  type DeckSlide,
+  type DeckSlideLayout,
+  type DeckTheme,
+} from "./deckModel";
 
 export const DECK_PREVIEW_WIDTH_PX = 960;
 export const DECK_PREVIEW_HEIGHT_PX = 540;
@@ -46,8 +54,24 @@ export type DeckDecorationSpec = {
   tint?: number;
 };
 
-/** Regions that hold bullets; every other region is flat rich text. */
+/** Layout regions that hold bullets; every other layout region is flat rich
+ * text. Ask `deckRegionIsList`, which also knows the lists an author added. */
 export const DECK_LIST_REGIONS: ReadonlySet<string> = new Set(["bullets", "left", "right"]);
+
+/** True when a region holds bullets (and so takes bullet indents): a
+ * layout's bullet region, or a bullet list the author added. */
+export function deckRegionIsList(region: string): boolean {
+  return DECK_LIST_REGIONS.has(region) || deckAddedKind(region) === "list";
+}
+
+const ADDED_BLOCK_LABELS = { text: "Text box", list: "Bullet list", picture: "Picture" } as const;
+
+/** What a block is called to authors and to the AI fit check: a layout
+ * region's label, or the kind of an added block. */
+export function deckRegionLabel(region: string): string {
+  const kind = deckAddedKind(region);
+  return kind ? ADDED_BLOCK_LABELS[kind] : DECK_REGION_LABELS[region] ?? region;
+}
 
 /** How the editor names each region to authors and to the AI fit check. */
 export const DECK_REGION_LABELS: Record<string, string> = {
@@ -286,6 +310,10 @@ export const DECK_MEDIA_BOXES: Partial<Record<DeckSlideLayout, DeckBox>> = {
 /* ------------------------------ designs ------------------------------ */
 
 type TextOptions = Partial<Omit<DeckTextRegionSpec, "box" | "sizePt">>;
+
+/** Type sizes for the text an author adds: a slide's ordinary body sizes. */
+const ADDED_TEXT_PT = 18;
+const ADDED_LIST_PT = 16;
 
 function box(x: number, y: number, w: number, h: number): DeckBox {
   return { x, y, w, h };
@@ -750,26 +778,98 @@ export function slideRegionNames(layout: DeckSlideLayout): string[] {
   return [...DECK_LAYOUT_REGIONS[layout]];
 }
 
-/** The slide's text regions with any user-resized boxes merged in. Both the
- * stage and the PPTX export resolve through here, so an adjusted block lands
- * in the same place on screen and in PowerPoint by construction. */
+/** The text regions the slide draws: its layout's regions, less any block
+ * the author deleted, with user-resized boxes merged in. Both the stage and
+ * the PPTX export resolve through here, so a block lands in the same place
+ * on screen and in PowerPoint, or in neither, by construction. */
 export function resolvedTextRegions(slide: DeckSlide, design: DeckDesign): Record<string, DeckTextRegionSpec> {
   const base = slideTextRegions(slide.layout, design);
   const overrides = slide.boxes;
-  if (!overrides) return base;
+  if (!overrides && !slide.removed && !slide.added) return base;
   const merged: Record<string, DeckTextRegionSpec> = {};
   for (const [region, spec] of Object.entries(base)) {
-    const box = overrides[region];
+    if (deckBlockRemoved(slide, region)) continue;
+    const box = overrides?.[region];
     merged[region] = box ? { ...spec, box } : spec;
   }
-  return merged;
+  return { ...merged, ...addedTextRegions(slide) };
 }
 
-/** The media (picture) box for a slide, honoring a user-resized "image" box. */
-export function resolvedMediaBox(slide: DeckSlide, design: DeckDesign): DeckBox | null {
+/** The text an author added sets like a slide's body text, in the box the
+ * author gave it. */
+function addedTextRegions(slide: DeckSlide): Record<string, DeckTextRegionSpec> {
+  const regions: Record<string, DeckTextRegionSpec> = {};
+  for (const block of slide.added ?? []) {
+    if ("text" in block) regions[block.id] = body(block.box, ADDED_TEXT_PT);
+    else if ("bullets" in block) regions[block.id] = body(block.box, ADDED_LIST_PT);
+  }
+  return regions;
+}
+
+/** The box of one of a slide's picture blocks. For the layout's own picture
+ * ("image", the default) a user-resized box is honored; null when the layout
+ * has no picture or the author deleted it. An added picture has its own box. */
+export function resolvedMediaBox(slide: DeckSlide, design: DeckDesign, region = "image"): DeckBox | null {
+  if (region !== "image") return addedPictureBox(slide, region);
   const base = DESIGN_MEDIA_BOXES[design]?.[slide.layout] ?? DECK_MEDIA_BOXES[slide.layout];
-  if (!base) return null;
+  if (!base || deckBlockRemoved(slide, "image")) return null;
   return slide.boxes?.image ?? base;
+}
+
+function addedPictureBox(slide: DeckSlide, region: string): DeckBox | null {
+  const added = slide.added?.find((block) => block.id === region);
+  return added && "image" in added ? added.box : null;
+}
+
+/** The largest empty rectangle inside `bounds` that touches none of the
+ * `occupied` boxes; with `at`, the largest one that holds that point. Null
+ * when the bounds are full (or the point is on a box). Its edges always lie
+ * on a box edge or a bound, so ties go to the top, then the left. */
+export function largestFreeBox(occupied: DeckBox[], bounds: DeckBox, at?: { x: number; y: number }): DeckBox | null {
+  const right = bounds.x + bounds.w;
+  const bottom = bounds.y + bounds.h;
+  const edges = (start: number, end: number, sides: number[]) =>
+    [...new Set([start, end, ...sides.filter((side) => side > start && side < end)])].sort((a, b) => a - b);
+  const xs = edges(bounds.x, right, occupied.flatMap((box) => [box.x, box.x + box.w]));
+  const ys = edges(bounds.y, bottom, occupied.flatMap((box) => [box.y, box.y + box.h]));
+  let best: DeckBox | null = null;
+  for (let top = 0; top < ys.length; top += 1) {
+    for (let left = 0; left < xs.length; left += 1) {
+      for (let low = top + 1; low < ys.length; low += 1) {
+        const box = widestFreeBox(xs, left, ys[top], ys[low] - ys[top], occupied, at);
+        if (box && (!best || box.w * box.h > best.w * best.h)) best = box;
+      }
+    }
+  }
+  return best;
+}
+
+/** The widest empty box of one height starting at one left edge (holding
+ * `at`, when given); null when even the narrowest touches a box. */
+function widestFreeBox(
+  xs: number[],
+  left: number,
+  y: number,
+  h: number,
+  occupied: DeckBox[],
+  at?: { x: number; y: number },
+): DeckBox | null {
+  let widest: DeckBox | null = null;
+  for (let far = left + 1; far < xs.length; far += 1) {
+    const box = { x: xs[left], y, w: xs[far] - xs[left], h };
+    if (occupied.some((other) => boxesOverlap(box, other))) break;
+    if (!at || boxHolds(box, at)) widest = box;
+  }
+  return widest;
+}
+
+/** True when a point lies in a box or on its edge. */
+export function boxHolds(box: DeckBox, point: { x: number; y: number }): boolean {
+  return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+function boxesOverlap(a: DeckBox, b: DeckBox): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
 export function slideDecorations(layout: DeckSlideLayout, design: DeckDesign): DeckDecorationSpec[] {

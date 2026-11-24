@@ -314,6 +314,31 @@ class PlatformSettingsUpdateRequest(BaseModel):
     users_can_browse_model_catalog: bool | None = None
 
 
+StarPromptAnswer = Literal["star", "later"]
+
+
+class StarPromptAsk(BaseModel):
+    """One showing of the GitHub star request and how it was answered."""
+
+    asked_at: datetime
+    answer: StarPromptAnswer | None = None
+
+
+class StarPrompt(BaseModel):
+    """When this person's star-request clock began and each time they were asked."""
+
+    started_at: datetime
+    asks: list[StarPromptAsk] = Field(default_factory=list, max_length=2)
+
+
+class StarPromptCheck(BaseModel):
+    ask: Literal[1, 2] | None = None
+
+
+class StarPromptAnswerRequest(BaseModel):
+    answer: StarPromptAnswer
+
+
 class User(BaseModel):
     id: str
     tenant_id: str | None = None
@@ -331,6 +356,7 @@ class User(BaseModel):
     last_active: str = "Never"
     auth_method: str = "sso"
     first_run_guide_seen_at: str | None = None
+    star_prompt: StarPrompt | None = None
     first_name: str | None = None
     last_name: str | None = None
     access_request_status: Literal["pending", "approved"] | None = None
@@ -580,6 +606,10 @@ class Group(BaseModel):
     user_count: int = 0
     default_group: bool = False
     permissions: dict[str, bool] = Field(default_factory=default_group_permissions)
+    # Who made the group in the console. None for seeded, synced, and legacy
+    # groups. A tenant admin may add or remove themselves only where this is
+    # their own id.
+    created_by_user_id: str | None = None
 
     @model_validator(mode="after")
     def include_default_permissions(self) -> "Group":
@@ -619,6 +649,12 @@ class GroupCreateRequest(BaseModel):
     synced: bool = True
     user_count: int = 0
     permissions: dict[str, bool] = Field(default_factory=default_group_permissions)
+    # The creating tenant admin joins the new group in the same request.
+    add_me: bool = False
+
+
+class GroupSelfMembershipRequest(BaseModel):
+    member: bool
 
 
 class GroupUpdateRequest(BaseModel):
@@ -1488,6 +1524,20 @@ class ToolConfig(TenantScopedSecretRecord):
     # shares stays private to its author; admin-created tools leave this None
     # and keep today's tenant-wide semantics.
     owner_user_id: str | None = None
+    # "Only me": an administrator's own connection. Only its owner (and
+    # platform owners) can see, manage, or run it; other tenant admins never
+    # see it. It is never shared with groups. With no owner (the owner's
+    # account was deleted) it belongs to platform owners alone.
+    only_me: bool = False
+    # Who created the connection; None for tools made before this was kept
+    # and once that account is deleted. Only the creator may make it Only me.
+    created_by_user_id: str | None = None
+
+    @model_validator(mode="after")
+    def _only_me_is_unshared(self) -> "ToolConfig":
+        if self.only_me and self.allowed_group_ids:
+            raise ValueError("An Only me tool has no group shares.")
+        return self
 
 
 class ToolConfigCreateRequest(BaseModel):
@@ -1499,6 +1549,7 @@ class ToolConfigCreateRequest(BaseModel):
     enabled: bool = True
     approval_required: bool = True
     allowed_group_ids: list[str] = Field(default_factory=list)
+    only_me: bool = False
     settings: dict[str, Any] = Field(default_factory=dict)
     secret_value: str | None = None
 
@@ -1510,6 +1561,7 @@ class ToolConfigUpdateRequest(BaseModel):
     enabled: bool | None = None
     approval_required: bool | None = None
     allowed_group_ids: list[str] | None = None
+    only_me: bool | None = None
     settings: dict[str, Any] | None = None
     secret_value: str | None = None
 
