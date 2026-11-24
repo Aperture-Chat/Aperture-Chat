@@ -50,7 +50,7 @@ type LibraryEditorState = {
 
 /** How much of an attached prompt or skill an agent receives per message.
  * Mirrors PROMPT_LIBRARY_EXCERPT_CHARS in services/api/app/routes/chat.py. */
-export const AGENT_ATTACHMENT_CHAR_LIMIT = 4000;
+export const AGENT_ATTACHMENT_CHAR_LIMIT = 65_000;
 
 const EMPTY_DRAFT: LibraryDraft = { name: "", description: "", category: "", content: "" };
 

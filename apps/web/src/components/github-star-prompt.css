@@ -1,0 +1,104 @@
+/* GitHub star request (components/GitHubStarPrompt.tsx).
+ *
+ * A floating card in the top-right corner: it never covers the composer or
+ * blocks the page, and it eases in a moment after the workspace settles so it
+ * reads as a note, not an interruption. Text stays at 13px or larger and the
+ * keys at 44px tall on touch screens. The star sits in a quiet well in the
+ * icon tone; the only color is the primary key. */
+
+.github-star-prompt {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 85;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 32px));
+  padding: 16px 16px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--tactile-float);
+  color: var(--text);
+  animation: github-star-prompt-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) 1.2s both;
+}
+
+.github-star-prompt-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--tactile-floor);
+  box-shadow: var(--tactile-engraved);
+  color: color-mix(in srgb, var(--muted) 78%, var(--teal));
+}
+
+.github-star-prompt-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.github-star-prompt h2 {
+  margin: 2px 0 0;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.github-star-prompt p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.github-star-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.github-star-prompt-actions > a.primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-decoration: none;
+}
+
+@keyframes github-star-prompt-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .github-star-prompt {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .github-star-prompt {
+    top: max(12px, env(safe-area-inset-top));
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+
+  .github-star-prompt-actions > * {
+    flex: 1 1 0;
+    min-height: 44px;
+    justify-content: center;
+  }
+}

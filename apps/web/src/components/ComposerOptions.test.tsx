@@ -20,7 +20,7 @@ import {
   webOptionDetail,
 } from "./ComposerOptions";
 import { RailSwitch } from "./RailSwitch";
-import { ReasoningRail, reasoningHelp } from "./ReasoningSlider";
+import { ReasoningAutoCheckbox, ReasoningRail, reasoningHelp } from "./ReasoningSlider";
 import { BookOpen, Bot, MessageSquare, Plug } from "lucide-react";
 
 describe("ToolSwitch", () => {
@@ -342,6 +342,51 @@ describe("ReasoningRail", () => {
     expect(reasoningHelp("balanced", true, "Model")).toBe("A middle ground between speed and depth.");
     expect(reasoningHelp("smart", true, "Model")).toBe("Takes longer and thinks it through.");
     expect(reasoningHelp("smart", false, "GPT Mini")).toBe("GPT Mini does not support reasoning levels.");
+  });
+
+  test("the help line says Aperture picks the level under Auto", () => {
+    expect(reasoningHelp("smart", true, "Model", true)).toBe("Aperture picks the level for each message.");
+    expect(reasoningHelp("smart", false, "GPT Mini", true)).toBe("GPT Mini does not support reasoning levels.");
+  });
+
+  test("under Auto the rail shows the pick, legibly, and cannot be moved", () => {
+    const onChange = vi.fn();
+    render(<ReasoningRail level="smart" supported auto onChange={onChange} />);
+    const rail = screen.getByRole("radiogroup", { name: "Model reasoning level" });
+    expect(within(rail).getByRole("radio", { name: "Smart" })).toBeChecked();
+    expect(rail).toHaveClass("is-auto");
+    for (const stop of within(rail).getAllByRole("radio")) expect(stop).toBeDisabled();
+    fireEvent.click(within(rail).getByRole("radio", { name: "Fast" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test("an unsupported model is not shown as Auto", () => {
+    render(<ReasoningRail level="smart" supported={false} auto onChange={() => {}} />);
+    expect(screen.getByRole("radiogroup", { name: "Model reasoning level" })).not.toHaveClass("is-auto");
+  });
+});
+
+describe("ReasoningAutoCheckbox", () => {
+  test("is a named checkbox that reports each change", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<ReasoningAutoCheckbox checked={false} onChange={onChange} />);
+    const box = screen.getByRole("checkbox", { name: "Auto: choose the reasoning level automatically" });
+    expect(box).not.toBeChecked();
+    expect(box.closest("label")).toHaveTextContent("Auto");
+    fireEvent.click(box);
+    expect(onChange).toHaveBeenLastCalledWith(true);
+    rerender(<ReasoningAutoCheckbox checked onChange={onChange} />);
+    fireEvent.click(box);
+    expect(onChange).toHaveBeenLastCalledWith(false);
+  });
+
+  test("a disabled box cannot be changed", () => {
+    const onChange = vi.fn();
+    render(<ReasoningAutoCheckbox checked={false} disabled onChange={onChange} />);
+    const box = screen.getByRole("checkbox", { name: "Auto: choose the reasoning level automatically" });
+    expect(box).toBeDisabled();
+    fireEvent.click(box);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

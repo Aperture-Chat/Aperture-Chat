@@ -1211,7 +1211,10 @@ test("an owner closing the ceiling writes only the catalog flag and leaves the w
   fireEvent.click(within(boxBlock).getByRole("button", { name: "Turn Box off for every workspace" }));
 
   expect(await within(boxBlock).findByText("Off for all workspaces")).toBeInTheDocument();
-  const mutations = fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== "GET");
+  // The GitHub star check is a POST from the shell, not a connector write.
+  const mutations = fetchMock.mock.calls.filter(
+    ([input, init]) => init?.method && init.method !== "GET" && !String(input).includes("/api/auth/star-prompt/"),
+  );
   expect(mutations.map(([input]) => String(input))).toEqual([expect.stringContaining("/api/platform/connectors/box")]);
   expect(JSON.parse(String(mutations[0][1]?.body))).toEqual({ platform_enabled: false });
 });

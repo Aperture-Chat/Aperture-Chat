@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { useCodeHighlight, type HighlightedLine } from "../lib/codeHighlight";
+import { useFollowCodeTail } from "../lib/codeFollow";
 
 /** Zero-based line range drawn as the AI edit's target. */
 export type MarkedLines = { first: number; last: number };
@@ -26,7 +28,9 @@ export function CodeLineText({ text, tokens }: { text: string; tokens?: Highligh
 }
 
 /** Numbered, read-only code view shared by chat code blocks, diagram source
- * views, and the artifact canvas. With a `language` the lines are colored. */
+ * views, and the artifact canvas. With a `language` the lines are colored.
+ * While lines stream in, the block keeps its newest line in view unless the
+ * reader has scrolled up inside it. */
 export function CodeLines({
   lines,
   language,
@@ -38,9 +42,12 @@ export function CodeLines({
   marked?: MarkedLines | null;
   preview?: boolean;
 }) {
-  const highlighted = useCodeHighlight(lines.join("\n"), language);
+  const text = lines.join("\n");
+  const highlighted = useCodeHighlight(text, language);
+  const blockRef = useRef<HTMLPreElement>(null);
+  useFollowCodeTail(blockRef, text);
   return (
-    <pre className="md-code-block" tabIndex={preview ? undefined : 0}>
+    <pre className="md-code-block" ref={blockRef} tabIndex={preview ? undefined : 0}>
       <code className="md-code-lines">
         {lines.map((line, lineIndex) => (
           <span

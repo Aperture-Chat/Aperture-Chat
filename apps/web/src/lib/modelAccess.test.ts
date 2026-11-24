@@ -6,6 +6,9 @@ import {
   approvedWorkspaceModels,
   isImageGenerationModel,
   isModelUsable,
+  pictureModelNotice,
+  pictureModelNoticeText,
+  usablePictureModel,
   preferredModel,
   supportsReasoningEffort,
   usableModels,
@@ -234,4 +237,78 @@ test("supportsReasoningEffort activates only for reasoning-capable model familie
     supportsReasoningEffort(routeModel("claude-legacy", "Claude 3.5 Sonnet", "anthropic/claude-3.5-sonnet")),
   ).toBe(false);
   expect(supportsReasoningEffort(undefined)).toBe(false);
+});
+
+test("the picture notice says why no picture can be generated and what the reader can do about it", () => {
+  const draws: ModelConfig = {
+    ...connectedOpenRouterModel,
+    id: "draws",
+    name: "MAI-Image 2.5 Pro",
+    platform_enabled: true,
+    capabilities: { input_modalities: ["text"], output_modalities: ["image"] },
+  };
+  const writes = sampleData.models.filter((model) => !isImageGenerationModel(model));
+  const world = (me: BootstrapData["me"], ...pictureModels: ModelConfig[]): BootstrapData => ({
+    ...sampleData,
+    me,
+    models: [...writes, ...pictureModels],
+  });
+  const disconnected = (data: BootstrapData): BootstrapData => ({
+    ...data,
+    providers: data.providers.map((provider) => (provider.id === draws.provider_id ? { ...provider, connected: false } : provider)),
+  });
+  const shared = { ...draws, group_ids: regularUser.group_ids };
+  const unshared = { ...draws, group_ids: ["group-nobody"] };
+  const off = { ...draws, platform_enabled: false };
+
+  // A model that is on, connected, and shared: nothing to say.
+  expect(usablePictureModel(world(owner, draws))?.id).toBe("draws");
+  expect(pictureModelNotice(world(owner, draws))).toBeNull();
+  expect(pictureModelNotice(world(regularUser, shared))).toBeNull();
+  expect(usablePictureModel(world(regularUser, unshared))).toBeNull();
+  expect(usablePictureModel(world(owner))).toBeNull();
+  // The first usable one is used, whatever sits before it.
+  expect(usablePictureModel(world(owner, off, { ...draws, id: "second" }))?.id).toBe("second");
+
+  // The owner is told which switch to flip.
+  expect(pictureModelNotice(world(owner))).toEqual({
+    headline: "No image model is set up.",
+    fix: "In the Platform Owner Console, open Models, sync your provider's models, then turn on an image model.",
+  });
+  expect(pictureModelNotice(world(owner, off))).toEqual({
+    headline: "The image model is turned off.",
+    fix: "In the Platform Owner Console, open Models and turn on MAI-Image 2.5 Pro.",
+  });
+  expect(pictureModelNotice(disconnected(world(owner, draws)))).toEqual({
+    headline: "The image model's provider is not connected.",
+    fix: `In the Platform Owner Console, reconnect ${draws.provider_name}.`,
+  });
+  // A connected one that is off is named ahead of one whose provider is down.
+  const elsewhere = { ...off, id: "elsewhere", name: "Other Image", provider_id: "provider-missing", provider_name: "Missing" };
+  expect(pictureModelNotice(world(owner, elsewhere, off))?.fix).toContain("turn on MAI-Image 2.5 Pro");
+
+  // A tenant administrator shares a model that is on, and asks the owner for one that is not.
+  const admin = { ...regularUser, role: "TENANT_ADMIN" as const };
+  expect(pictureModelNotice(world(admin, unshared))).toEqual({
+    headline: "An image model is on, but your group cannot use it.",
+    fix: "In the Admin console, open Models & workspace and share MAI-Image 2.5 Pro with your group.",
+  });
+  expect(pictureModelNotice(world(admin, off))).toEqual({
+    headline: "The image model is turned off.",
+    fix: "Ask the platform owner to turn one on.",
+  });
+  expect(pictureModelNotice(world(admin))?.fix).toBe("Ask the platform owner to turn one on.");
+  expect(pictureModelNotice(world(admin, shared))).toBeNull();
+
+  // Everyone else is told whom to ask, and whether it is off or just not shared with them.
+  const askToTurnOn = { headline: "The image model is turned off.", fix: "Ask your administrator to turn one on." };
+  expect(pictureModelNotice(world(regularUser))).toEqual(askToTurnOn);
+  expect(pictureModelNotice(world(regularUser, { ...shared, platform_enabled: false }))).toEqual(askToTurnOn);
+  expect(pictureModelNotice(disconnected(world(regularUser, shared)))).toEqual(askToTurnOn);
+  expect(pictureModelNotice(world(regularUser, unshared))).toEqual({
+    headline: "An image model is on, but your group cannot use it.",
+    fix: "Ask your administrator to share it with your group.",
+  });
+
+  expect(pictureModelNoticeText(askToTurnOn)).toBe("The image model is turned off. Ask your administrator to turn one on.");
 });

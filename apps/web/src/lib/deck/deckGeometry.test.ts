@@ -2,8 +2,11 @@ import { expect, test } from "vitest";
 import {
   DECK_PREVIEW_HEIGHT_PX,
   DECK_PREVIEW_WIDTH_PX,
+  deckRegionIsList,
+  deckRegionLabel,
   deckRoleColor,
   resolvedMediaBox,
+  resolvedTextRegions,
   slideDecorations,
   slideRegionNames,
   slideTextRegions,
@@ -15,6 +18,8 @@ import {
   SUPPORTED_DECK_LAYOUTS,
   createDeckSlide,
   deckSlideRegionContent,
+  withDeckBlockAdded,
+  withoutDeckBlock,
   defaultDeckTheme,
   type DeckDesign,
   type DeckSlideLayout,
@@ -129,4 +134,54 @@ test("role colors resolve from the theme and soften toward the background by tin
   // Halfway from #087d8b to #ffffff.
   expect(deckRoleColor(theme, "accent1", 0.5)).toBe("#84bec5");
   expect(deckRoleColor(theme, "accent1", 1)).toBe("#ffffff");
+});
+
+test("a deleted block has no place on the slide; the blocks that stay keep theirs", () => {
+  const slide = createDeckSlide("image-bullets", "p1");
+  const all = resolvedTextRegions(slide, "rule");
+  expect(Object.keys(all)).toEqual(["title", "bullets"]);
+
+  const withoutTitle = withoutDeckBlock(slide, "title");
+  expect(Object.keys(resolvedTextRegions(withoutTitle, "rule"))).toEqual(["bullets"]);
+  expect(resolvedTextRegions(withoutTitle, "rule").bullets).toEqual(all.bullets);
+  expect(resolvedMediaBox(withoutTitle, "rule")).toEqual(resolvedMediaBox(slide, "rule"));
+
+  const moved = { ...withoutTitle, boxes: { bullets: { x: 500, y: 200, w: 400, h: 200 }, title: { x: 1, y: 2, w: 300, h: 40 } } };
+  expect(resolvedTextRegions(moved, "rule")).toEqual({
+    bullets: { ...all.bullets, box: { x: 500, y: 200, w: 400, h: 200 } },
+  });
+
+  const withoutPicture = withoutDeckBlock(slide, "image");
+  expect(resolvedMediaBox(withoutPicture, "rule")).toBeNull();
+  expect(resolvedMediaBox({ ...withoutPicture, boxes: { image: { x: 10, y: 20, w: 300, h: 200 } } }, "split")).toBeNull();
+  expect(resolvedTextRegions(withoutPicture, "rule")).toEqual(all);
+});
+
+test("added blocks sit in their own boxes, set like body text, and are named for their kind", () => {
+  const spot = { x: 80, y: 300, w: 400, h: 120 };
+  let slide = withDeckBlockAdded(createDeckSlide("image-bullets", "p1"), "text", spot)!.slide;
+  slide = withDeckBlockAdded(slide, "list", { ...spot, x: 500 })!.slide;
+  slide = withDeckBlockAdded(slide, "picture", { ...spot, y: 20 })!.slide;
+  const regions = resolvedTextRegions(slide, "split");
+  expect(Object.keys(regions)).toEqual(["title", "bullets", "text-1", "list-1"]);
+  expect(regions["text-1"]).toEqual({ box: spot, sizePt: 18, align: "left", colorRole: "body", font: "minor", anchor: "top" });
+  expect(regions["list-1"]).toEqual({ box: { ...spot, x: 500 }, sizePt: 16, align: "left", colorRole: "body", font: "minor", anchor: "top" });
+  expect(regions.title).toEqual(resolvedTextRegions(createDeckSlide("image-bullets", "p1"), "split").title);
+
+  expect(resolvedMediaBox(slide, "split", "picture-1")).toEqual({ ...spot, y: 20 });
+  expect(resolvedMediaBox(slide, "split")).toEqual(resolvedMediaBox(createDeckSlide("image-bullets", "p1"), "split"));
+  expect(resolvedMediaBox(slide, "split", "text-1")).toBeNull();
+  expect(resolvedMediaBox(slide, "split", "picture-2")).toBeNull();
+  expect(resolvedMediaBox(createDeckSlide("title", "t1"), "rule", "picture-1")).toBeNull();
+
+  expect(["bullets", "left", "right", "list-1"].map(deckRegionIsList)).toEqual([true, true, true, true]);
+  expect(["title", "text-1", "picture-1", "list"].map(deckRegionIsList)).toEqual([false, false, false, false]);
+  expect(["title", "left", "text-2", "list-1", "picture-3", "mystery"].map(deckRegionLabel)).toEqual([
+    "Title",
+    "Left column",
+    "Text box",
+    "Bullet list",
+    "Picture",
+    "mystery",
+  ]);
 });

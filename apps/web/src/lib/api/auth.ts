@@ -567,3 +567,18 @@ export type MyUsageBudget = {
 export function getMyUsageBudget(userId: string): Promise<MyUsageBudget> {
   return apiRequest<MyUsageBudget>(userId, "/api/auth/me/usage-budget");
 }
+
+export type StarPromptAsk = 1 | 2;
+export type StarPromptAnswer = "star" | "later";
+
+/** Asks the server whether to request a GitHub star now; a "yes" counts as asked. */
+export async function checkStarPrompt(userId: string): Promise<StarPromptAsk | null> {
+  const result = await apiRequest<{ ask: StarPromptAsk | null }>(userId, "/api/auth/star-prompt/check", {
+    method: "POST",
+  });
+  return result.ask;
+}
+
+export function answerStarPrompt(userId: string, answer: StarPromptAnswer): Promise<void> {
+  return apiRequest<void>(userId, "/api/auth/star-prompt/answer", { method: "POST", body: { answer } });
+}

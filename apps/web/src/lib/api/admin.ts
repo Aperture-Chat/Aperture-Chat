@@ -176,6 +176,20 @@ export function createAdminGroup(
   });
 }
 
+/** A tenant admin joins or leaves a group they created; returns their updated user record. */
+export function setAdminOwnGroupMembership(
+  userId: string,
+  groupId: string,
+  member: boolean,
+  options: ApiMutationOptions = {},
+): Promise<User> {
+  return apiRequest<User>(userId, `/api/admin/groups/${pathId(groupId)}/membership/me`, {
+    method: "PUT",
+    body: { member },
+    signal: options.signal,
+  });
+}
+
 export function bulkCreateAdminGroups(
   userId: string,
   payload: AdminGroupBulkCreateRequest,

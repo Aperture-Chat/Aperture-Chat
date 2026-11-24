@@ -190,3 +190,156 @@ def test_statement_big_number_and_picture_bullets_layouts_canonicalize() -> None
     unsafe = _deck(slides=[{"layout": "image-bullets", "title": "x", "image": {"src": "javascript:alert(1)", "alt": ""}, "bullets": []}])
     with pytest.raises(DeckValidationError):
         canonicalize_deck_json(json.dumps(unsafe))
+
+
+def test_deleted_blocks_are_kept_sorted_and_hold_no_words() -> None:
+    slides = [
+        {
+            "id": "a",
+            "layout": "two-column",
+            "title": "Compare",
+            "left": [{"runs": [{"text": "Hidden words"}], "level": 0}],
+            "right": [],
+            "removed": ["right", "left", "right", "subtitle", 7, ["left"], {"left": 1}],
+        },
+        {
+            "id": "b",
+            "layout": "image-caption",
+            "title": "New office",
+            "image": {"src": "https://example.com/secret.png", "alt": "Secret"},
+            "caption": "Opens in May",
+            "removed": ["image"],
+            "boxes": {"image": {"x": 10, "y": 20, "w": 300, "h": 200}},
+        },
+        {"id": "c", "layout": "title", "title": "Kept", "subtitle": "Also kept", "removed": "title"},
+        {"id": "d", "layout": "quote", "quote": "Said", "attribution": "By", "removed": []},
+    ]
+    first = canonicalize_deck_json(json.dumps(_deck(slides=slides)))
+    assert canonicalize_deck_json(first) == first
+    two_column, picture, cover, quote = json.loads(first)["slides"]
+    assert two_column["removed"] == ["left", "right"]
+    assert two_column["left"] == [] and two_column["right"] == []
+    assert two_column["title"] == [{"text": "Compare"}]
+    assert picture["removed"] == ["image"]
+    assert picture["image"] == {"alt": "", "src": ""}
+    assert picture["caption"] == [{"text": "Opens in May"}]
+    # A block comes back where the author had put it, so its box is kept.
+    assert picture["boxes"] == {"image": {"x": 10, "y": 20, "w": 300, "h": 200}}
+    # A broken or empty list deletes nothing.
+    assert "removed" not in cover and cover["subtitle"] == [{"text": "Also kept"}]
+    assert "removed" not in quote
+    assert "Hidden words" not in first and "secret.png" not in first
+    assert "Hidden words" not in deck_plain_text(first)
+    assert "removed" not in canonicalize_deck_json(json.dumps(_deck()))
+
+
+def test_every_layout_can_lose_each_of_its_blocks_and_only_those() -> None:
+    expected = {
+        "title": ["subtitle", "title"],
+        "section": ["subtitle", "title"],
+        "big-number": ["subtitle", "title"],
+        "title-bullets": ["bullets", "title"],
+        "image-bullets": ["bullets", "image", "title"],
+        "two-column": ["left", "right", "title"],
+        "image-caption": ["caption", "image", "title"],
+        "quote": ["attribution", "quote"],
+        "chart": ["title"],
+        "closing": ["body", "title"],
+        "statement": ["body", "title"],
+    }
+    assert set(expected) == deck.DECK_LAYOUTS
+    for layout, blocks in expected.items():
+        slide = {
+            "id": "s",
+            "layout": layout,
+            "title": "Heading",
+            "subtitle": "Sub",
+            "bullets": [],
+            "left": [],
+            "right": [],
+            "quote": "Said",
+            "attribution": "By",
+            "caption": "Cap",
+            "body": "Body",
+            "image": {"src": "", "alt": ""},
+            "removed": sorted(deck.BOX_REGIONS, reverse=True),
+        }
+        parsed = json.loads(canonicalize_deck_json(json.dumps(_deck(slides=[slide]))))["slides"][0]
+        assert parsed["removed"] == blocks, layout
+
+
+SPOT = {"x": 80, "y": 300, "w": 400, "h": 120}
+
+
+def _slides(deck_json: str) -> list[dict[str, object]]:
+    return json.loads(deck_json)["slides"]
+
+
+def test_added_blocks_are_kept_in_order_and_unusable_ones_dropped() -> None:
+    added = [
+        {"id": "text-1", "box": {"x": -40, "y": 530, "w": 5000, "h": 2}, "text": "Plain words", "stray": 1},
+        {"id": "text-1", "box": SPOT, "text": "Same name again"},
+        {"id": "title", "box": SPOT, "text": "A layout name"},
+        {"id": "list-1", "box": SPOT},
+        {"id": "picture-1", "box": SPOT},
+        {"id": "text-2", "text": "No box"},
+        {"id": "text-3", "box": {"x": "left", "y": 0, "w": 10, "h": 10}, "text": "Bad box"},
+        {"id": "text-4\n", "box": SPOT, "text": "Trailing newline in the name"},
+        {"id": "xtext-5", "box": SPOT, "text": "Bad prefix"},
+        {"id": 7, "box": SPOT},
+        "text-6",
+        {"id": "list-2", "box": SPOT, "bullets": [{"runs": [{"text": "A point", "bold": True}], "level": 1}]},
+        {"id": "picture-2", "box": SPOT, "image": {"src": "https://example.com/a.png", "alt": "Chart of results"}},
+    ]
+    slide = {"id": "a", "layout": "title", "title": "Cover", "subtitle": "", "added": added}
+    first = canonicalize_deck_json(json.dumps(_deck(slides=[slide])))
+    assert canonicalize_deck_json(first) == first
+    assert _slides(first)[0]["added"] == [
+        {"box": {"h": 24, "w": 960, "x": 0, "y": 516}, "id": "text-1", "text": [{"text": "Plain words"}]},
+        {"box": SPOT, "bullets": [], "id": "list-1"},
+        {"box": SPOT, "id": "picture-1", "image": {"alt": "", "src": ""}},
+        {"box": SPOT, "bullets": [{"level": 1, "runs": [{"bold": True, "text": "A point"}]}], "id": "list-2"},
+        {"box": SPOT, "id": "picture-2", "image": {"alt": "Chart of results", "src": "https://example.com/a.png"}},
+    ]
+    text = deck_plain_text(first)
+    for expected in ("Cover", "Plain words", "A point", "Chart of results"):
+        assert expected in text
+    assert "Same name again" not in text
+
+    for broken in ("text-1", {}, None, []):
+        parsed = _slides(canonicalize_deck_json(json.dumps(_deck(slides=[{**slide, "added": broken}]))))[0]
+        assert "added" not in parsed
+    assert "added" not in canonicalize_deck_json(json.dumps(_deck()))
+
+
+def test_added_blocks_are_bounded_and_their_content_is_checked() -> None:
+    def with_added(added: object) -> str:
+        slide = {"id": "a", "layout": "statement", "title": "x", "body": "", "added": added}
+        return canonicalize_deck_json(json.dumps(_deck(slides=[slide])))
+
+    many = [{"id": f"text-{index + 1}", "box": SPOT, "text": ""} for index in range(deck.MAX_DECK_ADDED_BLOCKS)]
+    # Past the limit a block is dropped unread, even an unsafe one.
+    extra = {"id": "picture-1", "box": SPOT, "image": {"src": "javascript:alert(1)", "alt": ""}}
+    kept = _slides(with_added([*many, extra]))[0]["added"]
+    assert [block["id"] for block in kept] == [f"text-{index + 1}" for index in range(12)]  # type: ignore[index, union-attr]
+
+    with pytest.raises(DeckValidationError, match=r"added\[0\].image.src"):
+        with_added([extra])
+    with pytest.raises(DeckValidationError, match=r"added\[1\].text"):
+        with_added([many[0], {"id": "text-2", "box": SPOT, "text": 7}])
+    with pytest.raises(DeckValidationError, match=r"added\[0\].bullets"):
+        with_added([{"id": "list-1", "box": SPOT, "bullets": "x"}])
+    with pytest.raises(DeckValidationError, match="exceeds 2000"):
+        with_added([{"id": "text-1", "box": SPOT, "text": "y" * 2001}])
+
+
+def test_an_added_blocks_box_is_pulled_back_onto_the_slide_from_any_side() -> None:
+    def box_of(box: object) -> object:
+        slide = {"id": "a", "layout": "statement", "title": "x", "body": "", "added": [{"id": "text-1", "box": box, "text": "x"}]}
+        added = _slides(canonicalize_deck_json(json.dumps(_deck(slides=[slide]))))[0].get("added")
+        return added[0]["box"] if added else None  # type: ignore[index]
+
+    assert box_of({"x": -5, "y": -7, "w": 100, "h": 50}) == {"x": 0, "y": 0, "w": 100, "h": 50}
+    assert box_of({"x": 950, "y": 530, "w": 100, "h": 50}) == {"x": 860, "y": 490, "w": 100, "h": 50}
+    assert box_of({"x": True, "y": 0, "w": 100, "h": 50}) is None
+    assert box_of([1, 2, 3, 4]) is None

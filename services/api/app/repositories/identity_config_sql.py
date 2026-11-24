@@ -1996,6 +1996,10 @@ def _model_from_payload(
             # accommodation stays fail-closed. Unknown keys are still rejected
             # by the canonical comparison below.
             canonical_payload["permissions"] = {**permissions, **missing_permissions}
+        # Group creators were recorded after the SQL authority shipped. Accept
+        # only this exact legacy omission; an unknown creator lets no tenant
+        # admin add themselves, so the backfill cannot widen access.
+        canonical_payload.setdefault("created_by_user_id", None)
     if model_type is PlatformSettings and "downstream_api_enabled" not in canonical_payload:
         # The downstream API master policy was added after the identity/config
         # SQL authority shipped. Accept only this exact legacy omission and
@@ -2073,6 +2077,17 @@ def _model_from_payload(
         # omission; unowned tools keep their existing tenant-wide semantics,
         # so the backfill cannot widen access.
         canonical_payload["owner_user_id"] = None
+    if model_type is ToolConfig and "only_me" not in canonical_payload:
+        # The Only me audience shipped after the identity/config SQL
+        # authority. Accept only this exact legacy omission; False keeps every
+        # existing tool shared exactly as before, so the backfill cannot
+        # narrow or widen access.
+        canonical_payload["only_me"] = False
+    if model_type is ToolConfig and "created_by_user_id" not in canonical_payload:
+        # Tool creators are recorded from the Only me release on. Accept only
+        # this exact legacy omission; an unknown creator means no tenant admin
+        # can make the tool Only me, so the backfill cannot narrow access.
+        canonical_payload["created_by_user_id"] = None
     if model_type is User:
         # Access requests shipped after SQL identity authority. Existing user
         # rows legitimately omit these fields; backfill only their inert
@@ -2085,6 +2100,9 @@ def _model_from_payload(
             "access_request_status",
             "access_requested_at",
             "access_reviewed_at",
+            # The GitHub star request clock shipped later still; None means
+            # the clock starts on the person's next visit.
+            "star_prompt",
         ):
             canonical_payload.setdefault(field_name, None)
     try:

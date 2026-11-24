@@ -22,6 +22,7 @@ from app.core.policy import (
     assert_group_permission,
     assert_tool_access,
     require_admin_or_owner,
+    tool_config_visible_to,
     tool_use_allowed,
 )
 from app.core.script_tools import clamp_timeout_seconds, run_custom_script
@@ -491,4 +492,7 @@ def _get_configurable_tool(config_id: str, actor: User, store: SeedStore) -> Too
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown tool configuration.")
     if actor.role != Role.PLATFORM_OWNER and actor.tenant_id != tool.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tool access is restricted by tenant policy.")
+    if not tool_config_visible_to(actor, tool):
+        # Someone else's Only me connection: answer as if it did not exist.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown tool configuration.")
     return tool

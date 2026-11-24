@@ -150,7 +150,7 @@ def test_without_a_photo_the_best_image_model_draws_an_illustration_and_is_bille
     prompts: list[tuple[str, str]] = []
 
     class ImageClient:
-        def generate_images(self, *, route, messages, max_tokens=None):
+        def generate_images(self, *, route, messages, max_tokens=None, image_only=False):
             prompts.append((route.upstream_model, messages[-1]["content"]))
             return {
                 "choices": [{"message": {"images": [{"image_url": {"url": _jpeg_data_url()}}]}}],
