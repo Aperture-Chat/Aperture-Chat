@@ -3,7 +3,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { sampleData } from "../data/sampleData";
 import type { BootstrapData, ToolConfig } from "../lib/types";
-import { buildUpdatePayload, connectionIssues, ToolsLibrary } from "./ToolsLibrary";
+import { audienceFromTool, audienceToRequest, buildUpdatePayload, connectionIssues, ToolsLibrary } from "./ToolsLibrary";
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
 
@@ -40,6 +40,8 @@ function recordFor(tool: ToolConfig, body: Record<string, unknown> = {}) {
     approval_required: (body.approval_required as boolean) ?? tool.approval_required,
     allowed_group_ids: (body.allowed_group_ids as string[]) ?? tool.allowed_group_ids,
     owner_user_id: tool.owner_user_id ?? null,
+    created_by_user_id: tool.created_by_user_id ?? null,
+    only_me: (body.only_me as boolean) ?? Boolean(tool.only_me),
     secret_set: Boolean(tool.secret_set),
     settings: Object.fromEntries(Object.entries(settings).filter(([, value]) => value !== undefined)),
   };
@@ -309,6 +311,7 @@ test("the Hermes switch is offered only for MCP tools", () => {
       secret: "",
       approvalRequired: script.approval_required,
       hermesCompanion: true,
+      audience: "everyone",
       allowedGroupIds: [],
     },
     { isOwner: false, isAdmin: true },
@@ -357,6 +360,7 @@ test("self-authoring users manage their own connections but can't run admin test
   expect(screen.getByText("Only administrators can run connection tests.")).toBeInTheDocument();
   openTab("Access & approval");
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("radiogroup", { name: "Who can use it" })).not.toBeInTheDocument();
   expect(screen.getByText(/Sharing with groups is managed by administrators/)).toBeInTheDocument();
 });
 
@@ -419,7 +423,7 @@ test("approval copy describes what actually happens", () => {
     screen.getByText("Before Aperture calls this connection, the person sending the message is asked to approve it in chat."),
   ).toBeInTheDocument();
   expect(screen.queryByText(/automations/i)).not.toBeInTheDocument();
-  expect(screen.getByText("Leave every group unchecked to make it available to everyone in the workspace.")).toBeInTheDocument();
+  expect(screen.getByText("Everyone in the workspace can use this connection.")).toBeInTheDocument();
   // No secret is saved, so nothing claims one is being "retained".
   openTab("Sign-in");
   fireEvent.click(screen.getByRole("button", { name: "Access token" }));
@@ -462,4 +466,211 @@ test("a standard user's older script can be switched off but only an admin turns
   renderTools();
   expect(within(card("Old script")).getByRole("switch", { name: "Turn Old script on or off" })).toBeDisabled();
   expect(within(card("Live script")).getByRole("switch", { name: "Turn Live script on or off" })).toBeEnabled();
+});
+
+/* ---------- Who can use it: Only me / Everyone / Specific groups ---------- */
+
+const mineOnly: ToolConfig = {
+  ...httpTool,
+  id: "tool-mine-only",
+  name: "My matters",
+  owner_user_id: "user-admin",
+  created_by_user_id: "user-admin",
+  only_me: true,
+};
+const ONLY_CREATOR = "Only the person who created this connection can make it private.";
+
+function openAccess(name: string) {
+  fireEvent.click(within(card(name)).getByRole("button", { name: `Edit ${name}` }));
+  openTab("Access & approval");
+}
+
+function audienceRail() {
+  return screen.getByRole("radiogroup", { name: "Who can use it" });
+}
+
+test("the audience maps to exactly one request shape", () => {
+  expect(audienceToRequest("only", ["group-litigation"])).toEqual({ only_me: true, allowed_group_ids: [] });
+  expect(audienceToRequest("everyone", ["group-litigation"])).toEqual({ only_me: false, allowed_group_ids: [] });
+  expect(audienceToRequest("groups", ["group-litigation"])).toEqual({ only_me: false, allowed_group_ids: ["group-litigation"] });
+  expect(audienceFromTool(mineOnly)).toBe("only");
+  expect(audienceFromTool({ ...httpTool, allowed_group_ids: ["group-litigation"] })).toBe("groups");
+  expect(audienceFromTool(httpTool)).toBe("everyone");
+  expect(audienceFromTool({ ...httpTool, only_me: false })).toBe("everyone");
+});
+
+test("choosing Only me sends only_me and clears the groups", async () => {
+  const shared = { ...httpTool, allowed_group_ids: ["group-litigation"], created_by_user_id: "user-admin" };
+  currentData = { ...currentData, tools: [...sampleData.tools, shared] };
+  respond = (call) => json(recordFor(shared, call.body ?? {}));
+  renderTools();
+  openAccess("Docs Search");
+  expect(within(audienceRail()).getByRole("radio", { name: "Specific groups" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("checkbox", { name: /Litigation/ })).toBeChecked();
+
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Only me" }));
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.getByText("Only you can use this connection.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("Docs Search saved.");
+  expect(calls[0]).toMatchObject({ method: "PATCH" });
+  expect(calls[0].body).toEqual({ only_me: true, allowed_group_ids: [] });
+});
+
+test("an Only me connection loads as Only me and can move to specific groups", async () => {
+  currentData = { ...currentData, tools: [...sampleData.tools, mineOnly] };
+  respond = (call) => json(recordFor(mineOnly, call.body ?? {}));
+  renderTools();
+  expect(within(card("My matters")).getByText("Only you")).toBeInTheDocument();
+  openAccess("My matters");
+  expect(within(audienceRail()).getByRole("radio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Specific groups" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /Finance Team/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("My matters saved.");
+  expect(calls[0].body).toEqual({ only_me: false, allowed_group_ids: ["group-finance"] });
+});
+
+test("Specific groups with no group ticked is not saved as everyone", () => {
+  currentData = { ...currentData, tools: [...sampleData.tools, mineOnly] };
+  renderTools();
+  openAccess("My matters");
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Specific groups" }));
+  expect(screen.getByText("Tick at least one group, or choose Everyone.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(screen.getByRole("status")).toHaveTextContent("Tick at least one group, or choose Everyone.");
+  expect(calls).toHaveLength(0);
+});
+
+test("choosing Everyone sends only_me false with no groups", async () => {
+  currentData = { ...currentData, tools: [...sampleData.tools, mineOnly] };
+  respond = (call) => json(recordFor(mineOnly, call.body ?? {}));
+  renderTools();
+  openAccess("My matters");
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Everyone" }));
+  expect(screen.getByText("Everyone in the workspace can use this connection.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("My matters saved.");
+  expect(calls[0].body).toEqual({ only_me: false });
+});
+
+test("a platform owner sees whose Only me connection it is and can still change it", async () => {
+  const owner = sampleData.users.find((user) => user.id === "user-owner")!;
+  currentData = { ...currentData, me: { ...owner, role: "PLATFORM_OWNER" }, tools: [...sampleData.tools, mineOnly] };
+  respond = (call) => json(recordFor(mineOnly, call.body ?? {}));
+  renderTools();
+  expect(within(card("My matters")).getByText("Only Alex Morgan")).toBeInTheDocument();
+  openAccess("My matters");
+  const onlyAlex = within(audienceRail()).getByRole("radio", { name: "Only Alex Morgan" });
+  expect(onlyAlex).toHaveAttribute("aria-checked", "true");
+  expect(onlyAlex).toBeEnabled();
+  expect(screen.getByText("Only Alex Morgan can use this connection.")).toBeInTheDocument();
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Everyone" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("My matters saved.");
+  expect(calls[0].body).toEqual({ only_me: false });
+});
+
+test("another administrator cannot change someone else's Only me connection", () => {
+  const theirs = { ...mineOnly, owner_user_id: "user-casey" };
+  currentData = { ...currentData, tools: [...sampleData.tools, theirs] };
+  renderTools();
+  openAccess("My matters");
+  for (const radio of within(audienceRail()).getAllByRole("radio")) expect(radio).toBeDisabled();
+  expect(screen.getByText("Only Casey Doe can use this connection.")).toBeInTheDocument();
+});
+
+test("a person's own private connection keeps the group list for administrators", () => {
+  const janes = { ...httpTool, owner_user_id: "user-jane" };
+  currentData = { ...currentData, tools: [...sampleData.tools, janes] };
+  renderTools();
+  expect(within(card("Docs Search")).getByText("Only Jane Smith")).toBeInTheDocument();
+  openAccess("Docs Search");
+  expect(screen.queryByRole("radiogroup", { name: "Who can use it" })).not.toBeInTheDocument();
+  expect(screen.getByText("Leave every group unchecked to keep it private to the person who created it.")).toBeInTheDocument();
+});
+
+test("with no groups synced, Only me and Everyone are still offered", () => {
+  currentData = { ...currentData, groups: [], tools: [...sampleData.tools, { ...httpTool, created_by_user_id: "user-admin" }] };
+  renderTools();
+  openAccess("Docs Search");
+  const radios = within(audienceRail()).getAllByRole("radio");
+  expect(radios.map((radio) => radio.textContent)).toEqual(["Only me", "Everyone"]);
+  expect(screen.getByText(/No groups are synced yet/)).toBeInTheDocument();
+});
+
+test("one synced group is enough to offer Specific groups", () => {
+  currentData = {
+    ...currentData,
+    groups: sampleData.groups.filter((group) => group.id === "group-litigation"),
+    tools: [...sampleData.tools, { ...httpTool, created_by_user_id: "user-admin" }],
+  };
+  renderTools();
+  openAccess("Docs Search");
+  expect(within(audienceRail()).getAllByRole("radio").map((radio) => radio.textContent)).toEqual([
+    "Only me",
+    "Everyone",
+    "Specific groups",
+  ]);
+});
+
+test("only the creator, the owner, or a platform owner is offered Only me", () => {
+  const byCasey = { ...httpTool, id: "tool-casey", name: "Casey's search", created_by_user_id: "user-casey" };
+  const legacy = { ...httpTool, id: "tool-legacy", name: "Old search", created_by_user_id: null };
+  currentData = { ...currentData, tools: [...sampleData.tools, byCasey, legacy] };
+  const { unmount } = renderTools();
+  for (const name of ["Casey's search", "Old search"]) {
+    openAccess(name);
+    expect(within(audienceRail()).getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["Everyone", "Specific groups"]);
+    expect(screen.getByText(ONLY_CREATOR)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to all connections" }));
+  }
+  unmount();
+
+  const owner = sampleData.users.find((user) => user.id === "user-owner")!;
+  currentData = { ...currentData, me: { ...owner, role: "PLATFORM_OWNER" } };
+  renderTools();
+  openAccess("Old search");
+  expect(within(audienceRail()).getByRole("radio", { name: "Only me" })).toBeEnabled();
+  expect(screen.queryByText(ONLY_CREATOR)).not.toBeInTheDocument();
+});
+
+test("the creator of a shared connection is offered Only me", () => {
+  currentData = { ...currentData, tools: [...sampleData.tools, { ...httpTool, created_by_user_id: "user-admin" }] };
+  renderTools();
+  openAccess("Docs Search");
+  expect(within(audienceRail()).getByRole("radio", { name: "Only me" })).toBeEnabled();
+  expect(screen.queryByText(ONLY_CREATOR)).not.toBeInTheDocument();
+});
+
+test("an administrator can make a new connection Only me before it is first saved", async () => {
+  respond = (call) =>
+    json({ ...call.body, id: "tool-new-private", tenant_id: "tenant-example", owner_user_id: "user-admin", created_by_user_id: "user-admin", secret_set: false }, 201);
+  renderTools();
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  const form = screen.getByRole("form", { name: "Add a connection" });
+  fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Private search" } });
+  fireEvent.change(within(form).getByLabelText("Server URL"), { target: { value: "https://mcp.example.com/mcp" } });
+  const rail = within(form).getByRole("radiogroup", { name: "Who can use it" });
+  // Groups are picked on the next screen; up front it is just you or everyone.
+  expect(within(rail).getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["Only me", "Everyone"]);
+  expect(within(rail).getByRole("radio", { name: "Everyone" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(within(rail).getByRole("radio", { name: "Only me" }));
+  fireEvent.click(within(form).getByRole("button", { name: "Add connection" }));
+  await screen.findByRole("heading", { name: "Private search" });
+  expect(calls[0].body).toMatchObject({ only_me: true, allowed_group_ids: [] });
+  expect(currentData.tools.find((tool) => tool.id === "tool-new-private")?.only_me).toBe(true);
+});
+
+test("people adding their own connection are not asked who can use it", () => {
+  currentData = {
+    ...currentData,
+    me: { ...sampleData.users.find((user) => user.id === "user-jane")!, role: "USER" },
+    authoringState: { knowledge_enabled: false, tools_enabled: true },
+  };
+  renderTools();
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  expect(screen.queryByRole("radiogroup", { name: "Who can use it" })).not.toBeInTheDocument();
 });

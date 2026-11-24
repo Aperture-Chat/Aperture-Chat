@@ -1671,7 +1671,10 @@
   right: -6px;
 }
 
-.deck-block-move {
+/* The selected block's two keys sit side by side above it, centred as a
+   pair: the move grip, then delete. Same quiet pill for both. */
+.deck-block-move,
+.deck-block-delete {
   position: absolute;
   z-index: 6;
   top: -30px;
@@ -1686,19 +1689,133 @@
   background: #ffffff;
   color: var(--teal-strong);
   box-shadow: 0 2px 6px rgba(8, 41, 56, 0.25);
-  transform: translateX(-50%);
   pointer-events: auto;
+}
+
+.deck-block-move {
+  transform: translateX(calc(-100% - 5px));
   cursor: grab;
   touch-action: none;
+}
+
+.deck-block-delete {
+  transform: translateX(5px);
+  cursor: pointer;
+}
+
+.deck-block-delete:hover {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 10%, #ffffff);
 }
 
 .deck-block-move:active {
   cursor: grabbing;
 }
 
-.deck-block-move:focus-visible {
+.deck-block-move:focus-visible,
+.deck-block-delete:focus-visible {
   outline: 2px solid var(--teal-2);
   outline-offset: 2px;
+}
+
+/* The slide's plus: it sits in the middle of the slide's largest empty area,
+   in the viewport's own layer so it keeps its size at any zoom. Quiet until
+   the pointer is over the slide or the keyboard reaches it. */
+.deck-add-key {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--teal) 55%, transparent);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--teal-strong);
+  box-shadow: 0 2px 6px rgba(8, 41, 56, 0.25);
+  transform: translate(-50%, -50%);
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+}
+
+.deck-stage-viewport:hover .deck-add-key,
+.deck-add-key:focus-visible,
+.deck-add-key[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.deck-add-key:hover,
+.deck-add-key[aria-expanded="true"] {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 10%, #ffffff);
+}
+
+.deck-add-key:focus-visible {
+  outline: 2px solid var(--teal-2);
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .deck-add-key {
+    width: 36px;
+    height: 36px;
+    opacity: 1;
+  }
+}
+
+/* The add menu opens beside the spot it was asked for, and flips up or
+   left near the slide's far edges so it stays on the stage. */
+.deck-add-menu {
+  z-index: 9;
+  width: max-content;
+  min-width: 172px;
+  transform: translate(14px, 14px);
+}
+
+.deck-add-menu.opens-up {
+  transform: translate(14px, calc(-100% - 14px));
+}
+
+.deck-add-menu.opens-left {
+  transform: translate(calc(-100% - 14px), 14px);
+}
+
+.deck-add-menu.opens-up.opens-left {
+  transform: translate(calc(-100% - 14px), calc(-100% - 14px));
+}
+
+.deck-add-menu .deck-add-menu-ai {
+  color: var(--teal-strong);
+}
+
+.deck-add-menu button:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.deck-add-menu-rule {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--border);
+}
+
+/* The stage's corner controls: the slide's layout, and beside it the way
+   back for blocks deleted from this slide. */
+.deck-stage-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+}
+
+.deck-stage-controls .deck-layout-control {
+  position: static;
 }
 
 .deck-snap-guide {
@@ -3132,6 +3249,32 @@ figure.document-media-align-right {
 .deck-blade-actions button:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+/* Why AI pictures are off, said where the greyed button is: a caution row
+   with the reason in bold and the way to fix it after it. */
+.deck-blade-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #f59e0b 9%, var(--surface));
+  padding: 9px 11px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deck-blade-notice > svg {
+  margin-top: 2px;
+  color: var(--amber);
+}
+
+.deck-blade-notice strong {
+  font-weight: 720;
 }
 
 .deck-blade-hint,

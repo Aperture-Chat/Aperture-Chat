@@ -18,14 +18,13 @@ import { useKnowledgeFiles } from "../lib/useKnowledgeFiles";
 import { ComposerCommandMenu, KnowledgeMenuStatus } from "./ComposerCommandMenu";
 import { ComposerFileBlock } from "./ComposerFileBlock";
 import {
+  ReasoningAutoCheckbox,
   ReasoningRail,
   reasoningHelp,
   REASONING_EFFORT_BY_LEVEL,
-  loadReasoningLevel,
-  storeReasoningLevel,
   type ReasoningEffort,
-  type ReasoningLevel,
 } from "./ReasoningSlider";
+import { reasoningLevelForSend, useReasoningPreference, type ReasoningSignals } from "../lib/reasoningAuto";
 import {
   MatterOptionRow,
   OptionCopy,
@@ -1094,8 +1093,8 @@ export function ChatWorkspace({
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string | null>(null);
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  // Fast–Smart reasoning level for the composer; sticky per user.
-  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(() => loadReasoningLevel(data.me.id));
+  // Fast–Smart reasoning level, or Auto, for the composer; sticky per user.
+  const reasoning = useReasoningPreference(data.me.id);
   // Show replies as they stream in; sticky per user, display-only.
   const [streamResponses, setStreamResponses] = useState(() => loadLiveStreamPreference(data.me.id));
   const [askWhenUnclear, setAskWhenUnclear] = useState(() => loadAskPreference(data.me.id));
@@ -1719,11 +1718,15 @@ export function ChatWorkspace({
       ? data.models.find((model) => model.id === selectedAgentId)
       : chat.enabledModels.find((model) => model.id === chat.model);
   const reasoningSupported = supportsReasoningEffort(reasoningTargetModel);
-  const reasoningEffortForSend = reasoningSupported ? REASONING_EFFORT_BY_LEVEL[reasoningLevel] : null;
+  // Under Auto the rail shows the level picked for the message being typed.
+  const composerReasoningLevel = useMemo(
+    () => reasoningLevelForSend({ level: reasoning.level, auto: reasoning.auto }, { text: draft, attachmentCount: attachments.length }),
+    [reasoning.level, reasoning.auto, draft, attachments.length],
+  );
 
-  function updateReasoningLevel(level: ReasoningLevel) {
-    setReasoningLevel(level);
-    storeReasoningLevel(data.me.id, level);
+  /** The effort a message is sent at, judged from that message itself. */
+  function reasoningEffortFor(signals: ReasoningSignals): ReasoningEffort | null {
+    return reasoningSupported ? REASONING_EFFORT_BY_LEVEL[reasoningLevelForSend(reasoning, signals)] : null;
   }
 
   function toggleStreamResponses() {
@@ -1859,7 +1862,7 @@ export function ChatWorkspace({
         selectedAgentId,
         selectedKnowledgeBaseId,
         selectedToolIds,
-        reasoningEffortForSend,
+        reasoningEffortFor({ text, attachmentCount: attachments.length }),
       );
       if (fetchUrls.length > 0) {
         runtime.fetchUrls = [...fetchUrls];
@@ -1954,7 +1957,7 @@ export function ChatWorkspace({
         selectedAgentId,
         pending.knowledgeBaseId,
         [],
-        reasoningEffortForSend,
+        reasoningEffortFor({ text: pending.text, attachmentCount: pending.attachments.length }),
       );
       runtime.approvedToolConfigIds = [];
       runtime.approvalTokens = [];
@@ -2996,9 +2999,24 @@ export function ChatWorkspace({
                     <OptionCopy
                       icon={Brain}
                       title="Reasoning"
-                      detail={reasoningHelp(reasoningLevel, reasoningSupported, reasoningTargetModel?.name ?? "This model")}
+                      detail={reasoningHelp(
+                        reasoning.level,
+                        reasoningSupported,
+                        reasoningTargetModel?.name ?? "This model",
+                        reasoning.auto,
+                      )}
                     />
-                    <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
+                    <ReasoningAutoCheckbox
+                      checked={reasoning.auto}
+                      disabled={!reasoningSupported}
+                      onChange={reasoning.setAuto}
+                    />
+                    <ReasoningRail
+                      level={composerReasoningLevel}
+                      supported={reasoningSupported}
+                      auto={reasoning.auto}
+                      onChange={reasoning.setLevel}
+                    />
                   </div>
                   <StreamSwitch checked={streamResponses} onToggle={toggleStreamResponses} />
                   <AskSwitch checked={askWhenUnclear} onToggle={() => setAskPreference(!askWhenUnclear)} />

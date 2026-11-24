@@ -4,6 +4,21 @@ import { DocumentAssistantWorkspace } from "./DocumentAssistantWorkspace";
 import { sampleData } from "../data/sampleData";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
 import type { DraftHandoffRequest } from "../lib/draftHandoff";
+import type { ReasoningLevel } from "./ReasoningSlider";
+import type { ReasoningSignals } from "../lib/reasoningAuto";
+
+// Auto reasoning's rules are tested in their own module; here the chooser is
+// a stand-in so these tests pin only what Drafts asks it and what it sends.
+const chooseReasoningLevel = vi.hoisted(() => vi.fn<(signals: ReasoningSignals) => ReasoningLevel>());
+vi.mock("../lib/reasoningAuto", async (importActual) => {
+  const actual = await importActual<typeof import("../lib/reasoningAuto")>();
+  return {
+    ...actual,
+    chooseReasoningLevel,
+    reasoningLevelForSend: (preference: { level: ReasoningLevel; auto: boolean }, signals: ReasoningSignals) =>
+      preference.auto ? chooseReasoningLevel(signals) : actual.reasoningLevelForSend(preference, signals),
+  };
+});
 
 const LEGACY_DOCUMENT_HISTORY_STORAGE_KEY = "aperture-document-history-v1";
 // Draft history is cached per tenant AND user; sampleData signs in
@@ -15,6 +30,8 @@ beforeEach(() => {
   // These tests cover the writing itself, so the user here has turned off
   // "Ask me when unclear". DocumentAssistantIntake.test.tsx covers asking.
   window.localStorage.setItem("aperture-ask-when-unclear-user-admin", "off");
+  chooseReasoningLevel.mockReset();
+  chooseReasoningLevel.mockReturnValue("balanced");
   window.getSelection()?.removeAllRanges();
   delete (window as Partial<Window & { showSaveFilePicker: unknown }>).showSaveFilePicker;
   resetOfflineFetch();
@@ -720,6 +737,191 @@ test("uses the chat completion endpoint with web enabled for document assistant 
   expect(documentText()).toContain("NASA Artemis II");
   expect(screen.getByText(/drafted with provider-hosted web search/)).toBeInTheDocument();
 });
+
+const REASONING_AUTO_KEY = "aperture-reasoning-auto-user-admin";
+const ANDERSON_REQUEST = "Draft a client update on the Anderson discovery deadline.";
+
+function reasoningCapableData() {
+  const models = sampleData.models.map((model) =>
+    model.id === "agent-client-update"
+      ? { ...model, capabilities: { ...model.capabilities, supported_parameters: ["reasoning_effort"] } }
+      : model,
+  );
+  return { ...sampleData, models };
+}
+
+function openDraftSettings() {
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  return {
+    auto: screen.getByRole("checkbox", { name: "Auto: choose the reasoning level automatically" }),
+    rail: screen.getByRole("radiogroup", { name: "Model reasoning level" }),
+  };
+}
+
+function askDocumentAssistant(request: string) {
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), { target: { value: request } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+}
+
+function railStop(rail: HTMLElement, name: string) {
+  return within(rail).getByRole("radio", { name });
+}
+
+function expectRailLocked(rail: HTMLElement) {
+  for (const stop of within(rail).getAllByRole("radio")) expect(stop).toBeDisabled();
+}
+
+function sentEfforts(requests: unknown[]) {
+  return requests.map((request) => (request as { reasoning_effort: string | null }).reasoning_effort);
+}
+
+test("the Reasoning Auto box starts unchecked and Drafts sends the level the user set", async () => {
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  const { auto, rail } = openDraftSettings();
+  expect(auto).not.toBeChecked();
+  expect(auto).toBeEnabled();
+  fireEvent.click(railStop(rail, "Smart"));
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => "high"));
+  expect(chooseReasoningLevel).not.toHaveBeenCalled();
+});
+
+test("checking Auto is remembered across sessions in the preference chat shares", () => {
+  const { unmount } = render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  fireEvent.click(openDraftSettings().auto);
+  expect(window.localStorage.getItem(REASONING_AUTO_KEY)).toBe("on");
+  unmount();
+
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  const { auto, rail } = openDraftSettings();
+  expect(auto).toBeChecked();
+  // Auto chooses: the rail cannot be moved, and before any request it rests
+  // on the neutral middle with a line saying what Auto does.
+  expectRailLocked(rail);
+  expect(railStop(rail, "Balanced")).toBeChecked();
+  expect(screen.getByText("Aperture picks the level for each request.")).toBeInTheDocument();
+});
+
+test("with Auto on, Drafts sends the level picked from the user's request and shows it", async () => {
+  window.localStorage.setItem("aperture-reasoning-level-user-admin", "fast");
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValue("smart");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => "high"));
+  expect(chooseReasoningLevel).toHaveBeenCalledTimes(1);
+  expect(chooseReasoningLevel).toHaveBeenCalledWith({ text: ANDERSON_REQUEST, attachmentCount: 0, documentLength: 0 });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Apply instruction" })).toBeInTheDocument());
+  expect(railStop(openDraftSettings().rail, "Smart")).toBeChecked();
+});
+
+test("with Auto on, a revision tells the chooser how long the working document is", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  askDocumentAssistant(ANDERSON_REQUEST);
+  await waitFor(() => expect(screen.getAllByText(/Discovery deadline remains July 12, 2026/i).length).toBeGreaterThan(0));
+
+  chooseReasoningLevel.mockReturnValue("fast");
+  askDocumentAssistant("Make the key developments paragraph more formal.");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(2));
+  const revisionSignals = chooseReasoningLevel.mock.calls[1][0];
+  expect(revisionSignals.text).toBe("Make the key developments paragraph more formal.");
+  expect(revisionSignals.documentLength).toBeGreaterThan(40);
+  expect(sentEfforts(chatRequests)[1]).toBe("minimal");
+});
+
+test("with Auto on, the chooser counts the files sent with the request", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  const chatRequests = installChatCompletionFetchMock("# Brief\n\nA synthetic brief.");
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  fireEvent.change(screen.getByLabelText("Attach draft source files"), {
+    target: {
+      files: [
+        new File(["Synthetic notes"], "notes.txt", { type: "text/plain" }),
+        new File(["%PDF"], "scan.pdf", { type: "application/pdf" }),
+      ],
+    },
+  });
+  const chips = screen.getByRole("list", { name: "Attached draft sources" });
+  await waitFor(() => expect(within(chips).getByText("notes.txt").closest("li")).toHaveClass("is-ready"));
+  await waitFor(() => expect(within(chips).getByText("scan.pdf").closest("li")).toHaveClass("is-name-only"));
+
+  askDocumentAssistant("Write a one-page brief from my notes.");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chooseReasoningLevel).toHaveBeenCalledWith(expect.objectContaining({ attachmentCount: 2 }));
+});
+
+test("unchecking Auto sends the user's own level again", async () => {
+  window.localStorage.setItem("aperture-reasoning-level-user-admin", "fast");
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValue("smart");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  const { auto, rail } = openDraftSettings();
+  fireEvent.click(auto);
+  expect(window.localStorage.getItem(REASONING_AUTO_KEY)).toBe("off");
+  expect(railStop(rail, "Smart")).toBeEnabled();
+  expect(railStop(rail, "Fast")).toBeChecked();
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => "minimal"));
+  expect(chooseReasoningLevel).not.toHaveBeenCalled();
+});
+
+test("a model without reasoning levels disables Auto and sends no reasoning effort", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValue("smart");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  disableWebSearch();
+  const { auto, rail } = openDraftSettings();
+  expect(auto).toBeDisabled();
+  expectRailLocked(rail);
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => null));
+  expect(chooseReasoningLevel).not.toHaveBeenCalled();
+});
+
+test("every model call of one Drafts action runs at the one level Auto picked for it", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValueOnce("smart").mockReturnValue("fast");
+  // Not deck JSON, so the deck assistant retries once: two calls, one action.
+  const chatRequests = installChatCompletionFetchMock("## Boston Expansion\n\n- Talent density\n- Customer cluster");
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.change(screen.getByPlaceholderText("Ask the deck assistant what to build"), {
+    target: { value: "Draft a Boston deck" },
+  });
+  fireEvent.submit(screen.getByRole("textbox", { name: "Ask the deck assistant" }).closest("form")!);
+
+  await waitFor(() => expect(screen.getAllByText(/structured output failed validation/).length).toBeGreaterThan(0));
+  expect(chatRequests).toHaveLength(2);
+  expect(sentEfforts(chatRequests)).toEqual(["high", "high"]);
+  expect(chooseReasoningLevel).toHaveBeenCalledTimes(1);
+  expect(chooseReasoningLevel).toHaveBeenCalledWith(expect.objectContaining({ text: "Draft a Boston deck" }));
+});
+
 
 test("applies assistant instructions as a provider-backed new document version", async () => {
   const chatRequests = installChatCompletionFetchMock(
@@ -6076,10 +6278,12 @@ test("deck templates drawer offers starters, brand upload, and honest AI image g
   expect(dialog).toHaveClass("deck-blade");
   expect(within(dialog).getByRole("button", { name: "Upload from this device" })).toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toBeDisabled();
-  expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toHaveAttribute(
-    "data-tooltip",
-    "No image-generation model is enabled for your workspace",
-  );
+  const needsModel = "The image model is turned off. Ask the platform owner to turn one on.";
+  expect(within(dialog).getByRole("button", { name: "Generate AI picture" })).toHaveAttribute("data-tooltip", needsModel);
+  // The reason is also written out under the button, where it cannot be missed.
+  const notice = within(dialog).getByRole("status");
+  expect(notice).toHaveTextContent(needsModel);
+  expect(within(notice).getByText("The image model is turned off.").tagName).toBe("STRONG");
   expect(within(dialog).getByRole("button", { name: "Find web images" })).toBeInTheDocument();
 });
 
@@ -6319,7 +6523,7 @@ test("deck AI tools: without a highlight the AI edits the whole slide, images ne
   expect(toolbarImage).toBeDisabled();
   expect(toolbarImage).toHaveAttribute(
     "data-tooltip",
-    "No image-generation model is enabled for your workspace",
+    "The image model is turned off. Ask the platform owner to turn one on.",
   );
   const composerToggle = screen.getByRole("button", { name: "Toggle AI slide images" });
   expect(composerToggle).toBeDisabled();
@@ -6521,6 +6725,422 @@ test("the move grip nudges a slide block with the arrow keys as one undo step ea
   expect(parseFloat(screen.getByRole("textbox", { name: "Title slide title" }).style.left)).toBe(before + 9);
   fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
   expect(parseFloat(screen.getByRole("textbox", { name: "Title slide title" }).style.left)).toBe(before + 10);
+});
+
+test("a selected slide block can be deleted from its frame, and Undo brings it back", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const title = screen.getByRole("textbox", { name: "Title slide title" });
+  fireEvent.focus(title);
+  title.innerHTML = "Quarterly review";
+  fireEvent.input(title);
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete the title block" }));
+  expect(screen.queryByRole("textbox", { name: "Title slide title" })).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Title slide subtitle" })).toBeInTheDocument();
+  expect(screen.getByText("Deleted the title from this slide. Undo brings it back.")).toBeInTheDocument();
+  // Its frame goes with it: nothing is left selected.
+  expect(screen.queryByRole("button", { name: "Move the title block" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Delete the title block" })).not.toBeInTheDocument();
+  // The slide list shows the slide without its heading.
+  expect(document.querySelector(".deck-slide-thumb")?.textContent).not.toContain("Quarterly review");
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("Quarterly review");
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+});
+
+test("Delete on a block's handles deletes it, and Put back deleted blocks restores every block empty", async () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const subtitle = screen.getByRole("textbox", { name: "Title slide subtitle" });
+  fireEvent.focus(subtitle);
+  subtitle.innerHTML = "Prepared for the board";
+  fireEvent.input(subtitle);
+  const grip = screen.getByRole("button", { name: "Move the subtitle block" });
+  // Only Delete and Backspace delete; other keys leave the block alone.
+  fireEvent.keyDown(grip, { key: "d" });
+  fireEvent.keyDown(grip, { key: "ArrowRight" });
+  expect(screen.getByRole("textbox", { name: "Title slide subtitle" })).toHaveTextContent("Prepared for the board");
+  // Delete is taken by the editor (fireEvent returns false once prevented).
+  expect(fireEvent.keyDown(grip, { key: "d" })).toBe(true);
+  expect(fireEvent.keyDown(grip, { key: "Delete" })).toBe(false);
+  expect(screen.queryByRole("textbox", { name: "Title slide subtitle" })).not.toBeInTheDocument();
+  expect(screen.getByText("Deleted the subtitle from this slide. Undo brings it back.")).toBeInTheDocument();
+
+  // Focus lands on the way back, so the keyboard stays in the editor.
+  const putBack = screen.getByRole("button", { name: "Put back deleted blocks" });
+  await waitFor(() => expect(document.activeElement).toBe(putBack));
+
+  fireEvent.focus(screen.getByRole("textbox", { name: "Title slide title" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "Resize the title block from the top left corner" }), {
+    key: "Backspace",
+  });
+  expect(screen.queryByRole("textbox", { name: "Title slide title" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Put back deleted blocks" }));
+  expect(screen.getByRole("textbox", { name: "Title slide title" })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Title slide subtitle" })).toHaveTextContent("");
+  expect(screen.getByText("The deleted blocks are back on this slide, empty.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+  // Focus stays on the stage's controls rather than dropping out of the editor.
+  expect(document.activeElement).toBe(
+    within(document.querySelector<HTMLElement>(".deck-stage-controls")!).getByRole("button", { name: "Title" }),
+  );
+  // Putting them back is its own undo step.
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  expect(screen.queryByRole("textbox", { name: "Title slide title" })).not.toBeInTheDocument();
+});
+
+test("a slide's picture block can be deleted, and choosing its layout again puts it back", () => {
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  expect(screen.getByRole("button", { name: "Add image" })).toBeInTheDocument();
+  fireEvent.click(document.querySelector(".deck-media-slot")!);
+  fireEvent.click(screen.getByRole("button", { name: "Delete the image block" }));
+  expect(screen.queryByRole("button", { name: "Add image" })).not.toBeInTheDocument();
+  expect(document.querySelector(".deck-media-slot")).toBeNull();
+  expect(screen.getByText("Deleted the picture from this slide. Undo brings it back.")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Image + caption slide caption" })).toBeInTheDocument();
+
+  const gallery = screen.getByLabelText("Browse slide layouts");
+  fireEvent.click(within(gallery).getByRole("button", { name: "Apply Image + caption layout" }));
+  expect(screen.getByRole("button", { name: "Add image" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+  // Nothing was lost by choosing the slide's own layout again.
+  expect(screen.getByText("Image + caption layout applied.")).toBeInTheDocument();
+
+  // A different layout also arrives whole, whatever was deleted before.
+  fireEvent.click(document.querySelector(".deck-media-slot")!);
+  fireEvent.click(screen.getByRole("button", { name: "Delete the image block" }));
+  fireEvent.click(within(gallery).getByRole("button", { name: "Apply Picture + bullets layout" }));
+  expect(screen.getByRole("button", { name: "Add image" })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Picture + bullets slide bullets" })).toBeInTheDocument();
+});
+
+test("an AI slide edit leaves a deleted block deleted unless it writes words into it", async () => {
+  let subtitle = "";
+  let layout = "title";
+  const requests = installChatCompletionFetchMock(() =>
+    [
+      "```json",
+      JSON.stringify({ slides: [{ id: "any", layout, title: "Pipeline review", subtitle, notes: "" }] }),
+      "```",
+    ].join("\n"),
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.focus(screen.getByRole("textbox", { name: "Title slide subtitle" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete the subtitle block" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  fireEvent.click(screen.getByRole("option", { name: "Improve this slide" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("Pipeline review"));
+  expect(screen.queryByRole("textbox", { name: "Title slide subtitle" })).not.toBeInTheDocument();
+  // The model is shown the slide's words, not the editor's bookkeeping.
+  expect(JSON.stringify(requests[0])).not.toContain("removed");
+
+  subtitle = "Prepared for the board";
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  fireEvent.click(screen.getByRole("option", { name: "Improve this slide" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Title slide subtitle" })).toHaveTextContent("Prepared for the board"),
+  );
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+
+  // A reply that changes the layout brings the whole layout: the subtitle
+  // deleted from the old one is not deleted from the new one.
+  fireEvent.focus(screen.getByRole("textbox", { name: "Title slide subtitle" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete the subtitle block" }));
+  subtitle = "";
+  layout = "section";
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  fireEvent.click(screen.getByRole("option", { name: "Improve this slide" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Section slide subtitle" })).toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+});
+
+test("the slide's plus offers Ask AI, a text box, a bullet list, or a picture, and adds what is chosen", async () => {
+  installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const plus = screen.getByRole("button", { name: "Add to this slide" });
+  expect(plus).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(plus);
+  expect(plus).toHaveAttribute("aria-expanded", "true");
+  const menu = screen.getByRole("menu", { name: "Add to this slide" });
+  expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    "Ask AI",
+    "Text box",
+    "Bullet list",
+    "Picture",
+  ]);
+  // The menu takes the focus, on its first choice.
+  expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "Ask AI" }));
+
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Text box" }));
+  expect(screen.queryByRole("menu", { name: "Add to this slide" })).not.toBeInTheDocument();
+  const added = screen.getByRole("textbox", { name: "Added text box 1" });
+  expect(screen.getByText("Added a text box to this slide.")).toBeInTheDocument();
+  // It arrives selected, with the caret in it, ready to type.
+  expect(screen.getByRole("button", { name: "Move the text box" })).toBeInTheDocument();
+  await waitFor(() => expect(document.activeElement).toBe(added));
+  expect(added).toHaveAttribute("data-placeholder", "Type here");
+  added.innerHTML = "Revenue beat plan";
+  fireEvent.input(added);
+  // The slide's own blocks are still there, and the thumbnail shows the new words.
+  expect(screen.getByRole("textbox", { name: "Title slide title" })).toBeInTheDocument();
+  expect(document.querySelector(".deck-slide-thumb")?.textContent).toContain("Revenue beat plan");
+
+  // A second one gets the next number; a list is a list.
+  fireEvent.click(screen.getByRole("button", { name: "Add to this slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Bullet list" }));
+  const list = screen.getByRole("textbox", { name: "Added bullet list 1" });
+  expect(list).toHaveClass("is-bullets");
+  expect(list).toHaveAttribute("data-placeholder", "Add a bullet…");
+  expect(screen.getByText("Added a bullet list to this slide.")).toBeInTheDocument();
+  list.innerHTML = "<ul><li>First step</li><li>Second step</li></ul>";
+  fireEvent.input(list);
+  // The two do not sit on top of each other.
+  expect(`${list.style.left},${list.style.top}`).not.toBe(`${added.style.left},${added.style.top}`);
+
+  // An added block is deleted like any other, and Undo brings it back with its words.
+  fireEvent.focus(screen.getByRole("textbox", { name: "Added text box 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete the text box" }));
+  expect(screen.queryByRole("textbox", { name: "Added text box 1" })).not.toBeInTheDocument();
+  expect(screen.getByText("Deleted the text box from this slide. Undo brings it back.")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Added bullet list 1" })).toHaveTextContent("First stepSecond step");
+  expect(screen.queryByRole("button", { name: "Put back deleted blocks" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  expect(screen.getByRole("textbox", { name: "Added text box 1" })).toHaveTextContent("Revenue beat plan");
+
+  // Added blocks belong to the slide: a new layout keeps them.
+  fireEvent.click(within(screen.getByLabelText("Browse slide layouts")).getByRole("button", { name: "Apply Two columns layout" }));
+  expect(screen.getByRole("textbox", { name: "Added text box 1" })).toHaveTextContent("Revenue beat plan");
+  expect(screen.getByRole("textbox", { name: "Added bullet list 1" })).toHaveTextContent("First stepSecond step");
+  expect(screen.getByRole("textbox", { name: "Two columns slide left" })).toBeInTheDocument();
+});
+
+test("the add menu closes on Escape, on a second press of the plus, and when the slide is pressed", () => {
+  installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const plus = screen.getByRole("button", { name: "Add to this slide" });
+  const menu = () => screen.queryByRole("menu", { name: "Add to this slide" });
+
+  fireEvent.click(plus);
+  expect(fireEvent.keyDown(screen.getByRole("menuitem", { name: "Picture" }), { key: "ArrowDown" })).toBe(true);
+  expect(menu()).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Picture" }), { key: "Escape" });
+  expect(menu()).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(plus);
+
+  fireEvent.click(plus);
+  // Pressing the plus does not pull the focus out of the open menu…
+  expect(fireEvent.mouseDown(plus)).toBe(false);
+  fireEvent.click(plus);
+  // …so the second press closes it.
+  expect(menu()).not.toBeInTheDocument();
+
+  fireEvent.click(plus);
+  fireEvent.pointerDown(document.querySelector(".deck-stage")!);
+  expect(menu()).not.toBeInTheDocument();
+
+  // Focus leaving the menu for anything else closes it too; moving inside it does not.
+  fireEvent.click(plus);
+  fireEvent.blur(screen.getByRole("menuitem", { name: "Ask AI" }), { relatedTarget: screen.getByRole("menuitem", { name: "Text box" }) });
+  expect(menu()).toBeInTheDocument();
+  fireEvent.blur(screen.getByRole("menuitem", { name: "Text box" }), { relatedTarget: screen.getByRole("button", { name: "Undo deck edit" }) });
+  expect(menu()).not.toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: /^Added/ })).not.toBeInTheDocument();
+});
+
+test("a right-click on empty slide space adds a block right there; on a block the browser's menu is left alone", () => {
+  installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const stage = document.querySelector<HTMLElement>(".deck-stage")!;
+  const title = screen.getByRole("textbox", { name: "Title slide title" });
+  // A heading is drawn centred on its `top`, so this point is on its words' line.
+  const onTitle = { clientX: parseFloat(title.style.left) + 20, clientY: parseFloat(title.style.top) };
+  expect(fireEvent.contextMenu(stage, onTitle)).toBe(true);
+  expect(screen.queryByRole("menu", { name: "Add to this slide" })).not.toBeInTheDocument();
+
+  // Empty space under the subtitle: the editor's menu opens instead of the browser's.
+  expect(fireEvent.contextMenu(stage, { clientX: 300, clientY: 430 })).toBe(false);
+  fireEvent.click(within(screen.getByRole("menu", { name: "Add to this slide" })).getByRole("menuitem", { name: "Text box" }));
+  const added = screen.getByRole("textbox", { name: "Added text box 1" });
+  expect(added.style.left).toBe("300px");
+  expect(added.style.top).toBe("430px");
+  expect(added.style.width).toBe("480px");
+
+  // Near the right edge the block slides back so all of it stays on the slide.
+  expect(fireEvent.contextMenu(stage, { clientX: 880, clientY: 60 })).toBe(false);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Text box" }));
+  const second = screen.getByRole("textbox", { name: "Added text box 2" });
+  expect(parseFloat(second.style.left) + parseFloat(second.style.width)).toBeLessThanOrEqual(920);
+  expect(second.style.top).toBe("60px");
+  // Where a block now sits is no longer empty space.
+  expect(fireEvent.contextMenu(stage, { clientX: 320, clientY: 430 })).toBe(true);
+});
+
+test("an added picture opens the picture blade for itself, beside the layout's own picture", () => {
+  installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  expect(document.querySelectorAll(".deck-media-slot")).toHaveLength(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Add to this slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Picture" }));
+  expect(screen.getByText("Added a picture to this slide.")).toBeInTheDocument();
+  expect(document.querySelectorAll(".deck-media-slot")).toHaveLength(2);
+  expect(screen.getAllByRole("button", { name: "Add image" })).toHaveLength(2);
+  // The blade opens on the new picture, which arrives selected.
+  expect(screen.getByRole("dialog", { name: "Slide picture" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Move the picture" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete the picture" }));
+  expect(document.querySelectorAll(".deck-media-slot")).toHaveLength(1);
+  expect(screen.getByText("Deleted the picture from this slide. Undo brings it back.")).toBeInTheDocument();
+  // The layout's own picture is still the layout's: deleting it offers the way back.
+  fireEvent.click(document.querySelector(".deck-media-slot")!);
+  fireEvent.click(screen.getByRole("button", { name: "Delete the image block" }));
+  expect(document.querySelectorAll(".deck-media-slot")).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "Put back deleted blocks" })).toBeInTheDocument();
+});
+
+test("Ask AI in the add menu tells the model where to add, and places what it writes there", async () => {
+  const requests = installChatCompletionFetchMock((payload) => {
+    const messages = payload.messages as Array<{ content: string }>;
+    const prompt = messages[0].content;
+    const current = JSON.parse(prompt.slice(prompt.lastIndexOf("```json") + 7, prompt.lastIndexOf("```"))) as Record<string, unknown>;
+    const added = Array.isArray(current.added) ? current.added : [];
+    return [
+      "```json",
+      JSON.stringify({ slides: [{ ...current, added: [...added, { id: "text-new", text: "Key takeaway: revenue beat plan" }] }] }),
+      "```",
+    ].join("\n");
+  });
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const title = screen.getByRole("textbox", { name: "Title slide title" });
+  fireEvent.focus(title);
+  title.innerHTML = "Quarterly review";
+  fireEvent.input(title);
+
+  const stage = document.querySelector<HTMLElement>(".deck-stage")!;
+  fireEvent.contextMenu(stage, { clientX: 200, clientY: 440 });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Ask AI" }));
+  expect(screen.queryByRole("menu", { name: "Add to this slide" })).not.toBeInTheDocument();
+  const composer = screen.getByRole("dialog", { name: "Add to slide with AI" });
+  expect(within(composer).getByPlaceholderText("Tell AI what to add to this slide…")).toBeInTheDocument();
+  // The one-click choices are about adding, not rewriting the slide.
+  expect(within(composer).queryByRole("option", { name: "Improve this slide" })).not.toBeInTheDocument();
+  fireEvent.click(within(composer).getByRole("option", { name: "Add a key takeaway" }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
+  const added = await screen.findByRole("textbox", { name: "Added text box 1" });
+  expect(added).toHaveTextContent("Key takeaway: revenue beat plan");
+  // It lands where the author pointed, and the slide's own words are untouched.
+  expect(added.style.left).toBe("200px");
+  expect(added.style.top).toBe("440px");
+  expect(screen.getByRole("textbox", { name: "Title slide title" })).toHaveTextContent("Quarterly review");
+
+  const prompt = (requests[0] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(prompt).toContain("The author pointed at an empty part of this slide");
+  expect(prompt).toContain("Add a one-sentence key takeaway");
+  expect(prompt).toMatch(/The space is about \d+ by \d+ pixels/);
+
+  // An ordinary slide edit afterwards keeps the added box where it is, and is not told to add anything.
+  fireEvent.click(screen.getByRole("button", { name: "Edit slide with AI" }));
+  const editor = screen.getByRole("dialog", { name: "Edit slide with AI" });
+  fireEvent.click(within(editor).getByRole("option", { name: "Improve this slide" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Accept AI suggestion" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Added text box 2" })).toBeInTheDocument());
+  const kept = screen.getByRole("textbox", { name: "Added text box 1" });
+  expect(`${kept.style.left},${kept.style.top}`).toBe("200px,440px");
+  const second = (requests[1] as { messages: Array<{ content: string }> }).messages[0].content;
+  expect(second).not.toContain("The author pointed at an empty part");
+  // The model is shown the added box's words, never its position.
+  expect(second).toContain('"id":"text-1","text":[{"text":"Key takeaway: revenue beat plan"}]');
+  expect(second).not.toContain('"box"');
+});
+
+test("an added picture takes a web picture of its own and leaves the layout's picture and caption alone", async () => {
+  let answer: (response: Response) => void = () => {};
+  (globalThis.fetch as unknown as { mockImplementation: (implementation: typeof fetch) => void }).mockImplementation(
+    () => new Promise<Response>((resolve) => { answer = resolve; }),
+  );
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.click(screen.getByRole("button", { name: "Add slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Image + caption" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add to this slide" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Picture" }));
+  const blade = screen.getByRole("dialog", { name: "Slide picture" });
+  fireEvent.change(within(blade).getByRole("textbox", { name: "Picture description" }), { target: { value: "harbor at dawn" } });
+  fireEvent.click(within(blade).getByRole("button", { name: "Find web images" }));
+  await act(async () => {
+    answer(
+      new Response(
+        JSON.stringify({ query: { pages: { "1": { index: 1, title: "Boston Harbor", thumbnail: { source: "https://upload.wikimedia.org/harbor.jpg" } } } } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  });
+  fireEvent.click(await within(blade).findByRole("button", { name: "Use Boston Harbor" }));
+
+  // The added picture holds it; the layout's own picture is still empty, and
+  // its caption is not filled from a picture that is not the layout's.
+  const stage = document.querySelector<HTMLElement>(".deck-stage")!;
+  expect(stage.querySelectorAll(".deck-media-image")).toHaveLength(1);
+  expect(stage.querySelector(".deck-media-image")).toHaveAttribute("src", "https://upload.wikimedia.org/harbor.jpg");
+  expect(stage.querySelectorAll(".deck-media-slot.has-image")).toHaveLength(1);
+  expect(stage.querySelectorAll(".deck-media-slot.is-empty")).toHaveLength(1);
+  expect(within(stage).getAllByText("No image yet")).toHaveLength(1);
+  expect(within(stage).getByRole("button", { name: "Add image" })).toBeInTheDocument();
+  expect(within(stage).getByRole("button", { name: "Replace image" })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Image + caption slide caption" })).toHaveTextContent("");
+
+  // The blade edits that picture's alt text, and no other.
+  fireEvent.change(within(blade).getByRole("textbox", { name: "Picture alt text" }), { target: { value: "Boston Harbor at dawn" } });
+  expect(stage.querySelector(".deck-media-image")).toHaveAttribute("alt", "Boston Harbor at dawn");
+
+  // Removing the picture empties the added block and keeps the block.
+  fireEvent.click(within(stage).getByRole("button", { name: "Remove" }));
+  expect(stage.querySelectorAll(".deck-media-image")).toHaveLength(0);
+  expect(stage.querySelectorAll(".deck-media-slot.is-empty")).toHaveLength(2);
+  expect(screen.getByText("Slide image removed.")).toBeInTheDocument();
+});
+
+test("an added block moves with its grip, and a right-click is read from where the slide sits on screen", () => {
+  installChatCompletionFetchMock("unused");
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  const stage = document.querySelector<HTMLElement>(".deck-stage")!;
+  // The slide is drawn 100 pixels in and 50 down.
+  stage.getBoundingClientRect = () => ({ left: 100, top: 50, right: 1060, bottom: 590, width: 960, height: 540, x: 100, y: 50, toJSON: () => ({}) });
+  fireEvent.contextMenu(stage, { clientX: 400, clientY: 480 });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Text box" }));
+  const added = () => screen.getByRole("textbox", { name: "Added text box 1" });
+  expect(`${added().style.left},${added().style.top}`).toBe("300px,430px");
+
+  const title = screen.getByRole("textbox", { name: "Title slide title" });
+  const titleLeft = title.style.left;
+  fireEvent.keyDown(screen.getByRole("button", { name: "Move the text box" }), { key: "ArrowLeft", shiftKey: true });
+  expect(`${added().style.left},${added().style.top}`).toBe("290px,430px");
+  // Only that block moved.
+  expect(screen.getByRole("textbox", { name: "Title slide title" }).style.left).toBe(titleLeft);
+  fireEvent.click(screen.getByRole("button", { name: "Undo deck edit" }));
+  expect(added().style.left).toBe("300px");
 });
 
 test("a starred drafting model survives mounts where it is temporarily unavailable", async () => {

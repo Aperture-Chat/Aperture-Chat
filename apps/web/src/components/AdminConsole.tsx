@@ -152,6 +152,13 @@ import {
 import { Panel, Pill, StableLabel, Toggle } from "./Primitives";
 import { userIdentityTooltip } from "../lib/userIdentity";
 import { modelLabLabel } from "../lib/modelAccess";
+import {
+  canJoinOwnGroup,
+  groupMemberToggleCopy,
+  membershipGroupIds,
+  withMembershipChange,
+  withUpdatedUser,
+} from "../lib/groupSelfMembership";
 import { UserAvatar } from "./UserAvatar";
 import {
   EMPTY_SECTION_SCOPE,
@@ -322,6 +329,7 @@ type AdminGroupCreateInput = Pick<
 > & {
   id?: string;
   tenant_id?: string | null;
+  add_me?: boolean;
 };
 type AdminGroupUpdateInput = Partial<
   Pick<Group, "name" | "distinguished_name" | "entra_object_id" | "synced" | "user_count" | "permissions">
@@ -444,6 +452,12 @@ export type AdminConsoleApi = {
     context: AdminMutationContext,
   ) => Promise<Group | void>;
   deleteGroup?: (actorUserId: string, groupId: string, context: AdminMutationContext) => Promise<void>;
+  setOwnGroupMembership?: (
+    actorUserId: string,
+    groupId: string,
+    member: boolean,
+    context: AdminMutationContext,
+  ) => Promise<User | void>;
   deleteGroups?: (actorUserId: string, groupIds: string[], context: AdminMutationContext) => Promise<string[] | void>;
   updateModelAccess?: (
     actorUserId: string,
@@ -1628,18 +1642,29 @@ export function AdminConsole({
     }
     setPendingAction("create-group");
     setActionStatus({ tone: "info", message: "Creating platform group through the admin API..." });
+    const addMe = data.me.role === "TENANT_ADMIN" && Boolean(groupDraft.add_me);
     try {
       const createdGroup = await createGroup(
         data.me.id,
-        { ...groupDraft, name, tenant_id: data.currentTenant.id },
+        { ...groupDraft, name, tenant_id: data.currentTenant.id, add_me: addMe },
         mutationContext,
       );
       if (!createdGroup) throw new Error("The admin API did not return the created group.");
-      onDataChange((current) => ({ ...current, groups: upsertGroups(current.groups, createdGroup) }));
+      onDataChange((current) => {
+        const next = { ...current, groups: upsertGroups(current.groups, createdGroup) };
+        return addMe
+          ? withUpdatedUser(next, { ...current.me, group_ids: membershipGroupIds(current.me, createdGroup.id, true) })
+          : next;
+      });
       setSelectedGroupId(createdGroup.id);
       setGroupDraft(emptyGroupDraft(data.currentTenant.id));
       setShowGroupCreate(false);
-      setActionStatus({ tone: "success", message: `${createdGroup.name} was added as a platform group.` });
+      setActionStatus({
+        tone: "success",
+        message: addMe
+          ? `${createdGroup.name} was created, and you are a member.`
+          : `${createdGroup.name} was added as a platform group.`,
+      });
     } catch (error) {
       setActionStatus({ tone: "danger", message: `Group was not created. ${errorMessage(error)}` });
     } finally {
@@ -1759,41 +1784,38 @@ export function AdminConsole({
     });
   }
 
+  /* A tenant admin's own row in a group they created goes through the
+   * self-membership route; every other row is a user record update. */
+  function groupMembershipRequest(user: User, group: Group, nextGroupIds: string[], next: boolean) {
+    if (user.id === data.me.id && canJoinOwnGroup(data.me, group)) {
+      const setOwn = adminApi?.setOwnGroupMembership;
+      return setOwn && (() => setOwn(data.me.id, group.id, next, mutationContext));
+    }
+    const updateUserRecord = adminApi?.updateUser;
+    return updateUserRecord && (() => updateUserRecord(data.me.id, user.id, { group_ids: nextGroupIds }, mutationContext));
+  }
+
   async function setUserGroupMembership(user: User, group: Group, next: boolean) {
     const currentMembership = user.group_ids.includes(group.id);
     if (currentMembership === next) return;
-    const updateUserRecord = adminApi?.updateUser;
-    if (!updateUserRecord) {
+    const nextGroupIds = membershipGroupIds(user, group.id, next);
+    const request = groupMembershipRequest(user, group, nextGroupIds, next);
+    if (!request) {
       setActionStatus({ tone: "danger", message: "Group membership was not updated because the admin user API is not connected." });
       return;
     }
-    const nextGroupIds = next
-      ? Array.from(new Set([...user.group_ids, group.id]))
-      : user.group_ids.filter((groupId) => groupId !== group.id);
+    const self = user.id === data.me.id;
     const pendingKey = `group-user-${group.id}-${user.id}`;
     setPendingAction(pendingKey);
     setActionStatus({ tone: "info", message: `Syncing ${user.display_name} group membership...` });
     try {
-      const remoteUser = await updateUserRecord(data.me.id, user.id, { group_ids: nextGroupIds }, mutationContext);
+      const remoteUser = await request();
       const updatedUser = remoteUser ?? { ...user, group_ids: nextGroupIds };
-      onDataChange((current) => {
-        const currentUser =
-          current.visibleUsers.find((item) => item.id === user.id) ?? current.users.find((item) => item.id === user.id);
-        const wasMember = currentUser?.group_ids.includes(group.id) ?? currentMembership;
-        const isMember = updatedUser.group_ids.includes(group.id);
-        const delta = wasMember === isMember ? 0 : isMember ? 1 : -1;
-        return {
-          ...current,
-          users: current.users.map((item) => (item.id === updatedUser.id ? { ...item, ...updatedUser } : item)),
-          visibleUsers: current.visibleUsers.map((item) =>
-            item.id === updatedUser.id ? { ...item, ...updatedUser } : item,
-          ),
-          groups: current.groups.map((item) =>
-            item.id === group.id ? { ...item, user_count: Math.max(0, item.user_count + delta) } : item,
-          ),
-        };
+      onDataChange((current) => withMembershipChange(current, updatedUser, group.id, currentMembership));
+      setActionStatus({
+        tone: "success",
+        message: self ? ownMembershipMessage(group, next) : `${user.display_name} group membership synced with the admin API.`,
       });
-      setActionStatus({ tone: "success", message: `${user.display_name} group membership synced with the admin API.` });
     } catch (error) {
       setActionStatus({ tone: "danger", message: `${user.display_name} group membership could not sync. ${errorMessage(error)}` });
     } finally {
@@ -4541,6 +4563,11 @@ function GroupManagementPanel({
                   onChange={(event) => onDraftChange({ ...groupDraft, entra_object_id: event.target.value })}
                 />
               </label>
+              <GroupCreateAddMeRow
+                actor={data.me}
+                checked={Boolean(groupDraft.add_me)}
+                onChange={(next) => onDraftChange({ ...groupDraft, add_me: next })}
+              />
               <button
                 className="primary-button form-submit-button"
                 type="button"
@@ -4712,6 +4739,32 @@ function GroupManagementPanel({
   );
 }
 
+/* Platform owners hold no group membership, so only tenant admins get this switch. */
+function GroupCreateAddMeRow({
+  actor,
+  checked,
+  onChange,
+}: {
+  actor: User;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  if (actor.role !== "TENANT_ADMIN") return null;
+  return (
+    <div className="permission-row group-create-add-me">
+      <span>Add me to this group</span>
+      <Toggle
+        checked={checked}
+        label="Add me to this group"
+        tooltip={
+          checked ? "You will be a member of the new group and get the access it grants" : "You will not be a member of the new group"
+        }
+        onChange={onChange}
+      />
+    </div>
+  );
+}
+
 function GroupImportSection({
   group,
   bulkUserText,
@@ -4777,14 +4830,17 @@ function GroupUsersSection({
     );
   }
 
-  const groupEditorUsers = data.visibleUsers.filter((user) => user.role !== "PLATFORM_OWNER");
+  const canJoin = canJoinOwnGroup(data.me, group);
+  const groupEditorUsers = data.visibleUsers
+    .filter((user) => user.role !== "PLATFORM_OWNER")
+    .sort((a, b) => Number(canJoin && b.id === data.me.id) - Number(canJoin && a.id === data.me.id));
 
   return (
     <section className="group-section-panel" aria-label={`${group.name} users`}>
       <div className="group-editor-section">
         <header>
           <strong>Platform Users</strong>
-          <small>Toggle membership for users visible in this tenant.</small>
+          <small>{groupUsersHint(data.me, canJoin)}</small>
         </header>
         <div className="table-scroll group-user-table-scroll">
           <table className="data-table group-user-table">
@@ -4797,53 +4853,71 @@ function GroupUsersSection({
               </tr>
             </thead>
             <tbody>
-              {groupEditorUsers.map((user) => {
-                const isMember = user.group_ids.includes(group.id);
-                const pending = isPendingPlatformUser(user);
-                const editable = canModifyUser(data.me, user);
-                const pendingKey = `group-user-${group.id}-${user.id}`;
-                return (
-                  <tr key={user.id}>
-                    <td data-label="User">
-                      <span
-                        className="person-cell compact-person-cell user-identity-cell"
-                        tabIndex={0}
-                        data-tooltip={userIdentityTooltip(user)}
-                      >
-                        <UserAvatar user={user} className="mini-avatar" />
-                        <span>
-                          <strong>{user.display_name}</strong>
-                          <small>{user.email}</small>
-                        </span>
-                      </span>
-                    </td>
-                    <td data-label="Role">{ROLE_LABELS[user.role]}</td>
-                    <td data-label="Status">
-                      <Pill tone={isMember ? "success" : pending ? "warning" : "neutral"}>
-                        {isMember ? "In group" : pending ? "Pending" : "Not in group"}
-                      </Pill>
-                    </td>
-                    <td data-label="Member">
-                      <Toggle
-                        checked={isMember}
-                        disabled={!editable || pendingAction === pendingKey}
-                        label={`${isMember ? "Remove" : "Add"} ${user.display_name} ${isMember ? "from" : "to"} ${group.name}`}
-                        tooltip={
-                          isMember
-                            ? `Remove ${user.display_name} from ${group.name} and its access`
-                            : `Add ${user.display_name} to ${group.name} and grant its access`
-                        }
-                        onChange={(next) => onUserMembershipChange(user, group, next)}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
+              {groupEditorUsers.map((user) => (
+                <GroupUserRow
+                  key={user.id}
+                  actor={data.me}
+                  user={user}
+                  group={group}
+                  pendingAction={pendingAction}
+                  onUserMembershipChange={onUserMembershipChange}
+                />
+              ))}
             </tbody>
           </table>
         </div>
       </div>
     </section>
+  );
+}
+
+function GroupUserRow({
+  actor,
+  user,
+  group,
+  pendingAction,
+  onUserMembershipChange,
+}: {
+  actor: User;
+  user: User;
+  group: Group;
+  pendingAction: string | null;
+  onUserMembershipChange: (user: User, group: Group, next: boolean) => void;
+}) {
+  const isMember = user.group_ids.includes(group.id);
+  const pending = isPendingPlatformUser(user);
+  const isMe = user.id === actor.id;
+  const editable = canModifyUser(actor, user) || (isMe && canJoinOwnGroup(actor, group));
+  const pendingKey = `group-user-${group.id}-${user.id}`;
+  const toggleCopy = groupMemberToggleCopy(actor, user, group, isMember);
+  return (
+    <tr>
+      <td data-label="User">
+        <span className="person-cell compact-person-cell user-identity-cell" tabIndex={0} data-tooltip={userIdentityTooltip(user)}>
+          <UserAvatar user={user} className="mini-avatar" />
+          <span>
+            <strong>{user.display_name}</strong>
+            <small>{user.email}</small>
+          </span>
+          {isMe && <Pill tone="info">You</Pill>}
+        </span>
+      </td>
+      <td data-label="Role">{ROLE_LABELS[user.role]}</td>
+      <td data-label="Status">
+        <Pill tone={isMember ? "success" : pending ? "warning" : "neutral"}>
+          {isMember ? "In group" : pending ? "Pending" : "Not in group"}
+        </Pill>
+      </td>
+      <td data-label="Member">
+        <Toggle
+          checked={isMember}
+          disabled={!editable || pendingAction === pendingKey}
+          label={toggleCopy.label}
+          tooltip={toggleCopy.tooltip}
+          onChange={(next) => onUserMembershipChange(user, group, next)}
+        />
+      </td>
+    </tr>
   );
 }
 
@@ -4925,6 +4999,12 @@ function GroupPermissionsSection({
       </div>
     </section>
   );
+}
+
+function groupUsersHint(actor: User, canJoin: boolean) {
+  if (actor.role !== "TENANT_ADMIN") return "Toggle membership for users visible in this tenant.";
+  const self = canJoin ? "You created this group, so you can add yourself." : "You can add yourself only to groups you created.";
+  return `Toggle membership for users visible in this tenant. Only the platform owner can add administrators to a group. ${self}`;
 }
 
 function canModifyUser(actor: User, target: User) {
@@ -5512,9 +5592,16 @@ function mergeSyncedModelCatalog(currentModels: ModelConfig[], syncedModels: Mod
   return [...mergedCurrent, ...newModels];
 }
 
+function ownMembershipMessage(group: Group, member: boolean) {
+  return member ? `You are now a member of ${group.name}.` : `You are no longer a member of ${group.name}.`;
+}
+
+/* add_me starts on: a tenant admin who makes a group usually means to work
+ * in it, and it only takes effect for tenant admins (owners hold no groups). */
 function emptyGroupDraft(tenantId: string): AdminGroupCreateInput {
   return {
     tenant_id: tenantId,
+    add_me: true,
     name: "",
     distinguished_name: "Platform-managed group",
     entra_object_id: "",

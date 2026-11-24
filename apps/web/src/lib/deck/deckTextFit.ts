@@ -17,7 +17,6 @@
 
 import {
   DECK_LINE_HEIGHT,
-  DECK_LIST_REGIONS,
   DECK_TEXT_INSET_X,
   DECK_TEXT_INSET_Y,
   type DeckTextRegionSpec,
@@ -127,11 +126,6 @@ function paragraphsOf(content: DeckRegionContent): Paragraph[] {
     return content.filter((bullet) => bullet.runs.some((run) => run.text.trim()));
   }
   return deckRichTextParagraphs(content).map((runs) => ({ runs, level: -1 }));
-}
-
-/** True when a region holds bullets (and so takes bullet indents). */
-export function deckRegionIsList(region: string): boolean {
-  return DECK_LIST_REGIONS.has(region);
 }
 
 /** Text width available inside the box. */

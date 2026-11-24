@@ -69,7 +69,12 @@ import { SheetTabs } from "./SheetTabs";
 import { SheetToolbar, type SheetActions, type SheetToolbarState } from "./SheetToolbar";
 import { formatRangeAsTable, regionForTable, restyledWorkbook, sharedTableLook, styleMeetsOwnColors } from "../../lib/sheet/tableStyles";
 
-export type SheetAiAsk = (prompt: string, options: { signal: AbortSignal; onText?: (text: string) => void }) => Promise<string>;
+/** `instruction` is the user's own words; `prompt` is the built request that
+ * wraps them in workbook context. */
+export type SheetAiAsk = (
+  prompt: string,
+  options: { signal: AbortSignal; onText?: (text: string) => void; instruction?: string },
+) => Promise<string>;
 
 export type SpreadsheetEditorProps = {
   workbook: Workbook;
@@ -636,7 +641,7 @@ export function SpreadsheetEditor(props: SpreadsheetEditorProps) {
     setAiState((state) => ({ ...state, prompt: instruction, label, phase: "thinking", error: undefined, message: undefined, preview: base, streamed: "" }));
     try {
       const flow = await runSheetAiFlow({
-        ask: (prompt) => ai.ask(prompt, { signal: controller.signal, onText: (partial) => setAiState((state) => ({ ...state, streamed: partial })) }),
+        ask: (prompt) => ai.ask(prompt, { signal: controller.signal, instruction, onText: (partial) => setAiState((state) => ({ ...state, streamed: partial })) }),
         instruction,
         workbook: base?.workbook ?? workbook,
         sheetId: base?.sheetId ?? sheet.id,

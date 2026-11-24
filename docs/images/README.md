@@ -33,6 +33,34 @@ registered as an Azure AI Foundry deployment named `gpt-5.5`. The
 **Assistant settings** panel, the **Reasoning** stops, and the help line are
 the application's own. No real model was called.
 
+Two pictures were added on November 24, 2026 from the v0.5.28 interface:
+`deck-add-block-light.png` and `tools-only-me-light.png`. Both were taken on
+one isolated local instance (API, Vite, and a stand-in model server on
+loopback ports) started from the release source on a fresh, empty data
+directory with seeds off. The first owner was created through the bootstrap
+flow; the organization was renamed Meridian Advisory Group, and Legal,
+Operations, and Finance groups and a workspace admin, Priya Shah, were added
+through the admin API. Both pictures are signed in as Priya Shah, a normal
+workspace admin, in the light theme at 1440×900 and 2× scale, and were
+compressed with `oxipng -o 4 --strip safe`. The model picker in the deck
+picture reads `qa-stub`: a scripted stand-in on a small local server,
+registered only so Drafts offers **Ask AI**. It was never sent a request
+during either capture (its request log holds only a model-list call), and no
+text in either picture came from it or from any other model. The Deck
+Assistant's three suggestions are the application's built-in prompts.
+
+- `deck-add-block-light.png`: a three-slide deck, "Q3 onboarding", built in
+  the browser: a Title slide, a Two columns slide of goals and results, and a
+  Title + bullets "Next steps" slide, each added with **Add slide** and typed
+  into the slide, then kept with **Save version**. With layouts and themes
+  folded away, the capture clicks the plus in the Next steps slide's empty
+  space and shows the menu it opens.
+- `tools-only-me-light.png`: an MCP (SSE) connection named Client Records
+  Search, pointing at a reserved `example.test` address, added through
+  **Add connection** in Library → Tools. The capture opens **Access &
+  approval**, picks **Only me** under **Who can use it**, and saves. The
+  connection was never turned on or tested.
+
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
@@ -98,6 +126,13 @@ the application's own. No real model was called.
 - `drafts-check-light.png`: the **Check** panel beside a five-line consulting
   agreement typed into the editor, listing three blanks and two defined-term
   findings.
+- `deck-add-block-light.png`: the slide editor on a typed Next steps slide
+  with the add menu open from the plus in the slide's empty space, offering
+  **Ask AI**, **Text box**, **Bullet list**, and **Picture**.
+- `tools-only-me-light.png`: the Library connection editor for Client Records
+  Search on **Access & approval**, with **Only me** chosen on the **Who can
+  use it** rail beside **Everyone** and **Specific groups**, and the line
+  "Only you can use this connection."
 
 ## Data and honesty
 

@@ -51,18 +51,25 @@ const REASONING_HELP: Record<ReasoningLevel, string> = {
   smart: "Takes longer and thinks it through.",
 };
 
-export function reasoningHelp(level: ReasoningLevel, supported: boolean, modelName: string) {
-  return supported ? REASONING_HELP[level] : `${modelName} does not support reasoning levels.`;
+const AUTO_HELP = "Aperture picks the level for each message.";
+
+export function reasoningHelp(level: ReasoningLevel, supported: boolean, modelName: string, auto = false) {
+  if (!supported) return `${modelName} does not support reasoning levels.`;
+  return auto ? AUTO_HELP : REASONING_HELP[level];
 }
 
 /** Every level named on its own stop, for chat's Send options and the Drafts settings. */
 export function ReasoningRail({
   level,
   supported,
+  auto = false,
   onChange,
 }: {
+  /** The user's level, or with `auto` the level picked for this request. */
   level: ReasoningLevel;
   supported: boolean;
+  /** Auto is choosing: the rail shows the pick and cannot be moved. */
+  auto?: boolean;
   onChange: (level: ReasoningLevel) => void;
 }) {
   return (
@@ -71,8 +78,36 @@ export function ReasoningRail({
       ariaLabel="Model reasoning level"
       options={REASONING_STOPS}
       value={supported ? level : "balanced"}
-      disabled={!supported}
+      disabled={!supported || auto}
+      className={supported && auto ? "is-auto" : undefined}
       onChange={onChange}
     />
+  );
+}
+
+/** The opt-in box that lets the platform pick the reasoning level. Shared by
+ * chat's Send options and the Drafts settings. */
+export function ReasoningAutoCheckbox({
+  checked,
+  disabled = false,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (auto: boolean) => void;
+}) {
+  return (
+    <label className={`reasoning-auto${disabled ? " is-disabled" : ""}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-label="Auto: choose the reasoning level automatically"
+        onChange={(event) => {
+          if (!disabled) onChange(event.target.checked);
+        }}
+      />
+      <span aria-hidden="true">Auto</span>
+    </label>
   );
 }

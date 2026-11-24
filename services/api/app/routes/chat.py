@@ -2967,6 +2967,7 @@ def _generate_completion(
             model_config.id,
             resolved_usage_surface,
             request.thread_id,
+            options=_follow_up_generation_options(request),
         )
         final = _validate_and_revise_completion_if_needed(
             client,
@@ -3571,6 +3572,13 @@ def _is_image_generation_model(model: ModelConfig) -> bool:
     return bool(_IMAGE_OUTPUT_UPSTREAM_PATTERN.search(model.upstream_model_id or ""))
 
 
+def _draws_only(model: ModelConfig) -> bool:
+    """True for a model whose catalog entry says it outputs pictures and no
+    text. A model with no reported outputs is asked the usual way."""
+    outputs = model.capabilities.output_modalities if model.capabilities else []
+    return "image" in outputs and "text" not in outputs
+
+
 def _requested_image_count(prompt: str) -> int:
     """Read how many images the user asked for, clamped to the per-request cap."""
     best = 1
@@ -3638,7 +3646,9 @@ def _generate_image_completion(
                     }
                 )
             completion_id = new_accounting_id()
-            payload = client.generate_images(route=route, messages=call_messages)
+            payload = client.generate_images(
+                route=route, messages=call_messages, image_only=_draws_only(model_config)
+            )
             settlement = usage_context.settle_provider_child(
                 completion_id=completion_id,
                 usage=_raw_provider_usage(payload),
@@ -5566,6 +5576,15 @@ def _openai_generation_options(request: ChatCompletionRequest) -> dict[str, Any]
     return present or None
 
 
+def _follow_up_generation_options(request: ChatCompletionRequest) -> dict[str, Any] | None:
+    """What a continuation or revision pass carries over from the request: the
+    reasoning level the user chose. Those passes send no tools and ask for
+    plain text, so the rest of the request's generation options stay behind."""
+    if request.reasoning_effort is None:
+        return None
+    return {"reasoning_effort": request.reasoning_effort}
+
+
 def _continue_completion_if_needed(
     client: Any,
     route: ModelGatewayRoute,
@@ -5579,6 +5598,8 @@ def _continue_completion_if_needed(
     model_id: str,
     usage_surface: str,
     thread_id: str | None,
+    *,
+    options: dict[str, Any] | None = None,
 ) -> ChatCompletionResponse:
     combined = response
     for _ in range(MAX_CONTINUATION_CALLS):
@@ -5595,6 +5616,7 @@ def _continue_completion_if_needed(
                 model_id=model_id,
                 usage_surface=usage_surface,
                 thread_id=thread_id,
+                options=options,
             )
             continuation = _translate_response(payload, requested_model, runtime_context)
         except ModelGatewayError as exc:
@@ -5648,6 +5670,7 @@ def _validate_and_revise_completion_if_needed(
                 model_id=model_id,
                 usage_surface=usage_surface,
                 thread_id=thread_id,
+                options=_follow_up_generation_options(request),
             )
             revision = _translate_response(revision_payload, request.model, runtime_context)
             revision = _continue_completion_if_needed(
@@ -5663,6 +5686,7 @@ def _validate_and_revise_completion_if_needed(
                 model_id,
                 usage_surface,
                 thread_id,
+                options=_follow_up_generation_options(request),
             )
         except ModelGatewayError as exc:
             logger.warning(
@@ -6035,10 +6059,12 @@ class _ChatPictures:
     def _illustrate(self, prompt: str) -> dict[str, Any]:
         if self._illustrator_refused:
             raise ModelGatewayError("The image model's credential was refused earlier in this reply.")
-        _model, route = cast(tuple[ModelConfig, ModelGatewayRoute], self._illustrator)
+        model, route = cast(tuple[ModelConfig, ModelGatewayRoute], self._illustrator)
         try:
             return get_model_gateway_client().generate_images(
-                route=route, messages=[{"role": "user", "content": prompt}]
+                route=route,
+                messages=[{"role": "user", "content": prompt}],
+                image_only=_draws_only(model),
             )
         except ModelGatewayAuthError as exc:
             self._illustrator_refused = True
@@ -9270,7 +9296,7 @@ def _prompt_cites_strictly(runtime_context: dict[str, object]) -> bool:
 # Attached prompt templates and skill files are authored instructions, so they
 # get a larger budget than retrieved snippets. The Library editor shows this
 # limit to authors; keep the two in sync (ToolLibraryManager.tsx).
-PROMPT_LIBRARY_EXCERPT_CHARS = 4000
+PROMPT_LIBRARY_EXCERPT_CHARS = 65_000
 
 
 def _prompt_excerpt(text: str, *, limit: int = 1000) -> str:

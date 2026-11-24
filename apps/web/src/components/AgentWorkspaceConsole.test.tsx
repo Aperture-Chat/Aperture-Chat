@@ -736,6 +736,7 @@ test("a new agent starts with nothing attached and can start from a template", (
 
   expect(screen.getByLabelText("Agent name")).toHaveValue("");
   expect(screen.getByRole("button", { name: "Create agent" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Start from a template" }));
   fireEvent.click(screen.getByRole("button", { name: /Meeting Summarizer/ }));
   expect(screen.getByLabelText("Agent name")).toHaveValue("Meeting Summarizer");
 
@@ -743,6 +744,77 @@ test("a new agent starts with nothing attached and can start from a template", (
   expect(screen.getAllByRole("checkbox").every((box) => !(box as HTMLInputElement).checked)).toBe(true);
   selectTab("Prompts & Skills");
   expect(screen.getAllByRole("checkbox").every((box) => !(box as HTMLInputElement).checked)).toBe(true);
+});
+
+test("the template list stays folded away until asked for, then folds back", () => {
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: /New Agent/ }));
+
+  const toggle = screen.getByRole("button", { name: "Start from a template" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("group", { name: "Agent templates" })).not.toBeInTheDocument();
+
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(within(screen.getByRole("group", { name: "Agent templates" })).getByRole("button", { name: /Financial Analyst/ })).toBeInTheDocument();
+
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("group", { name: "Agent templates" })).not.toBeInTheDocument();
+});
+
+function pictureModels() {
+  const text = currentData.models.find((model) => model.id === "openrouter-openai-gpt-4o-mini")!;
+  return [
+    { ...text, id: "openrouter-mai-image", name: "Microsoft: MAI Image 2.5 Pro", upstream_model_id: "microsoft/mai-image-2.5-pro", capabilities: { output_modalities: ["image"] } },
+    { ...text, id: "foundry-gpt-image", name: "GPT Image 1", upstream_model_id: "gpt-image-1", capabilities: undefined },
+  ];
+}
+
+test("the AI model list offers only models that write, never picture models", () => {
+  currentData = { ...currentData, models: [...currentData.models, ...pictureModels()] };
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: /New Agent/ }));
+
+  const names = within(screen.getByRole("combobox", { name: "AI model" })).getAllByRole("option").map((option) => option.textContent);
+  expect(names).toContain("OpenRouter: openai/gpt-4o-mini · OpenRouter");
+  expect(names.some((name) => /MAI Image|GPT Image/.test(name ?? ""))).toBe(false);
+  expect(screen.getByText(/Picture models are not listed/)).toBeInTheDocument();
+});
+
+test("with no model connected, a new agent says how to get one", () => {
+  currentData = { ...currentData, models: currentData.models.filter((model) => model.is_custom) };
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: /New Agent/ }));
+
+  expect(screen.getByRole("combobox", { name: "AI model" })).toHaveDisplayValue("No connected models available");
+  expect(screen.getByText("Connect and enable a model, then choose it here before saving.")).toBeInTheDocument();
+});
+
+test("an agent saved on a picture model says so in words and waits for a model that writes", () => {
+  const [picture] = pictureModels();
+  const agent = currentData.models.find((model) => model.id === "agent-client-update")!;
+  currentData = {
+    ...currentData,
+    models: [
+      ...currentData.models.map((model) => model.id === agent.id ? { ...model, upstream_model_id: picture.upstream_model_id } : model),
+      picture,
+    ],
+  };
+  renderAgentWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+  const selector = screen.getByRole("combobox", { name: "AI model" });
+  expect(selector).toHaveValue(picture.id);
+  expect(within(selector).getByRole("option", { name: /MAI Image 2.5 Pro \(makes pictures only\)/ })).toBeInTheDocument();
+  expect(screen.getByText(/runs on a picture model/)).toBeInTheDocument();
+  expect(screen.queryByText(/saved model is unavailable/)).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Agent name"), { target: { value: "Renamed agent" } });
+  expect(screen.getByRole("button", { name: "Save Profile" })).toBeDisabled();
+
+  fireEvent.change(selector, { target: { value: "openrouter-openai-gpt-4o-mini" } });
+  expect(screen.getByRole("button", { name: "Save Profile" })).toBeEnabled();
+  expect(screen.queryByText(/runs on a picture model/)).not.toBeInTheDocument();
 });
 
 test("the group picker appears only when access is limited to selected groups", () => {

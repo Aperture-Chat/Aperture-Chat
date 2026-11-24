@@ -38,6 +38,7 @@ import {
   deckRichTextParagraphs,
   deckRunsText,
   deckSlideBackgroundSource,
+  deckPictureRegions,
   deckSlidePicture,
   deckSlideRegionContent,
   deckThemeDesign,
@@ -243,7 +244,8 @@ type SlideMedia = {
   /** rel id → media part name, for this slide's .rels file. */
   rels: Array<{ relId: string; target: string }>;
   /** Slide-content picture (the picture layouts). */
-  contentPic: { relId: string; box: DeckBox } | null;
+  /** The slide's pictures, in drawing order: its layout's, then added ones. */
+  contentPics: Array<{ relId: string; box: DeckBox }>;
   logoPic: { relId: string; box: DeckBox } | null;
   backgroundRelId: string | null;
 };
@@ -258,8 +260,8 @@ function slideXml(slide: DeckSlide, theme: DeckTheme, media: SlideMedia): string
     shapes.push(decorationShapeXml(shapeId, decoration, theme));
     shapeId += 1;
   });
-  if (media.contentPic) {
-    shapes.push(picXml(shapeId, "Slide image", media.contentPic.relId, media.contentPic.box));
+  for (const picture of media.contentPics) {
+    shapes.push(picXml(shapeId, "Slide image", picture.relId, picture.box));
     shapeId += 1;
   }
   // User-resized boxes flow into the export through the shared resolver.
@@ -687,22 +689,20 @@ export async function buildPptxExportDocument(
 
   const slideMediaList: SlideMedia[] = [];
   for (const [slideIndex, slide] of deck.slides.entries()) {
-    const media: SlideMedia = { rels: [], contentPic: null, logoPic: null, backgroundRelId: null };
+    const media: SlideMedia = { rels: [], contentPics: [], logoPic: null, backgroundRelId: null };
     let relCounter = 1;
     const nextRelId = () => {
       relCounter += 1;
       return `rIdMedia${relCounter}`;
     };
-    const picture = deckSlidePicture(slide);
-    if (picture?.src) {
-      const box = resolvedMediaBox(slide, deckThemeDesign(deck.theme));
-      const resource = box
-        ? await loadMedia(picture.src, box, `Slide ${slideIndex + 1}'s image`)
-        : null;
+    for (const region of deckPictureRegions(slide)) {
+      const picture = deckSlidePicture(slide, region);
+      const box = resolvedMediaBox(slide, deckThemeDesign(deck.theme), region);
+      const resource = picture?.src && box ? await loadMedia(picture.src, box, `Slide ${slideIndex + 1}'s image`) : null;
       if (resource && box) {
         const relId = nextRelId();
         media.rels.push({ relId, target: resource.name });
-        media.contentPic = { relId, box };
+        media.contentPics.push({ relId, box });
       }
     }
     // A slide with its own template design already contains that design's

@@ -7,6 +7,7 @@ import {
   BookOpen,
   Bot,
   CheckCircle2,
+  ChevronRight,
   ClipboardList,
   Copy,
   FileText,
@@ -57,6 +58,7 @@ import {
 import {
   agentProfileCreatorMatches,
   isAgentProfile,
+  isImageGenerationModel,
   usableModels,
   visibleAgentProfiles,
 } from "../lib/modelAccess";
@@ -282,6 +284,18 @@ export function AgentWorkspaceConsole({
     canAuthorAgents && (isAgentAdmin || agentProfileCreatorMatches(data, agent));
   const canEditSelectedAgent = !draft.id ? canAuthorAgents : canAuthorProfile(selectedAgent);
   const selectedBaseModelAvailable = baseModels.some((model) => model.id === draft.base_model_id);
+  // A saved agent can predate the rule that agents run on a model that
+  // writes; name its picture model so the owner knows why it must change.
+  const savedPictureModel = selectedBaseModelAvailable
+    ? undefined
+    : data.models.find((model) => model.id === draft.base_model_id && isImageGenerationModel(model));
+  const missingModelText = unavailableModelText({
+    pictureModel: savedPictureModel,
+    savedAgentModel: draft.id ? selectedAgent?.upstream_model_id ?? "Saved model" : null,
+    anyModels: baseModels.length !== 0,
+  });
+  const pictureModelsLeftOut = useMemo(() => agentModelCandidates(data).some(isImageGenerationModel), [data]);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   // Say which of the two gates is closed rather than silently hiding the
   // authoring controls, so the missing button is never a mystery.
   const authoringBlockedReason = canAuthorAgents
@@ -760,8 +774,18 @@ export function AgentWorkspaceConsole({
                 <div className="agent-builder-form">
                   {!draft.id && canAuthorAgents && (
                     <div className="agent-starter-row">
-                      <span className="ws-section-label">Start from a template</span>
-                      <div className="ws-chips" role="group" aria-label="Agent templates">
+                      <button
+                        type="button"
+                        className="agent-starter-toggle"
+                        aria-expanded={templatesOpen}
+                        aria-controls="agent-template-chips"
+                        onClick={() => setTemplatesOpen((open) => !open)}
+                      >
+                        <ChevronRight size={14} aria-hidden="true" />
+                        Start from a template
+                      </button>
+                      {templatesOpen && (
+                      <div id="agent-template-chips" className="ws-chips" role="group" aria-label="Agent templates">
                         {AGENT_STARTERS.map((starter) => (
                           <button
                             key={starter.key}
@@ -781,6 +805,7 @@ export function AgentWorkspaceConsole({
                           </button>
                         ))}
                       </div>
+                      )}
                     </div>
                   )}
                   {draftIssues.length > 0 && (
@@ -820,9 +845,7 @@ export function AgentWorkspaceConsole({
                       >
                         {!selectedBaseModelAvailable && (
                           <option value={draft.base_model_id}>
-                            {draft.id
-                              ? `${selectedAgent?.upstream_model_id ?? "Saved model"} (unavailable)`
-                              : baseModels.length ? "Choose an available model" : "No connected models available"}
+                            {missingModelText.option}
                           </option>
                         )}
                         {baseModels.map((model) => (
@@ -833,9 +856,12 @@ export function AgentWorkspaceConsole({
                       </SelectControl>
                       {!selectedBaseModelAvailable && (
                         <span className="field-hint" role="status">
-                          {draft.id
-                            ? "This agent's saved model is unavailable. Restore model access or explicitly select a replacement before saving."
-                            : "Connect and enable a model, then choose it here before saving."}
+                          {missingModelText.hint}
+                        </span>
+                      )}
+                      {selectedBaseModelAvailable && pictureModelsLeftOut && (
+                        <span className="field-hint">
+                          Picture models are not listed: an agent needs a model that writes. Its answers can still include pictures.
                         </span>
                       )}
                     </label>
@@ -1615,9 +1641,44 @@ function defaultAgentBaseModel(models: ModelConfig[]): ModelConfig | undefined {
   return models[0];
 }
 
+/** What the AI model field says when the chosen model is not one an agent
+ * can run on: a picture model, a saved model that is gone, or none yet. */
+function unavailableModelText({
+  pictureModel,
+  savedAgentModel,
+  anyModels,
+}: {
+  pictureModel: ModelConfig | undefined;
+  savedAgentModel: string | null;
+  anyModels: boolean;
+}): { option: string; hint: string } {
+  if (pictureModel) {
+    return {
+      option: `${pictureModel.name} (makes pictures only)`,
+      hint: "This agent runs on a picture model, which cannot follow instructions or answer questions. Choose a model that writes before saving. Its answers can still include pictures.",
+    };
+  }
+  if (savedAgentModel) {
+    return {
+      option: `${savedAgentModel} (unavailable)`,
+      hint: "This agent's saved model is unavailable. Restore model access or explicitly select a replacement before saving.",
+    };
+  }
+  return {
+    option: anyModels ? "Choose an available model" : "No connected models available",
+    hint: "Connect and enable a model, then choose it here before saving.",
+  };
+}
+
+function agentModelCandidates(data: BootstrapData): ModelConfig[] {
+  return usableModels(data).filter((model) => !isAgentProfile(model));
+}
+
+/** Models an agent can run on: ones that write. Picture models cannot follow
+ * an agent's instructions; replies get pictures from chat's own picture step. */
 function availableAgentBaseModels(data: BootstrapData): ModelConfig[] {
-  return usableModels(data)
-    .filter((model) => !isAgentProfile(model))
+  return agentModelCandidates(data)
+    .filter((model) => !isImageGenerationModel(model))
     .sort((a, b) => {
       const providerCompare = (a.provider_name ?? "").localeCompare(
         b.provider_name ?? "",

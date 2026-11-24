@@ -29,6 +29,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { StableLabel, Toggle } from "./Primitives";
+import { RailSwitch, type RailSwitchOption } from "./RailSwitch";
 import { SelectControl } from "./SelectControl";
 import { OverflowMenu } from "./AgentWorkspaceConsole";
 import { ToolLibraryManager } from "./ToolLibraryManager";
@@ -68,6 +69,8 @@ type ActionStatus = { tone: Tone; message: string } | null;
 type ConnectionFilter = "all" | "on" | "off" | "setup";
 type TransportChoice = "http" | "sse" | "stdio";
 type AuthChoice = "none" | "bearer" | "oauth";
+/** Who can use a connection: its owner alone, the whole workspace, or chosen groups. */
+export type Audience = "only" | "everyone" | "groups";
 
 type ToolDraft = {
   name: string;
@@ -86,6 +89,7 @@ type ToolDraft = {
   secret: string;
   approvalRequired: boolean;
   hermesCompanion: boolean;
+  audience: Audience;
   allowedGroupIds: string[];
 };
 
@@ -352,7 +356,7 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
     }
   }
 
-  async function createConnection(input: { name: string; url: string; transport: TransportChoice; command: string; argsText: string }) {
+  async function createConnection(input: NewConnection) {
     setPending("create");
     try {
       const record = await createAdminToolConfig(me.id, {
@@ -364,6 +368,8 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
         enabled: false,
         approval_required: true,
         allowed_group_ids: [],
+        // Chosen before the first save, so it is never briefly visible to other admins.
+        ...(input.onlyMe ? { only_me: true } : {}),
         settings:
           input.transport === "stdio"
             ? { transport: "stdio", command: input.command.trim(), args: parseArgs(input.argsText) }
@@ -538,6 +544,7 @@ function ConnectionsView({ data, onDataChange }: { data: BootstrapData; onDataCh
     return (
       <CreateConnectionForm
         canUseCommand={isOwner}
+        canChooseAudience={isAdmin}
         pending={pending === "create"}
         statusNotice={statusNotice}
         onCancel={() => setEditor(null)}
@@ -839,19 +846,25 @@ function ConnectionIcon({ tool, size = 18 }: { tool: ToolConfig; size?: number }
   return <Blocks size={size} />;
 }
 
+type NewConnection = { name: string; url: string; transport: TransportChoice; command: string; argsText: string; onlyMe: boolean };
+
 function CreateConnectionForm({
   canUseCommand,
+  canChooseAudience,
   pending,
   statusNotice,
   onCancel,
   onSubmit,
 }: {
   canUseCommand: boolean;
+  /** Administrators choose Only me or Everyone up front; others' connections are already private. */
+  canChooseAudience: boolean;
   pending: boolean;
   statusNotice: ReactNode;
   onCancel: () => void;
-  onSubmit: (input: { name: string; url: string; transport: TransportChoice; command: string; argsText: string }) => void;
+  onSubmit: (input: NewConnection) => void;
 }) {
+  const [audience, setAudience] = useState<Audience>("everyone");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [transport, setTransport] = useState<TransportChoice>("http");
@@ -882,7 +895,7 @@ function CreateConnectionForm({
         aria-label="Add a connection"
         onSubmit={(event) => {
           event.preventDefault();
-          if (ready && !pending) onSubmit({ name, url, transport, command, argsText });
+          if (ready && !pending) onSubmit({ name, url, transport, command, argsText, onlyMe: audience === "only" });
         }}
       >
         <div className="tab-content tools-tab">
@@ -935,6 +948,13 @@ function CreateConnectionForm({
                   />
                 )}
               </Field>
+            )}
+            {canChooseAudience && (
+              <fieldset className="lib-field lib-fieldset">
+                <legend>Who can use it</legend>
+                <RailSwitch ariaLabel="Who can use it" options={audienceOptions(null, true, false)} value={audience} onChange={setAudience} />
+                <p className="lib-field-static">{audienceSentence(audience, null)}</p>
+              </fieldset>
             )}
           </div>
         </div>
@@ -1389,50 +1409,7 @@ function ConnectionEditor({
 
           <Tabs.Content className="tab-content tools-tab" value="access">
             <p className="agent-tab-intro">Who can use this connection, and whether each use needs a yes first.</p>
-            <fieldset className="lib-field lib-fieldset">
-              <legend>Who can use it</legend>
-              {isAdmin ? (
-                data.groups.length === 0 ? (
-                  <small className="lib-field-hint">
-                    No groups are synced yet, so this is available to {tool.owner_user_id ? "its creator" : "everyone in the workspace"}.
-                  </small>
-                ) : (
-                  <>
-                    <div className="lib-check-grid">
-                      {data.groups.map((group) => (
-                        <label className="lib-check" key={group.id}>
-                          <input
-                            type="checkbox"
-                            disabled={readOnly}
-                            checked={draft.allowedGroupIds.includes(group.id)}
-                            onChange={(event) =>
-                              onDraft({
-                                allowedGroupIds: event.target.checked
-                                  ? Array.from(new Set([...draft.allowedGroupIds, group.id]))
-                                  : draft.allowedGroupIds.filter((id) => id !== group.id),
-                              })
-                            }
-                          />
-                          <span>
-                            <strong>{group.name}</strong>
-                            <small>
-                              {group.user_count} {group.user_count === 1 ? "person" : "people"}
-                            </small>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                    <small className="lib-field-hint">
-                      {tool.owner_user_id
-                        ? "Leave every group unchecked to keep it private to the person who created it."
-                        : "Leave every group unchecked to make it available to everyone in the workspace."}
-                    </small>
-                  </>
-                )
-              ) : (
-                <p className="lib-field-static">{accessSummary(tool, data)}. Sharing with groups is managed by administrators.</p>
-              )}
-            </fieldset>
+            <AudienceField tool={tool} data={data} draft={draft} perms={perms} readOnly={readOnly} onDraft={onDraft} />
             <div className="lib-switch-row">
               <Toggle
                 checked={draft.approvalRequired}
@@ -1594,6 +1571,167 @@ function ConnectionEditor({
 
 /** A labelled control whose hint/error is linked by aria-describedby rather
  * than nested in the label (which would bloat the control's name). */
+/** "Who can use it". Administrators choose Only me, Everyone, or Specific
+ * groups; a person's own private connection keeps its group list; anyone else
+ * reads the audience in words. */
+function AudienceField({
+  tool,
+  data,
+  draft,
+  perms,
+  readOnly,
+  onDraft,
+}: {
+  tool: ToolConfig;
+  data: BootstrapData;
+  draft: ToolDraft;
+  perms: { isOwner: boolean; isAdmin: boolean };
+  readOnly: boolean;
+  onDraft: (patch: Partial<ToolDraft>) => void;
+}) {
+  const owner = otherOwner(tool, data);
+  return (
+    <fieldset className="lib-field lib-fieldset">
+      <legend>Who can use it</legend>
+      {!perms.isAdmin ? (
+        <p className="lib-field-static">{accessSummary(tool, data)}. Sharing with groups is managed by administrators.</p>
+      ) : tool.only_me || !owner ? (
+        <AudienceChoice
+          data={data}
+          draft={draft}
+          owner={owner}
+          offerOnly={onlyMeOffered(tool, data.me.id, perms.isOwner)}
+          // Only the owner (or a platform owner) changes an Only me connection.
+          disabled={readOnly || (Boolean(tool.only_me) && Boolean(owner) && !perms.isOwner)}
+          onDraft={onDraft}
+        />
+      ) : data.groups.length === 0 ? (
+        <small className="lib-field-hint">No groups are synced yet, so this is available to its creator.</small>
+      ) : (
+        <>
+          <GroupChecks
+            groups={data.groups}
+            selected={draft.allowedGroupIds}
+            disabled={readOnly}
+            onChange={(ids) => onDraft({ allowedGroupIds: ids, audience: ids.length ? "groups" : "everyone" })}
+          />
+          <small className="lib-field-hint">Leave every group unchecked to keep it private to the person who created it.</small>
+        </>
+      )}
+    </fieldset>
+  );
+}
+
+/** Whether the viewer may pick Only me: the connection's creator or owner, or
+ * a platform owner. A connection that already is Only me always shows it. */
+export function onlyMeOffered(
+  tool: Pick<ToolConfig, "only_me" | "owner_user_id" | "created_by_user_id">,
+  meId: string,
+  isPlatformOwner: boolean,
+): boolean {
+  return Boolean(tool.only_me) || isPlatformOwner || tool.created_by_user_id === meId || tool.owner_user_id === meId;
+}
+
+const ONLY_CREATOR = "Only the person who created this connection can make it private.";
+
+/** The rail stops, in the same order everywhere: Only me, Everyone, Specific groups. */
+function audienceOptions(owner: string | null, offerOnly: boolean, offerGroups: boolean): RailSwitchOption<Audience>[] {
+  return [
+    ...(offerOnly ? [{ value: "only" as const, label: owner ? `Only ${owner}` : "Only me" }] : []),
+    { value: "everyone", label: "Everyone" },
+    ...(offerGroups ? [{ value: "groups" as const, label: "Specific groups" }] : []),
+  ];
+}
+
+/** Someone else's name when they own the connection; null when it is the viewer's or nobody's. */
+function otherOwner(tool: ToolConfig, data: BootstrapData): string | null {
+  return tool.owner_user_id && tool.owner_user_id !== data.me.id ? ownerWords(tool, data) : null;
+}
+
+function AudienceChoice({
+  data,
+  draft,
+  owner,
+  offerOnly,
+  disabled,
+  onDraft,
+}: {
+  data: BootstrapData;
+  draft: ToolDraft;
+  owner: string | null;
+  offerOnly: boolean;
+  disabled: boolean;
+  onDraft: (patch: Partial<ToolDraft>) => void;
+}) {
+  const options = audienceOptions(owner, offerOnly, data.groups.length > 0 || draft.audience === "groups");
+  const picking = draft.audience === "groups";
+  return (
+    <>
+      <RailSwitch ariaLabel="Who can use it" options={options} value={draft.audience} disabled={disabled} onChange={(audience) => onDraft({ audience })} />
+      <p className="lib-field-static">{audienceSentence(draft.audience, owner)}</p>
+      {!offerOnly && <small className="lib-field-hint">{ONLY_CREATOR}</small>}
+      {picking && (
+        <GroupChecks
+          groups={data.groups}
+          selected={draft.allowedGroupIds}
+          disabled={disabled}
+          onChange={(ids) => onDraft({ allowedGroupIds: ids })}
+        />
+      )}
+      {picking && draft.allowedGroupIds.length === 0 && <small className="lib-field-hint is-warning">{NO_GROUP_TICKED}</small>}
+      {data.groups.length === 0 && (
+        <small className="lib-field-hint">No groups are synced yet, so it can&apos;t be shared with specific groups.</small>
+      )}
+    </>
+  );
+}
+
+/** The chosen audience as one plain sentence. */
+export function audienceSentence(audience: Audience, owner: string | null): string {
+  if (audience === "only") return `Only ${owner ?? "you"} can use this connection.`;
+  if (audience === "everyone") return "Everyone in the workspace can use this connection.";
+  return "Only people in the groups you tick can use this connection.";
+}
+
+function GroupChecks({
+  groups,
+  selected,
+  disabled,
+  onChange,
+}: {
+  groups: BootstrapData["groups"];
+  selected: string[];
+  disabled: boolean;
+  onChange: (ids: string[]) => void;
+}) {
+  return (
+    <div className="lib-check-grid">
+      {groups.map((group) => (
+        <label className="lib-check" key={group.id}>
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={selected.includes(group.id)}
+            onChange={(event) =>
+              onChange(
+                event.target.checked
+                  ? Array.from(new Set([...selected, group.id]))
+                  : selected.filter((id) => id !== group.id),
+              )
+            }
+          />
+          <span>
+            <strong>{group.name}</strong>
+            <small>
+              {group.user_count} {group.user_count === 1 ? "person" : "people"}
+            </small>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function Field({
   label,
   hint,
@@ -1733,8 +1871,33 @@ function draftFromTool(tool: ToolConfig): ToolDraft {
     secret: "",
     approvalRequired: tool.approval_required,
     hermesCompanion: Boolean(tool.hermes_companion),
+    audience: audienceFromTool(tool),
     allowedGroupIds: tool.allowed_group_ids ?? [],
   };
+}
+
+/** The audience a saved connection has. */
+export function audienceFromTool(tool: Pick<ToolConfig, "only_me" | "allowed_group_ids">): Audience {
+  if (tool.only_me) return "only";
+  return tool.allowed_group_ids.length > 0 ? "groups" : "everyone";
+}
+
+/** What an audience saves as. Only me and Everyone never carry groups. */
+export function audienceToRequest(audience: Audience, groupIds: string[]): { only_me: boolean; allowed_group_ids: string[] } {
+  return { only_me: audience === "only", allowed_group_ids: audience === "groups" ? groupIds : [] };
+}
+
+const NO_GROUP_TICKED = "Tick at least one group, or choose Everyone.";
+
+/** The access fields a save changes, or why it can't be saved: "Specific
+ * groups" with none ticked would quietly mean everyone, so it is refused. */
+function accessChanges(tool: ToolConfig, draft: ToolDraft): { changes: AdminToolConfigUpdateRequest; error?: string } {
+  if (draft.audience === "groups" && draft.allowedGroupIds.length === 0) return { changes: {}, error: NO_GROUP_TICKED };
+  const next = audienceToRequest(draft.audience, draft.allowedGroupIds);
+  const changes: AdminToolConfigUpdateRequest = {};
+  if (next.only_me !== Boolean(tool.only_me)) changes.only_me = next.only_me;
+  if (!sameSet(next.allowed_group_ids, tool.allowed_group_ids)) changes.allowed_group_ids = next.allowed_group_ids;
+  return { changes };
 }
 
 function isDirty(tool: ToolConfig, draft: ToolDraft, isOwner: boolean, isAdmin: boolean): boolean {
@@ -1756,9 +1919,8 @@ export function buildUpdatePayload(
   if (draft.name.trim() !== tool.name) payload.name = draft.name.trim();
   if (draft.description.trim() !== visibleDescription(tool)) settings.description = draft.description.trim();
   if (draft.approvalRequired !== tool.approval_required) payload.approval_required = draft.approvalRequired;
-  if (isAdmin && !sameSet(draft.allowedGroupIds, tool.allowed_group_ids ?? [])) {
-    payload.allowed_group_ids = draft.allowedGroupIds;
-  }
+  const access = isAdmin ? accessChanges(tool, draft) : { changes: {} };
+  Object.assign(payload, access.changes);
 
   let invocationError: string | undefined;
   if (isMcp) {
@@ -1798,10 +1960,12 @@ export function buildUpdatePayload(
     settings.oauth_callback_url = toolOAuthRedirectUrl(tool.id);
   }
   if (Object.keys(settings).length > 0) payload.settings = settings;
+  const error = access.error ?? (invocationError && `Automatic tool calls: ${invocationError}`);
   return {
     payload,
-    dirty: dirty || Boolean(invocationError),
-    ...(invocationError ? { error: `Automatic tool calls: ${invocationError}`, invocationError } : {}),
+    dirty: dirty || Boolean(error),
+    ...(error ? { error } : {}),
+    ...(invocationError ? { invocationError } : {}),
   };
 }
 
@@ -1887,12 +2051,15 @@ export function accessSummary(tool: ToolConfig, data: BootstrapData): string {
     const names = groupIds.map((id) => data.groups.find((group) => group.id === id)?.name ?? "Unknown group");
     return names.length <= 2 ? names.join(", ") : `${names.slice(0, 2).join(", ")} +${names.length - 2} more`;
   }
-  if (tool.owner_user_id) {
-    if (tool.owner_user_id === data.me.id) return "Only you";
-    const owner = [...(data.visibleUsers ?? []), ...(data.users ?? [])].find((user) => user.id === tool.owner_user_id);
-    return owner ? `Only ${owner.display_name}` : "Only its creator";
-  }
+  if (tool.only_me || tool.owner_user_id) return `Only ${ownerWords(tool, data)}`;
   return "Everyone in the workspace";
+}
+
+/** The owner in words, as the viewer would say it: "you", a name, or "its creator". */
+function ownerWords(tool: ToolConfig, data: BootstrapData): string {
+  if (tool.owner_user_id === data.me.id) return "you";
+  const owner = [...(data.visibleUsers ?? []), ...(data.users ?? [])].find((user) => user.id === tool.owner_user_id);
+  return owner?.display_name || "its creator";
 }
 
 function approvalSummary(tool: ToolConfig): string | null {
