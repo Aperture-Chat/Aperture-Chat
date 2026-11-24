@@ -3867,7 +3867,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
     troubleshooting: [
       { symptom: "Building slides… runs for several minutes", fix: "Larger decks take longer, especially on smaller models. Ask for fewer slides, or wait; your draft stays intact meanwhile." },
       { symptom: "\"The model's structured output failed validation twice, so the deck was built from its outline instead.\"", fix: "Smaller models can return slides in the wrong format, so the deck may have only a couple of slides, with raw text on one. Undo, then ask again and add: Each slide's layout value is just the layout's name, with its fields beside it. Or choose a stronger model." },
-      { symptom: "Generate AI picture is off: \"No image-generation model is enabled for your workspace\"", fix: "Your workspace has no image model. Upload your own picture from Slide pictures instead." },
+      { symptom: "Generate AI picture is off: \"The image model is turned off.\"", fix: "Ask your administrator to turn one on, or upload your own picture from Slide pictures instead." },
       { symptom: "\"Could not open … Choose a PowerPoint .pptx file.\"", fix: "Open in editor in a deck accepts .pptx and .potx files. Save other formats as .pptx first." },
       { symptom: "\"… exceeds the 30 MB brand-template upload limit.\" or \"Macro-enabled presentations are not accepted. Save as .pptx or .potx first.\"", fix: "Use a smaller template, and save it without macros." },
       { symptom: "After a brand is applied, slide text is hard to read on its background", fix: "Some brand templates pair a dark background with dark text. Choose Load all N slides to start from the template's own slide designs, or recolor the text with Text color." },
@@ -4047,7 +4047,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
         label: "Generate an AI picture",
         steps: [
           "Describe the picture in Or describe the picture, then choose Generate AI picture.",
-          "It needs an image-generation model. Without one the button is off and the panel says No image-generation model is enabled for your workspace.",
+          "It needs an image model. Without one the button is off and the panel says The image model is turned off, and what to do about it.",
         ],
       },
       {
@@ -4091,7 +4091,7 @@ export const USER_TRAINING_VIDEOS: UserTrainingVideo[] = [
       { symptom: "\"Pictures can be PNG, JPEG, WebP, or GIF.\"", fix: "Save the picture in one of those formats and upload it again." },
       { symptom: "\"… has no picture. Switch this slide to a layout that holds one; its words come along.\"", fix: "Choose Picture + bullets or Image + caption under Layouts with a picture, then add the picture." },
       { symptom: "\"No web images were found for … Try other words.\"", fix: "Try other words, or upload your own picture. The search reaches public web pictures, so it needs internet access from your browser." },
-      { symptom: "Generate AI picture is off: \"No image-generation model is enabled for your workspace\"", fix: "Upload your own picture, or ask your administrator for an image model." },
+      { symptom: "Generate AI picture is off: \"The image model is turned off.\"", fix: "Upload your own picture, or ask your administrator to turn on an image model." },
       { symptom: "\"Text overflows this box · shorten it, size it down, or drag a corner\"", fix: "Shorten the text, choose a smaller size, drag a corner of the box, or use Edit slide with AI and Cut the text in half." },
       { symptom: "Bullets after the eighth disappear when you leave the slide", fix: "A bullet box keeps up to eight bullets; extra lines are not saved. Shorten the list, or use Edit slide with AI and Split into two slides." },
       { symptom: "\"… had no slot in this layout — undo restores them.\"", fix: "The new layout has fewer text boxes. Undo, or pick a layout with more boxes." },

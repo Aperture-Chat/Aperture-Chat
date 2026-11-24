@@ -12,7 +12,8 @@
 
 import {
   DECK_LINE_HEIGHT,
-  DECK_REGION_LABELS,
+  deckRegionIsList,
+  deckRegionLabel,
   resolvedTextRegions,
   slideRegionNames,
   slideTextRegions,
@@ -37,7 +38,6 @@ import {
   deckBulletIndent,
   deckCanvasMeasure,
   deckRegionFitWith,
-  deckRegionIsList,
   deckRegionLayout,
   deckRegionTextHeight,
   deckRegionTextWidth,
@@ -144,7 +144,7 @@ function checkRegion(
     slideIndex,
     layout: slide.layout,
     region,
-    label: DECK_REGION_LABELS[region] ?? region,
+    label: deckRegionLabel(region),
     text: text.length > 160 ? `${text.slice(0, 157)}…` : text,
     sizePt,
     fittedPt,
@@ -227,7 +227,7 @@ export function deckFitIssueSlides(issues: DeckFitIssue[]): number[] {
 /** What lays out on a slide: its layout, its words, and its boxes. */
 function fitFingerprint(slide: DeckSlide): string {
   const regions = slideRegionNames(slide.layout).map((region) => deckSlideRegionContent(slide, region));
-  return JSON.stringify([slide.layout, regions, slide.boxes ?? null]);
+  return JSON.stringify([slide.layout, regions, slide.boxes ?? null, slide.added ?? null]);
 }
 
 /** Slides a revision added or changed (layout, words, or boxes); a revision

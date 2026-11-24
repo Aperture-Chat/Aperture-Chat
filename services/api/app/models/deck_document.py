@@ -39,6 +39,7 @@ SLIDE_WIDTH = 960
 SLIDE_HEIGHT = 540
 BOX_MIN_W = 40
 BOX_MIN_H = 24
+MAX_DECK_ADDED_BLOCKS = 12
 
 DECK_LAYOUTS = frozenset(
     {
@@ -62,6 +63,24 @@ BOX_REGIONS = frozenset(
     {"title", "subtitle", "bullets", "left", "right", "quote", "attribution", "caption", "body", "image"}
 )
 
+# Every block a layout draws (its text regions and its picture): the names an
+# author may delete from a slide. Mirrors ``deckSlideBlocks`` in the client.
+LAYOUT_BLOCKS: dict[str, frozenset[str]] = {
+    "title": frozenset({"title", "subtitle"}),
+    "section": frozenset({"title", "subtitle"}),
+    "big-number": frozenset({"title", "subtitle"}),
+    "title-bullets": frozenset({"title", "bullets"}),
+    "image-bullets": frozenset({"title", "bullets", "image"}),
+    "two-column": frozenset({"title", "left", "right"}),
+    "image-caption": frozenset({"title", "caption", "image"}),
+    "quote": frozenset({"quote", "attribution"}),
+    "chart": frozenset({"title"}),
+    "closing": frozenset({"title", "body"}),
+    "statement": frozenset({"title", "body"}),
+}
+
+# A block the author added is named for its kind: "text-1", "list-2", "picture-1".
+_ADDED_BLOCK_ID = re.compile(r"(text|list|picture)-[a-z0-9]{1,12}")
 _HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$", re.IGNORECASE)
 _RUN_FONT_NAME = re.compile(r"^[a-z0-9][a-z0-9 \-]{0,58}$", re.IGNORECASE)
 _SLIDE_ID = re.compile(r"^[\w-]{1,60}$")
@@ -133,19 +152,29 @@ def deck_plain_text(canonical: str) -> str:
     for slide in deck.get("slides") or []:
         if not isinstance(slide, dict):
             continue
-        for key in ("title", "subtitle", "quote", "attribution", "caption", "body"):
-            parts.extend(_run_texts(slide.get(key)))
-        for key in ("bullets", "left", "right"):
-            for bullet in slide.get(key) or []:
-                if isinstance(bullet, dict):
-                    parts.extend(_run_texts(bullet.get("runs")))
-        image = slide.get("image")
-        if isinstance(image, dict) and isinstance(image.get("alt"), str) and image["alt"].strip():
-            parts.append(image["alt"].strip())
+        # A slide's own blocks, then the ones its author added.
+        for holder in (slide, *(slide.get("added") or [])):
+            if isinstance(holder, dict):
+                parts.extend(_block_texts(holder))
         notes = slide.get("notes")
         if isinstance(notes, str) and notes.strip():
             parts.append(notes.strip())
     return "\n".join(parts)
+
+
+def _block_texts(holder: dict[str, Any]) -> list[str]:
+    """The words in a slide's layout blocks, or in one added block."""
+    parts: list[str] = []
+    for key in ("title", "subtitle", "quote", "attribution", "caption", "body", "text"):
+        parts.extend(_run_texts(holder.get(key)))
+    for key in ("bullets", "left", "right"):
+        for bullet in holder.get(key) or []:
+            if isinstance(bullet, dict):
+                parts.extend(_run_texts(bullet.get("runs")))
+    image = holder.get("image")
+    if isinstance(image, dict) and isinstance(image.get("alt"), str) and image["alt"].strip():
+        parts.append(image["alt"].strip())
+    return parts
 
 
 def _run_texts(runs: object) -> list[str]:
@@ -435,24 +464,89 @@ def _parse_slide(value: object, index: int, used_ids: set[str]) -> dict[str, Any
         assert isinstance(boxes_raw, dict)
         boxes: dict[str, dict[str, int]] = {}
         for region, geometry in boxes_raw.items():
-            if region not in BOX_REGIONS or not _is_record(geometry):
-                continue
-            assert isinstance(geometry, dict)
-            coords = [geometry.get(key) for key in ("x", "y", "w", "h")]
-            if not all(_is_number(coord) for coord in coords):
-                continue
-            x, y, w, h = (float(coord) for coord in coords)  # type: ignore[arg-type]
-            width = int(round(min(max(w, BOX_MIN_W), SLIDE_WIDTH)))
-            height = int(round(min(max(h, BOX_MIN_H), SLIDE_HEIGHT)))
-            boxes[region] = {
-                "x": int(round(min(max(x, 0), SLIDE_WIDTH - width))),
-                "y": int(round(min(max(y, 0), SLIDE_HEIGHT - height))),
-                "w": width,
-                "h": height,
-            }
+            box = _parse_box(geometry) if region in BOX_REGIONS else None
+            if box is not None:
+                boxes[region] = box
         if boxes:
             slide["boxes"] = boxes
+
+    # A deleted block's words or picture are cleared here, so no stored deck
+    # carries content that is on no slide.
+    removed = _deleted_blocks(value.get("removed"), layout)
+    for region in removed:
+        slide[region] = {"src": "", "alt": ""} if region == "image" else []
+    if removed:
+        slide["removed"] = removed
+
+    added = _parse_added(value.get("added"), f"{label}.added")
+    if added:
+        slide["added"] = added
     return slide
+
+
+def _parse_box(geometry: object) -> dict[str, int] | None:
+    """A block box clamped to the slide canvas and the minimum block size, or
+    None when the value holds no usable geometry."""
+    if not _is_record(geometry):
+        return None
+    assert isinstance(geometry, dict)
+    coords = [geometry.get(key) for key in ("x", "y", "w", "h")]
+    if not all(_is_number(coord) for coord in coords):
+        return None
+    x, y, w, h = (float(coord) for coord in coords)  # type: ignore[arg-type]
+    width = int(round(min(max(w, BOX_MIN_W), SLIDE_WIDTH)))
+    height = int(round(min(max(h, BOX_MIN_H), SLIDE_HEIGHT)))
+    return {
+        "x": int(round(min(max(x, 0), SLIDE_WIDTH - width))),
+        "y": int(round(min(max(y, 0), SLIDE_HEIGHT - height))),
+        "w": width,
+        "h": height,
+    }
+
+
+def _parse_added(value: object, label: str) -> list[dict[str, Any]]:
+    """The blocks an author added to a slide, in order. One with a bad name,
+    a repeated name, or no usable box is dropped, as is anything past the
+    limit; the words and picture of the rest are checked as strictly as a
+    layout block's. Mirrors ``withAddedBlocks`` in the client."""
+    if not isinstance(value, list):
+        return []
+    added: list[dict[str, Any]] = []
+    for index, entry in enumerate(value):
+        frame = _added_block_frame(entry, {block["id"] for block in added})
+        if frame is None or len(added) == MAX_DECK_ADDED_BLOCKS:
+            continue
+        assert isinstance(entry, dict)
+        at = f"{label}[{index}]"
+        if frame["id"].startswith("text-"):
+            frame["text"] = _parse_rich_text(entry.get("text"), MAX_RUN_TEXT_CHARS, f"{at}.text")
+        elif frame["id"].startswith("list-"):
+            frame["bullets"] = _parse_bullets(entry.get("bullets", []), f"{at}.bullets")
+        else:
+            frame["image"] = _parse_image_ref(entry.get("image", {}), f"{at}.image")
+        added.append(frame)
+    return added
+
+
+def _added_block_frame(entry: object, taken: set[str]) -> dict[str, Any] | None:
+    """An added block's name and box, or None when either is unusable."""
+    if not _is_record(entry):
+        return None
+    assert isinstance(entry, dict)
+    block_id = entry.get("id")
+    box = _parse_box(entry.get("box"))
+    if not isinstance(block_id, str) or not _ADDED_BLOCK_ID.fullmatch(block_id) or block_id in taken or box is None:
+        return None
+    return {"id": block_id, "box": box}
+
+
+def _deleted_blocks(value: object, layout: str) -> list[str]:
+    """The blocks an author deleted from a slide of this layout, sorted.
+    Anything that is not one of the layout's blocks is dropped."""
+    if not isinstance(value, list):
+        return []
+    blocks = LAYOUT_BLOCKS[layout]
+    return sorted({region for region in value if isinstance(region, str) and region in blocks})
 
 
 def _parse_deck(candidate: object) -> dict[str, Any]:
