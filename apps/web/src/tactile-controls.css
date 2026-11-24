@@ -146,12 +146,15 @@
 
 /* --- Switches ---------------------------------------------------------------- */
 
-.toggle {
+/* On phones the button becomes a clear 44px touch square and ::before draws the track. */
+.toggle,
+.toggle::before {
   background: color-mix(in srgb, var(--border-strong) 82%, var(--surface-sunken));
   box-shadow: var(--tactile-switch-well);
 }
 
-.toggle.is-on {
+.toggle.is-on,
+.toggle.is-on::before {
   background: var(--tactile-lit);
   box-shadow: var(--tactile-switch-well-on);
 }

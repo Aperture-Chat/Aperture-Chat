@@ -24904,8 +24904,7 @@ button.retention-tagged-title:focus-visible strong {
   .panel-collapse-button,
   .panel-actions button,
   .date-range-filter-presets button,
-  .audit-summary-card,
-  .toggle {
+  .audit-summary-card {
     min-height: 44px;
     touch-action: manipulation;
   }
@@ -25739,16 +25738,17 @@ body:has([aria-modal="true"]) .mobile-hamburger { visibility: hidden; pointer-ev
 }
 
 @media (max-width: 700px) {
-  /* The touch target is 44px tall; the visible track remains a horizontal pill. */
+  /* The touch target is 44px tall; the visible track remains a horizontal pill.
+     The well belongs to the track, never the invisible touch square around it. */
   button.toggle, button.toggle.is-on {
     width: 44px; min-width: 44px; height: 44px; min-height: 44px;
-    max-height: 44px; padding: 0; background: transparent;
+    max-height: 44px; padding: 0; background: transparent; box-shadow: none;
+    touch-action: manipulation;
   }
   button.toggle::before {
     content: ""; position: absolute; left: 0; top: 10px; width: 44px; height: 24px;
-    border-radius: 999px; background: var(--border-strong);
+    border-radius: 999px;
   }
-  button.toggle.is-on::before { background: var(--teal); }
   button.toggle > span { top: 13px; left: 3px; width: 18px; height: 18px; }
   button.toggle.is-on > span { transform: translateX(20px); }
   .tool-library-popout {
