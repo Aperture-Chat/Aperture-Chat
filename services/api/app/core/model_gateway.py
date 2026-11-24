@@ -589,12 +589,17 @@ class ModelGatewayClient:
         route: ModelGatewayRoute,
         messages: list[dict[str, Any]],
         max_tokens: int | None = None,
+        image_only: bool = False,
     ) -> dict[str, Any]:
         """Request a completion from an image-output model.
 
         OpenAI-compatible providers (including OpenRouter) accept the standard
         chat/completions shape with ``modalities`` requesting image output; the
         generated images come back base64-encoded on the assistant message.
+
+        ``image_only`` marks a model that draws and writes nothing. OpenRouter
+        serves those on its Images endpoint; the reply comes back in the same
+        chat shape, so callers read pictures one way.
         """
         if not route.configured:
             raise ModelGatewayConfigurationError(route.status_message)
@@ -602,6 +607,14 @@ class ModelGatewayClient:
             raise ModelGatewayError(
                 f"Image generation is not supported for provider kind '{route.provider_kind}'."
             )
+        if image_only and _provider_kind(route.provider_kind) == "openrouter":
+            reply = self._post_for_json(
+                route,
+                _openrouter_images_url(route),
+                headers=_headers(route),
+                json={"model": route.upstream_model, "prompt": _images_prompt(messages), "n": 1},
+            )
+            return _images_reply_as_chat(reply)
         payload: dict[str, Any] = {
             "model": route.upstream_model,
             "messages": messages,
@@ -1373,6 +1386,61 @@ def _upstream_model(provider: Provider, model: ModelConfig) -> str:
             ) from exc
 
     return model.name or model.id
+
+
+def _openrouter_images_url(route: ModelGatewayRoute) -> str:
+    base_url = (route.base_url or "").rstrip("/")
+    if not base_url:
+        raise ModelGatewayConfigurationError("Provider base URL is missing.")
+    return f"{base_url}/images"
+
+
+def _images_prompt(messages: list[dict[str, Any]]) -> str:
+    """The words an Images endpoint draws from: the user's last turn, which
+    may be several messages in a row. Pictures sent along are left out."""
+    turn: list[str] = []
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            break
+        turn.append(_message_words(message.get("content")))
+    prompt = "\n\n".join(words for words in reversed(turn) if words)
+    if not prompt:
+        raise ModelGatewayError("There was nothing to draw: the request had no words.")
+    return prompt
+
+
+def _message_words(content: object) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts = [
+        str(part.get("text") or "")
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    ]
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
+def _images_reply_as_chat(reply: dict[str, Any]) -> dict[str, Any]:
+    """An Images endpoint reply in the chat shape callers already read:
+    pictures as data URLs on the assistant message, usage passed through."""
+    images = [
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{item.get('media_type') or 'image/png'};base64,{item['b64_json']}"
+            },
+        }
+        for item in reply.get("data") or []
+        if isinstance(item, dict) and isinstance(item.get("b64_json"), str) and item["b64_json"]
+    ]
+    chat: dict[str, Any] = {
+        "choices": [{"message": {"role": "assistant", "content": "", "images": images}}]
+    }
+    if "usage" in reply:
+        chat["usage"] = reply["usage"]
+    return chat
 
 
 def _chat_completions_url(route: ModelGatewayRoute) -> str:

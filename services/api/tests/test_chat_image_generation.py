@@ -26,7 +26,7 @@ from app.db.orm import TenantUsagePermitRow
 from app.main import app
 from app.models.schemas import ModelConfig, Tenant
 from app.repositories.deps import get_store
-from app.routes.chat import _is_image_generation_model, _requested_image_count
+from app.routes.chat import _draws_only, _is_image_generation_model, _requested_image_count
 
 client = TestClient(app)
 
@@ -531,3 +531,17 @@ def test_dictation_rejects_unsupported_audio_type() -> None:
     )
     assert response.status_code == 400
     assert "Unsupported dictation audio type" in response.json()["detail"]
+
+
+def test_only_a_model_that_reports_pictures_and_no_text_is_asked_as_picture_only() -> None:
+    from app.models.schemas import ModelCapabilities
+
+    def reporting(*outputs: str) -> ModelConfig:
+        return _image_model().model_copy(update={"capabilities": ModelCapabilities(output_modalities=list(outputs))})
+
+    assert _draws_only(reporting("image"))
+    assert not _draws_only(reporting("image", "text"))
+    assert not _draws_only(reporting("text"))
+    # No reported outputs (a deployment added by hand): asked the usual way.
+    assert not _draws_only(_image_model())
+    assert not _draws_only(reporting())

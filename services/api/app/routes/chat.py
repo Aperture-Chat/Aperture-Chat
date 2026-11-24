@@ -3571,6 +3571,13 @@ def _is_image_generation_model(model: ModelConfig) -> bool:
     return bool(_IMAGE_OUTPUT_UPSTREAM_PATTERN.search(model.upstream_model_id or ""))
 
 
+def _draws_only(model: ModelConfig) -> bool:
+    """True for a model whose catalog entry says it outputs pictures and no
+    text. A model with no reported outputs is asked the usual way."""
+    outputs = model.capabilities.output_modalities if model.capabilities else []
+    return "image" in outputs and "text" not in outputs
+
+
 def _requested_image_count(prompt: str) -> int:
     """Read how many images the user asked for, clamped to the per-request cap."""
     best = 1
@@ -3638,7 +3645,9 @@ def _generate_image_completion(
                     }
                 )
             completion_id = new_accounting_id()
-            payload = client.generate_images(route=route, messages=call_messages)
+            payload = client.generate_images(
+                route=route, messages=call_messages, image_only=_draws_only(model_config)
+            )
             settlement = usage_context.settle_provider_child(
                 completion_id=completion_id,
                 usage=_raw_provider_usage(payload),
@@ -6035,10 +6044,12 @@ class _ChatPictures:
     def _illustrate(self, prompt: str) -> dict[str, Any]:
         if self._illustrator_refused:
             raise ModelGatewayError("The image model's credential was refused earlier in this reply.")
-        _model, route = cast(tuple[ModelConfig, ModelGatewayRoute], self._illustrator)
+        model, route = cast(tuple[ModelConfig, ModelGatewayRoute], self._illustrator)
         try:
             return get_model_gateway_client().generate_images(
-                route=route, messages=[{"role": "user", "content": prompt}]
+                route=route,
+                messages=[{"role": "user", "content": prompt}],
+                image_only=_draws_only(model),
             )
         except ModelGatewayAuthError as exc:
             self._illustrator_refused = True

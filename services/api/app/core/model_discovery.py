@@ -21,6 +21,8 @@ from app.models.schemas import ModelCapabilities, Provider
 
 DEFAULT_DISCOVERY_TIMEOUT_SECONDS = 30.0
 OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+# The kinds of model the platform can use from OpenRouter's catalog.
+OPENROUTER_CATALOG_OUTPUTS = "text,image"
 
 
 @dataclass(frozen=True)
@@ -74,17 +76,7 @@ def _discover_openrouter(
     base_url = _openrouter_base_url(provider)
     headers = _bearer_headers(secret_value)
     if _openrouter_catalog_scope(provider) == "zdr":
-        zdr_catalog = _fetch_model_payload(
-            f"{base_url}/models",
-            headers=headers,
-            params={"zdr": "true"},
-            transport=transport,
-            timeout=timeout,
-        )
-        return (
-            _normalize_openrouter_models(zdr_catalog, "Synced from OpenRouter ZDR-filtered catalog."),
-            "openrouter:/models?zdr=true",
-        )
+        return _openrouter_zdr_catalog(base_url, headers, transport=transport, timeout=timeout)
 
     user_catalog = _fetch_model_payload(
         f"{base_url}/models/user",
@@ -102,15 +94,29 @@ def _discover_openrouter(
             "openrouter:/models/user",
         )
 
-    zdr_catalog = _fetch_model_payload(
+    return _openrouter_zdr_catalog(base_url, headers, transport=transport, timeout=timeout)
+
+
+def _openrouter_zdr_catalog(
+    base_url: str,
+    headers: dict[str, str],
+    *,
+    transport: httpx.BaseTransport | None,
+    timeout: float,
+) -> tuple[list[DiscoveredModel], str]:
+    """OpenRouter's zero-data-retention catalog of the models people can chat
+    with or draw with. Its listing leaves out everything but text-output
+    models unless asked, so picture models are asked for by name; speech,
+    embedding, and ranking models stay out."""
+    catalog = _fetch_model_payload(
         f"{base_url}/models",
         headers=headers,
-        params={"zdr": "true"},
+        params={"zdr": "true", "output_modalities": OPENROUTER_CATALOG_OUTPUTS},
         transport=transport,
         timeout=timeout,
     )
     return (
-        _normalize_openrouter_models(zdr_catalog, "Synced from OpenRouter ZDR-filtered catalog."),
+        _normalize_openrouter_models(catalog, "Synced from OpenRouter ZDR-filtered catalog."),
         "openrouter:/models?zdr=true",
     )
 
