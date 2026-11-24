@@ -511,6 +511,28 @@
 .agents-page .agent-access-form .agent-selection-group { grid-column: 1 / -1; }
 .agent-field-hint { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.5; }
 .agent-starter-row { display: grid; gap: 8px; grid-column: 1 / -1; }
+/* Templates fold away under one quiet line so they do not crowd the form. */
+.agent-starter-toggle {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.agent-starter-toggle:hover { color: var(--text); }
+.agent-starter-toggle:focus-visible { outline: 2px solid var(--teal-border); outline-offset: -2px; }
+.agent-starter-toggle svg { transition: transform var(--speed) var(--ease); }
+.agent-starter-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
 .agent-starter-row .ws-chips { gap: 6px; }
 .agent-readiness {
   grid-column: 1 / -1;

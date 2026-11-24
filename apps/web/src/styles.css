@@ -15094,6 +15094,10 @@ button.owner-doc-card:hover {
 .tool-config-form label,
 .agent-builder-form label {
   display: grid;
+  /* Pack the caption and control at the top: a taller neighbor (the AI model
+     field with Sync models under it) stretches the row, and stretched grid
+     rows pushed the Agent name box down out of line. */
+  align-content: start;
   gap: 6px;
   min-width: 0;
   color: var(--muted);
