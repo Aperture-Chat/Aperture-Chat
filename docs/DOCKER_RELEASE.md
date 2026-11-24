@@ -236,6 +236,139 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.27
+
+This release adds block editing on deck slides, OpenRouter picture-only
+models, Only me connections, and group self-membership for administrators. It
+also carries over the chat changes made in S.F. Steward v0.6.29. Users,
+groups, and connections now store new fields, so rolling back is not an image
+swap. Read the rollback item before upgrading.
+
+- **Delete and add blocks on a slide.** In a Drafts deck, any block on a slide
+  can be selected and deleted. Its words or picture go with it, on screen and
+  in the PowerPoint export. Undo brings it back. **Put back deleted blocks**
+  returns the deleted blocks of the slide's layout, empty. An added block
+  that is deleted comes back only with Undo. A plus in the slide's
+  largest empty area, or a right-click on empty space, opens a menu with
+  **Ask AI**, **Text box**, **Bullet list**, and **Picture**. **Ask AI** asks
+  the deck's assistant to fill that spot. A slide holds up to 12 added blocks.
+  Added blocks appear in thumbnails, the fit check, and the PowerPoint export.
+  The server now keeps the deleted and added blocks when a deck is saved. It
+  clears the content of a deleted block, and the text of added blocks is
+  included in search.
+- **Generate AI picture says why it is off.** When no image model can be
+  used, the greyed **Generate AI picture** button and the picture panel now
+  say what is missing and whose step it is. A platform owner is told to sync
+  and turn on an image model, or to reconnect its provider. A workspace
+  administrator whose group cannot use an image model that is on is told to
+  share it in **Models & workspace**. Everyone else is told to ask their
+  administrator.
+- **OpenRouter picture-only models.** **Sync Models** on an OpenRouter
+  provider asked only for text models, so picture-only models such as
+  MAI-Image never reached the catalog. The sync now asks OpenRouter's
+  zero-data-retention catalog for models that output text or pictures. A
+  model whose catalog entry lists picture output and no text output is called
+  through OpenRouter's images endpoint. That call sends the words of the
+  user's last turn as the prompt. Pictures sent along with the request are not
+  passed on.
+- **Agent Profile form.** The **AI model** list leaves out picture-only
+  models and says that an agent needs a model that writes. An agent already
+  saved on a picture model shows it as "(makes pictures only)" and asks for
+  another model before the agent is saved again. Only the form changed; the
+  server does not move such an agent to another model. **Agent name** now
+  lines up with **AI model**. **Start from a template** is folded away and
+  starts closed.
+- **Administrators can join groups they created.** A workspace administrator
+  can add or remove themselves in a group they created, from the group's
+  member list, or with **Add me to this group** when creating it. Placing
+  other administrators in a group works as before. Platform owners are not
+  group members and cannot join. Each change is audited as
+  `admin.group_self_membership`.
+- **Only me connections.** A connection's **Who can use it** setting now
+  offers **Only me** to administrators, beside **Everyone** and **Specific
+  groups**. An Only me connection cannot be shared with groups. Other
+  administrators in the workspace do not see it in their lists, get "not
+  found" when they ask for it by address, and do not see its events in the
+  workspace audit log. Platform owners see and manage every connection. Only
+  the person who created a connection, or a platform owner, can make it Only
+  me. When an account is deleted, its Only me connections are turned off and
+  left to platform owners. An Only me connection on a shared agent stays on
+  the agent when another administrator edits it, and only its owner and
+  platform owners can run it.
+- **Code follows as it is written.** A code block that is still being written
+  keeps its newest lines in view. Scrolling up stops the following, and
+  scrolling back near the bottom starts it again. An older reply opened at
+  its top stays where it is.
+- **Auto reasoning.** **Send options** in chat and **Assistant settings** in
+  Drafts gain an **Auto** box, off by default. When it is on, the browser
+  picks **Fast**, **Balanced**, or **Smart** for each request from its words,
+  its attachments, and in Drafts the length of the document. The rail shows
+  the pick. The choice is kept per person in that browser.
+- **Follow-up passes keep the reasoning level.** When the server continues a
+  reply that stopped at its length limit, or revises one after its own
+  checks, the extra call now sends the reasoning level the person chose.
+  Before, it sent none, so the model used its own default.
+- **Switches on phones.** At phone widths a switch no longer shows a faint
+  circle around its track.
+- **Attached prompts and skills reach agents whole.** Each prompt template and
+  skill file attached to an agent or an automation step was cut to its first
+  4,000 characters. The limit is now 65,000 characters for each one, in chat,
+  in automation steps, and in the count the Library editor shows.
+- **A request to star the project.** A small card in the top right asks a
+  signed-in person to star Aperture Chat on GitHub. It first asks three days
+  after the person's first visit on this release, and once more 14 days later
+  unless they clicked **Star on GitHub**. Then it never asks again. **Not
+  now** closes it. A showing counts when it is handed out, so a reload does
+  not bring it back. The card waits while the first-run welcome or the install
+  prompt is open, and it does not show while viewing as another role. In a
+  renamed workspace it says the workspace runs on Aperture Chat. The button is
+  a link to `https://github.com/Aperture-Chat/Aperture-Chat`; the browser
+  contacts GitHub only when someone clicks it. There is no setting to turn the
+  card off or to change the address. The address is fixed in
+  `apps/web/src/components/GitHubStarPrompt.tsx`, so a fork changes it there
+  and builds its own web image.
+- **What an operator has to do.** There is no database migration, no new
+  environment variable, no new Compose service or Compose change, and no new
+  dependency. `.env.example` changes only the image tag. Picture-only
+  OpenRouter models appear only after the platform owner presses **Sync
+  Models** on the OpenRouter provider again. New models arrive turned off, so
+  the owner then turns one on and shares it as usual. A long attached prompt
+  or skill file now sends up to 65,000 characters on every message that uses
+  it, roughly 16,000 more input tokens for each one, counted toward usage and
+  budgets as usual.
+- **Records saved before this release.** Users, groups, and connections saved
+  by v0.5.27 load with their old behavior. A user's star clock starts on their
+  next visit. A group made before this release has no recorded creator, so no
+  administrator can add themselves to it. A connection made before this
+  release is not Only me and has no recorded creator, so only a platform owner
+  can make it Only me.
+- **Rolling back to v0.5.27.** This is not an image swap. Users, groups, and
+  connections saved by this release carry new fields (`star_prompt`,
+  `created_by_user_id`, `only_me`). The v0.5.27 code rejects those records as
+  "not canonical" and cannot load them. Every person's first visit saves their
+  user record. Back up the application-data volume before upgrading. To go
+  back, restore that backup together with the v0.5.27 images; changes made
+  after the upgrade are lost. Decks are the smaller case: v0.5.27 does not
+  show added blocks and drops them the next time a deck is saved.
+- **Known limits of Only me.** The Elastic export sends every audit event,
+  including those about Only me connections. Once an Only me connection is
+  deleted, its audit events become visible to other administrators. The
+  workspace audit log applies its `limit` before it hides Only me events, so
+  a page can hold fewer events than asked for. An administrator who is
+  demoted keeps their Only me connections, still hidden from administrators.
+- **Not shown or tried yet.** The training lessons, recorded narration, and
+  guide PDFs do not cover these changes. The Groups, Tools and connections,
+  deck editing, and Send options lessons are stale; only the training text
+  about a greyed **Generate AI picture** button was updated. The deck **Ask
+  AI** choice and the **Auto** box have been run only against a scripted
+  stand-in model, and the clean-install check opened the **Ask AI** menu
+  entry without having it write. Picture-only OpenRouter models were tried
+  once, on the development instance, with one model (MAI-Image 2.5 Pro). The
+  clean-install check upgraded data written by v0.5.18, not by v0.5.27. The
+  second star request, 14 days after the first, is covered by unit tests
+  only. Pulling the published images from GHCR still required signing in on
+  2026-11-24.
+
 ## New Since v0.5.26
 
 This release carries over the reasoning and picture-model changes made in
