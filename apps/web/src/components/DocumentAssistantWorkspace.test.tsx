@@ -4,6 +4,21 @@ import { DocumentAssistantWorkspace } from "./DocumentAssistantWorkspace";
 import { sampleData } from "../data/sampleData";
 import type { DraftNavigationGuard } from "../lib/draftNavigation";
 import type { DraftHandoffRequest } from "../lib/draftHandoff";
+import type { ReasoningLevel } from "./ReasoningSlider";
+import type { ReasoningSignals } from "../lib/reasoningAuto";
+
+// Auto reasoning's rules are tested in their own module; here the chooser is
+// a stand-in so these tests pin only what Drafts asks it and what it sends.
+const chooseReasoningLevel = vi.hoisted(() => vi.fn<(signals: ReasoningSignals) => ReasoningLevel>());
+vi.mock("../lib/reasoningAuto", async (importActual) => {
+  const actual = await importActual<typeof import("../lib/reasoningAuto")>();
+  return {
+    ...actual,
+    chooseReasoningLevel,
+    reasoningLevelForSend: (preference: { level: ReasoningLevel; auto: boolean }, signals: ReasoningSignals) =>
+      preference.auto ? chooseReasoningLevel(signals) : actual.reasoningLevelForSend(preference, signals),
+  };
+});
 
 const LEGACY_DOCUMENT_HISTORY_STORAGE_KEY = "aperture-document-history-v1";
 // Draft history is cached per tenant AND user; sampleData signs in
@@ -15,6 +30,8 @@ beforeEach(() => {
   // These tests cover the writing itself, so the user here has turned off
   // "Ask me when unclear". DocumentAssistantIntake.test.tsx covers asking.
   window.localStorage.setItem("aperture-ask-when-unclear-user-admin", "off");
+  chooseReasoningLevel.mockReset();
+  chooseReasoningLevel.mockReturnValue("balanced");
   window.getSelection()?.removeAllRanges();
   delete (window as Partial<Window & { showSaveFilePicker: unknown }>).showSaveFilePicker;
   resetOfflineFetch();
@@ -720,6 +737,191 @@ test("uses the chat completion endpoint with web enabled for document assistant 
   expect(documentText()).toContain("NASA Artemis II");
   expect(screen.getByText(/drafted with provider-hosted web search/)).toBeInTheDocument();
 });
+
+const REASONING_AUTO_KEY = "aperture-reasoning-auto-user-admin";
+const ANDERSON_REQUEST = "Draft a client update on the Anderson discovery deadline.";
+
+function reasoningCapableData() {
+  const models = sampleData.models.map((model) =>
+    model.id === "agent-client-update"
+      ? { ...model, capabilities: { ...model.capabilities, supported_parameters: ["reasoning_effort"] } }
+      : model,
+  );
+  return { ...sampleData, models };
+}
+
+function openDraftSettings() {
+  fireEvent.click(screen.getByRole("button", { name: "Assistant settings" }));
+  return {
+    auto: screen.getByRole("checkbox", { name: "Auto: choose the reasoning level automatically" }),
+    rail: screen.getByRole("radiogroup", { name: "Model reasoning level" }),
+  };
+}
+
+function askDocumentAssistant(request: string) {
+  fireEvent.change(screen.getByLabelText("Ask the document assistant"), { target: { value: request } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply instruction" }));
+}
+
+function railStop(rail: HTMLElement, name: string) {
+  return within(rail).getByRole("radio", { name });
+}
+
+function expectRailLocked(rail: HTMLElement) {
+  for (const stop of within(rail).getAllByRole("radio")) expect(stop).toBeDisabled();
+}
+
+function sentEfforts(requests: unknown[]) {
+  return requests.map((request) => (request as { reasoning_effort: string | null }).reasoning_effort);
+}
+
+test("the Reasoning Auto box starts unchecked and Drafts sends the level the user set", async () => {
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  const { auto, rail } = openDraftSettings();
+  expect(auto).not.toBeChecked();
+  expect(auto).toBeEnabled();
+  fireEvent.click(railStop(rail, "Smart"));
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => "high"));
+  expect(chooseReasoningLevel).not.toHaveBeenCalled();
+});
+
+test("checking Auto is remembered across sessions in the preference chat shares", () => {
+  const { unmount } = render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  fireEvent.click(openDraftSettings().auto);
+  expect(window.localStorage.getItem(REASONING_AUTO_KEY)).toBe("on");
+  unmount();
+
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  const { auto, rail } = openDraftSettings();
+  expect(auto).toBeChecked();
+  // Auto chooses: the rail cannot be moved, and before any request it rests
+  // on the neutral middle with a line saying what Auto does.
+  expectRailLocked(rail);
+  expect(railStop(rail, "Balanced")).toBeChecked();
+  expect(screen.getByText("Aperture picks the level for each request.")).toBeInTheDocument();
+});
+
+test("with Auto on, Drafts sends the level picked from the user's request and shows it", async () => {
+  window.localStorage.setItem("aperture-reasoning-level-user-admin", "fast");
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValue("smart");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => "high"));
+  expect(chooseReasoningLevel).toHaveBeenCalledTimes(1);
+  expect(chooseReasoningLevel).toHaveBeenCalledWith({ text: ANDERSON_REQUEST, attachmentCount: 0, documentLength: 0 });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Apply instruction" })).toBeInTheDocument());
+  expect(railStop(openDraftSettings().rail, "Smart")).toBeChecked();
+});
+
+test("with Auto on, a revision tells the chooser how long the working document is", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  askDocumentAssistant(ANDERSON_REQUEST);
+  await waitFor(() => expect(screen.getAllByText(/Discovery deadline remains July 12, 2026/i).length).toBeGreaterThan(0));
+
+  chooseReasoningLevel.mockReturnValue("fast");
+  askDocumentAssistant("Make the key developments paragraph more formal.");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(2));
+  const revisionSignals = chooseReasoningLevel.mock.calls[1][0];
+  expect(revisionSignals.text).toBe("Make the key developments paragraph more formal.");
+  expect(revisionSignals.documentLength).toBeGreaterThan(40);
+  expect(sentEfforts(chatRequests)[1]).toBe("minimal");
+});
+
+test("with Auto on, the chooser counts the files sent with the request", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  const chatRequests = installChatCompletionFetchMock("# Brief\n\nA synthetic brief.");
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  fireEvent.change(screen.getByLabelText("Attach draft source files"), {
+    target: {
+      files: [
+        new File(["Synthetic notes"], "notes.txt", { type: "text/plain" }),
+        new File(["%PDF"], "scan.pdf", { type: "application/pdf" }),
+      ],
+    },
+  });
+  const chips = screen.getByRole("list", { name: "Attached draft sources" });
+  await waitFor(() => expect(within(chips).getByText("notes.txt").closest("li")).toHaveClass("is-ready"));
+  await waitFor(() => expect(within(chips).getByText("scan.pdf").closest("li")).toHaveClass("is-name-only"));
+
+  askDocumentAssistant("Write a one-page brief from my notes.");
+
+  await waitFor(() => expect(chatRequests).toHaveLength(1));
+  expect(chooseReasoningLevel).toHaveBeenCalledWith(expect.objectContaining({ attachmentCount: 2 }));
+});
+
+test("unchecking Auto sends the user's own level again", async () => {
+  window.localStorage.setItem("aperture-reasoning-level-user-admin", "fast");
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValue("smart");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  disableWebSearch();
+  const { auto, rail } = openDraftSettings();
+  fireEvent.click(auto);
+  expect(window.localStorage.getItem(REASONING_AUTO_KEY)).toBe("off");
+  expect(railStop(rail, "Smart")).toBeEnabled();
+  expect(railStop(rail, "Fast")).toBeChecked();
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => "minimal"));
+  expect(chooseReasoningLevel).not.toHaveBeenCalled();
+});
+
+test("a model without reasoning levels disables Auto and sends no reasoning effort", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValue("smart");
+  const chatRequests = installChatCompletionFetchMock(clientUpdateProviderDraft());
+  render(<DocumentAssistantWorkspace data={sampleData} brandName="Aperture Chat" />);
+  disableWebSearch();
+  const { auto, rail } = openDraftSettings();
+  expect(auto).toBeDisabled();
+  expectRailLocked(rail);
+
+  askDocumentAssistant(ANDERSON_REQUEST);
+
+  await waitFor(() => expect(chatRequests.length).toBeGreaterThan(0));
+  expect(sentEfforts(chatRequests)).toEqual(chatRequests.map(() => null));
+  expect(chooseReasoningLevel).not.toHaveBeenCalled();
+});
+
+test("every model call of one Drafts action runs at the one level Auto picked for it", async () => {
+  window.localStorage.setItem(REASONING_AUTO_KEY, "on");
+  chooseReasoningLevel.mockReturnValueOnce("smart").mockReturnValue("fast");
+  // Not deck JSON, so the deck assistant retries once: two calls, one action.
+  const chatRequests = installChatCompletionFetchMock("## Boston Expansion\n\n- Talent density\n- Customer cluster");
+  render(<DocumentAssistantWorkspace data={reasoningCapableData()} brandName="Aperture Chat" />);
+  switchToDeckMode();
+  fireEvent.change(screen.getByPlaceholderText("Ask the deck assistant what to build"), {
+    target: { value: "Draft a Boston deck" },
+  });
+  fireEvent.submit(screen.getByRole("textbox", { name: "Ask the deck assistant" }).closest("form")!);
+
+  await waitFor(() => expect(screen.getAllByText(/structured output failed validation/).length).toBeGreaterThan(0));
+  expect(chatRequests).toHaveLength(2);
+  expect(sentEfforts(chatRequests)).toEqual(["high", "high"]);
+  expect(chooseReasoningLevel).toHaveBeenCalledTimes(1);
+  expect(chooseReasoningLevel).toHaveBeenCalledWith(expect.objectContaining({ text: "Draft a Boston deck" }));
+});
+
 
 test("applies assistant instructions as a provider-backed new document version", async () => {
   const chatRequests = installChatCompletionFetchMock(

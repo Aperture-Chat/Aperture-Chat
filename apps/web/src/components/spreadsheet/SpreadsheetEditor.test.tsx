@@ -126,6 +126,8 @@ describe("SpreadsheetEditor", () => {
     await screen.findByText(/highlighted in the grid/);
     expect(ask).toHaveBeenCalledTimes(1);
     expect(ask.mock.calls[0][0]).toContain("User request: Add a total under these");
+    // The host also gets the user's own words, apart from the built prompt.
+    expect(ask.mock.calls[0][1].instruction).toBe("Add a total under these");
     expect(cellText("A3")).toBe("12");
     expect(document.querySelector("[data-cell='A3']")?.classList.contains("is-ai-changed")).toBe(true);
     expect(latest!.sheets[0].cells.A3).toBeUndefined();

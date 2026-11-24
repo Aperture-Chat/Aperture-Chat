@@ -3406,7 +3406,9 @@ a.nav-item {
   white-space: nowrap;
 }
 
-.draft-settings-panel label {
+/* The shared reasoning Auto box keeps its own styling. `:where` keeps this
+   rule as weak as the plain `label` it replaces, so field rules still win. */
+.draft-settings-panel label:where(:not(.reasoning-auto)) {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3421,10 +3423,21 @@ a.nav-item {
   gap: 6px;
 }
 
-.draft-setting-field > span {
+.draft-setting-field > span,
+.draft-setting-field-head > span {
   color: var(--muted);
   font-size: var(--control-label-size);
   font-weight: 750;
+}
+
+/* The label line holds the Auto box at its right edge; a minimum height
+   keeps the field still when the box is toggled. */
+.draft-setting-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
 }
 
 .draft-setting-field .draft-setting-help {

@@ -1254,6 +1254,73 @@ span.mini-avatar.avatar-initials,
   cursor: not-allowed;
 }
 
+/* Auto: the platform picked this stop. The pick stays easy to read, in a
+   quieter tint than a hand-set level, and nothing invites a click. */
+.rail-switch.is-disabled.is-auto::before {
+  border-color: color-mix(in srgb, var(--teal) 55%, transparent);
+  background: color-mix(in srgb, var(--teal) 14%, var(--surface));
+  box-shadow: none;
+}
+
+.rail-switch.is-disabled.is-auto .rail-switch-option {
+  cursor: default;
+}
+
+.rail-switch.is-disabled.is-auto .rail-switch-option.is-active {
+  color: var(--text-strong);
+}
+
+/* The opt-in "Auto" box beside a reasoning control, in chat and Drafts. */
+.reasoning-auto {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--control-label-size);
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--speed) var(--ease),
+    color var(--speed) var(--ease);
+}
+
+.reasoning-auto input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--teal);
+  cursor: inherit;
+}
+
+.reasoning-auto input:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.reasoning-auto:has(input:checked) {
+  color: var(--text-strong);
+}
+
+.reasoning-auto.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (hover: hover) {
+  .reasoning-auto:not(.is-disabled):hover {
+    background: var(--surface-soft);
+    color: var(--text-strong);
+  }
+}
+
 .rail-switch.is-block .rail-switch-option {
   padding: 0 8px;
   white-space: normal;

@@ -3492,6 +3492,96 @@ def test_balanced_reasoning_keeps_grok_at_its_usual_pace_on_openrouter(monkeypat
     assert "provider" not in sent
 
 
+def _scripted_handler(bodies: list[dict[str, object]], replies: list[tuple[str, str]]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.read().decode()))
+        content, finish_reason = replies[min(len(bodies), len(replies)) - 1]
+        return httpx.Response(
+            200,
+            json={
+                "id": f"gen-scripted-{len(bodies)}",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": finish_reason,
+                    }
+                ],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            },
+        )
+
+    return handler
+
+
+_FULL_PAPER = " ".join(["Completed drafted paragraph with analysis and support."] * 120)
+_OUTLINE = "Outline\n1. Introduction\n2. Background\n3. Conclusion"
+
+
+@pytest.mark.parametrize("effort", ["minimal", "medium", "high"])
+@pytest.mark.parametrize(
+    ("prompt", "replies"),
+    [
+        # The first pass stops at its token budget, so a continuation follows.
+        ("Explain legal AI governance.", [("Section 1 begins.", "length"), (_FULL_PAPER, "stop")]),
+        # The first pass is only an outline, so a revision pass follows.
+        ("Write a 2 page paper on Artemis II.", [(_OUTLINE, "stop"), (_FULL_PAPER, "stop")]),
+        # The revision itself stops at its budget and is continued.
+        (
+            "Write a 2 page paper on Artemis II.",
+            [(_OUTLINE, "stop"), ("Artemis II opens the paper.", "length"), (_FULL_PAPER, "stop")],
+        ),
+    ],
+    ids=["continuation", "revision", "revision-continuation"],
+)
+def test_a_drafts_follow_up_pass_keeps_the_chosen_reasoning_level(
+    monkeypatch, effort: str, prompt: str, replies: list[tuple[str, str]]
+) -> None:
+    _activate_provider("provider-openrouter")
+    bodies: list[dict[str, object]] = []
+    fake = _gateway(transport=httpx.MockTransport(_scripted_handler(bodies, replies)))
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: fake)
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-openai-gpt-5-5",
+            "messages": [{"role": "user", "content": prompt}],
+            "surface": "draft",
+            "draft_title": "Artemis II",
+            "reasoning_effort": effort,
+        },
+        headers=headers("user-owner"),
+    )
+
+    assert response.status_code == 200
+    assert len(bodies) == len(replies)
+    assert [body.get("reasoning") for body in bodies] == [{"effort": effort}] * len(replies)
+
+
+def test_a_drafts_follow_up_pass_sends_no_reasoning_level_when_none_was_chosen(monkeypatch) -> None:
+    _activate_provider("provider-openrouter")
+    bodies: list[dict[str, object]] = []
+    replies = [("Section 1 begins.", "length"), (_FULL_PAPER, "stop")]
+    fake = _gateway(transport=httpx.MockTransport(_scripted_handler(bodies, replies)))
+    monkeypatch.setattr("app.routes.chat.get_model_gateway_client", lambda: fake)
+
+    response = client.post(
+        "/api/chat/complete",
+        json={
+            "model": "openrouter-openai-gpt-5-5",
+            "messages": [{"role": "user", "content": "Explain legal AI governance."}],
+            "surface": "draft",
+            "draft_title": "Governance",
+        },
+        headers=headers("user-owner"),
+    )
+
+    assert response.status_code == 200
+    assert len(bodies) == 2
+    assert all("reasoning" not in body for body in bodies)
+
+
 def test_minimal_reasoning_effort_degrades_to_low_off_gpt5(monkeypatch) -> None:
     _activate_provider("provider-openai")
     get_store().models["o3-mini"].platform_enabled = True

@@ -476,13 +476,14 @@ import {
   webSearchSupportedForModel,
 } from "../lib/modelAccess";
 import {
+  ReasoningAutoCheckbox,
   ReasoningRail,
   reasoningHelp,
   REASONING_EFFORT_BY_LEVEL,
-  loadReasoningLevel,
-  storeReasoningLevel,
+  type ReasoningEffort,
   type ReasoningLevel,
 } from "./ReasoningSlider";
+import { reasoningLevelForSend, useReasoningPreference, type ReasoningSignals } from "../lib/reasoningAuto";
 import { fetchServerTime, formatTimeLabel, formatTimestamp } from "../lib/serverClock";
 import { useViewportWidth } from "../lib/useViewport";
 import { useModalFocus } from "../lib/useModalFocus";
@@ -2355,20 +2356,36 @@ export function DocumentAssistantWorkspace({
   const [textColor, setTextColor] = useState(TEXT_COLOR_SWATCHES[0]);
   const [citationsOpen, setCitationsOpen] = useState(false);
   const [requireCitations, setRequireCitations] = useState(importedDraftState?.requiresCitations ?? false);
-  // Fast–Smart reasoning level for drafting; shares the sticky per-user
-  // preference with the chat composer's slider.
-  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(() =>
-    loadReasoningLevel(completionUserId),
-  );
+  // Fast–Smart reasoning level for drafting, or Auto; the sticky per-user
+  // preference is shared with the chat composer.
+  const reasoningPreference = useReasoningPreference(completionUserId);
+  // What Auto picked for the latest request; none yet shows the neutral middle.
+  const [autoReasoningPick, setAutoReasoningPick] = useState<ReasoningLevel | null>(null);
+  const sheetAskReasoningRef = useRef(new WeakMap<AbortSignal, ReasoningEffort | null>());
   // The slider only engages for models with real reasoning control; the API
   // enforces the same gate before anything reaches the provider.
   const reasoningTargetModel = data.models.find((model) => model.id === selectedAgent?.id);
   const reasoningSupported = supportsReasoningEffort(reasoningTargetModel);
-  const reasoningEffortForSend = reasoningSupported ? REASONING_EFFORT_BY_LEVEL[reasoningLevel] : null;
 
-  function updateReasoningLevel(level: ReasoningLevel) {
-    setReasoningLevel(level);
-    storeReasoningLevel(completionUserId, level);
+  /** The effort one user action is sent at, resolved once when it starts:
+   * every model call of that action reuses it, so its passes never differ.
+   * Auto reads the request as asked, the files sent with it, and the working
+   * document it acts on ("" when the action writes something new). */
+  function reasoningEffortForRequest(text: string, workingDocument = ""): ReasoningEffort | null {
+    if (!reasoningSupported) return null;
+    const signals: ReasoningSignals = {
+      text,
+      attachmentCount: draftAttachmentRuntime().attachmentIds.length,
+      documentLength: workingDocument.length,
+    };
+    const level = reasoningLevelForSend(reasoningPreference, signals);
+    if (reasoningPreference.auto) setAutoReasoningPick(level);
+    return REASONING_EFFORT_BY_LEVEL[level];
+  }
+
+  function setReasoningAuto(auto: boolean) {
+    setAutoReasoningPick(null);
+    reasoningPreference.setAuto(auto);
   }
   const [codeArtifact, setCodeArtifact] = useState<CodeArtifact | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<DraftSourceFile[]>([]);
@@ -6127,8 +6144,14 @@ export function DocumentAssistantWorkspace({
 
   /** The inline spreadsheet assistant's model call: streamed, with the
    * draft's knowledge sources and attachments, abortable from the editor. */
-  const askSpreadsheetModel: SheetAiAsk = async (prompt, { signal, onText }) => {
+  const askSpreadsheetModel: SheetAiAsk = async (prompt, { signal, onText, instruction }) => {
     if (!selectedAgent) throw new Error(draftAiUnavailableReason);
+    // One editor request (its first ask, a retry, a fix round) shares one
+    // abort signal, so the signal keys its one reasoning level. Auto reads
+    // the user's own words, not the built prompt that wraps them.
+    const efforts = sheetAskReasoningRef.current;
+    if (!efforts.has(signal)) efforts.set(signal, reasoningEffortForRequest(instruction ?? prompt, currentDraftText()));
+    const reasoningEffort = efforts.get(signal) ?? null;
     const sources = spreadsheetSourceText();
     const reply = await sendChatStream(completionUserId, {
       model: selectedAgent.id,
@@ -6143,7 +6166,7 @@ export function DocumentAssistantWorkspace({
         knowledgeConfigIds: activeSourceIds,
         ...draftAttachmentRuntime(),
         maxCompletionTokens: 12000,
-        reasoningEffort: reasoningEffortForSend,
+        reasoningEffort,
       },
       onDelta: (fullText) => onText?.(splitAssistantThinking(fullText).visibleContent),
     });
@@ -6178,6 +6201,7 @@ export function DocumentAssistantWorkspace({
       );
     const finish = (outcome: SheetRunOutcome) => record((steps) => sheetRunFinished(steps, outcome));
     setStatus(revising ? "Updating the workbook..." : "Building the workbook...");
+    const reasoningEffort = reasoningEffortForRequest(request, revising ? currentDraftText() : "");
     const ask = async (prompt: string) => {
       const askedAt = Date.now();
       const reply = await sendChat(completionUserId, {
@@ -6192,7 +6216,7 @@ export function DocumentAssistantWorkspace({
           knowledgeConfigIds: activeSourceIds,
           ...draftAttachmentRuntime(),
           maxCompletionTokens: 16000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort,
           workSteps: true,
         },
       });
@@ -6331,6 +6355,10 @@ export function DocumentAssistantWorkspace({
     });
     setDraftTrace({ steps: traceSteps, activeIndex: 0, complete: false, startedAt: Date.now() });
     setStatus(revising ? "Revising the deck..." : "Drafting the deck...");
+    const reasoningEffort = reasoningEffortForRequest(
+      request,
+      revising ? (currentDeck?.slides ?? []).map(deckSlideOutline).join("\n\n") : "",
+    );
 
     const askProvider = async (prompt: string) => {
       const reply = await sendChat(completionUserId, {
@@ -6345,7 +6373,7 @@ export function DocumentAssistantWorkspace({
           knowledgeConfigIds: activeSourceIds,
           ...draftAttachmentRuntime(),
           maxCompletionTokens: 12000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort,
           workSteps: true,
         },
       });
@@ -6365,7 +6393,7 @@ export function DocumentAssistantWorkspace({
           citationsEnabled: false,
           knowledgeConfigIds: [],
           maxCompletionTokens: 6000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort,
         },
       });
       return splitAssistantThinking(reply.content ?? "").visibleContent;
@@ -8561,7 +8589,7 @@ export function DocumentAssistantWorkspace({
           knowledgeConfigIds: sourceIdsForDraft,
           ...draftAttachmentRuntime(),
           maxCompletionTokens: pageTotal > 1 ? 24000 : 12000,
-          reasoningEffort: reasoningEffortForSend,
+          reasoningEffort: reasoningEffortForRequest(requestText),
           workSteps: true,
         },
       });
@@ -8936,6 +8964,7 @@ export function DocumentAssistantWorkspace({
       useTemplateContext: Boolean(revisionTemplate),
       useWebSearch,
     });
+    const reasoningEffort = reasoningEffortForRequest(request, currentDraftText);
     await runDocumentChange(agent, request, {
       workingMessage: requestedAdditionalPages
         ? `Expanding the current document by ${requestedAdditionalPages} page${requestedAdditionalPages === 1 ? "" : "s"} through ${agent.name}.`
@@ -8992,7 +9021,7 @@ export function DocumentAssistantWorkspace({
               currentDraftText,
               requestedAdditionalPages,
             ),
-            reasoningEffort: reasoningEffortForSend,
+            reasoningEffort,
             workSteps: true,
           },
         });
@@ -9081,6 +9110,7 @@ export function DocumentAssistantWorkspace({
     const holder = window.document.createElement("div");
     holder.innerHTML = contentRef.current;
     const blocks = documentBlocks(holder);
+    const reasoningEffort = reasoningEffortForRequest(request, blocks.map((block) => block.text).join("\n"));
     await runDocumentChange(agent, request, {
       workingMessage: `Changing ${documentTitle} through ${agent.name}.`,
       workingStatus: `Calling ${agent.name} to change ${documentTitle}.`,
@@ -9114,7 +9144,7 @@ export function DocumentAssistantWorkspace({
             knowledgeConfigIds: activeSourceIds,
             ...draftAttachmentRuntime(),
             maxCompletionTokens: revisionCompletionTokenBudget(blocks.map((block) => block.text).join(" "), 0),
-            reasoningEffort: reasoningEffortForSend,
+            reasoningEffort,
           },
         });
         ensureUnchanged();
@@ -12837,10 +12867,24 @@ export function DocumentAssistantWorkspace({
                     </SelectControl>
                   </label>
                   <div className="draft-setting-field" role="group" aria-label="Reasoning level">
-                    <span>Reasoning</span>
-                    <ReasoningRail level={reasoningLevel} supported={reasoningSupported} onChange={updateReasoningLevel} />
+                    <div className="draft-setting-field-head">
+                      <span>Reasoning</span>
+                      <ReasoningAutoCheckbox
+                        checked={reasoningPreference.auto}
+                        disabled={!reasoningSupported}
+                        onChange={setReasoningAuto}
+                      />
+                    </div>
+                    <ReasoningRail
+                      level={reasoningPreference.auto ? autoReasoningPick ?? "balanced" : reasoningPreference.level}
+                      supported={reasoningSupported}
+                      auto={reasoningPreference.auto}
+                      onChange={reasoningPreference.setLevel}
+                    />
                     <small className="draft-setting-help">
-                      {reasoningHelp(reasoningLevel, reasoningSupported, selectedAgent?.name ?? "This model")}
+                      {reasoningPreference.auto && reasoningSupported
+                        ? "Aperture picks the level for each request."
+                        : reasoningHelp(reasoningPreference.level, reasoningSupported, selectedAgent?.name ?? "This model")}
                     </small>
                   </div>
                   <label className="draft-switch-row">

@@ -2967,6 +2967,7 @@ def _generate_completion(
             model_config.id,
             resolved_usage_surface,
             request.thread_id,
+            options=_follow_up_generation_options(request),
         )
         final = _validate_and_revise_completion_if_needed(
             client,
@@ -5575,6 +5576,15 @@ def _openai_generation_options(request: ChatCompletionRequest) -> dict[str, Any]
     return present or None
 
 
+def _follow_up_generation_options(request: ChatCompletionRequest) -> dict[str, Any] | None:
+    """What a continuation or revision pass carries over from the request: the
+    reasoning level the user chose. Those passes send no tools and ask for
+    plain text, so the rest of the request's generation options stay behind."""
+    if request.reasoning_effort is None:
+        return None
+    return {"reasoning_effort": request.reasoning_effort}
+
+
 def _continue_completion_if_needed(
     client: Any,
     route: ModelGatewayRoute,
@@ -5588,6 +5598,8 @@ def _continue_completion_if_needed(
     model_id: str,
     usage_surface: str,
     thread_id: str | None,
+    *,
+    options: dict[str, Any] | None = None,
 ) -> ChatCompletionResponse:
     combined = response
     for _ in range(MAX_CONTINUATION_CALLS):
@@ -5604,6 +5616,7 @@ def _continue_completion_if_needed(
                 model_id=model_id,
                 usage_surface=usage_surface,
                 thread_id=thread_id,
+                options=options,
             )
             continuation = _translate_response(payload, requested_model, runtime_context)
         except ModelGatewayError as exc:
@@ -5657,6 +5670,7 @@ def _validate_and_revise_completion_if_needed(
                 model_id=model_id,
                 usage_surface=usage_surface,
                 thread_id=thread_id,
+                options=_follow_up_generation_options(request),
             )
             revision = _translate_response(revision_payload, request.model, runtime_context)
             revision = _continue_completion_if_needed(
@@ -5672,6 +5686,7 @@ def _validate_and_revise_completion_if_needed(
                 model_id,
                 usage_surface,
                 thread_id,
+                options=_follow_up_generation_options(request),
             )
         except ModelGatewayError as exc:
             logger.warning(
