@@ -236,6 +236,90 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.29
+
+This release has another model take over when the chosen one fails, in chat
+and in Drafts. Until now that happened only when a provider's safety filter
+kept withholding a reply or a router said the upstream would not serve the
+model. Model records now store one new field, so read the rollback item
+before upgrading.
+
+- **Another model takes over when the chosen one fails.** A dropped
+  connection, a timeout, a rate limit, a server error, or any other error
+  from the provider now sends the reply to another model the person may use.
+  The first model is not asked again. When none of the reply has been shown,
+  the other model gets the same conversation. When part of a chat reply has
+  been shown, those words stay and the other model goes on from them. A
+  reply that arrives whole, as Drafts replies do, is asked again from the
+  start on the other model, whichever of its calls failed.
+- **An empty reply counts as a failure.** A reply with no words and no tool
+  call is handed to another model instead of being delivered empty. A reply
+  cut at its token budget before a word was written is still asked again on
+  the same model with more room, and a reply the browser is resuming is left
+  alone.
+- **Which model takes over.** The one nearest in ability, read from what the
+  catalog reports and never from a list of model names. A small model (one
+  with mini, nano, lite, tiny, micro, small, flash, haiku, or instant
+  standing alone in its name) comes after every full-size one. A model
+  priced under a quarter of the first comes after the comfortable ones. A
+  model that cannot read pictures or files the first can read comes last.
+  Among equals, another vendor's model comes before the same vendor's, and
+  then the nearest in price. The other rules are unchanged: a model the
+  person may use themselves, with the same content filters, from the same
+  workspace or the platform, with a configured route, and searching the web
+  the same way when web search is on.
+- **Listed prices.** The OpenRouter model sync now records each model's
+  price for a million output tokens. It is used only to rank stand-ins. A
+  model has no price until the next sync, and models added by hand or
+  through another provider have none; they are ranked by size word, vendor,
+  and catalog order.
+- **What people see.** The work trace says which model answered instead and
+  why: the first one ran into an error, or returned an empty reply. When the
+  first model had written part of the reply, the step reads "finished the
+  reply" and says the error came part-way through. Drafts shows the same
+  step once in a run's trace, and its closing line, version name, and the
+  stamp on each edit name the model that wrote the work.
+- **What is recorded.** Each switch is an audit event,
+  `chat.completion_fallback`, with the reason `model_failed` or
+  `empty_reply` beside the two reasons from earlier releases. A turn that
+  failed is not recorded as usage; the turn the other model completes is.
+- **What is not handed over.** A rejected provider key or a broken route is
+  reported as it is, because every model behind it fails the same way and it
+  needs an administrator. A custom agent's reply is never handed to another
+  model, which would answer without the agent's instructions, knowledge, and
+  tools. One switch is made for each request: if the other model fails too,
+  a chat reply ends with the error and the browser resumes it as before, and
+  a Drafts request shows the error.
+- **What an operator has to do.** There is no database migration, no new
+  environment variable, no new Compose service or Compose change, and no new
+  dependency. `.env.example` changes only the image tag. Run **Sync models**
+  on the OpenRouter provider once after upgrading so prices are recorded. A
+  switch is one extra model call for a chat reply. For a Drafts request it
+  repeats the request on the other model, including any research steps. Both
+  count toward usage and budgets as usual and happen only after a failure.
+- **Records saved before this release.** Model records saved by v0.5.29 load
+  as they were, with no price.
+- **Rolling back to v0.5.29.** Back up the application-data volume before
+  upgrading. A model record that this release saves with catalog details
+  carries the new field (`output_price`), and the v0.5.29 code rejects such a
+  record as "not canonical" and cannot start. A model sync writes them, and
+  so does saving a model in the console. Until one of those happens, going
+  back is an image swap. After it, restore the backup together with the
+  v0.5.29 images; changes made after the upgrade are lost.
+- **Known limits.** A stream that ends cleanly without a finish reason and
+  without its closing marker is still taken as a complete reply. Chat title
+  naming is a separate call that does not move to another model. The `/v1`
+  proxy does not move a request to another model. A hand-over part-way
+  through a reply joins the two parts with a paragraph break when the first
+  part did not end in a space.
+- **Not shown or tried yet.** The training lessons, recorded narration, and
+  guide PDFs do not cover this. The hand-over was tried against scripted
+  stand-in models that fail on purpose (an HTTP 500, a connection closed
+  part-way through a streamed reply, and an empty reply), not against a real
+  provider that was failing at the time. The ranking by price was tried in
+  tests; the live catalog had no recorded prices when this was written. Pulling the published images from GHCR still
+  required signing in on 2026-11-25.
+
 ## New Since v0.5.28
 
 This release lets the creator of a prompt or skill choose who gets it, and
