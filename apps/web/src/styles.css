@@ -22735,7 +22735,7 @@ button.retention-tagged-title:focus-visible strong {
   border-radius: 12px;
   border: 1px solid var(--border);
   /* The default install icon's paper tile. */
-  background: #f9f7f2;
+  background: #f5faf7;
 }
 
 .pwa-install-preview-icon img {

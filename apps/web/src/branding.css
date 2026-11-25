@@ -137,7 +137,7 @@ img[data-brand-pending] {
  * the console itself is dark. */
 .branding-preview-rail.is-light {
   --text-strong: #172e31;
-  background: #eeebe4;
+  background: #e8f0ec;
   color: #213c3f;
 }
 

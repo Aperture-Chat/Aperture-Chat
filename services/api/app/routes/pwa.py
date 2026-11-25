@@ -30,7 +30,7 @@ DEFAULT_BRAND_NAME = "Aperture Chat"
 DEFAULT_THEME_COLOR = "#087d8b"
 # Splash-screen color: the paper tone of the default icon tile and the light
 # theme's surfaces (--surface in apps/web/src/workspace-refresh.css).
-DEFAULT_BACKGROUND_COLOR = "#f9f7f2"
+DEFAULT_BACKGROUND_COLOR = "#f5faf7"
 # Manifest short_name is what Android shows under the icon; the spec
 # recommends keeping it within roughly 12 characters.
 SHORT_NAME_MAX_CHARS = 12
