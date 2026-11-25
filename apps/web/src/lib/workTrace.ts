@@ -275,6 +275,14 @@ type StepBuilders = {
   [K in ActivityKind]: (activity: Extract<ChatStreamActivity, { kind: K }>) => ChatActivityTraceStep[];
 };
 
+/** Why another model answered: who kept `from` from answering, in plain words. */
+const FALLBACK_CAUSE: Record<"filter" | "unavailable", (from: string, servedBy: string) => string> = {
+  filter: (from, servedBy) =>
+    servedBy ? `A safety filter at ${servedBy} kept withholding ${from}` : `A safety filter kept withholding ${from}`,
+  unavailable: (from, servedBy) =>
+    servedBy ? `${from} was not available at ${servedBy}` : `${from} was not available`,
+};
+
 const ACTIVITY_STEPS: StepBuilders = {
   agent: ({ name }) => [stepOf("agent:profile", `Working as ${name}`, "Its instructions, knowledge, and tools apply.")],
   privacy: () => [
@@ -316,12 +324,8 @@ const ACTIVITY_STEPS: StepBuilders = {
       `Asked again (try ${attempt + 1})`,
     ),
   ],
-  "model-fallback": ({ from, to, servedBy }) => [
-    stepOf(
-      "route:fallback",
-      `${to} answered instead`,
-      servedBy ? `A safety filter at ${servedBy} kept withholding ${from}` : `A safety filter kept withholding ${from}`,
-    ),
+  "model-fallback": ({ from, to, servedBy, why }) => [
+    stepOf("route:fallback", `${to} answered instead`, FALLBACK_CAUSE[why](from, servedBy)),
   ],
   hermes: ({ memories, skills, automations }) => hermesSteps(memories, skills, automations),
   resume: ({ attempt }) => [
