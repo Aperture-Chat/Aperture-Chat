@@ -30,8 +30,9 @@ export type ChatStreamActivity =
   /** The provider's safety filter withheld a turn and it was asked again.
    * `servedBy` names the upstream that ran the filter, empty when unknown. */
   | { kind: "provider-filter"; attempt: number; servedBy: string }
-  /** The filter kept withholding the reply, so another model answered. */
-  | { kind: "model-fallback"; from: string; to: string; servedBy: string }
+  /** Another model answered. `why`: the provider's filter kept withholding
+   * the reply, or the upstream that serves the first model was unavailable. */
+  | { kind: "model-fallback"; from: string; to: string; servedBy: string; why: "filter" | "unavailable" }
   | { kind: "hermes"; memories: number; skills: string[]; automations: string[] }
   /** The reply paused to ask the user this many questions. */
   | { kind: "ask"; questions: number }
@@ -155,7 +156,8 @@ const PARSERS: Record<string, Parser> = {
   "model-fallback": (raw) => {
     const from = text(raw.from);
     const to = text(raw.to);
-    return from && to ? { kind: "model-fallback", from, to, servedBy: text(raw.served_by) ?? "" } : null;
+    const why = raw.reason === "unavailable" ? "unavailable" : "filter";
+    return from && to ? { kind: "model-fallback", from, to, servedBy: text(raw.served_by) ?? "", why } : null;
   },
   ask: (raw) => {
     const questions = count(raw.questions);

@@ -1005,7 +1005,29 @@ class ModelContentFiltersUpdateRequest(BaseModel):
     content_filter_ids: list[str]
 
 
-class PromptTemplate(BaseModel):
+class LibraryAudience(BaseModel):
+    """Who gets a prompt or a skill: its owner alone, chosen groups, or everyone.
+
+    No groups and not Only me means everyone in the workspace.
+    """
+
+    group_ids: list[str] = Field(default_factory=list)
+    # Who created the item; None for items saved before this was kept and once
+    # that account is deleted. Only this person may make the item Only me.
+    owner_user_id: str | None = None
+    # "Only me": the item exists for its owner (and platform owners) alone;
+    # other tenant admins never see it. With no owner (the owner's account was
+    # deleted) it belongs to platform owners alone.
+    only_me: bool = False
+
+    @model_validator(mode="after")
+    def _only_me_is_unshared(self) -> "LibraryAudience":
+        if self.only_me and self.group_ids:
+            raise ValueError("An Only me item has no group shares.")
+        return self
+
+
+class PromptTemplate(LibraryAudience):
     id: str
     tenant_id: str
     name: str
@@ -1013,7 +1035,6 @@ class PromptTemplate(BaseModel):
     content: str
     category: str = "general"
     variables: list[str] = Field(default_factory=list)
-    group_ids: list[str] = Field(default_factory=list)
     enabled: bool = True
     updated_at: str = "Just now"
 
@@ -1027,6 +1048,7 @@ class PromptTemplateCreateRequest(BaseModel):
     category: str = "general"
     variables: list[str] = Field(default_factory=list)
     group_ids: list[str] = Field(default_factory=list)
+    only_me: bool = False
     enabled: bool = True
 
 
@@ -1037,10 +1059,11 @@ class PromptTemplateUpdateRequest(BaseModel):
     category: str | None = None
     variables: list[str] | None = None
     group_ids: list[str] | None = None
+    only_me: bool | None = None
     enabled: bool | None = None
 
 
-class SkillFile(BaseModel):
+class SkillFile(LibraryAudience):
     id: str
     tenant_id: str
     name: str
@@ -1049,7 +1072,6 @@ class SkillFile(BaseModel):
     category: str = "workflow"
     format: str = "markdown"
     version: str = "1.0.0"
-    group_ids: list[str] = Field(default_factory=list)
     enabled: bool = True
     updated_at: str = "Just now"
 
@@ -1081,6 +1103,7 @@ class SkillFileCreateRequest(BaseModel):
     format: str = "markdown"
     version: str = "1.0.0"
     group_ids: list[str] = Field(default_factory=list)
+    only_me: bool = False
     enabled: bool = True
 
 
@@ -1092,6 +1115,7 @@ class SkillFileUpdateRequest(BaseModel):
     format: str | None = None
     version: str | None = None
     group_ids: list[str] | None = None
+    only_me: bool | None = None
     enabled: bool | None = None
 
 

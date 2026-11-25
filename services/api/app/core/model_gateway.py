@@ -323,6 +323,21 @@ class ModelGatewayAuthError(ModelGatewayError):
         return False
 
 
+class ModelUpstreamUnavailable(ModelGatewayError):
+    """Raised when a router reports that the upstream behind a model would
+    not serve it.
+
+    The router answered and the request was sound; whoever hosts this one
+    model turned it away (Azure blocking a resource, say). Asking the same
+    model again meets the same upstream, while a model served elsewhere can
+    still answer.
+    """
+
+    def __init__(self, message: str, *, status_code: int, served_by: str | None) -> None:
+        super().__init__(message, status_code=status_code)
+        self.served_by = served_by
+
+
 @dataclass(frozen=True)
 class ModelGatewayRoute:
     provider_id: str
@@ -763,6 +778,11 @@ class ModelGatewayClient:
                             return
                         if not isinstance(chunk, dict):
                             continue
+                        failure = _reported_error(route, chunk.get("error"), chunk.get("provider"))
+                        if failure is not None:
+                            # A router opens the stream before its upstream
+                            # answers, so a refusal arrives inside an HTTP 200.
+                            raise failure
                         if usage_sink is not None:
                             usage = chunk.get("usage")
                             if "usage" in chunk:
@@ -1226,6 +1246,9 @@ def _status_error(
     routing_block = _provider_routing_block_message(route, status_code, detail)
     if routing_block is not None:
         return ModelGatewayError(routing_block, status_code=status_code)
+    unavailable = _upstream_unavailable(route, status_code, detail)
+    if unavailable is not None:
+        return unavailable
     # The upstream error body names the actual rejection reason (parameter,
     # token limit, dialect rule); without it a 4xx is undiagnosable.
     suffix = f": {detail[:300]}" if detail else ""
@@ -1233,6 +1256,78 @@ def _status_error(
         f"{route.provider_name} returned HTTP {status_code}{suffix}",
         status_code=status_code,
     )
+
+
+# The statuses a router answers with when the fault lies behind it.
+_UPSTREAM_FAULT_STATUSES = frozenset({502, 503})
+_UPSTREAM_REASON_LIMIT = 300
+
+
+def _reported_error(
+    route: ModelGatewayRoute, error: object, served_by: object = None
+) -> ModelGatewayError | None:
+    """The failure a provider reported in an ``error`` object, if it sent one.
+
+    OpenRouter's shape: ``code`` is the HTTP status it would have answered
+    with and ``metadata`` names the upstream (``provider_name``) or the kind
+    of fault (``error_type``); a stream chunk names the upstream beside the
+    error instead, passed here as ``served_by``.
+    """
+    if not isinstance(error, dict) or not error:
+        return None
+    status_code = _http_status(error.get("code"))
+    reason = str(error.get("message") or "").strip()[:_UPSTREAM_REASON_LIMIT]
+    details = _error_details(error)
+    upstream = _named(details.get("provider_name")) or _named(served_by)
+    fault = _upstream_fault_status(status_code, upstream, details)
+    if fault is not None:
+        return ModelUpstreamUnavailable(
+            f"{upstream or 'The upstream provider'} could not serve {route.upstream_model}: {reason}",
+            status_code=fault,
+            served_by=upstream,
+        )
+    return ModelGatewayError(
+        f"{route.provider_name} reported an error: {reason}", status_code=status_code
+    )
+
+
+def _http_status(code: object) -> int | None:
+    """An error's ``code`` when it is an HTTP status, not a provider's own word for it."""
+    return code if isinstance(code, int) and not isinstance(code, bool) else None
+
+
+def _error_details(error: dict[str, Any]) -> dict[str, Any]:
+    metadata = error.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _upstream_fault_status(
+    status_code: int | None, upstream: str | None, details: dict[str, Any]
+) -> int | None:
+    """The status of an error that says the upstream behind the model failed
+    it: a gateway status, with the upstream named or the fault typed as its."""
+    blamed = upstream is not None or details.get("error_type") == "provider_unavailable"
+    return status_code if status_code in _UPSTREAM_FAULT_STATUSES and blamed else None
+
+
+def _named(value: object) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def _upstream_unavailable(
+    route: ModelGatewayRoute, status_code: int, detail: str
+) -> ModelUpstreamUnavailable | None:
+    """The upstream refusal a failed call's body reports, when it is one."""
+    if status_code not in _UPSTREAM_FAULT_STATUSES:
+        return None
+    try:
+        error = json.loads(detail).get("error")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(error, dict):
+        return None
+    failure = _reported_error(route, {**error, "code": status_code})
+    return failure if isinstance(failure, ModelUpstreamUnavailable) else None
 
 
 def _provider_routing_block_message(

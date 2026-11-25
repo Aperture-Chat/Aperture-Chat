@@ -12,8 +12,10 @@ from app.models.schemas import (
     KnowledgeConfig,
     ModelConfig,
     PlatformSettings,
+    PromptTemplate,
     Provider,
     Role,
+    SkillFile,
     TENANT_ADMIN_ASSIGNABLE_ROLES,
     ToolConfig,
     User,
@@ -685,6 +687,35 @@ def tool_config_visible_to(user: User, config: ToolConfig) -> bool:
     if user.tenant_id != config.tenant_id:
         return False
     return not config.only_me or user.id == config.owner_user_id
+
+
+def library_item_shared_with(user: User, item: PromptTemplate | SkillFile) -> bool:
+    """Whether the audience of a prompt or skill includes ``user``.
+
+    This is who gets the item: in the / menu, and in a chat with an agent it
+    is attached to. An Only me item reaches its owner alone, a group share
+    reaches those groups, and anything else reaches the whole workspace.
+    Platform owners get everything.
+    """
+    if is_platform_owner(user):
+        return True
+    if user.tenant_id != item.tenant_id:
+        return False
+    if item.only_me:
+        return user.id == item.owner_user_id
+    return not item.group_ids or bool(set(user.group_ids).intersection(item.group_ids))
+
+
+def library_item_visible_to(user: User, item: PromptTemplate | SkillFile) -> bool:
+    """Whether a prompt or skill exists for ``user`` at all: listed, opened, or managed.
+
+    Everyone it is shared with sees it. Tenant admins also see what their
+    workspace shares with groups they are not in, because they manage the
+    Library, but never another person's Only me item.
+    """
+    if library_item_shared_with(user, item):
+        return True
+    return is_tenant_admin(user) and user.tenant_id == item.tenant_id and not item.only_me
 
 
 def tool_access_allowed(user: User, config: ToolConfig) -> bool:

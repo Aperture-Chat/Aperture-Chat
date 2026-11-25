@@ -174,6 +174,7 @@ from app.core.model_gateway import (
     ModelGatewayConfigurationError,
     ModelGatewayError,
     ModelGatewayRoute,
+    ModelUpstreamUnavailable,
     get_model_gateway_client,
     resolve_model_route,
     supports_image_input,
@@ -245,6 +246,7 @@ from app.core.policy import (
     is_hermes_tool,
     is_workspace_agent_profile,
     model_access_allowed,
+    library_item_shared_with,
     tool_access_allowed,
     tool_use_allowed,
 )
@@ -2933,7 +2935,10 @@ def _generate_completion(
             return payload, _translate_response(payload, request.model, runtime_context)
 
         def complete(conversation: list[dict[str, Any]]) -> Completion:
-            return _past_provider_filter(partial(ask, conversation))
+            try:
+                return _past_provider_filter(partial(ask, conversation))
+            except ModelUpstreamUnavailable as unserved:
+                raise _elsewhere_or(unserved, model_config, fallback) from unserved
 
         step_facts: list[dict[str, Any]] = []
         researched = _complete_after_steps(
@@ -2949,7 +2954,7 @@ def _generate_completion(
         # Whatever follows continues from the research, not from before it.
         messages = researched.messages
         payload, response = researched.reply
-        switch = fallback() if fallback is not None and _provider_filtered(response) else None
+        switch = fallback(FALLBACK_FOR_FILTER) if fallback is not None and _provider_filtered(response) else None
         if switch is not None:
             raise _AnswerElsewhere(switch, _fallback_activity(model_config, switch, payload.get("provider")))
         if request.surface == "draft" and _provider_filtered(response):
@@ -3074,6 +3079,17 @@ class _AnswerElsewhere(Exception):
         super().__init__(switch.model.id)
         self.switch = switch
         self.activity = activity
+
+
+def _elsewhere_or(
+    unserved: ModelUpstreamUnavailable, current: ModelConfig, fallback: FilterFallback | None
+) -> Exception:
+    """What ends a turn the upstream would not serve: the hand-off to the
+    model that answers instead, or the refusal itself when none may."""
+    switch = fallback(FALLBACK_FOR_UNAVAILABLE) if fallback is not None else None
+    if switch is None:
+        return unserved
+    return _AnswerElsewhere(switch, _fallback_activity(current, switch, unserved.served_by, unavailable=True))
 
 
 def _unconfigured_route_detail(route: ModelGatewayRoute) -> str:
@@ -4636,25 +4652,34 @@ def _stream_events(
             # The turn's opening waits while it could still be the stand-in a
             # provider sends for a reply its filter withheld.
             stand_in = StandInGate()
-            for delta in deltas:
-                if not delta:
-                    # Upstream keep-alive while the model is still thinking.
-                    yield ": keep-alive\n\n"
-                    last_wire_activity = time.monotonic()
-                    continue
-                delta = stand_in.feed(delta)
-                visible = take(delta, first_delta_of_round) if delta else ""
-                first_delta_of_round = first_delta_of_round and not delta
-                if not visible:
-                    # Keep the wire alive so the client's stall watchdog never
-                    # mistakes held-back text for a drop.
-                    now = time.monotonic()
-                    if now - last_wire_activity >= KEEPALIVE_INTERVAL_SECONDS:
+            # Set when the upstream would not serve this turn at all.
+            unserved: ModelUpstreamUnavailable | None = None
+            try:
+                for delta in deltas:
+                    if not delta:
+                        # Upstream keep-alive while the model is still thinking.
                         yield ": keep-alive\n\n"
-                        last_wire_activity = now
-                    continue
-                yield _sse_data({"delta": visible})
-                last_wire_activity = time.monotonic()
+                        last_wire_activity = time.monotonic()
+                        continue
+                    delta = stand_in.feed(delta)
+                    visible = take(delta, first_delta_of_round) if delta else ""
+                    first_delta_of_round = first_delta_of_round and not delta
+                    if not visible:
+                        # Keep the wire alive so the client's stall watchdog never
+                        # mistakes held-back text for a drop.
+                        now = time.monotonic()
+                        if now - last_wire_activity >= KEEPALIVE_INTERVAL_SECONDS:
+                            yield ": keep-alive\n\n"
+                            last_wire_activity = now
+                        continue
+                    yield _sse_data({"delta": visible})
+                    last_wire_activity = time.monotonic()
+            except ModelUpstreamUnavailable as refusal:
+                if stand_in.opened:
+                    # Words of this turn are already shown: it stays this
+                    # model's, and the browser resumes it.
+                    raise
+                unserved = refusal
             round_annotations = usage_sink.get("annotations")
             if isinstance(round_annotations, list):
                 stream_annotations.extend(round_annotations)
@@ -4682,7 +4707,13 @@ def _stream_events(
                 # Nothing of this turn has been shown yet.
                 held = stand_in.release()
                 # A turn that asked for research steps is not the reply.
-                verdict = "deliver" if step_gate.block else after_unshown_turn(finish_reason, held, filter_retries)
+                verdict = (
+                    "fail"
+                    if unserved is not None
+                    else "deliver"
+                    if step_gate.block
+                    else after_unshown_turn(finish_reason, held, filter_retries)
+                )
                 if verdict == "ask_again":
                     # The same request often passes the next time.
                     filter_retries += 1
@@ -4690,12 +4721,20 @@ def _stream_events(
                     last_wire_activity = time.monotonic()
                     continue
                 if verdict == "fail":
-                    switch = None if switched or fallback is None else fallback()
+                    cause = FALLBACK_FOR_FILTER if unserved is None else FALLBACK_FOR_UNAVAILABLE
+                    served_by = usage_sink.get("served_by") if unserved is None else unserved.served_by
+                    switch = None if switched or fallback is None else fallback(cause)
                     if switch is None:
-                        raise _ReplyWithheld(_provider_filter_detail(route, usage_sink.get("served_by")))
+                        raise unserved or _ReplyWithheld(_provider_filter_detail(route, served_by))
                     # Another model answers the same turn, after the same
                     # conversation; text already shown stays as it is.
-                    yield _sse_data({"activity": _fallback_activity(model_config, switch, usage_sink.get("served_by"))})
+                    yield _sse_data(
+                        {
+                            "activity": _fallback_activity(
+                                model_config, switch, served_by, unavailable=unserved is not None
+                            )
+                        }
+                    )
                     last_wire_activity = time.monotonic()
                     earlier_turns = request_messages[len(base_messages) :]
                     model_config, route, switched, filter_retries = switch.model, switch.route, True, 0
@@ -5895,7 +5934,12 @@ class FilterSwitch:
     route: ModelGatewayRoute
 
 
-FilterFallback = Callable[[], "FilterSwitch | None"]
+# Why another model answers, as the audit trail records it.
+FALLBACK_FOR_FILTER = "provider_content_filter"
+FALLBACK_FOR_UNAVAILABLE = "provider_unavailable"
+
+# Called with why the reply needs another model; None when none may answer.
+FilterFallback = Callable[[str], "FilterSwitch | None"]
 
 
 def _may_answer_instead(actor: User, current: ModelConfig, model: ModelConfig) -> bool:
@@ -5918,10 +5962,14 @@ def _filter_fallback(
     current: ModelConfig,
     runtime_context: dict[str, object],
     tenant_id: str | None,
+    reason: str = FALLBACK_FOR_FILTER,
     *,
     stream: bool = True,
 ) -> FilterSwitch | None:
     """Another model that may answer this request, with a working route.
+
+    ``reason`` is why the first model could not: its provider's filter kept
+    withholding the reply, or its upstream would not serve it at all.
 
     Only a model the person may use themselves, under the same content rules,
     from the same tenant (or the platform), and not a workspace agent; it is
@@ -5955,7 +6003,7 @@ def _filter_fallback(
             "chat.completion_fallback",
             stream,
             runtime_context,
-            extra={"fallback_from": current.id, "reason": "provider_content_filter"},
+            extra={"fallback_from": current.id, "reason": reason},
         )
         return FilterSwitch(model, route)
     return None
@@ -6142,11 +6190,16 @@ def _route_or_none(store: SeedStore, model: ModelConfig, tenant_id: str | None) 
         return None
 
 
-def _fallback_activity(current: ModelConfig, switch: FilterSwitch, served_by: object) -> dict[str, Any]:
-    """The work-trace step for a reply another model answers."""
+def _fallback_activity(
+    current: ModelConfig, switch: FilterSwitch, served_by: object, *, unavailable: bool = False
+) -> dict[str, Any]:
+    """The work-trace step for a reply another model answers: after a filter
+    kept withholding it, or (``unavailable``) the upstream would not serve it."""
     activity: dict[str, Any] = {"kind": "model-fallback", "from": current.name, "to": switch.model.name}
     if isinstance(served_by, str) and served_by.strip():
         activity["served_by"] = served_by.strip()
+    if unavailable:
+        activity["reason"] = "unavailable"
     return activity
 
 
@@ -6897,7 +6950,7 @@ def _assert_prompt_template_access(actor: User, template: PromptTemplate) -> Non
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Prompt template is outside your tenant."
         )
-    if template.group_ids and not set(actor.group_ids).intersection(template.group_ids):
+    if not library_item_shared_with(actor, template):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Prompt template access is restricted."
         )
@@ -6912,7 +6965,7 @@ def _assert_skill_file_access(actor: User, skill: SkillFile) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Skill file is outside your tenant."
         )
-    if skill.group_ids and not set(actor.group_ids).intersection(skill.group_ids):
+    if not library_item_shared_with(actor, skill):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Skill file access is restricted."
         )
