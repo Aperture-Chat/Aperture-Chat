@@ -87,14 +87,25 @@ describe("recordActivity", () => {
       "A safety filter at Azure withheld the reply",
     ],
     [
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "filter" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "filter", continued: false },
       "route:fallback",
       "Claude Opus 5.5 answered instead",
     ],
     [
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "unavailable" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "unavailable", continued: false },
       "route:fallback",
       "Claude Opus 5.5 answered instead",
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", servedBy: "", why: "failed", continued: false },
+      "route:fallback",
+      "Claude Opus 5.5 answered instead",
+    ],
+    [
+      // Part of the reply was already written by the first model.
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", servedBy: "", why: "failed", continued: true },
+      "route:fallback",
+      "Claude Opus 5.5 finished the reply",
     ],
     [
       { kind: "provider-filter", attempt: 2, servedBy: "" },
@@ -138,10 +149,38 @@ describe("recordActivity", () => {
     ["filter", "", "A safety filter kept withholding GPT-6 Astra"],
     ["unavailable", "Azure", "GPT-6 Astra was not available at Azure"],
     ["unavailable", "", "GPT-6 Astra was not available"],
+    ["failed", "", "GPT-6 Astra ran into an error"],
+    ["failed", "Azure", "GPT-6 Astra ran into an error at Azure"],
+    ["empty", "", "GPT-6 Astra returned an empty reply"],
+    ["empty", "Azure", "GPT-6 Astra returned an empty reply"],
   ] as const)("a reply another model answered says why (%s, served by %j)", (why, servedBy, detail) => {
-    const step = recordActivity([], { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy, why });
+    const step = recordActivity([], {
+      kind: "model-fallback",
+      from: "GPT-6 Astra",
+      to: "Claude Opus 5.5",
+      servedBy,
+      why,
+      continued: false,
+    });
 
     expect(step[0].detail).toBe(detail);
+  });
+
+  test.each([
+    ["filter", "A safety filter kept withholding GPT-6 Astra"],
+    ["unavailable", "GPT-6 Astra was no longer available"],
+    ["failed", "GPT-6 Astra ran into an error part-way through"],
+  ] as const)("a reply another model finished says why (%s)", (why, detail) => {
+    const step = recordActivity([], {
+      kind: "model-fallback",
+      from: "GPT-6 Astra",
+      to: "Claude Opus 5.5",
+      servedBy: "",
+      why,
+      continued: true,
+    });
+
+    expect(step[0]).toMatchObject({ label: "Claude Opus 5.5 finished the reply", detail });
   });
 
   test("each tool call is its own step and a failed call is a flag", () => {

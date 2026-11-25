@@ -64,13 +64,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.29](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.29)**:
-> Whoever creates a prompt or skill now chooses who gets it: **Only me**,
-> **Everyone**, or **Specific groups**. When a provider cannot serve the model
-> you chose, another model answers instead of an empty reply.
-> v0.5.28 added deleting and adding blocks on a slide, **Auto** reasoning, and
-> **Only me** connections.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0528) and
+> **Current release: [v0.5.30](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.30)**:
+> When the model you chose fails (an error, a lost connection, or an empty
+> reply), another model of similar ability takes over, in chat and in Drafts,
+> and the work trace says which one and why.
+> v0.5.29 let whoever creates a prompt or skill choose who gets it: **Only
+> me**, **Everyone**, or **Specific groups**.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0529) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -94,12 +94,19 @@ policies appropriate for your organization's data.
 
 <sub>Also scripted: a stand-in model (<code>qa-filtered</code>) answered every try with the filter's refusal and named Azure as its server, and a second stand-in (<code>qa-stub</code>) wrote the answer. The retries, the switch, and the trace are the application's own.</sub>
 
+<p align="center">
+  <img src="docs/images/chat-handover-light.png" alt="A reply's work trace: routed to qa-drops, wrote the reply, then qa-stub finished the reply because qa-drops ran into an error part-way through, followed by the whole answer" width="760">
+</p>
+
+<sub>Scripted as well: one stand-in model (<code>qa-drops</code>) sent the first two sentences and then broke its connection, and a second stand-in (<code>qa-stub</code>) wrote the rest. The switch, the joined answer, and the trace are the application's own. No real model failed for this picture.</sub>
+
 - **Approved models and agents.** Pick a model or agent for each conversation. Access follows provider, platform, tenant, group, user, and deny policies.
 - **Reasoning levels.** Under **Reasoning** in **Send options**, choose **Fast**, **Balanced**, or **Smart**. They ask the model for low, medium, and high reasoning, the same on every model that supports it. **Fast** also keeps the answer short and skips research steps. Check **Auto** and Aperture picks the level for each message from its words and attachments, without asking a model. The rail then shows the level it picked.
 - **Grounded answers.** Use attachments, knowledge bases, connected documents, and web search, then open the citations behind an answer. Attached files are kept and open in the document viewer, and typing `#` brings a knowledge file or a whole base into the message as a block you can check before you send.
 - **Research steps.** Before it answers, a reply can search your knowledge again, search the web, read a linked page, or work out a figure exactly, up to three rounds of four steps. Each step shows in the work trace with what it looked for. Steps use only the knowledge and web access already allowed for that message, a page step reads only an address from the search results, your own messages, or your knowledge sources, and Fast replies skip them.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
 - **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it. If the connection drops, the reply picks up where it stopped, and an empty answer to "continue" is asked again instead of ending the reply.
+- **When a model fails.** If the model you chose runs into an error, loses its connection, or returns an empty reply, another model you are allowed to use takes over at once. Aperture picks the one nearest in ability: a full-size model stands in for a full-size model, and a model from another company comes first. If the first model had already written part of the reply, those words stay and the other model finishes it. The work trace names the model that took over and says why. Drafts does the same for documents, decks, and spreadsheets, and its closing line names the model that wrote the work. A rejected provider key is still reported as it is, and a custom agent's reply is not handed to another model. Each switch is recorded in the audit log.
 - **When a provider's filter refuses.** Some providers run their own safety filter (Azure does for the OpenAI models it hosts) and send "I'm sorry, but I cannot assist with that request." in place of the answer. Aperture asks again twice. If the filter keeps refusing, another model you are allowed to use answers instead, and the work trace names it. A reply the filter cuts off partway goes on from where it stopped. Each switch is recorded in the audit log.
 - **When a provider cannot serve a model.** A router such as OpenRouter passes each model to the company that hosts it, and that host can decline to serve a request. The reply used to come back empty. Now another model you are allowed to use answers instead, and the work trace says which model was not available and where. If no other model may answer, the message names the host and gives its reason. Each switch is recorded in the audit log.
 - **Pictures in replies.** Ask for pictures, photos, or images and the reply places them where they belong. With **Web** on, each one is a freely licensed photo from Wikimedia Commons (public domain, CC0, CC BY, or CC BY-SA) with its credit and a link to its source. Otherwise, or when no photo fits, an image model you may use draws an illustration that is labelled as one. When neither is possible, the reply says so in that place. The OpenRouter model sync also brings in models that only make pictures, such as MAI-Image.
@@ -251,7 +258,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.29
+#   APERTURE_IMAGE_TAG=v0.5.30
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -272,7 +279,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.29 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.30 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -307,10 +314,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.29` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.30` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.29-dev`, `v0.5.29-test`, `v0.5.29-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.30-dev`, `v0.5.30-test`, `v0.5.30-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable

@@ -99,7 +99,7 @@ import { ClarifyCard } from "./ClarifyCard";
 import { respondToClarification, waitingClarification, type ClarifyQuestions, type ClarifyResponse, type WaitingClarification } from "../lib/clarify";
 import { draftIntakePrompt, requestWithAnswers, revealScrollTop } from "../lib/draftIntake";
 import { loadAskPreference, storeAskPreference } from "../lib/streamPreference";
-import type { ChatStreamActivity } from "../lib/streamActivity";
+import { answeredBy, type ChatStreamActivity } from "../lib/streamActivity";
 import {
   ALargeSmall,
   AlignCenter,
@@ -3687,7 +3687,8 @@ export function DocumentAssistantWorkspace({
     });
   }
 
-  /** Shows the research a writing call did on its own before it wrote. */
+  /** Shows what a model call reports besides its reply: the research it did
+   * on its own, and that another model answered when the chosen one failed. */
   function recordDraftResearch(activity: ChatStreamActivity[] = []) {
     setDraftTrace((trace) => (trace ? recordResearch(trace, activity) : trace));
   }
@@ -6360,6 +6361,8 @@ export function DocumentAssistantWorkspace({
       revising ? (currentDeck?.slides ?? []).map(deckSlideOutline).join("\n\n") : "",
     );
 
+    // The model that wrote the deck: another, once the chosen one failed.
+    let deckWriter = selectedAgent.name;
     const askProvider = async (prompt: string) => {
       const reply = await sendChat(completionUserId, {
         model: selectedAgent.id,
@@ -6378,6 +6381,7 @@ export function DocumentAssistantWorkspace({
         },
       });
       recordDraftResearch(reply.activity);
+      deckWriter = answeredBy(deckWriter, reply.activity);
       return plainDraftCitations(reply.content ?? "", reply.citations);
     };
     // Fit fixes are rewording only: no web, sources, or attachments.
@@ -6396,6 +6400,8 @@ export function DocumentAssistantWorkspace({
           reasoningEffort,
         },
       });
+      recordDraftResearch(reply.activity);
+      deckWriter = answeredBy(deckWriter, reply.activity);
       return splitAssistantThinking(reply.content ?? "").visibleContent;
     };
 
@@ -6494,7 +6500,7 @@ export function DocumentAssistantWorkspace({
           "deck-draft",
           `${revising ? "Revised" : "Drafted"} ${nextDeck.slides.length} slide${
             nextDeck.slides.length === 1 ? "" : "s"
-          } with ${selectedAgent.name}.${fallbackNotice ? ` ${fallbackNotice}` : ""} ${fitSummary}`,
+          } with ${deckWriter}.${fallbackNotice ? ` ${fallbackNotice}` : ""} ${fitSummary}`,
           {
             createdAt: completedAt,
             executedAt: requestStartedAt,
@@ -8650,7 +8656,7 @@ export function DocumentAssistantWorkspace({
       };
       const assistantCompletionEvent = assistantEvent(
         liveWebSearch ? "provider-web-draft" : "provider-draft",
-        `${liveWebSearch ? "Provider web search" : "Provider drafting"} completed through ${selectedAgent.name}; ${reply.citations.length} citation${
+        `${liveWebSearch ? "Provider web search" : "Provider drafting"} completed through ${answeredBy(selectedAgent.name, reply.activity)}; ${reply.citations.length} citation${
           reply.citations.length === 1 ? "" : "s"
         } returned.`,
         { createdAt: completedAt, executedAt: requestStartedAt, durationMs },
@@ -9081,12 +9087,13 @@ export function DocumentAssistantWorkspace({
           );
         }
         advanceDraftTrace("finalize");
+        const writer = answeredBy(agent.name, reply.activity);
         return {
           html: revisedHtml,
-          versionSummary: `Provider revision through ${agent.name}`,
+          versionSummary: `Provider revision through ${writer}`,
           completionMessage: requestedAdditionalPages
-            ? `Expanded the document by ${revisedPageCount - originalPageCount} page${revisedPageCount - originalPageCount === 1 ? "" : "s"} through ${agent.name}.`
-            : `Provider revision completed through ${agent.name}; ${reply.citations.length} citation${reply.citations.length === 1 ? "" : "s"} returned.`,
+            ? `Expanded the document by ${revisedPageCount - originalPageCount} page${revisedPageCount - originalPageCount === 1 ? "" : "s"} through ${writer}.`
+            : `Provider revision completed through ${writer}; ${reply.citations.length} citation${reply.citations.length === 1 ? "" : "s"} returned.`,
           status: (versionLabel) => `${versionLabel} applied from provider revision.`,
         };
       },
@@ -9147,6 +9154,8 @@ export function DocumentAssistantWorkspace({
             reasoningEffort,
           },
         });
+        recordDraftResearch(reply.activity);
+        const writer = answeredBy(agent.name, reply.activity);
         ensureUnchanged();
         advanceDraftTrace("protect");
         const stampedAt = Date.parse(draftNowIso());
@@ -9154,7 +9163,7 @@ export function DocumentAssistantWorkspace({
         const { changed } = applyDocumentPatch(blocks, patches, (content, order) => {
           // The edit trail counts runs with one stamp as one edit, and each of
           // these should be its own stop.
-          const stamp = { at: new Date(stampedAt + order).toISOString(), by: agent.name };
+          const stamp = { at: new Date(stampedAt + order).toISOString(), by: writer };
           const marker = markInlineAiSuggestion(window.document.createElement("span"), stamp);
           marker.appendChild(content);
           return marker;
@@ -9163,16 +9172,16 @@ export function DocumentAssistantWorkspace({
         if (!changed) {
           return {
             html: null,
-            versionSummary: `No change through ${agent.name}`,
-            completionMessage: `${agent.name} found nothing needed to change.`,
+            versionSummary: `No change through ${writer}`,
+            completionMessage: `${writer} found nothing needed to change.`,
             status: () => "The assistant found nothing needed to change.",
           };
         }
         const patchedHtml = holder.innerHTML;
         return {
           html: isAutomatedTestMode() ? patchedHtml : (await repaginateOverfullDocumentPages(patchedHtml)) ?? patchedHtml,
-          versionSummary: `${changed} change${changed === 1 ? "" : "s"} through ${agent.name}`,
-          completionMessage: `Made ${changed} change${changed === 1 ? "" : "s"} through ${agent.name}. The formatting was kept.`,
+          versionSummary: `${changed} change${changed === 1 ? "" : "s"} through ${writer}`,
+          completionMessage: `Made ${changed} change${changed === 1 ? "" : "s"} through ${writer}. The formatting was kept.`,
           status: (versionLabel) => `${versionLabel} applied. Every change is marked in the document.`,
           reviewEdits: true,
         };
@@ -9368,6 +9377,7 @@ export function DocumentAssistantWorkspace({
           reasoningEffort: reasoningSupported ? "low" : null,
           clarifyMode: "ask",
         },
+        onActivity: (activity) => recordDraftResearch([activity]),
       });
       questions = reply.questions;
     } catch {

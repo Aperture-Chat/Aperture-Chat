@@ -9,6 +9,7 @@ from app.core.model_gateway import ModelGatewayError, ModelGatewayRoute
 from app.main import app
 from app.models.schemas import ModelConfig
 from app.repositories.deps import get_store
+from tests.test_upstream_unavailable import _only_models
 
 
 client = TestClient(app)
@@ -100,6 +101,8 @@ def test_stream_error_is_honest_and_has_no_success_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    # No other model may take over, so the failure ends the reply.
+    _only_models("gpt-4o-mini")
 
     def failing_stream(*args, **kwargs):
         yield "Partial"
@@ -239,10 +242,35 @@ def test_stream_forwards_upstream_keepalives_as_sse_comments(
     assert not any(isinstance(event, dict) and event.get("delta") == "" for event in events)
 
 
+def test_a_turns_reported_tokens_join_the_replys_usage_and_none_are_invented() -> None:
+    from types import SimpleNamespace
+
+    from app.routes.chat import _usage_after_turn
+
+    def settled(total: int | None, prompt: int | None = None, completion: int | None = None) -> SimpleNamespace:
+        return SimpleNamespace(
+            event=SimpleNamespace(total_tokens=total, prompt_tokens=prompt, completion_tokens=completion)
+        )
+
+    # A turn whose provider reported nothing leaves the usage as it was.
+    assert _usage_after_turn({}, settled(None)) == {}
+    # A total with no breakdown is kept as a total; the parts stay at zero.
+    first = _usage_after_turn({}, settled(9))
+    assert first == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 9}
+    assert _usage_after_turn(first, settled(None)) is first
+    assert _usage_after_turn(first, settled(15, 10, 5)) == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 24,
+    }
+
+
 def test_stream_error_events_carry_honest_retryable_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _configured_tenant_route)
+    # No other model may take over, so each failure ends the reply.
+    _only_models("gpt-4o-mini")
 
     def overloaded_stream(*args, **kwargs):
         raise ModelGatewayError("Test Provider returned HTTP 529", status_code=529)

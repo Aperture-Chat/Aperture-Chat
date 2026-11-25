@@ -99,19 +99,28 @@ export function traceAnchorId(
 
 const RESEARCH_STEP_ID = /:step-\d+$/;
 
-function researchTaken({ factRun, research = [] }: DraftTraceState): number {
-  if (!factRun) return research.length;
-  return factRun.activity.filter((step) => RESEARCH_STEP_ID.test(step.id)).length;
+/** What the run's model calls have reported so far. */
+function reported({ factRun, research = [] }: DraftTraceState): ChatActivityTraceStep[] {
+  return factRun ? factRun.activity : research.map((found) => found.step);
 }
 
-/** Adds the research steps a writing call reports having taken. A run may
- * make several writing calls, and each numbers its steps from one, so they
- * are numbered here in the order the run took them. */
+/** Adds what a writing call reports: the research steps it took, and that
+ * another model answered when the chosen one failed. A run may make several
+ * writing calls, and each numbers its steps from one, so they are numbered
+ * here in the order the run took them. A run says once that another model
+ * took over, however many of its calls that model answers. */
 export function recordResearch(trace: DraftTraceState, activities: ChatStreamActivity[]): DraftTraceState {
-  const taken = researchTaken(trace);
-  const steps = activities
+  const known = reported(trace);
+  const taken = known.filter((step) => RESEARCH_STEP_ID.test(step.id)).length;
+  const handOff = activities
+    .filter((activity) => activity.kind === "model-fallback")
+    .flatMap((activity) => recordActivity([], activity))
+    .filter((step) => !known.some((shown) => shown.id === step.id))
+    .slice(0, 1);
+  const researched = activities
     .filter((activity) => activity.kind === "step")
     .flatMap((activity, index) => recordActivity([], { ...activity, number: taken + index + 1 }));
+  const steps = [...handOff, ...researched];
   if (steps.length === 0) return trace;
   if (trace.factRun) {
     return { ...trace, factRun: { ...trace.factRun, activity: [...trace.factRun.activity, ...steps] } };
