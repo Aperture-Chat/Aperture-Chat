@@ -59,8 +59,8 @@ def test_manifest_serves_aperture_defaults_without_auth() -> None:
     assert payload["display"] == "standalone"
     assert payload["start_url"] == "/"
     assert payload["theme_color"] == "#087d8b"
-    # The splash matches the default icon's paper tile.
-    assert payload["background_color"] == "#f9f7f2"
+    # The splash is the light theme's card color (--surface).
+    assert payload["background_color"] == "#f5faf7"
     assert [icon["src"] for icon in payload["icons"]] == [
         "/api/pwa/icon-192.png",
         "/api/pwa/icon-512.png",
@@ -185,3 +185,12 @@ def test_default_icons_exist_at_declared_sizes() -> None:
         response = client.get(f"/api/pwa/icon-{size}.png")
         assert response.status_code == 200
         assert response.content.startswith(b"\x89PNG")
+
+
+def test_default_icon_tiles_match_the_splash_color() -> None:
+    _reset_branding(_tenant())
+    splash = client.get("/api/pwa/manifest.webmanifest").json()["background_color"]
+    for size in (180, 192, 512):
+        icon = Image.open(BytesIO(client.get(f"/api/pwa/icon-{size}.png").content)).convert("RGB")
+        corners = {icon.getpixel(spot) for spot in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1))}
+        assert {"#%02x%02x%02x" % corner for corner in corners} == {splash}
