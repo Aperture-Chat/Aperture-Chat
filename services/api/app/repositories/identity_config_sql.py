@@ -100,7 +100,9 @@ from app.models.schemas import (
     Group,
     ElasticExportSettings,
     PlatformSettings,
+    PromptTemplate,
     Provider,
+    SkillFile,
     TenantRetentionPolicy,
     ToolConfig,
     User,
@@ -2088,6 +2090,13 @@ def _model_from_payload(
         # this exact legacy omission; an unknown creator means no tenant admin
         # can make the tool Only me, so the backfill cannot narrow access.
         canonical_payload["created_by_user_id"] = None
+    if model_type in (PromptTemplate, SkillFile):
+        # Choosing who gets a prompt or skill shipped after the identity/config
+        # SQL authority. Accept only these exact legacy omissions; no owner and
+        # not Only me keep every existing item shared exactly as before, so
+        # the backfill cannot narrow or widen access.
+        canonical_payload.setdefault("owner_user_id", None)
+        canonical_payload.setdefault("only_me", False)
     if model_type is User:
         # Access requests shipped after SQL identity authority. Existing user
         # rows legitimately omit these fields; backfill only their inert

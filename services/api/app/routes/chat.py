@@ -246,6 +246,7 @@ from app.core.policy import (
     is_hermes_tool,
     is_workspace_agent_profile,
     model_access_allowed,
+    library_item_shared_with,
     tool_access_allowed,
     tool_use_allowed,
 )
@@ -6949,7 +6950,7 @@ def _assert_prompt_template_access(actor: User, template: PromptTemplate) -> Non
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Prompt template is outside your tenant."
         )
-    if template.group_ids and not set(actor.group_ids).intersection(template.group_ids):
+    if not library_item_shared_with(actor, template):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Prompt template access is restricted."
         )
@@ -6964,7 +6965,7 @@ def _assert_skill_file_access(actor: User, skill: SkillFile) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Skill file is outside your tenant."
         )
-    if skill.group_ids and not set(actor.group_ids).intersection(skill.group_ids):
+    if not library_item_shared_with(actor, skill):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Skill file access is restricted."
         )
