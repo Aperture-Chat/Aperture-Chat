@@ -73,6 +73,19 @@ people". The picture is signed in as Priya Shah in the light theme at
 model was registered on the instance, and none was called: the prompt's text
 was typed into the editor by the capture script. The prompt was not saved.
 
+One picture was added on November 25, 2026 from the v0.5.30 interface:
+`chat-handover-light.png`. It was taken on an isolated local instance (API and
+Vite on loopback ports) started from the release source on a fresh data
+directory with the seeded demo organization, signed in as the seeded platform
+owner in the light theme at 1440×900 and 2× scale, and compressed with
+`oxipng -o 4 --strip safe`. Both models in it are scripted stand-ins on a
+small local server. `qa-drops` streamed the first two sentences of a fixed
+answer and then closed its connection before the transfer ended, the way a
+dropped upstream does. `qa-stub`, asked to continue, streamed the rest of the
+same fixed answer. The switch to the other model, the joined reply, and the
+work trace are the application's own. No real model or provider failed for
+this picture.
+
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
@@ -125,6 +138,9 @@ was typed into the editor by the capture script. The prompt was not saved.
 - `chat-fallback-light.png`: a reply's work trace after a provider's filter
   withheld it on all three tries and another model answered, with the answer
   below it.
+- `chat-handover-light.png`: a reply's work trace after its model ran into an
+  error part-way through and another model finished the reply, with the whole
+  answer below it.
 - `chat-steps-light.png`: a reply's work trace after it took research steps
   (two more searches of workspace knowledge and one worked-out figure), with
   the cited answer below it.
