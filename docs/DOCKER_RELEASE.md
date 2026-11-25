@@ -311,8 +311,9 @@ the rollback item before upgrading.
   guide PDFs do not cover these changes; the Library lessons on prompts and
   skills are stale. The move to another model was tried against a scripted
   stand-in that replays the error OpenRouter sent, not against a provider
-  that was refusing at the time. Pulling the published images from GHCR
-  still required signing in on 2026-11-24.
+  that was refusing at the time. The clean-install check upgraded data
+  written by v0.5.18, not by v0.5.28. Pulling the published images from
+  GHCR still required signing in on 2026-11-25.
 
 ## New Since v0.5.27
 
