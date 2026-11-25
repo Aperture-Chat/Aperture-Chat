@@ -15,7 +15,7 @@
 import { markerEntryLabel, parseMarkerBracket, type MarkerEntry, type MarkerLetter } from "./citationTargets";
 import { parseMarkdownBlocks, resolveDiagramBlock, type MarkdownBlock } from "./markdown";
 import { parseStewardDiagram, parseStructuredSummaryDiagram } from "./stewardDiagram";
-import type { ChatStreamActivity } from "./streamActivity";
+import type { ChatStreamActivity, FallbackWhy } from "./streamActivity";
 import type { ChatActivityTraceStep, ChatCitation, ChatMessage } from "./types";
 
 export type TraceKind =
@@ -276,11 +276,15 @@ type StepBuilders = {
 };
 
 /** Why another model answered: who kept `from` from answering, in plain words. */
-const FALLBACK_CAUSE: Record<"filter" | "unavailable", (from: string, servedBy: string) => string> = {
-  filter: (from, servedBy) =>
-    servedBy ? `A safety filter at ${servedBy} kept withholding ${from}` : `A safety filter kept withholding ${from}`,
-  unavailable: (from, servedBy) =>
-    servedBy ? `${from} was not available at ${servedBy}` : `${from} was not available`,
+const at = (servedBy: string) => (servedBy ? ` at ${servedBy}` : "");
+
+/** Why the first model did not give the reply; `continued` when it had
+ * written part of it before the other model took over. */
+const FALLBACK_CAUSE: Record<FallbackWhy, (from: string, servedBy: string, continued: boolean) => string> = {
+  filter: (from, servedBy) => `A safety filter${at(servedBy)} kept withholding ${from}`,
+  unavailable: (from, servedBy, continued) => `${from} was ${continued ? "no longer" : "not"} available${at(servedBy)}`,
+  failed: (from, servedBy, continued) => `${from} ran into an error${at(servedBy)}${continued ? " part-way through" : ""}`,
+  empty: (from) => `${from} returned an empty reply`,
 };
 
 const ACTIVITY_STEPS: StepBuilders = {
@@ -324,8 +328,12 @@ const ACTIVITY_STEPS: StepBuilders = {
       `Asked again (try ${attempt + 1})`,
     ),
   ],
-  "model-fallback": ({ from, to, servedBy, why }) => [
-    stepOf("route:fallback", `${to} answered instead`, FALLBACK_CAUSE[why](from, servedBy)),
+  "model-fallback": ({ from, to, servedBy, why, continued }) => [
+    stepOf(
+      "route:fallback",
+      continued ? `${to} finished the reply` : `${to} answered instead`,
+      FALLBACK_CAUSE[why](from, servedBy, continued),
+    ),
   ],
   hermes: ({ memories, skills, automations }) => hermesSteps(memories, skills, automations),
   resume: ({ attempt }) => [

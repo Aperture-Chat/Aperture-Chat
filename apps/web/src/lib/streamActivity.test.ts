@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseStreamActivity } from "./streamActivity";
+import { answeredBy, parseStreamActivity } from "./streamActivity";
 
 describe("parseStreamActivity", () => {
   test.each([
@@ -31,15 +31,32 @@ describe("parseStreamActivity", () => {
     [{ kind: "provider-filter", attempt: 2 }, { kind: "provider-filter", attempt: 2, servedBy: "" }],
     [
       { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", served_by: "Azure" },
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "filter" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "filter", continued: false },
     ],
     [
       { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", served_by: "Azure", reason: "unavailable" },
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "unavailable" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "unavailable", continued: false },
     ],
     [
       { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", reason: "something new" },
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "", why: "filter" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "", why: "filter", continued: false },
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "failed" },
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", servedBy: "", why: "failed", continued: false },
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "empty" },
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", servedBy: "", why: "empty", continued: false },
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "failed", continued: true },
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", servedBy: "", why: "failed", continued: true },
+    ],
+    [
+      // Only the API's own yes counts as one.
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "failed", continued: "yes" },
+      { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", servedBy: "", why: "failed", continued: false },
     ],
     [
       { kind: "hermes", memories: 1, skills: ["Style"], automations: [] },
@@ -65,6 +82,16 @@ describe("parseStreamActivity", () => {
     { kind: "model-fallback", from: "GPT-6 Astra" },
   ])("rejects malformed %j", (raw) => {
     expect(parseStreamActivity(raw)).toBeNull();
+  });
+
+  test("a reply is credited to the model that answered instead, when one did", () => {
+    const handOff = parseStreamActivity({ kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "failed" })!;
+    const step = parseStreamActivity({ kind: "continue", round: 1 })!;
+
+    expect(answeredBy("GPT-6.2 Sol", [step, handOff])).toBe("Claude Opus 5.5");
+    expect(answeredBy("GPT-6.2 Sol", [step])).toBe("GPT-6.2 Sol");
+    expect(answeredBy("GPT-6.2 Sol", [])).toBe("GPT-6.2 Sol");
+    expect(answeredBy("GPT-6.2 Sol")).toBe("GPT-6.2 Sol");
   });
 
   test("drops malformed entries inside lists instead of the whole event", () => {

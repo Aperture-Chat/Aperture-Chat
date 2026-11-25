@@ -28,7 +28,7 @@ from app.core.model_gateway import (
     supports_image_input,
     supports_reasoning_effort,
 )
-from app.models.schemas import Provider
+from app.models.schemas import ModelCapabilities, Provider
 
 
 def _anthropic_route(supported_parameters: frozenset[str] = frozenset()) -> ModelGatewayRoute:
@@ -277,6 +277,57 @@ def test_openrouter_discovery_captures_capability_metadata() -> None:
     assert full.capabilities.input_modalities == ["text", "image", "audio"]
     bare = next(model for model in models if model.id == "vendor/no-caps")
     assert bare.capabilities is None
+
+
+def _openrouter_prices(*pricings: object) -> list[float | None]:
+    """The output price each catalog entry is recorded with, in order."""
+    catalog = {"data": [{"id": f"vendor/model-{index}", "pricing": pricing} for index, pricing in enumerate(pricings)]}
+    models, _source = discover_provider_models(
+        _catalog_provider("openrouter"),
+        "sk-or-test",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=catalog)),
+    )
+    return [model.capabilities.output_price if model.capabilities else None for model in models]
+
+
+def test_openrouter_discovery_records_the_output_price_for_a_million_tokens() -> None:
+    # The catalog lists dollars for one token, as text.
+    assert _openrouter_prices({"prompt": "0.000005", "completion": "0.000025"}, {"completion": 0.0000006}) == [
+        25.0,
+        0.6,
+    ]
+
+
+@pytest.mark.parametrize(
+    "pricing",
+    [
+        None,
+        {},
+        "0.000025",
+        {"prompt": "0.000005"},
+        # A free model, and a router whose price depends on where it routes.
+        {"completion": "0"},
+        {"completion": "-1"},
+        {"completion": "varies"},
+        {"completion": None},
+        {"completion": True},
+        {"completion": "inf"},
+        {"completion": "nan"},
+    ],
+)
+def test_a_price_the_catalog_does_not_state_is_left_unrecorded(pricing: object) -> None:
+    assert _openrouter_prices(pricing) == [None]
+
+
+def test_a_model_known_only_by_its_price_still_carries_it() -> None:
+    catalog = {"data": [{"id": "vendor/priced", "pricing": {"completion": "0.00001"}}]}
+    models, _source = discover_provider_models(
+        _catalog_provider("openrouter"),
+        "sk-or-test",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=catalog)),
+    )
+
+    assert models[0].capabilities == ModelCapabilities(output_price=10.0)
 
 
 def test_anthropic_discovery_lists_catalog_models() -> None:

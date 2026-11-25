@@ -18,6 +18,7 @@ from app.db.orm import TenantUsagePermitRow
 from app.main import app
 from app.models.schemas import ChatCompletionRequest
 from app.repositories.deps import get_store
+from tests.test_upstream_unavailable import _only_models
 from app.routes.chat import (
     _resolve_gateway_route,
     _resolve_runtime_context,
@@ -597,6 +598,8 @@ def test_later_continuation_error_keeps_first_event_and_fails_permit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _activate_openrouter()
+    # No other model may take over, so the failure ends the request.
+    _only_models("openrouter-openai-gpt-4o-mini")
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:

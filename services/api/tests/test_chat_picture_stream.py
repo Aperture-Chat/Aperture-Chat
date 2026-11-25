@@ -230,6 +230,9 @@ def test_text_after_a_pending_picture_is_not_lost_when_the_provider_fails(monkey
         raise ModelGatewayError("upstream refused", status_code=400)
 
     monkeypatch.setattr("app.routes.chat.find_picture", slow)
+    # No other model may take over, so the failure ends the reply.
+    for model in get_store().models.values():
+        model.platform_enabled = model.id == "gpt-4o-mini"
 
     text, _sent, events = _reply(monkeypatch, chunks())
 

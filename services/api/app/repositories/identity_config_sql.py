@@ -99,6 +99,7 @@ from app.models.schemas import (
     EmailSettings,
     Group,
     ElasticExportSettings,
+    ModelConfig,
     PlatformSettings,
     PromptTemplate,
     Provider,
@@ -2062,6 +2063,12 @@ def _model_from_payload(
             else rule
             for rule in canonical_payload["rules"]
         ]
+    if model_type is ModelConfig and isinstance(canonical_payload.get("capabilities"), Mapping):
+        # A model's listed price shipped after the identity/config SQL
+        # authority. Accept only this exact legacy omission; None is "no price
+        # listed", which leaves which model stands in for another to the
+        # other signals, exactly as before the price was recorded.
+        canonical_payload["capabilities"] = {"output_price": None, **canonical_payload["capabilities"]}
     if model_type is AlertRule and "detector_ids" not in canonical_payload:
         # Detection-scoped alert rules shipped after the identity/config SQL
         # authority. Accept only this exact legacy omission; an empty list
