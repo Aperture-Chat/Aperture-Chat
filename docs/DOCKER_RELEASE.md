@@ -317,8 +317,11 @@ before upgrading.
   stand-in models that fail on purpose (an HTTP 500, a connection closed
   part-way through a streamed reply, and an empty reply), not against a real
   provider that was failing at the time. The ranking by price was tried in
-  tests; the live catalog had no recorded prices when this was written. Pulling the published images from GHCR still
-  required signing in on 2026-11-25.
+  tests and, on a clean install, against a stand-in catalog that lists
+  prices; the live catalog had no recorded prices when this was written. The
+  clean-install check upgraded data written by v0.5.29 and by v0.5.18.
+  Pulling the published images from GHCR still required signing in on
+  2026-11-25.
 
 ## New Since v0.5.28
 
