@@ -64,13 +64,13 @@ Requests to configured model providers, cloud connectors, and web search leave
 your deployment when those features are used. Choose providers and access
 policies appropriate for your organization's data.
 
-> **Current release: [v0.5.28](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.28)**:
-> You can now delete and add blocks on a slide, let **Auto** pick the
-> reasoning level, and keep a connection to **Only me**, and agents receive
-> attached prompts and skills of up to 65,000 characters.
-> v0.5.27 made **Fast**, **Balanced**, and **Smart** ask every model for low,
-> medium, and high reasoning, in chat and in Drafts.
-> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0527) and
+> **Current release: [v0.5.29](https://github.com/Aperture-Chat/Aperture-Chat/releases/tag/v0.5.29)**:
+> Whoever creates a prompt or skill now chooses who gets it: **Only me**,
+> **Everyone**, or **Specific groups**. When a provider cannot serve the model
+> you chose, another model answers instead of an empty reply.
+> v0.5.28 added deleting and adding blocks on a slide, **Auto** reasoning, and
+> **Only me** connections.
+> See the [release notes](docs/DOCKER_RELEASE.md#new-since-v0528) and
 > [all releases](https://github.com/Aperture-Chat/Aperture-Chat/releases).
 
 ## Features
@@ -101,6 +101,7 @@ policies appropriate for your organization's data.
 - **Clarifying questions.** When a request is unclear, a reply pauses to ask up to three multiple-choice questions, one at a time, with a suggested choice. **Decide for me** lets the assistant choose and say what it assumed, and the **Ask me when unclear** switch in Send options turns questions off.
 - **Replies that keep running.** A reply runs on the server, so it keeps going when you reload, close the browser, or switch to another chat, and it is there when you come back. **Stop** ends it. If the connection drops, the reply picks up where it stopped, and an empty answer to "continue" is asked again instead of ending the reply.
 - **When a provider's filter refuses.** Some providers run their own safety filter (Azure does for the OpenAI models it hosts) and send "I'm sorry, but I cannot assist with that request." in place of the answer. Aperture asks again twice. If the filter keeps refusing, another model you are allowed to use answers instead, and the work trace names it. A reply the filter cuts off partway goes on from where it stopped. Each switch is recorded in the audit log.
+- **When a provider cannot serve a model.** A router such as OpenRouter passes each model to the company that hosts it, and that host can decline to serve a request. The reply used to come back empty. Now another model you are allowed to use answers instead, and the work trace says which model was not available and where. If no other model may answer, the message names the host and gives its reason. Each switch is recorded in the audit log.
 - **Pictures in replies.** Ask for pictures, photos, or images and the reply places them where they belong. With **Web** on, each one is a freely licensed photo from Wikimedia Commons (public domain, CC0, CC BY, or CC BY-SA) with its credit and a link to its source. Otherwise, or when no photo fits, an image model you may use draws an illustration that is labelled as one. When neither is possible, the reply says so in that place. The OpenRouter model sync also brings in models that only make pictures, such as MAI-Image.
 - **Code and diagrams.** Code blocks are colored, editable in place, and offer **AI edit** on a highlighted selection; **Download** names the file from its contents, and HTML previews open in a canvas. A code block that is still being written keeps its newest lines in view until you scroll up in it. Ask for a diagram and get a structure chart you can restyle with eight themes, rearrange by dragging, and export as PNG or SVG.
 - **Client-matter numbers.** File a chat under a client-matter number from the **Matter** row in **Send options**. Numbers you type are saved for reuse, and the same numbers tag knowledge bases, so records staff can find a matter's chats in retention and its knowledge bases in Library search.
@@ -212,6 +213,12 @@ policies appropriate for your organization's data.
   <img src="docs/images/tools-only-me-light.png" alt="A connection in the Library's Tools with Who can use it set to Only me, beside Everyone and Specific groups, and the line Only you can use this connection" width="760">
 </p>
 
+- **Who gets a prompt or skill.** Administrators create prompts and skills, and whoever creates one sets **Who can use it** in its editor: **Only me**, **Everyone**, or **Specific groups**. A new one starts as **Everyone**. With **Specific groups**, people outside the ticked groups no longer find it in the **/** and **$** menus in chat. Administrators still see it, and can open and edit it in the Library. With **Only me**, other workspace administrators cannot see it, open it, attach it to an agent, or read its audit events. Platform owners still see every prompt and skill. Only the person who created one, or a platform owner, can choose **Only me**. An agent that carries an **Only me** prompt or skill warns that it will refuse chats from anyone else.
+
+<p align="center">
+  <img src="docs/images/prompt-audience-light.png" alt="A new prompt in the Library's Tools with Who can use it set to Specific groups, the Legal group ticked, and the line Only people in the groups you tick can use this prompt" width="760">
+</p>
+
 ### Administration and identity
 
 | Admin Console | Platform Owner Console |
@@ -244,7 +251,7 @@ then open a terminal in the extracted directory:
 ```bash
 cp .env.example .env
 # Edit .env before continuing:
-#   APERTURE_IMAGE_TAG=v0.5.28
+#   APERTURE_IMAGE_TAG=v0.5.29
 #   APERTURE_SECRET_KEY=<a unique, high-entropy secret of at least 32 characters>
 docker compose -f docker-compose.release.yml --profile local pull
 docker compose -f docker-compose.release.yml --profile local up -d
@@ -265,7 +272,7 @@ With Docker Compose, Python 3, a DNS hostname, and ports 80/443 available, run
 the installer from a reviewed release bundle:
 
 ```bash
-python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.28 --start
+python3 scripts/install-release.py --directory ./deployment --domain chat.example.com --tag v0.5.29 --start
 ```
 
 Replace the domain and version. The installer writes private configuration, a
@@ -300,10 +307,10 @@ to `ghcr.io/aperture-chat/aperture-chat-api` and
 
 | Tag | Use |
 | --- | --- |
-| `v0.5.28` | Reviewed stable release. Prefer a specific version for deployments. |
+| `v0.5.29` | Reviewed stable release. Prefer a specific version for deployments. |
 | `latest` | Moving alias for the newest stable release. |
 | `dev`, `test`, `main` | Moving image pairs for each release branch. |
-| `v0.5.28-dev`, `v0.5.28-test`, `v0.5.28-main` | Moving branch aliases for commits carrying that version. |
+| `v0.5.29-dev`, `v0.5.29-test`, `v0.5.29-main` | Moving branch aliases for commits carrying that version. |
 | `<branch>-<full-commit-sha>` | Commit-addressed builds. Record manifest digests for exact reproducibility. |
 
 Changes are promoted **dev → test → main**. Both test images must be inspectable
