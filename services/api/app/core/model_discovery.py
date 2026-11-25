@@ -7,6 +7,7 @@ platform catalog.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -252,13 +253,34 @@ def _capabilities_from_catalog(item: dict[str, Any]) -> ModelCapabilities | None
     architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
     input_modalities = _string_list(architecture.get("input_modalities"))
     output_modalities = _string_list(architecture.get("output_modalities"))
-    if not supported and not input_modalities and not output_modalities:
+    output_price = _output_price(item.get("pricing"))
+    if not supported and not input_modalities and not output_modalities and output_price is None:
         return None
     return ModelCapabilities(
         supported_parameters=supported,
         input_modalities=input_modalities,
         output_modalities=output_modalities,
+        output_price=output_price,
     )
+
+
+def _output_price(pricing: Any) -> float | None:
+    """Dollars for a million output tokens, from a catalog's ``pricing``.
+
+    OpenRouter lists dollars for one token, as text. A free model's zero and
+    the negative price of a router that charges by where it routes say
+    nothing about how able the model is, so neither is recorded.
+    """
+    listed = pricing.get("completion") if isinstance(pricing, dict) else None
+    if isinstance(listed, bool) or not isinstance(listed, (str, int, float)):
+        return None
+    try:
+        per_token = float(listed)
+    except ValueError:
+        return None
+    if not math.isfinite(per_token) or per_token <= 0:
+        return None
+    return round(per_token * 1_000_000, 6)
 
 
 def _string_list(value: Any) -> list[str]:

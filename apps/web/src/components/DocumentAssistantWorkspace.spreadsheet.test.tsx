@@ -132,7 +132,7 @@ const EXPENSES_REPLY = JSON.stringify({
 });
 
 /** Answers the Drafts chat calls in turn (the last answer repeats), each after `gate` when given. */
-function installSheetReply(gate?: Promise<void>, replies: string[] = [EXPENSES_REPLY]): string[] {
+function installSheetReply(gate?: Promise<void>, replies: string[] = [EXPENSES_REPLY], activity: unknown[] = []): string[] {
   const prompts: string[] = [];
   const fetchMock = globalThis.fetch as unknown as { mockImplementation: (implementation: typeof fetch) => void; mockReset?: () => void };
   fetchMock.mockReset?.();
@@ -143,7 +143,7 @@ function installSheetReply(gate?: Promise<void>, replies: string[] = [EXPENSES_R
       prompts.push(payload.messages.map((message) => message.content).join("\n"));
       await gate;
       const content = replies[Math.min(prompts.length, replies.length) - 1];
-      return json({ choices: [{ message: { role: "assistant", content } }] });
+      return json({ choices: [{ message: { role: "assistant", content } }], activity });
     }
     if (/\/api\/drafts/.test(url) && (init?.method ?? "GET").toUpperCase() === "GET") return json([]);
     return json({ error: "offline" }, 503);
@@ -213,6 +213,21 @@ test("a spreadsheet request is traced the way the chat traces a reply", async ()
   const reply = await within(events).findByText(/Built a monthly expense tracker/);
   expect(request.compareDocumentPosition(finished) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(finished.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("the spreadsheet trace says when another model answered because the chosen one failed", async () => {
+  installSheetReply(undefined, [EXPENSES_REPLY], [
+    { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "failed" },
+  ]);
+  renderSheetHandoff();
+  const events = screen.getByLabelText("Assistant events");
+  const finished = await within(events).findByRole("region", { name: "Aperture Chat activity trace" });
+  fireEvent.click(within(finished).getByRole("button", { name: "Collapse work trace" }));
+  fireEvent.click(within(finished).getByRole("button", { name: "Expand work trace" }));
+  expect(within(finished).getByText("Claude Opus 5.5 answered instead")).toBeInTheDocument();
+  expect(within(finished).getByText("GPT-6.2 Sol ran into an error")).toBeInTheDocument();
+  // The workbook is built all the same.
+  await waitFor(() => expect(cellText("B4")).toBe("$2,220"));
 });
 
 test("the spreadsheet trace records a formula fix round and the thinking the model exposed", async () => {

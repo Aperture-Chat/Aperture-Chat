@@ -205,9 +205,10 @@ def _only_models(*model_ids: str) -> None:
         model.platform_enabled = model.id in model_ids
 
 
-def _serve(monkeypatch: pytest.MonkeyPatch, by_model: dict[str, list[httpx.Response]]) -> list[str]:
+def _serve(monkeypatch: pytest.MonkeyPatch, by_model: dict[str, list[httpx.Response | Exception]]) -> list[str]:
     """Answer each upstream model through the real gateway with its own
-    replies, in order (the last repeats). Returns the models asked, in order."""
+    replies, in order (the last repeats); a reply that is an exception is how
+    the connection fails. Returns the models asked, in order."""
     monkeypatch.setattr("app.routes.chat._resolve_gateway_route", _route)
     asked: list[str] = []
 
@@ -216,6 +217,8 @@ def _serve(monkeypatch: pytest.MonkeyPatch, by_model: dict[str, list[httpx.Respo
         replies = by_model[upstream]
         reply = replies[min(asked.count(upstream), len(replies) - 1)]
         asked.append(upstream)
+        if isinstance(reply, Exception):
+            raise reply
         return reply
 
     gateway = ModelGatewayClient(transport=httpx.MockTransport(handler))
@@ -231,13 +234,14 @@ def _events(response_text: str) -> list[dict]:
     ]
 
 
-def _ask() -> list[dict]:
+def _ask(model: str = "gpt-4o-mini", **more: object) -> list[dict]:
     response = client.post(
         "/api/chat/complete",
         json={
-            "model": "gpt-4o-mini",
+            "model": model,
             "messages": [{"role": "user", "content": "Draft the oral argument."}],
             "stream": True,
+            **more,
         },
         headers={"x-aperture-user": "user-jane"},
     )
@@ -347,35 +351,34 @@ def test_a_reply_unserved_on_every_model_switches_once_and_ends_with_the_reason(
     assert not any(event.get("done") for event in events)
 
 
-def test_a_reply_cut_by_the_upstream_after_it_began_keeps_its_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_reply_cut_by_the_upstream_after_it_began_is_finished_by_another_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _only_models("gpt-4o-mini", "gpt-4.1")
     asked = _serve(
         monkeypatch,
-        {"gpt-4o-mini": [_sse(_words("May it please "), IN_STREAM_REFUSAL)], "gpt-4.1": [_sse(_words("Other.", "stop"))]},
+        {
+            "gpt-4o-mini": [_sse(_words("May it please "), IN_STREAM_REFUSAL)],
+            "gpt-4.1": [_sse(_words("the court.", "stop"))],
+        },
     )
 
     events = _ask()
 
-    # The words already shown are this model's; the browser resumes from them.
-    assert asked == ["gpt-4o-mini"]
-    assert _text(events) == "May it please "
-    assert _switches(events) == []
-    error = next(event for event in events if "error" in event)
-    assert "Azure could not serve gpt-4o-mini" in error["error"]
-    assert error["retryable"] is True
-
-
-def test_another_failure_inside_the_stream_is_shown_and_no_model_is_switched(monkeypatch: pytest.MonkeyPatch) -> None:
-    _only_models("gpt-4o-mini", "gpt-4.1")
-    limited = {"choices": [], "error": {"code": 429, "message": "Rate limit exceeded."}}
-    asked = _serve(monkeypatch, {"gpt-4o-mini": [_sse(limited)], "gpt-4.1": [_sse(_words("Other.", "stop"))]})
-
-    events = _ask()
-
-    assert asked == ["gpt-4o-mini"]
-    assert _switches(events) == []
-    error = next(event for event in events if "error" in event)
-    assert error["error"] == "Test Router did not return a completion: Test Router reported an error: Rate limit exceeded."
+    # The words already shown stay; the other model goes on from them.
+    assert asked == ["gpt-4o-mini", "gpt-4.1"]
+    assert _text(events) == "May it please the court."
+    assert _switches(events) == [
+        {
+            "kind": "model-fallback",
+            "from": "gpt-4o-mini",
+            "to": "gpt-4.1",
+            "served_by": "Azure",
+            "reason": "unavailable",
+            "continued": True,
+        }
+    ]
+    assert not any("error" in event for event in events)
 
 
 # --- A reply that does not stream (Drafts) --------------------------------

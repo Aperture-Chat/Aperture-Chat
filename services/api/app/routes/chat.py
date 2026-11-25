@@ -97,7 +97,14 @@ from app.core.connector_auth import (
     build_user_authorize_url,
     user_oauth_provider,
 )
-from app.core.model_fallback import fallback_order
+from app.core.model_fallback import (
+    FALLBACK_FOR_EMPTY,
+    FALLBACK_FOR_FAILURE,
+    FALLBACK_FOR_FILTER,
+    FALLBACK_FOR_UNAVAILABLE,
+    fallback_order,
+    reason_to_switch,
+)
 from app.core.provider_filter import (
     MAX_FILTER_RETRIES,
     StandInGate,
@@ -174,7 +181,6 @@ from app.core.model_gateway import (
     ModelGatewayConfigurationError,
     ModelGatewayError,
     ModelGatewayRoute,
-    ModelUpstreamUnavailable,
     get_model_gateway_client,
     resolve_model_route,
     supports_image_input,
@@ -297,6 +303,7 @@ from app.core.sessions import (
 )
 from app.repositories.deps import get_store, get_usage_budget_orchestrator
 from app.repositories.seed import SeedStore
+from app.repositories.usage_budgets import CompletionSettlement
 from app.routes.dependencies import current_user, current_user_or_api_key
 from app.routes.knowledge import (
     readable_base,
@@ -1536,8 +1543,9 @@ def complete(
     )
     _schedule_memory_followup(background_tasks, store, actor, request, route, runtime_context)
     _schedule_retention_tagging(background_tasks, store, actor, request, route, runtime_context)
-    # When a provider's safety filter keeps withholding the reply, another
-    # model the person may use answers instead (see app.core.model_fallback).
+    # When the model fails to answer (an error, a dropped connection, an
+    # empty reply, a safety filter that keeps withholding it), another model
+    # the person may use answers instead (see app.core.model_fallback).
     fallback = partial(
         _filter_fallback, store, actor, model, runtime_context, web_tenant_id, stream=bool(request.stream)
     )
@@ -2905,6 +2913,23 @@ def _generate_completion(
     (see app.core.work_steps); the reply carries what it did as ``activity``.
     """
 
+    def answer_elsewhere(elsewhere: _AnswerElsewhere) -> ChatCompletionResponse:
+        """The same request, given to the other model on the same usage
+        request; the reply says that it answered, and why."""
+        answer = _generate_completion(
+            request,
+            elsewhere.switch.model,
+            elsewhere.switch.route,
+            runtime_context,
+            store=store,
+            actor=actor,
+            usage_context=usage_context,
+            usage_surface=usage_surface,
+            step_runners=step_runners,
+        )
+        answer.activity = [elsewhere.activity, *answer.activity]
+        return answer
+
     try:
         client = get_model_gateway_client()
         if not route.configured:
@@ -2935,10 +2960,7 @@ def _generate_completion(
             return payload, _translate_response(payload, request.model, runtime_context)
 
         def complete(conversation: list[dict[str, Any]]) -> Completion:
-            try:
-                return _past_provider_filter(partial(ask, conversation))
-            except ModelUpstreamUnavailable as unserved:
-                raise _elsewhere_or(unserved, model_config, fallback) from unserved
+            return _past_provider_filter(partial(ask, conversation))
 
         step_facts: list[dict[str, Any]] = []
         researched = _complete_after_steps(
@@ -2954,9 +2976,10 @@ def _generate_completion(
         # Whatever follows continues from the research, not from before it.
         messages = researched.messages
         payload, response = researched.reply
-        switch = fallback(FALLBACK_FOR_FILTER) if fallback is not None and _provider_filtered(response) else None
+        cause = _unanswered_cause(_provider_filtered(response), _says_nothing(response))
+        switch = fallback(cause) if fallback is not None and cause is not None else None
         if switch is not None:
-            raise _AnswerElsewhere(switch, _fallback_activity(model_config, switch, payload.get("provider")))
+            raise _AnswerElsewhere(switch, _fallback_activity(model_config, switch, payload.get("provider"), cause))
         if request.surface == "draft" and _provider_filtered(response):
             raise _provider_filter_exception(route, payload)
         completed = _continue_completion_if_needed(
@@ -3034,6 +3057,9 @@ def _generate_completion(
             detail=detail,
         ) from exc
     except ModelGatewayError as exc:
+        elsewhere = _elsewhere(exc, model_config, fallback)
+        if elsewhere is not None:
+            return answer_elsewhere(elsewhere)
         close_error = _fail_usage_request(usage_context)
         if close_error is not None:
             raise _usage_budget_http_exception(close_error) from exc
@@ -3050,21 +3076,8 @@ def _generate_completion(
             raise _usage_budget_http_exception(close_error) from None
         raise
     except _AnswerElsewhere as elsewhere:
-        # The provider's filter kept withholding the reply: the same request
-        # goes to the other model, on the same usage request.
-        answer = _generate_completion(
-            request,
-            elsewhere.switch.model,
-            elsewhere.switch.route,
-            runtime_context,
-            store=store,
-            actor=actor,
-            usage_context=usage_context,
-            usage_surface=usage_surface,
-            step_runners=step_runners,
-        )
-        answer.activity = [elsewhere.activity, *answer.activity]
-        return answer
+        # The reply was withheld by the provider's filter, or had nothing in it.
+        return answer_elsewhere(elsewhere)
     except Exception:
         close_error = _fail_usage_request(usage_context)
         if close_error is not None:
@@ -3073,7 +3086,7 @@ def _generate_completion(
 
 
 class _AnswerElsewhere(Exception):
-    """Hands a withheld request to the model that answers instead."""
+    """Hands a request its model did not answer to the model that answers instead."""
 
     def __init__(self, switch: FilterSwitch, activity: dict[str, Any]) -> None:
         super().__init__(switch.model.id)
@@ -3081,15 +3094,35 @@ class _AnswerElsewhere(Exception):
         self.activity = activity
 
 
-def _elsewhere_or(
-    unserved: ModelUpstreamUnavailable, current: ModelConfig, fallback: FilterFallback | None
-) -> Exception:
-    """What ends a turn the upstream would not serve: the hand-off to the
-    model that answers instead, or the refusal itself when none may."""
-    switch = fallback(FALLBACK_FOR_UNAVAILABLE) if fallback is not None else None
+def _elsewhere(
+    failure: ModelGatewayError, current: ModelConfig, fallback: FilterFallback | None
+) -> _AnswerElsewhere | None:
+    """The hand-off to the model that answers for one that failed; None when
+    no other model may, or the failure is not another model's to answer for."""
+    cause = reason_to_switch(failure)
+    switch = fallback(cause) if fallback is not None and cause is not None else None
     if switch is None:
-        return unserved
-    return _AnswerElsewhere(switch, _fallback_activity(current, switch, unserved.served_by, unavailable=True))
+        return None
+    logger.warning("%s failed; %s answers instead. (%s)", current.name, switch.model.name, failure)
+    return _AnswerElsewhere(switch, _fallback_activity(current, switch, _served_by(failure), cause))
+
+
+def _served_by(failure: ModelGatewayError | None) -> str | None:
+    """The upstream a failure names, when there is one and it names one."""
+    return getattr(failure, "served_by", None)
+
+
+def _says_nothing(response: ChatCompletionResponse) -> bool:
+    """Whether a whole reply has nothing in it: no words and no tool call.
+    One cut at its token budget is not that; it is asked again with more room."""
+    choice = response.choices[0]
+    return not (
+        _response_text(response).strip()
+        or choice.message.get("tool_calls")
+        or choice.message.get("function_call")
+        or choice.finish_reason.strip().lower() in CONTINUATION_FINISH_REASONS
+    )
+
 
 
 def _unconfigured_route_detail(route: ModelGatewayRoute) -> str:
@@ -4600,7 +4633,7 @@ def _stream_events(
             nonlocal accumulated
             if (
                 opens_round
-                and (continuation_rounds or step_rounds)
+                and (continuation_rounds or step_rounds or switched)
                 and accumulated
                 and not accumulated.endswith(("\n", " "))
             ):
@@ -4652,8 +4685,10 @@ def _stream_events(
             # The turn's opening waits while it could still be the stand-in a
             # provider sends for a reply its filter withheld.
             stand_in = StandInGate()
-            # Set when the upstream would not serve this turn at all.
-            unserved: ModelUpstreamUnavailable | None = None
+            # Set when this turn failed in a way another model may answer
+            # for, with why another model should take the turn.
+            failed: ModelGatewayError | None = None
+            cause: str | None = None
             try:
                 for delta in deltas:
                     if not delta:
@@ -4674,80 +4709,79 @@ def _stream_events(
                         continue
                     yield _sse_data({"delta": visible})
                     last_wire_activity = time.monotonic()
-            except ModelUpstreamUnavailable as refusal:
-                if stand_in.opened:
-                    # Words of this turn are already shown: it stays this
-                    # model's, and the browser resumes it.
+            except ModelGatewayError as failure:
+                cause = reason_to_switch(failure)
+                if cause is None:
+                    # A rejected key or a broken route is said as it is.
                     raise
-                unserved = refusal
+                failed = failure
+                logger.warning("%s turn failed; another model may answer. (%s)", route.provider_name, failure)
             round_annotations = usage_sink.get("annotations")
             if isinstance(round_annotations, list):
                 stream_annotations.extend(round_annotations)
-            settlement = usage_context.settle_provider_child(
-                completion_id=completion_id,
-                usage=_stream_provider_usage(usage_sink),
-                attribution=ProviderUsageAttribution(
-                    model_id=model_config.id,
-                    provider_name=route.provider_name,
-                    surface=request.surface,
-                    message_count=1,
-                    thread_id=request.thread_id,
-                ),
-            )
-            round_settled = True
-            if settlement.event.total_tokens is not None:
-                round_usage = {
-                    "prompt_tokens": settlement.event.prompt_tokens or 0,
-                    "completion_tokens": settlement.event.completion_tokens or 0,
-                    "total_tokens": settlement.event.total_tokens,
-                }
-                total_usage = _merge_usage(total_usage, round_usage) if total_usage else round_usage
+            if failed is None:
+                # Only a call the model completed is recorded; a turn that
+                # failed is left to whatever ends the reply.
+                total_usage = _usage_after_turn(
+                    total_usage,
+                    usage_context.settle_provider_child(
+                        completion_id=completion_id,
+                        usage=_stream_provider_usage(usage_sink),
+                        attribution=ProviderUsageAttribution(
+                            model_id=model_config.id,
+                            provider_name=route.provider_name,
+                            surface=request.surface,
+                            message_count=1,
+                            thread_id=request.thread_id,
+                        ),
+                    ),
+                )
+                round_settled = True
             finish_reason = str(usage_sink.get("finish_reason") or "").strip().lower()
+            held = ""
             if not stand_in.opened:
                 # Nothing of this turn has been shown yet.
                 held = stand_in.release()
                 # A turn that asked for research steps is not the reply.
-                verdict = (
-                    "fail"
-                    if unserved is not None
-                    else "deliver"
-                    if step_gate.block
-                    else after_unshown_turn(finish_reason, held, filter_retries)
-                )
-                if verdict == "ask_again":
-                    # The same request often passes the next time.
-                    filter_retries += 1
-                    yield _sse_data({"activity": _filter_retry_activity(filter_retries, usage_sink)})
-                    last_wire_activity = time.monotonic()
-                    continue
-                if verdict == "fail":
-                    cause = FALLBACK_FOR_FILTER if unserved is None else FALLBACK_FOR_UNAVAILABLE
-                    served_by = usage_sink.get("served_by") if unserved is None else unserved.served_by
-                    switch = None if switched or fallback is None else fallback(cause)
-                    if switch is None:
-                        raise unserved or _ReplyWithheld(_provider_filter_detail(route, served_by))
-                    # Another model answers the same turn, after the same
-                    # conversation; text already shown stays as it is.
+                if failed is None and not step_gate.block:
+                    verdict = after_unshown_turn(finish_reason, held, filter_retries)
+                    if verdict == "ask_again":
+                        # The same request often passes the next time.
+                        filter_retries += 1
+                        yield _sse_data({"activity": _filter_retry_activity(filter_retries, usage_sink)})
+                        last_wire_activity = time.monotonic()
+                        continue
+                    # What a resumed reply was shown before it dropped counts as said.
+                    said = f"{_resumed_partial(request.messages)}{accumulated}{held}"
+                    cause = _unanswered_cause(verdict == "fail", _silent_turn(said, finish_reason, usage_sink))
+            if cause is not None:
+                served_by = _served_by(failed) or usage_sink.get("served_by")
+                switch = None if switched or fallback is None else fallback(cause)
+                if switch is not None:
+                    # Another model takes the turn, after the same
+                    # conversation; text already shown stays as it is, and
+                    # the reply goes on from it.
+                    written = accumulated[answer_start:]
+                    continued = bool(written.strip())
                     yield _sse_data(
-                        {
-                            "activity": _fallback_activity(
-                                model_config, switch, served_by, unavailable=unserved is not None
-                            )
-                        }
+                        {"activity": _fallback_activity(model_config, switch, served_by, cause, continued=continued)}
                     )
                     last_wire_activity = time.monotonic()
-                    earlier_turns = request_messages[len(base_messages) :]
+                    earlier_turns = _turns_for_stand_in(step_messages, written, request_messages[len(base_messages) :])
                     model_config, route, switched, filter_retries = switch.model, switch.route, True, 0
                     gateway_web_tools = _gateway_web_search_tools(route, runtime_context)
                     base_messages = _messages_with_runtime_context(request, model_config, runtime_context)
                     completion_budget = _completion_token_budget(request, model_config)
                     request_messages = [*base_messages, *earlier_turns]
                     continue
-                # The model's own words after all: they join the reply.
-                visible = take(held, first_delta_of_round) if held else ""
-                if visible:
-                    yield _sse_data({"delta": visible})
-                    last_wire_activity = time.monotonic()
+                ending = _unanswered_turn(failed, cause, route, served_by)
+                if ending is not None:
+                    raise ending
+            # The model's own words after all: they join the reply.
+            visible = take(held, first_delta_of_round) if held else ""
+            if visible:
+                yield _sse_data({"delta": visible})
+                last_wire_activity = time.monotonic()
             if step_gate.block and step_runners:
                 # The turn asked for research instead of answering: run it,
                 # hand the results back, and let the model go on.
@@ -4805,15 +4839,7 @@ def _stream_events(
             # continue in-place so the user still receives the full output.
             continuation_rounds += 1
             yield _sse_data({"activity": {"kind": "continue", "round": continuation_rounds}})
-            request_messages = [
-                *base_messages,
-                *step_messages,
-                # Trailing whitespace from a mid-token cut can violate
-                # provider dialect rules for assistant content; strip it —
-                # the joiner on the next round restores natural spacing.
-                {"role": "assistant", "content": written.rstrip()},
-                {"role": "user", "content": CONTINUATION_PROMPT},
-            ]
+            request_messages = [*base_messages, *_continuation_turns(step_messages, written)]
         delivery = yield from _deliver_output(
             accumulated,
             ask_gate=ask_gate,
@@ -5934,10 +5960,6 @@ class FilterSwitch:
     route: ModelGatewayRoute
 
 
-# Why another model answers, as the audit trail records it.
-FALLBACK_FOR_FILTER = "provider_content_filter"
-FALLBACK_FOR_UNAVAILABLE = "provider_unavailable"
-
 # Called with why the reply needs another model; None when none may answer.
 FilterFallback = Callable[[str], "FilterSwitch | None"]
 
@@ -6190,17 +6212,81 @@ def _route_or_none(store: SeedStore, model: ModelConfig, tenant_id: str | None) 
         return None
 
 
+# How the work trace names each reason another model answers. A filter that
+# kept withholding the reply is the reason when none is named.
+_FALLBACK_TRACE_REASON = {
+    FALLBACK_FOR_UNAVAILABLE: "unavailable",
+    FALLBACK_FOR_FAILURE: "failed",
+    FALLBACK_FOR_EMPTY: "empty",
+}
+
+
 def _fallback_activity(
-    current: ModelConfig, switch: FilterSwitch, served_by: object, *, unavailable: bool = False
+    current: ModelConfig,
+    switch: FilterSwitch,
+    served_by: object,
+    reason: str = FALLBACK_FOR_FILTER,
+    *,
+    continued: bool = False,
 ) -> dict[str, Any]:
-    """The work-trace step for a reply another model answers: after a filter
-    kept withholding it, or (``unavailable``) the upstream would not serve it."""
+    """The work-trace step for a reply another model answers, and why (see
+    app.core.model_fallback). ``continued`` when part of the reply was
+    already written and the other model goes on from it."""
     activity: dict[str, Any] = {"kind": "model-fallback", "from": current.name, "to": switch.model.name}
     if isinstance(served_by, str) and served_by.strip():
         activity["served_by"] = served_by.strip()
-    if unavailable:
-        activity["reason"] = "unavailable"
+    if reason in _FALLBACK_TRACE_REASON:
+        activity["reason"] = _FALLBACK_TRACE_REASON[reason]
+    if continued:
+        activity["continued"] = True
     return activity
+
+
+def _continuation_turns(step_messages: list[dict[str, Any]], written: str) -> list[dict[str, Any]]:
+    """The turns that ask a model to go on from what is already written."""
+    return [
+        *step_messages,
+        # Trailing whitespace from a mid-token cut can violate provider
+        # dialect rules for assistant content; strip it. The joiner on the
+        # next round restores natural spacing.
+        {"role": "assistant", "content": written.rstrip()},
+        {"role": "user", "content": CONTINUATION_PROMPT},
+    ]
+
+
+def _turns_for_stand_in(
+    step_messages: list[dict[str, Any]], written: str, asked: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """What the model that takes over a turn is given after the conversation:
+    the turns to go on from what is written, when anything is, else the
+    turns the first model was ``asked``."""
+    return _continuation_turns(step_messages, written) if written.strip() else asked
+
+
+def _unanswered_turn(
+    failed: ModelGatewayError | None, cause: str, route: ModelGatewayRoute, served_by: object
+) -> ModelGatewayError | None:
+    """What ends a turn no other model may take: its own failure, or the
+    filter's reason. An empty turn has neither, and ends as it came."""
+    if failed is not None:
+        return failed
+    return _ReplyWithheld(_provider_filter_detail(route, served_by)) if cause == FALLBACK_FOR_FILTER else None
+
+
+def _silent_turn(text: str, finish_reason: str, usage_sink: Mapping[str, Any]) -> bool:
+    """Whether a finished turn leaves the reply with nothing in it: no words
+    so far and no tool call. A turn cut at its token budget is not that; it
+    is asked again with more room."""
+    return not (text.strip() or usage_sink.get("tool_calls") or finish_reason in CONTINUATION_FINISH_REASONS)
+
+
+def _unanswered_cause(withheld_by_filter: bool, silent: bool) -> str | None:
+    """Why another model should give a reply that came back without failing
+    yet is no answer: the provider's filter stood in for it, or it has
+    nothing in it. None when the reply is the model's own."""
+    if withheld_by_filter:
+        return FALLBACK_FOR_FILTER
+    return FALLBACK_FOR_EMPTY if silent else None
 
 
 def _past_provider_filter(ask: Callable[[], Completion]) -> Completion:
@@ -6322,6 +6408,18 @@ def _join_output_segments(base_text: str, next_text: str) -> str:
     if base_text.endswith(("\n", " ")):
         return f"{base_text}{next_text}"
     return f"{base_text}\n\n{next_text}"
+
+
+def _usage_after_turn(total: dict[str, int], settlement: CompletionSettlement) -> dict[str, int]:
+    """The reply's usage so far, with the tokens a settled turn reported."""
+    if settlement.event.total_tokens is None:
+        return total
+    turn = {
+        "prompt_tokens": settlement.event.prompt_tokens or 0,
+        "completion_tokens": settlement.event.completion_tokens or 0,
+        "total_tokens": settlement.event.total_tokens,
+    }
+    return _merge_usage(total, turn) if total else turn
 
 
 def _merge_usage(first: dict[str, int], second: dict[str, int]) -> dict[str, int]:

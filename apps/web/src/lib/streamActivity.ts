@@ -11,6 +11,11 @@
 export type StreamToolCall = { name: string; ok: boolean };
 export type StreamRequirementCheck = { label: string; met: boolean };
 
+const NAMED_FALLBACK_REASONS = ["unavailable", "failed", "empty"] as const;
+
+/** Why another model answered a reply. */
+export type FallbackWhy = "filter" | (typeof NAMED_FALLBACK_REASONS)[number];
+
 export type ChatStreamActivity =
   | { kind: "agent"; name: string }
   | { kind: "privacy" }
@@ -31,8 +36,11 @@ export type ChatStreamActivity =
    * `servedBy` names the upstream that ran the filter, empty when unknown. */
   | { kind: "provider-filter"; attempt: number; servedBy: string }
   /** Another model answered. `why`: the provider's filter kept withholding
-   * the reply, or the upstream that serves the first model was unavailable. */
-  | { kind: "model-fallback"; from: string; to: string; servedBy: string; why: "filter" | "unavailable" }
+   * the reply, the upstream that serves the first model was unavailable, the
+   * first model failed (an error, a dropped connection), or it returned
+   * nothing. `continued`: the first model had written part of the reply, and
+   * the other went on from it. */
+  | { kind: "model-fallback"; from: string; to: string; servedBy: string; why: FallbackWhy; continued: boolean }
   | { kind: "hermes"; memories: number; skills: string[]; automations: string[] }
   /** The reply paused to ask the user this many questions. */
   | { kind: "ask"; questions: number }
@@ -156,8 +164,10 @@ const PARSERS: Record<string, Parser> = {
   "model-fallback": (raw) => {
     const from = text(raw.from);
     const to = text(raw.to);
-    const why = raw.reason === "unavailable" ? "unavailable" : "filter";
-    return from && to ? { kind: "model-fallback", from, to, servedBy: text(raw.served_by) ?? "", why } : null;
+    if (!from || !to) return null;
+    // The API names every reason but the filter, which is the one it began with.
+    const why = NAMED_FALLBACK_REASONS.find((reason) => reason === raw.reason) ?? "filter";
+    return { kind: "model-fallback", from, to, servedBy: text(raw.served_by) ?? "", why, continued: raw.continued === true };
   },
   ask: (raw) => {
     const questions = count(raw.questions);
@@ -177,4 +187,13 @@ export function parseStreamActivity(raw: unknown): ChatStreamActivity | null {
   const record = raw as Raw;
   const parser = typeof record.kind === "string" ? PARSERS[record.kind] : undefined;
   return parser ? parser(record) : null;
+}
+
+/** Who gave a reply: the model that answered instead when the chosen one
+ * failed, else the chosen one. */
+export function answeredBy(chosen: string, activity: ChatStreamActivity[] = []): string {
+  for (const reported of activity) {
+    if (reported.kind === "model-fallback") return reported.to;
+  }
+  return chosen;
 }

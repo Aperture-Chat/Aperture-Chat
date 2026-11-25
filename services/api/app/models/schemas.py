@@ -738,6 +738,10 @@ class ModelCapabilities(BaseModel):
     supported_parameters: list[str] = Field(default_factory=list)
     input_modalities: list[str] = Field(default_factory=list)
     output_modalities: list[str] = Field(default_factory=list)
+    # What the catalog charges for a million output tokens, in US dollars.
+    # Vendors price their strongest models highest, so this is how a stand-in
+    # of similar ability is found (see app.core.model_fallback).
+    output_price: float | None = None
 
 
 class ModelConfig(BaseModel):

@@ -164,6 +164,51 @@ describe("recordResearch", () => {
     expect(recordResearch(trace, [])).toBe(trace);
   });
 
+  const handOff: ChatStreamActivity = {
+    kind: "model-fallback",
+    from: "GPT-6.2 Sol",
+    to: "Claude Opus 5.5",
+    servedBy: "",
+    why: "failed",
+    continued: false,
+  };
+
+  it("shows that another model wrote a planned run's draft, under the step it happened in", () => {
+    const trace = recordResearch(run({ activeIndex: 2 }), [handOff, calc("1 + 1")]);
+    const shown = readTrace(draftRunMessage({ ...trace, activeIndex: 4, complete: true, endedAt: 9_000 }).activityTrace);
+    expect(shown.map((step) => step.label)).toEqual([
+      "Routing request",
+      "Preparing context",
+      "Generating answer",
+      "Claude Opus 5.5 answered instead",
+      "Worked out a figure",
+      "Finalizing response",
+    ]);
+    expect(shown[3]).toMatchObject({ id: "route:fallback", detail: "GPT-6.2 Sol ran into an error" });
+  });
+
+  it("shows that another model answered a spreadsheet run", () => {
+    const factRun = { activity: [{ id: "route:model", label: "Used Model" }], thinking: [], requestEventId: "e1" };
+    expect(labels(recordResearch(run({ factRun }), [handOff]))).toEqual(["Used Model", "Claude Opus 5.5 answered instead"]);
+  });
+
+  it("does not count a hand-off as a research step", () => {
+    const first = recordResearch(run({ activeIndex: 2 }), [handOff, calc("1 + 1")]);
+    expect(researchIds(recordResearch(first, [calc("2 + 2")]))).toEqual(["calc:step-1", "calc:step-2"]);
+  });
+
+  it.each([
+    ["planned", run({ activeIndex: 2 })],
+    ["spreadsheet", run({ factRun: { activity: [], thinking: [], requestEventId: "e1" } })],
+  ])("says once that another model took over a %s run, however many calls it answers", (_kind, start) => {
+    const again: ChatStreamActivity = { ...handOff, why: "empty" };
+    const twice = recordResearch(recordResearch(start, [handOff]), [again, again]);
+    const shown = readTrace(draftRunMessage(twice).activityTrace).filter((step) => step.id === "route:fallback");
+    expect(shown.map((step) => step.detail)).toEqual(["GPT-6.2 Sol ran into an error"]);
+    // A call that reports only a hand-off already shown changes nothing.
+    expect(recordResearch(twice, [again])).toBe(twice);
+  });
+
   it("says when a step could not be done", () => {
     const failed: ChatStreamActivity = { kind: "step", number: 1, do: "read_page", ok: false, found: 0, about: "" };
     const steps = readTrace(draftRunMessage(recordResearch(run({ activeIndex: 2 }), [failed])).activityTrace);

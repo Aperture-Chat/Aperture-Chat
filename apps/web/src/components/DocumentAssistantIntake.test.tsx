@@ -238,6 +238,42 @@ test("the writing call may research on its own, and the trace shows what it did"
   );
 });
 
+const HAND_OFF = { kind: "model-fallback", from: "GPT-6.2 Sol", to: "Claude Opus 5.5", reason: "failed" };
+
+test("the trace says when another model wrote the draft because the chosen one failed", async () => {
+  window.localStorage.setItem(ASK_SWITCH_KEY, "off");
+  installModel({ intake: ready, writing: writes(MEMO, [HAND_OFF]) });
+  renderDrafts();
+
+  ask("Draft a memo about the renewal");
+
+  await waitFor(() => expect(documentText()).toContain("renewal terms are summarised"));
+  const trace = screen.getByRole("region", { name: "Aperture Chat activity trace" });
+  await waitFor(() => expect(within(trace).getByText("Claude Opus 5.5 answered instead")).toBeInTheDocument(), {
+    timeout: 8000,
+  });
+  expect(within(trace).getByText("GPT-6.2 Sol ran into an error")).toBeInTheDocument();
+  // The run is credited to the model that wrote it, not the one that failed.
+  expect(screen.getByText(/^Provider drafting completed through Claude Opus 5\.5; /)).toBeInTheDocument();
+});
+
+test("the trace says when another model read the request because the chosen one failed", async () => {
+  installModel({
+    intake: () => stream({ activity: HAND_OFF }, { activity: { kind: "ask", questions: 1 } }, { questions: ONE_QUESTION }),
+    writing: writes(MEMO),
+  });
+  renderDrafts();
+
+  ask("Draft a memo about the renewal");
+
+  await questionCard();
+  const trace = screen.getByRole("region", { name: "Aperture Chat activity trace" });
+  await waitFor(() => expect(within(trace).getByText("Claude Opus 5.5 answered instead")).toBeInTheDocument(), {
+    timeout: 3000,
+  });
+  expect(trace).toHaveTextContent("Waiting for your answer");
+});
+
 test("a deck request is read first too, and its answers reach the deck's writing call", async () => {
   const sent = installModel({ intake: asking(), writing: writes("Not a deck") });
   renderDrafts();
