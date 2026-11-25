@@ -29,7 +29,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { StableLabel, Toggle } from "./Primitives";
-import { RailSwitch, type RailSwitchOption } from "./RailSwitch";
+import { AudienceChoice, audienceOf, audienceOptions, audienceSentence, GroupChecks, NO_GROUP_TICKED, type Audience } from "./AudienceChoice";
+import { RailSwitch } from "./RailSwitch";
 import { SelectControl } from "./SelectControl";
 import { OverflowMenu } from "./AgentWorkspaceConsole";
 import { ToolLibraryManager } from "./ToolLibraryManager";
@@ -69,8 +70,6 @@ type ActionStatus = { tone: Tone; message: string } | null;
 type ConnectionFilter = "all" | "on" | "off" | "setup";
 type TransportChoice = "http" | "sse" | "stdio";
 type AuthChoice = "none" | "bearer" | "oauth";
-/** Who can use a connection: its owner alone, the whole workspace, or chosen groups. */
-export type Audience = "only" | "everyone" | "groups";
 
 type ToolDraft = {
   name: string;
@@ -1597,13 +1596,16 @@ function AudienceField({
         <p className="lib-field-static">{accessSummary(tool, data)}. Sharing with groups is managed by administrators.</p>
       ) : tool.only_me || !owner ? (
         <AudienceChoice
-          data={data}
-          draft={draft}
+          groups={data.groups}
+          audience={draft.audience}
+          groupIds={draft.allowedGroupIds}
           owner={owner}
           offerOnly={onlyMeOffered(tool, data.me.id, perms.isOwner)}
           // Only the owner (or a platform owner) changes an Only me connection.
           disabled={readOnly || (Boolean(tool.only_me) && Boolean(owner) && !perms.isOwner)}
-          onDraft={onDraft}
+          noun="connection"
+          onAudience={(audience) => onDraft({ audience })}
+          onGroups={(allowedGroupIds) => onDraft({ allowedGroupIds })}
         />
       ) : data.groups.length === 0 ? (
         <small className="lib-field-hint">No groups are synced yet, so this is available to its creator.</small>
@@ -1632,104 +1634,9 @@ export function onlyMeOffered(
   return Boolean(tool.only_me) || isPlatformOwner || tool.created_by_user_id === meId || tool.owner_user_id === meId;
 }
 
-const ONLY_CREATOR = "Only the person who created this connection can make it private.";
-
-/** The rail stops, in the same order everywhere: Only me, Everyone, Specific groups. */
-function audienceOptions(owner: string | null, offerOnly: boolean, offerGroups: boolean): RailSwitchOption<Audience>[] {
-  return [
-    ...(offerOnly ? [{ value: "only" as const, label: owner ? `Only ${owner}` : "Only me" }] : []),
-    { value: "everyone", label: "Everyone" },
-    ...(offerGroups ? [{ value: "groups" as const, label: "Specific groups" }] : []),
-  ];
-}
-
 /** Someone else's name when they own the connection; null when it is the viewer's or nobody's. */
 function otherOwner(tool: ToolConfig, data: BootstrapData): string | null {
   return tool.owner_user_id && tool.owner_user_id !== data.me.id ? ownerWords(tool, data) : null;
-}
-
-function AudienceChoice({
-  data,
-  draft,
-  owner,
-  offerOnly,
-  disabled,
-  onDraft,
-}: {
-  data: BootstrapData;
-  draft: ToolDraft;
-  owner: string | null;
-  offerOnly: boolean;
-  disabled: boolean;
-  onDraft: (patch: Partial<ToolDraft>) => void;
-}) {
-  const options = audienceOptions(owner, offerOnly, data.groups.length > 0 || draft.audience === "groups");
-  const picking = draft.audience === "groups";
-  return (
-    <>
-      <RailSwitch ariaLabel="Who can use it" options={options} value={draft.audience} disabled={disabled} onChange={(audience) => onDraft({ audience })} />
-      <p className="lib-field-static">{audienceSentence(draft.audience, owner)}</p>
-      {!offerOnly && <small className="lib-field-hint">{ONLY_CREATOR}</small>}
-      {picking && (
-        <GroupChecks
-          groups={data.groups}
-          selected={draft.allowedGroupIds}
-          disabled={disabled}
-          onChange={(ids) => onDraft({ allowedGroupIds: ids })}
-        />
-      )}
-      {picking && draft.allowedGroupIds.length === 0 && <small className="lib-field-hint is-warning">{NO_GROUP_TICKED}</small>}
-      {data.groups.length === 0 && (
-        <small className="lib-field-hint">No groups are synced yet, so it can&apos;t be shared with specific groups.</small>
-      )}
-    </>
-  );
-}
-
-/** The chosen audience as one plain sentence. */
-export function audienceSentence(audience: Audience, owner: string | null): string {
-  if (audience === "only") return `Only ${owner ?? "you"} can use this connection.`;
-  if (audience === "everyone") return "Everyone in the workspace can use this connection.";
-  return "Only people in the groups you tick can use this connection.";
-}
-
-function GroupChecks({
-  groups,
-  selected,
-  disabled,
-  onChange,
-}: {
-  groups: BootstrapData["groups"];
-  selected: string[];
-  disabled: boolean;
-  onChange: (ids: string[]) => void;
-}) {
-  return (
-    <div className="lib-check-grid">
-      {groups.map((group) => (
-        <label className="lib-check" key={group.id}>
-          <input
-            type="checkbox"
-            disabled={disabled}
-            checked={selected.includes(group.id)}
-            onChange={(event) =>
-              onChange(
-                event.target.checked
-                  ? Array.from(new Set([...selected, group.id]))
-                  : selected.filter((id) => id !== group.id),
-              )
-            }
-          />
-          <span>
-            <strong>{group.name}</strong>
-            <small>
-              {group.user_count} {group.user_count === 1 ? "person" : "people"}
-            </small>
-          </span>
-        </label>
-      ))}
-    </div>
-  );
 }
 
 function Field({
@@ -1878,16 +1785,13 @@ function draftFromTool(tool: ToolConfig): ToolDraft {
 
 /** The audience a saved connection has. */
 export function audienceFromTool(tool: Pick<ToolConfig, "only_me" | "allowed_group_ids">): Audience {
-  if (tool.only_me) return "only";
-  return tool.allowed_group_ids.length > 0 ? "groups" : "everyone";
+  return audienceOf(tool.only_me, tool.allowed_group_ids);
 }
 
 /** What an audience saves as. Only me and Everyone never carry groups. */
 export function audienceToRequest(audience: Audience, groupIds: string[]): { only_me: boolean; allowed_group_ids: string[] } {
   return { only_me: audience === "only", allowed_group_ids: audience === "groups" ? groupIds : [] };
 }
-
-const NO_GROUP_TICKED = "Tick at least one group, or choose Everyone.";
 
 /** The access fields a save changes, or why it can't be saved: "Specific
  * groups" with none ticked would quietly mean everyone, so it is refused. */

@@ -325,6 +325,244 @@ test("placeholder timestamps are not shown as real times", () => {
   expect(formatUpdatedAt("2026-09-23T15:04:00+00:00")).toMatch(/2026/);
 });
 
+// --- Who can use it ----------------------------------------------------------
+
+const MODES = ["template", "skill"] as const;
+type Mode = (typeof MODES)[number];
+const NEW_LABEL = { template: "New prompt", skill: "New skill" } as const;
+const SAVE_LABEL = { template: "Save prompt", skill: "Save skill" } as const;
+
+function firstItem(mode: Mode) {
+  return mode === "template" ? currentData.promptTemplates[0] : currentData.skillFiles[0];
+}
+
+function setFirstItem(mode: Mode, patch: Record<string, unknown>) {
+  const item = { ...firstItem(mode), ...patch };
+  if (mode === "template") currentData = { ...currentData, promptTemplates: [item as BootstrapData["promptTemplates"][number]] };
+  else currentData = { ...currentData, skillFiles: [item as BootstrapData["skillFiles"][number]] };
+  return item;
+}
+
+function asTenantAdmin(userId: string) {
+  currentData = { ...currentData, me: sampleData.users.find((user) => user.id === userId)! };
+}
+
+/** The server echoes what it was sent on top of the stored item. */
+function echoSave(stored: Record<string, unknown> = {}) {
+  fetchMock.mockImplementationOnce(async (_input, init) => new Response(JSON.stringify({
+    id: "created", tenant_id: "tenant-example", updated_at: "2026-11-24T10:00:00Z", ...stored, ...JSON.parse(String(init?.body)),
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+}
+
+function lastBody() {
+  return JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+}
+
+function fillNew(mode: Mode) {
+  fireEvent.click(screen.getByRole("button", { name: NEW_LABEL[mode] }));
+  const form = screen.getByRole("form");
+  fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Hearing notes" } });
+  fireEvent.change(within(form).getByLabelText("Content"), { target: { value: "Summarize the hearing." } });
+  return form;
+}
+
+function audienceRail() {
+  return screen.getByRole("radiogroup", { name: "Who can use it" });
+}
+
+test.each(MODES)("a new %s is for everyone until its creator chooses otherwise", async (mode) => {
+  renderToolLibrary(mode);
+  const form = fillNew(mode);
+  const stops = within(audienceRail()).getAllByRole("radio");
+  expect(stops.map((stop) => stop.textContent)).toEqual(["Only me", "Everyone", "Specific groups"]);
+  expect(within(audienceRail()).getByRole("radio", { name: "Everyone" })).toBeChecked();
+  echoSave();
+  fireEvent.click(within(form).getByRole("button", { name: SAVE_LABEL[mode] }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody()).toMatchObject({ only_me: false, group_ids: [] });
+});
+
+test.each(MODES)("the creator keeps a new %s to themselves with Only me", async (mode) => {
+  renderToolLibrary(mode);
+  const form = fillNew(mode);
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Only me" }));
+  expect(form).toHaveTextContent(`Only you can use this ${mode === "template" ? "prompt" : "skill"}.`);
+  echoSave({ owner_user_id: "user-owner" });
+  fireEvent.click(within(form).getByRole("button", { name: SAVE_LABEL[mode] }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody()).toMatchObject({ only_me: true, group_ids: [] });
+  // The card says who gets it, in words.
+  expect(screen.getByRole("article", { name: "Hearing notes" })).toHaveTextContent("Only you");
+});
+
+test.each(MODES)("the creator shares a new %s with the groups they tick", async (mode) => {
+  renderToolLibrary(mode);
+  const form = fillNew(mode);
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Specific groups" }));
+  // Specific groups with none ticked would quietly mean everyone, so it is refused.
+  fireEvent.click(within(form).getByRole("button", { name: SAVE_LABEL[mode] }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Tick at least one group, or choose Everyone.");
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole("form")).getByRole("checkbox", { name: /Litigation/ }));
+  fireEvent.click(within(screen.getByRole("form")).getByRole("checkbox", { name: /Corporate/ }));
+  echoSave();
+  fireEvent.click(within(screen.getByRole("form")).getByRole("button", { name: SAVE_LABEL[mode] }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody()).toMatchObject({ only_me: false, group_ids: ["group-litigation", "group-corporate"] });
+  expect(screen.getByRole("article", { name: "Hearing notes" })).toHaveTextContent("Litigation, Corporate");
+});
+
+test.each(MODES)("groups ticked and then abandoned are not sent with a %s for everyone", async (mode) => {
+  renderToolLibrary(mode);
+  const form = fillNew(mode);
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Specific groups" }));
+  fireEvent.click(within(form).getByRole("checkbox", { name: /Litigation/ }));
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Everyone" }));
+  expect(within(form).queryByRole("checkbox", { name: /Litigation/ })).not.toBeInTheDocument();
+  echoSave();
+  fireEvent.click(within(form).getByRole("button", { name: SAVE_LABEL[mode] }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody()).toMatchObject({ only_me: false, group_ids: [] });
+});
+
+test.each(MODES)("the creator of a shared %s makes it Only me, and only the audience is sent", async (mode) => {
+  asTenantAdmin("user-admin");
+  const item = setFirstItem(mode, { owner_user_id: "user-admin", only_me: false, group_ids: ["group-litigation"] });
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  expect(within(audienceRail()).getByRole("radio", { name: "Specific groups" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: /Litigation/ })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Only me" }));
+  echoSave(item);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody()).toMatchObject({ only_me: true, group_ids: [] });
+  expect(screen.getByRole("article", { name: item.name })).toHaveTextContent("Only you");
+});
+
+test.each(MODES)("changing only the groups of a %s sends the groups and leaves Only me alone", async (mode) => {
+  asTenantAdmin("user-admin");
+  const item = setFirstItem(mode, { owner_user_id: "user-admin", only_me: false, group_ids: ["group-litigation"] });
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /Corporate/ }));
+  echoSave(item);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody().group_ids).toEqual(["group-litigation", "group-corporate"]);
+  expect(lastBody()).not.toHaveProperty("only_me");
+});
+
+test.each(MODES)("an Only me %s is opened up to everyone", async (mode) => {
+  asTenantAdmin("user-admin");
+  const item = setFirstItem(mode, { owner_user_id: "user-admin", only_me: true, group_ids: [] });
+  renderToolLibrary(mode);
+  expect(screen.getByRole("article", { name: item.name })).toHaveTextContent("Only you");
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  expect(within(audienceRail()).getByRole("radio", { name: "Only me" })).toBeChecked();
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Everyone" }));
+  echoSave(item);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
+  expect(lastBody()).toEqual(expect.objectContaining({ only_me: false }));
+  expect(lastBody()).not.toHaveProperty("group_ids");
+  expect(screen.getByRole("article", { name: item.name })).toHaveTextContent("Everyone in the workspace");
+});
+
+test.each(MODES)("an administrator who did not create a %s cannot make it Only me", (mode) => {
+  asTenantAdmin("user-drew");
+  const item = setFirstItem(mode, { owner_user_id: "user-admin", only_me: false, group_ids: [] });
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  const stops = within(audienceRail()).getAllByRole("radio");
+  expect(stops.map((stop) => stop.textContent)).toEqual(["Everyone", "Specific groups"]);
+  expect(screen.getByRole("form")).toHaveTextContent(
+    `Only the person who created this ${mode === "template" ? "prompt" : "skill"} can make it private.`,
+  );
+});
+
+test.each(MODES)("a platform owner sees whose Only me %s it is and can make any item private", (mode) => {
+  const item = setFirstItem(mode, { owner_user_id: "user-admin", only_me: true, group_ids: [] });
+  renderToolLibrary(mode);
+  expect(screen.getByRole("article", { name: item.name })).toHaveTextContent("Only Alex Morgan");
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  expect(within(audienceRail()).getByRole("radio", { name: "Only Alex Morgan" })).toBeChecked();
+  expect(screen.getByRole("form")).toHaveTextContent("Only Alex Morgan can use this");
+  fireEvent.click(screen.getByRole("button", { name: "Close editor" }));
+  cleanup();
+  // An item nobody is recorded as creating can still be made private by a platform owner.
+  const legacy = setFirstItem(mode, { owner_user_id: null, only_me: false, group_ids: [] });
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: `Open ${legacy.name}` }));
+  expect(within(audienceRail()).getByRole("radio", { name: "Only me" })).toBeInTheDocument();
+});
+
+test.each(MODES)("a platform owner making someone's shared %s Only me is told whose it becomes", (mode) => {
+  const item = setFirstItem(mode, { owner_user_id: "user-admin", only_me: false, group_ids: [] });
+  renderToolLibrary(mode);
+  expect(screen.getByRole("article", { name: item.name })).toHaveTextContent("Everyone in the workspace");
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  // The server gives a private item to the person who created it.
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Only Alex Morgan" }));
+  expect(screen.getByRole("form")).toHaveTextContent("Only Alex Morgan can use this");
+});
+
+test.each(MODES)("an Only me %s whose owner is unknown or gone still says who has it", (mode) => {
+  const unknown = setFirstItem(mode, { owner_user_id: "user-left-the-firm", only_me: true, group_ids: [] });
+  renderToolLibrary(mode);
+  expect(screen.getByRole("article", { name: unknown.name })).toHaveTextContent("Only its creator");
+  cleanup();
+  const orphan = setFirstItem(mode, { owner_user_id: null, only_me: true, group_ids: [] });
+  renderToolLibrary(mode);
+  expect(screen.getByRole("article", { name: orphan.name })).toHaveTextContent("Only platform owners");
+});
+
+test.each(MODES)("a %s card names up to two groups and counts the rest", (mode) => {
+  const two = setFirstItem(mode, { group_ids: ["group-litigation", "group-corporate"] });
+  renderToolLibrary(mode);
+  const facts = () => within(screen.getByRole("article", { name: two.name })).getByRole("list");
+  expect(facts()).toHaveTextContent(/^Litigation, Corporate$/);
+  cleanup();
+  setFirstItem(mode, { group_ids: ["group-litigation", "group-corporate", "group-hr", "group-gone"] });
+  renderToolLibrary(mode);
+  expect(facts()).toHaveTextContent(/^Litigation, Corporate \+2 more$/);
+});
+
+test.each(MODES)("the %s editor says what each choice means for administrators", (mode) => {
+  renderToolLibrary(mode);
+  fillNew(mode);
+  const field = audienceRail().closest("fieldset")!;
+  expect(field.querySelectorAll("small.lib-field-hint")).toHaveLength(0);
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Only me" }));
+  expect(screen.getByText("Other administrators can't see it. Platform owners can.")).toHaveClass("lib-field-hint");
+  fireEvent.click(within(audienceRail()).getByRole("radio", { name: "Specific groups" }));
+  expect(screen.getByText("Administrators can also open and edit it.")).toHaveClass("lib-field-hint");
+});
+
+test.each(MODES)("renaming or re-describing a %s alone is a change worth saving", (mode) => {
+  const item = firstItem(mode);
+  renderToolLibrary(mode);
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  const save = screen.getByRole("button", { name: "Save changes" });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: `${item.name} v2` } });
+  expect(save).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: item.name } });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Description"), { target: { value: "A new description" } });
+  expect(save).toBeEnabled();
+});
+
+test.each(MODES)("someone reading a %s is told who gets it but is not offered the choice", (mode) => {
+  currentData = { ...currentData, me: { ...sampleData.users.find((user) => user.id === "user-jane")!, role: "USER" } };
+  const item = setFirstItem(mode, { group_ids: ["group-litigation"] });
+  renderToolLibrary(mode);
+  expect(screen.getByRole("article", { name: item.name })).toHaveTextContent("Litigation");
+  fireEvent.click(screen.getByRole("button", { name: `Open ${item.name}` }));
+  expect(screen.queryByRole("radiogroup", { name: "Who can use it" })).not.toBeInTheDocument();
+});
+
 function renderToolLibrary(mode: "template" | "skill") {
   render(<ToolLibraryHarness mode={mode} />);
 }

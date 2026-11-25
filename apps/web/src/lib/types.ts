@@ -112,6 +112,10 @@ export type PromptTemplate = {
   category: string;
   variables: string[];
   group_ids: string[];
+  /** Who created it; absent on items saved before creators were recorded. */
+  owner_user_id?: string | null;
+  /** Only its owner (and platform owners) can see or use it. */
+  only_me?: boolean;
   enabled: boolean;
   updated_at: string;
 };
@@ -126,6 +130,10 @@ export type SkillFile = {
   format: string;
   version: string;
   group_ids: string[];
+  /** Who created it; absent on items saved before creators were recorded. */
+  owner_user_id?: string | null;
+  /** Only its owner (and platform owners) can see or use it. */
+  only_me?: boolean;
   enabled: boolean;
   updated_at: string;
 };
@@ -1661,6 +1669,7 @@ export type AdminPromptTemplateCreateRequest = {
   category?: string;
   variables?: string[];
   group_ids?: string[];
+  only_me?: boolean;
   enabled?: boolean;
 };
 
@@ -1671,6 +1680,7 @@ export type AdminPromptTemplateUpdateRequest = {
   category?: string | null;
   variables?: string[] | null;
   group_ids?: string[] | null;
+  only_me?: boolean | null;
   enabled?: boolean | null;
 };
 
@@ -1684,6 +1694,7 @@ export type AdminSkillFileCreateRequest = {
   format?: string;
   version?: string;
   group_ids?: string[];
+  only_me?: boolean;
   enabled?: boolean;
 };
 
@@ -1695,6 +1706,7 @@ export type AdminSkillFileUpdateRequest = {
   format?: string | null;
   version?: string | null;
   group_ids?: string[] | null;
+  only_me?: boolean | null;
   enabled?: boolean | null;
 };
 

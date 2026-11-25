@@ -10,6 +10,7 @@ from app.core.policy import (
     is_tenant_admin,
     knowledge_authoring_allowed,
     knowledge_config_visible_to_user,
+    library_item_visible_to,
     model_access_allowed,
     tool_authoring_allowed,
     tool_config_visible_to,
@@ -106,7 +107,7 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
             record for record in store.tool_configs.values() if _tool_in_workspace_payload(actor, record)
         ]
         snapshot["promptTemplates"] = [
-            record for record in store.prompt_templates.values() if record.tenant_id == actor.tenant_id
+            record for record in store.prompt_templates.values() if library_item_visible_to(actor, record)
         ]
         if not is_tenant_admin(actor):
             # The Connections tab switches are workspace kill switches: a
@@ -120,7 +121,7 @@ def bootstrap_payload(actor: User, store: SeedStore) -> dict[str, object]:
             if not connector_enabled_for_tenant(store, "prompt-library", actor.tenant_id):
                 snapshot["promptTemplates"] = []
         snapshot["skillFiles"] = [
-            record for record in store.skill_files.values() if record.tenant_id == actor.tenant_id
+            record for record in store.skill_files.values() if library_item_visible_to(actor, record)
         ]
     # Every role goes through the same visibility filter so each automation
     # carries its computed next run (owners see all of them).

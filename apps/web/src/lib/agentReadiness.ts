@@ -7,7 +7,8 @@ import type { BootstrapData, ModelConfig } from "./types";
  * (services/api/app/routes/chat.py `_resolve_runtime_context`): a turned-off or
  * unshared tool, prompt template, or skill file, an unshared knowledge base,
  * or a disconnected provider fails the whole request ("blocker"); a turned-off
- * knowledge base is skipped, so the agent answers without it ("warning").
+ * knowledge base is skipped, so the agent answers without it ("warning"), and
+ * an Only me prompt or skill works for its owner alone ("warning").
  * Surfacing these before the chat turns a confusing error into a fixable to-do.
  */
 export type AgentIssue = {
@@ -80,6 +81,8 @@ export function agentIssues(attachments: AgentAttachments, data: BootstrapData):
         issues.push({ kind: "template", severity: "blocker", message: "A prompt template it uses was deleted or is not shared with you." });
       } else if (!template.enabled) {
         issues.push({ kind: "template", severity: "blocker", message: `Prompt template “${template.name}” is turned off.` });
+      } else if (template.only_me) {
+        issues.push({ kind: "template", severity: "warning", message: onlyMeWarning("Prompt template", template.name) });
       }
     }
   }
@@ -89,9 +92,16 @@ export function agentIssues(attachments: AgentAttachments, data: BootstrapData):
       issues.push({ kind: "skill", severity: "blocker", message: "A skill file it uses was deleted or is not shared with you." });
     } else if (!skill.enabled) {
       issues.push({ kind: "skill", severity: "blocker", message: `Skill file “${skill.name}” is turned off.` });
+    } else if (skill.only_me) {
+      issues.push({ kind: "skill", severity: "warning", message: onlyMeWarning("Skill file", skill.name) });
     }
   }
   return issues;
+}
+
+/** Chat refuses anyone but the owner of an attached Only me prompt or skill. */
+function onlyMeWarning(kind: string, name: string): string {
+  return `${kind} “${name}” is set to Only me, so this agent refuses chats from anyone else.`;
 }
 
 /** "Everyone" covers both stored values: the API enforces "organization" and

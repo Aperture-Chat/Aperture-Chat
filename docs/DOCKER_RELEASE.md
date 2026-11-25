@@ -236,6 +236,85 @@ Use the health URL configured for your deployment and confirm that the API,
 web application, and reverse proxy are healthy before routing production
 traffic.
 
+## New Since v0.5.28
+
+This release lets the creator of a prompt or skill choose who gets it, and
+has another model answer when a provider cannot serve the chosen one. Prompts
+and skills now store new fields, so rolling back is not an image swap. Read
+the rollback item before upgrading.
+
+- **Who can use a prompt or skill.** The prompt and skill editors in Library
+  → Tools gain **Who can use it**: **Only me**, **Everyone**, or **Specific
+  groups**. A new prompt or skill starts as **Everyone**, as before. Creating
+  them is still for administrators.
+- **Only me prompts and skills.** An Only me prompt or skill reaches its
+  creator and platform owners alone. Other administrators in the workspace do
+  not see it in the Library or in the **/** and **$** menus, get "not found"
+  when they ask for it by address, cannot attach it to an agent, and do not
+  see its events in the workspace audit log. Those events stay hidden after
+  it is deleted. Only the person who created a prompt or skill, or a platform
+  owner, can make it Only me, and a platform owner who does so gives it to
+  its creator. Only me cannot be combined with groups. When an account is
+  deleted, its Only me prompts and skills are turned off and left to platform
+  owners, and its shared ones stay shared.
+- **Group shares are now enforced in the menus.** A prompt or skill limited
+  to groups used to reach every person in the workspace in the **/** and
+  **$** menus; only its use through an agent was checked. A regular user now
+  receives only the prompts and skills shared with them. Administrators still
+  receive every prompt and skill in their workspace that is not another
+  person's Only me, because they manage the Library. Prompts and skills
+  already limited to groups disappear from the menus of people outside those
+  groups after the upgrade. Until this release the editor could not set
+  groups, so this affects only items given groups through the API, an import,
+  or the Hermes companion.
+- **Agents.** An agent can carry an Only me prompt or skill. Chat then refuses
+  everyone but its owner and platform owners, the same way it refuses people
+  outside a group-limited one. The agent's readiness list warns its owner
+  about this. An administrator who cannot see an Only me item on a shared
+  agent sees it as an unavailable item, can leave it or untick it, and cannot
+  add it back.
+- **Another model answers when the provider cannot serve the chosen one.** A
+  router such as OpenRouter can answer HTTP 200 with a stream that holds only
+  an error, when the upstream behind the model would not serve the request.
+  Chat showed "The model returned an empty response." and kept asking
+  again. The gateway now reads that error, and a 502 or 503 that names
+  the upstream, as a refusal by the upstream. When none of the reply has been
+  shown, chat moves straight to another model the person may use, without
+  retrying the first, and the work trace says which model was not available
+  and where. With no other model to move to, the error names the upstream and
+  its reason. The audit trail records the switch with the reason
+  `provider_unavailable`.
+- **What an operator has to do.** There is no database migration, no new
+  environment variable, no new Compose service or Compose change, and no new
+  dependency. `.env.example` changes only the image tag. A switch to another
+  model is one extra model call, counted toward usage and budgets as usual,
+  and it happens only when the upstream refused the first.
+- **Records saved before this release.** Prompts and skills saved by v0.5.28
+  load as they were: shared with everyone, or with their groups, and not Only
+  me. They have no recorded creator, so only a platform owner can make one
+  Only me. Skills the Hermes companion saves also have no recorded creator.
+- **Rolling back to v0.5.28.** This is not an image swap. Prompts and skills
+  saved by this release carry new fields (`owner_user_id`, `only_me`). The
+  v0.5.28 code rejects those records as "not canonical" and cannot load
+  them. Back up the application-data volume before upgrading. To go back,
+  restore that backup together with the v0.5.28 images; changes made after
+  the upgrade are lost.
+- **Known limits.** The Elastic export sends every audit event, including
+  those about Only me prompts and skills. The workspace audit log applies its
+  `limit` before it hides Only me events, so a page can hold fewer events
+  than asked for. An administrator who is demoted keeps their Only me prompts
+  and skills in their own menus but can no longer edit them. Chat title
+  naming is a separate call that does not move to another model, so it can
+  fail while an upstream is refusing. The `/v1` proxy still passes an
+  upstream's in-stream error through unchanged.
+- **Not shown or tried yet.** The training lessons, recorded narration, and
+  guide PDFs do not cover these changes; the Library lessons on prompts and
+  skills are stale. The move to another model was tried against a scripted
+  stand-in that replays the error OpenRouter sent, not against a provider
+  that was refusing at the time. The clean-install check upgraded data
+  written by v0.5.18, not by v0.5.28. Pulling the published images from
+  GHCR still required signing in on 2026-11-25.
+
 ## New Since v0.5.27
 
 This release adds block editing on deck slides, OpenRouter picture-only

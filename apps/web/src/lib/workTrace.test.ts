@@ -87,7 +87,12 @@ describe("recordActivity", () => {
       "A safety filter at Azure withheld the reply",
     ],
     [
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "filter" },
+      "route:fallback",
+      "Claude Opus 5.5 answered instead",
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "unavailable" },
       "route:fallback",
       "Claude Opus 5.5 answered instead",
     ],
@@ -126,6 +131,17 @@ describe("recordActivity", () => {
     expect(
       recordActivity([], { kind: "hermes", memories: 2, skills: ["Style"], automations: ["Weekly digest"] })[0].detail,
     ).toBe("2 memories · skill “Style” · automation “Weekly digest” proposed");
+  });
+
+  test.each([
+    ["filter", "Azure", "A safety filter at Azure kept withholding GPT-6 Astra"],
+    ["filter", "", "A safety filter kept withholding GPT-6 Astra"],
+    ["unavailable", "Azure", "GPT-6 Astra was not available at Azure"],
+    ["unavailable", "", "GPT-6 Astra was not available"],
+  ] as const)("a reply another model answered says why (%s, served by %j)", (why, servedBy, detail) => {
+    const step = recordActivity([], { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy, why });
+
+    expect(step[0].detail).toBe(detail);
   });
 
   test("each tool call is its own step and a failed call is a flag", () => {
