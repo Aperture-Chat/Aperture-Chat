@@ -30,6 +30,7 @@ import { preferredModel, usableModels } from "../lib/modelAccess";
 import { cleanImprovedPrompt, promptImproverSystemPrompt } from "../lib/promptImprover";
 import type { BootstrapData, PromptTemplate, SkillFile } from "../lib/types";
 import { OverflowMenu } from "./AgentWorkspaceConsole";
+import { AudienceChoice, audienceOf, NO_GROUP_TICKED, type Audience } from "./AudienceChoice";
 import { StableLabel } from "./Primitives";
 
 type LibraryDraft = {
@@ -37,6 +38,8 @@ type LibraryDraft = {
   description: string;
   category: string;
   content: string;
+  audience: Audience;
+  groupIds: string[];
 };
 
 type LibraryMode = "template" | "skill";
@@ -52,7 +55,7 @@ type LibraryEditorState = {
  * Mirrors PROMPT_LIBRARY_EXCERPT_CHARS in services/api/app/routes/chat.py. */
 export const AGENT_ATTACHMENT_CHAR_LIMIT = 65_000;
 
-const EMPTY_DRAFT: LibraryDraft = { name: "", description: "", category: "", content: "" };
+const EMPTY_DRAFT: LibraryDraft = { name: "", description: "", category: "", content: "", audience: "everyone", groupIds: [] };
 
 const COPY = {
   template: {
@@ -150,8 +153,9 @@ export function ToolLibraryManager({
     if (!editor) return;
     const name = editor.draft.name.trim();
     const content = editor.draft.content.trim();
-    if (!name || !content) {
-      setActionStatus({ tone: "warning", message: `Add a name and ${copy.contentLabel.toLowerCase()} before saving.` });
+    const problem = draftProblem(editor.draft, copy.contentLabel);
+    if (problem) {
+      setActionStatus({ tone: "warning", message: problem });
       return;
     }
     const pendingKey = `${mode}:${editor.itemId ? "update" : "create"}`;
@@ -180,14 +184,14 @@ export function ToolLibraryManager({
       variables: extractVariables(content),
     };
     if (current.itemId) {
-      const saved = await updateAdminPromptTemplate(data.me.id, current.itemId, payload);
+      const saved = await updateAdminPromptTemplate(data.me.id, current.itemId, { ...payload, ...audienceChanges(current) });
       onDataChange((state) => ({
         ...state,
         promptTemplates: state.promptTemplates.map((template) => (template.id === saved.id ? saved : template)),
       }));
       return saved;
     }
-    const saved = await createAdminPromptTemplate(data.me.id, { ...payload, group_ids: [], enabled: true });
+    const saved = await createAdminPromptTemplate(data.me.id, { ...payload, ...audienceRequest(current.draft), enabled: true });
     onDataChange((state) => ({ ...state, promptTemplates: [...state.promptTemplates, saved] }));
     return saved;
   }
@@ -200,7 +204,7 @@ export function ToolLibraryManager({
       category: current.draft.category.trim() || copy.defaultCategory,
     };
     if (current.itemId) {
-      const saved = await updateAdminSkillFile(data.me.id, current.itemId, payload);
+      const saved = await updateAdminSkillFile(data.me.id, current.itemId, { ...payload, ...audienceChanges(current) });
       onDataChange((state) => ({
         ...state,
         skillFiles: state.skillFiles.map((skill) => (skill.id === saved.id ? saved : skill)),
@@ -211,7 +215,7 @@ export function ToolLibraryManager({
       ...payload,
       format: "markdown",
       version: "1.0.0",
-      group_ids: [],
+      ...audienceRequest(current.draft),
       enabled: true,
     });
     onDataChange((state) => ({ ...state, skillFiles: [...state.skillFiles, saved] }));
@@ -425,7 +429,7 @@ function LibraryCard({
         <p className={`lib-card-desc ${item.description ? "" : "is-excerpt"}`}>{item.description || excerpt(item.content)}</p>
         <ul className="ws-facts" aria-label={`${item.name} details`}>
           <li className="ws-fact">
-            <Users size={13} /> {groupSummary(item.group_ids, data)}
+            {item.only_me ? <Lock size={13} /> : <Users size={13} />} {audienceSummary(item, data)}
           </li>
           {agentLength > AGENT_ATTACHMENT_CHAR_LIMIT && (
             <li className="ws-fact is-warn">
@@ -549,8 +553,8 @@ function LibraryItemEditor({
             <h2 id={titleId}>{editor.itemId ? draft.name.trim() || editor.original.name : copy.newLabel}</h2>
             <p>
               {editor.itemId
-                ? [updated ? `Updated ${updated}` : null, groupSummary(item?.group_ids ?? [], data)].filter(Boolean).join(" · ")
-                : `Not saved yet. Shared with everyone in the workspace once saved.`}
+                ? [updated ? `Updated ${updated}` : null, item ? audienceSummary(item, data) : null].filter(Boolean).join(" · ")
+                : `Not saved yet. ${UNSAVED_AUDIENCE[draft.audience]}`}
             </p>
           </div>
         </div>
@@ -699,11 +703,21 @@ function LibraryItemEditor({
                 )}
               </div>
             )}
+            {canEdit && (
+              <LibraryAudienceField
+                item={item}
+                data={data}
+                draft={draft}
+                noun={copy.singular}
+                disabled={readOnly}
+                onDraftChange={onDraftChange}
+              />
+            )}
         </div>
         {canEdit && (
           <div className="agent-editor-foot">
             <span className="agent-editor-foot-note">
-              {editor.itemId ? (dirty ? "You have unsaved changes." : "No changes yet.") : "Saved to the shared library for your workspace."}
+              {editor.itemId ? (dirty ? "You have unsaved changes." : "No changes yet.") : SAVE_DESTINATION[draft.audience]}
             </span>
             <span className="ws-spacer" />
             <button className="secondary-button compact-button" type="button" disabled={pending} onClick={onClose}>
@@ -722,12 +736,59 @@ function LibraryItemEditor({
   );
 }
 
+/** "Who can use it": the creator keeps a prompt or skill to themselves,
+ * shares it with everyone, or picks the groups that get it. */
+function LibraryAudienceField({
+  item,
+  data,
+  draft,
+  noun,
+  disabled,
+  onDraftChange,
+}: {
+  item?: LibraryItem;
+  data: BootstrapData;
+  draft: LibraryDraft;
+  noun: string;
+  disabled: boolean;
+  onDraftChange: (patch: Partial<LibraryDraft>) => void;
+}) {
+  const adminNote = ADMIN_NOTE[draft.audience];
+  return (
+    <fieldset className="lib-field lib-fieldset">
+      <legend>Who can use it</legend>
+      <AudienceChoice
+        groups={data.groups}
+        audience={draft.audience}
+        groupIds={draft.groupIds}
+        owner={item ? otherOwner(item, data) : null}
+        offerOnly={onlyMeOffered(item, data.me)}
+        disabled={disabled}
+        noun={noun}
+        onAudience={(audience) => onDraftChange({ audience })}
+        onGroups={(groupIds) => onDraftChange({ groupIds })}
+      />
+      {adminNote && <small className="lib-field-hint">{adminNote}</small>}
+    </fieldset>
+  );
+}
+
+/** Why a draft can't be saved yet, or null when it can. "Specific groups"
+ * with none ticked would quietly mean everyone, so it is refused. */
+function draftProblem(draft: LibraryDraft, contentLabel: string): string | null {
+  if (!draft.name.trim() || !draft.content.trim()) return `Add a name and ${contentLabel.toLowerCase()} before saving.`;
+  if (draft.audience === "groups" && draft.groupIds.length === 0) return NO_GROUP_TICKED;
+  return null;
+}
+
 function draftFromItem(item: LibraryItem): LibraryDraft {
   return {
     name: item.name,
     description: item.description,
     category: item.category,
     content: item.content,
+    audience: audienceOf(item.only_me, item.group_ids),
+    groupIds: item.group_ids,
   };
 }
 
@@ -737,15 +798,74 @@ function editorDirty(editor: LibraryEditorState): boolean {
     draft.name !== original.name ||
     draft.description !== original.description ||
     draft.category !== original.category ||
-    draft.content !== original.content
+    draft.content !== original.content ||
+    Object.keys(audienceChanges(editor)).length > 0
   );
 }
 
-function groupSummary(groupIds: string[], data: BootstrapData): string {
-  if (!groupIds.length) return "Everyone in the workspace";
-  const names = groupIds.map((id) => data.groups.find((group) => group.id === id)?.name ?? "Unknown group");
+type AudienceRequest = { only_me: boolean; group_ids: string[] };
+
+/** What a draft's audience saves as. Only me and Everyone never carry groups. */
+function audienceRequest(draft: Pick<LibraryDraft, "audience" | "groupIds">): AudienceRequest {
+  return { only_me: draft.audience === "only", group_ids: draft.audience === "groups" ? draft.groupIds : [] };
+}
+
+/** The audience fields an edit changes. An untouched audience sends nothing,
+ * so editing someone else's shared item never asks to change who gets it. */
+function audienceChanges({ draft, original }: LibraryEditorState): Partial<AudienceRequest> {
+  const next = audienceRequest(draft);
+  const before = audienceRequest(original);
+  return {
+    ...(next.only_me !== before.only_me ? { only_me: next.only_me } : {}),
+    ...(sameIds(next.group_ids, before.group_ids) ? {} : { group_ids: next.group_ids }),
+  };
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
+
+/** Whether the viewer may choose Only me: for a new item, for one they
+ * created, or as a platform owner. An item that already is Only me shows it. */
+function onlyMeOffered(item: LibraryItem | undefined, me: BootstrapData["me"]): boolean {
+  return !item || Boolean(item.only_me) || me.role === "PLATFORM_OWNER" || item.owner_user_id === me.id;
+}
+
+/** The name of whoever created the item when that is someone else: Only me
+ * belongs to them, even when a platform owner is the one choosing it. Null
+ * when the viewer created it or nobody is recorded. */
+function otherOwner(item: LibraryItem, data: BootstrapData): string | null {
+  if (!item.owner_user_id || item.owner_user_id === data.me.id) return null;
+  const owner = [...data.visibleUsers, ...data.users].find((user) => user.id === item.owner_user_id);
+  return owner ? owner.display_name : "its creator";
+}
+
+/** Who gets the item, in words: "Only you", a person, group names, or everyone. */
+function audienceSummary(item: LibraryItem, data: BootstrapData): string {
+  if (item.only_me) return item.owner_user_id ? `Only ${otherOwner(item, data) ?? "you"}` : "Only platform owners";
+  if (!item.group_ids.length) return "Everyone in the workspace";
+  const names = item.group_ids.map((id) => data.groups.find((group) => group.id === id)?.name ?? "Unknown group");
   return names.length <= 2 ? names.join(", ") : `${names.slice(0, 2).join(", ")} +${names.length - 2} more`;
 }
+
+const UNSAVED_AUDIENCE: Record<Audience, string> = {
+  only: "Only you will see it once saved.",
+  everyone: "Shared with everyone in the workspace once saved.",
+  groups: "Shared with the groups you tick once saved.",
+};
+
+const SAVE_DESTINATION: Record<Audience, string> = {
+  only: "Saved to the library for you alone.",
+  everyone: "Saved to the shared library for your workspace.",
+  groups: "Saved to the library for the groups you tick.",
+};
+
+/** What the choice means for administrators, who manage the Library. */
+const ADMIN_NOTE: Record<Audience, string | null> = {
+  only: "Other administrators can't see it. Platform owners can.",
+  everyone: null,
+  groups: "Administrators can also open and edit it.",
+};
 
 /** Length as the chat runtime counts it (whitespace runs collapse to one space). */
 function agentVisibleLength(content: string): number {

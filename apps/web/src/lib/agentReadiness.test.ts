@@ -52,3 +52,34 @@ test("card summaries use the first sentence of the instructions", () => {
   expect(agentSummary("You summarize meetings. Always list owners.")).toBe("You summarize meetings.");
   expect(agentSummary("")).toBe("");
 });
+
+test("an Only me prompt or skill on an agent warns that nobody else can chat with it", () => {
+  const template = { ...sampleData.promptTemplates[0], only_me: true, owner_user_id: sampleData.me.id, group_ids: [] };
+  const skill = { ...sampleData.skillFiles[0], only_me: true, owner_user_id: sampleData.me.id, group_ids: [] };
+  const issues = agentIssues(
+    {
+      provider_id: connectedProvider.id,
+      knowledge_config_ids: [],
+      tool_config_ids: [],
+      prompt_template_ids: [template.id, sampleData.promptTemplates[1].id],
+      skill_file_ids: [skill.id],
+    },
+    data({
+      providers: sampleData.providers.map((provider) => ({ ...provider, connected: true })),
+      promptTemplates: [template, sampleData.promptTemplates[1]],
+      skillFiles: [skill],
+    }),
+  );
+  expect(issues).toEqual([
+    {
+      kind: "template",
+      severity: "warning",
+      message: `Prompt template “${template.name}” is set to Only me, so this agent refuses chats from anyone else.`,
+    },
+    {
+      kind: "skill",
+      severity: "warning",
+      message: `Skill file “${skill.name}” is set to Only me, so this agent refuses chats from anyone else.`,
+    },
+  ]);
+});

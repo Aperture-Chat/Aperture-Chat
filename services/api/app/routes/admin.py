@@ -60,6 +60,7 @@ from app.core.policy import (
     is_platform_owner,
     is_temp_user_model,
     is_workspace_agent_profile,
+    library_item_visible_to,
     require_admin_or_owner,
     same_tenant,
     tool_config_visible_to,
@@ -98,6 +99,7 @@ from app.models.schemas import (
     KnowledgeConfig,
     KnowledgeConfigCreateRequest,
     KnowledgeConfigUpdateRequest,
+    LibraryAudience,
     AdminModelAccessUpdateRequest,
     MemoryUserStat,
     ModelConfig,
@@ -2676,13 +2678,89 @@ def preview_tool_script(
     )
 
 
+# --- prompts and skills: who gets them ---------------------------------------
+# One audience rule for both kinds: Only me, everyone in the workspace, or
+# chosen groups. The visibility decision itself lives in app.core.policy.
+
+ONLY_ME_ITEM_WITH_GROUPS = "Only me can't also be shared with groups. Choose one."
+
+
+def _get_library_item(
+    item_id: str, records: dict[str, Any], actor: User
+) -> PromptTemplate | SkillFile:
+    item = _get_tenant_record(item_id, records, actor)
+    if not library_item_visible_to(actor, item):
+        # Someone else's Only me item: answer as if it did not exist.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown configuration.")
+    return item
+
+
+def _assert_library_audience(only_me: bool, group_ids: list[str] | None) -> None:
+    if only_me and group_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ONLY_ME_ITEM_WITH_GROUPS)
+
+
+def _library_audience(
+    actor: User,
+    item: PromptTemplate | SkillFile,
+    payload: PromptTemplateUpdateRequest | SkillFileUpdateRequest,
+    noun: str,
+) -> tuple[bool, str | None, list[str]]:
+    """The (only_me, owner_user_id, group_ids) an update leaves behind.
+
+    Turning Only me on clears the item's groups. Turning it off shares the item
+    with everyone, or with the groups named in the same update.
+    """
+    only_me = item.only_me if payload.only_me is None else payload.only_me
+    _assert_library_audience(only_me, payload.group_ids)
+    if not only_me:
+        groups = item.group_ids if payload.group_ids is None else payload.group_ids
+        return False, item.owner_user_id, groups
+    owner = item.owner_user_id if item.only_me else _library_only_me_owner(actor, item, noun)
+    return True, owner, []
+
+
+def _library_only_me_owner(actor: User, item: PromptTemplate | SkillFile, noun: str) -> str:
+    """Who owns an item that is being made Only me.
+
+    Only the person who created it may do it, so one admin cannot take
+    another's prompt or skill out of the shared library. A platform owner may
+    do it to any item: it goes to its creator when known, otherwise to the
+    platform owner.
+    """
+    if is_platform_owner(actor):
+        return item.owner_user_id or actor.id
+    if item.owner_user_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You can make a {noun} Only me only if you created it.",
+        )
+    return actor.id
+
+
+def _apply_library_update(
+    actor: User,
+    store: SeedStore,
+    item: PromptTemplate | SkillFile,
+    payload: PromptTemplateUpdateRequest | SkillFileUpdateRequest,
+    noun: str,
+) -> None:
+    audience = _library_audience(actor, item, payload, noun)
+    if payload.group_ids is not None:
+        _assert_group_scope(actor, payload.group_ids, store, tenant_id=item.tenant_id)
+    # Fields the request left out are None, which _apply_config_updates skips.
+    _apply_config_updates(item, payload.model_dump(exclude={"only_me", "group_ids"}))
+    item.only_me, item.owner_user_id, item.group_ids = audience
+    item.updated_at = clock.now_iso()
+
+
 @router.get("/prompt-templates")
 def prompt_templates(
     actor: User = Depends(current_user),
     store: SeedStore = Depends(get_store),
 ) -> list[PromptTemplate]:
     require_admin_or_owner(actor)
-    return _visible_tenant_records(store.prompt_templates, actor)
+    return [item for item in store.prompt_templates.values() if library_item_visible_to(actor, item)]
 
 
 @router.post("/prompt-templates", status_code=201)
@@ -2693,6 +2771,7 @@ def create_prompt_template(
 ) -> PromptTemplate:
     require_admin_or_owner(actor)
     tenant_id = _tenant_id_for_config(actor, payload.tenant_id, store)
+    _assert_library_audience(payload.only_me, payload.group_ids)
     _assert_group_scope(actor, payload.group_ids, store, tenant_id=tenant_id)
     template_id = payload.id or f"template-{uuid4()}"
     _assert_new_config_id(template_id, store.prompt_templates)
@@ -2705,6 +2784,8 @@ def create_prompt_template(
         category=payload.category,
         variables=payload.variables,
         group_ids=payload.group_ids,
+        owner_user_id=actor.id,
+        only_me=payload.only_me,
         enabled=payload.enabled,
         updated_at=clock.now_iso(),
     )
@@ -2723,12 +2804,8 @@ def update_prompt_template(
     store: SeedStore = Depends(get_store),
 ) -> PromptTemplate:
     require_admin_or_owner(actor)
-    template = _get_tenant_record(template_id, store.prompt_templates, actor)
-    updates = payload.model_dump(exclude_unset=True)
-    if payload.group_ids is not None:
-        _assert_group_scope(actor, payload.group_ids, store, tenant_id=template.tenant_id)
-    _apply_config_updates(template, updates)
-    template.updated_at = clock.now_iso()
+    template = _get_library_item(template_id, store.prompt_templates, actor)
+    _apply_library_update(actor, store, template, payload, "prompt")
     store.record_audit(
         actor, "admin.prompt_template_updated", template.id, _template_audit_payload(template)
     )
@@ -2742,7 +2819,7 @@ def delete_prompt_template(
     store: SeedStore = Depends(get_store),
 ) -> dict[str, str]:
     require_admin_or_owner(actor)
-    template = _get_tenant_record(template_id, store.prompt_templates, actor)
+    template = _get_library_item(template_id, store.prompt_templates, actor)
     del store.prompt_templates[template.id]
     for model in store.models.values():
         if template.id in model.prompt_template_ids:
@@ -2763,7 +2840,7 @@ def skill_files(
     store: SeedStore = Depends(get_store),
 ) -> list[SkillFile]:
     require_admin_or_owner(actor)
-    return _visible_tenant_records(store.skill_files, actor)
+    return [item for item in store.skill_files.values() if library_item_visible_to(actor, item)]
 
 
 @router.post("/skill-files", status_code=201)
@@ -2774,6 +2851,7 @@ def create_skill_file(
 ) -> SkillFile:
     require_admin_or_owner(actor)
     tenant_id = _tenant_id_for_config(actor, payload.tenant_id, store)
+    _assert_library_audience(payload.only_me, payload.group_ids)
     _assert_group_scope(actor, payload.group_ids, store, tenant_id=tenant_id)
     skill_id = payload.id or f"skill-{uuid4()}"
     _assert_new_config_id(skill_id, store.skill_files)
@@ -2787,6 +2865,8 @@ def create_skill_file(
         format=payload.format,
         version=payload.version,
         group_ids=payload.group_ids,
+        owner_user_id=actor.id,
+        only_me=payload.only_me,
         enabled=payload.enabled,
         updated_at=clock.now_iso(),
     )
@@ -2803,12 +2883,8 @@ def update_skill_file(
     store: SeedStore = Depends(get_store),
 ) -> SkillFile:
     require_admin_or_owner(actor)
-    skill = _get_tenant_record(skill_id, store.skill_files, actor)
-    updates = payload.model_dump(exclude_unset=True)
-    if payload.group_ids is not None:
-        _assert_group_scope(actor, payload.group_ids, store, tenant_id=skill.tenant_id)
-    _apply_config_updates(skill, updates)
-    skill.updated_at = clock.now_iso()
+    skill = _get_library_item(skill_id, store.skill_files, actor)
+    _apply_library_update(actor, store, skill, payload, "skill")
     store.record_audit(actor, "admin.skill_file_updated", skill.id, _skill_audit_payload(skill))
     return skill
 
@@ -2820,7 +2896,7 @@ def delete_skill_file(
     store: SeedStore = Depends(get_store),
 ) -> dict[str, str]:
     require_admin_or_owner(actor)
-    skill = _get_tenant_record(skill_id, store.skill_files, actor)
+    skill = _get_library_item(skill_id, store.skill_files, actor)
     del store.skill_files[skill.id]
     for model in store.models.values():
         if skill.id in model.skill_file_ids:
@@ -3160,10 +3236,31 @@ def tenant_audit_events(
 
 
 def _audit_event_visible_to(actor: User, store: SeedStore, event: AuditEvent) -> bool:
-    """An event about a tool the viewer cannot see (another admin's Only me
-    connection) stays out of their trail; platform owners see every event."""
+    """An event about something the viewer cannot see (another admin's Only me
+    connection, prompt, or skill) stays out of their trail; platform owners
+    see every event."""
     tool = store.tool_configs.get(event.target)
-    return tool is None or tool_config_visible_to(actor, tool)
+    if tool is not None:
+        return tool_config_visible_to(actor, tool)
+    item = store.prompt_templates.get(event.target) or store.skill_files.get(event.target)
+    if item is not None:
+        return library_item_visible_to(actor, item)
+    return not _deleted_only_me_item_event(actor, event)
+
+
+LIBRARY_AUDIT_ACTIONS = ("admin.prompt_template_", "admin.skill_file_")
+
+
+def _deleted_only_me_item_event(actor: User, event: AuditEvent) -> bool:
+    """Whether ``event`` is about someone else's Only me prompt or skill that no
+    longer exists. The event keeps the audience it recorded at the time, so
+    deleting the item does not put its name in other admins' trails."""
+    return (
+        event.action.startswith(LIBRARY_AUDIT_ACTIONS)
+        and bool(event.metadata.get("only_me"))
+        and not is_platform_owner(actor)
+        and event.metadata.get("owner_user_id") != actor.id
+    )
 
 
 def _usage_filter_user_ids(selected: list[str] | None, visible: set[str]) -> set[str]:
@@ -4241,15 +4338,20 @@ def _assert_agent_profile_references(
             store.content_filters,
         ),
     )
-    # Tools already on the profile stay valid even when the editor cannot see
-    # them (another admin's Only me connection); only added ones are checked.
-    kept_tool_ids = set(getattr(existing, "tool_config_ids", ()))
+    # Connections, prompts, and skills already on the profile stay valid even
+    # when the editor cannot see them (another admin's Only me item); only
+    # added ones are checked.
+    kept_ids = {
+        record_id
+        for field in ("tool_config_ids", "prompt_template_ids", "skill_file_ids")
+        for record_id in getattr(existing, field, ())
+    }
     for label, record_ids, collection in references:
         for record_id in record_ids:
             if label == "content filter" and is_builtin_filter_id(record_id):
                 continue
             _assert_profile_reference(
-                actor, label, collection.get(record_id), tenant_id, record_id in kept_tool_ids
+                actor, label, collection.get(record_id), tenant_id, record_id in kept_ids
             )
 
 
@@ -4264,9 +4366,17 @@ def _assert_profile_reference(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Agent profile {label} is outside the target tenant.",
         )
-    if isinstance(record, ToolConfig) and not kept and not tool_config_visible_to(actor, record):
-        # Someone else's Only me connection: as if it did not exist.
+    if not kept and _reference_hidden_from(actor, record):
+        # Someone else's Only me item: as if it did not exist.
         raise unknown
+
+
+def _reference_hidden_from(actor: User, record: Any) -> bool:
+    if isinstance(record, ToolConfig):
+        return not tool_config_visible_to(actor, record)
+    if isinstance(record, LibraryAudience):
+        return not library_item_visible_to(actor, record)
+    return False
 
 
 def _keep_hidden_tools(
@@ -5070,6 +5180,8 @@ def _template_audit_payload(template: PromptTemplate) -> dict[str, Any]:
         "category": template.category,
         "variables": template.variables,
         "group_ids": template.group_ids,
+        "only_me": template.only_me,
+        "owner_user_id": template.owner_user_id,
         "enabled": template.enabled,
         "content_chars": len(template.content),
     }
@@ -5083,6 +5195,8 @@ def _skill_audit_payload(skill: SkillFile) -> dict[str, Any]:
         "format": skill.format,
         "version": skill.version,
         "group_ids": skill.group_ids,
+        "only_me": skill.only_me,
+        "owner_user_id": skill.owner_user_id,
         "enabled": skill.enabled,
         "content_chars": len(skill.content),
     }

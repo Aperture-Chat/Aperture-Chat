@@ -2671,6 +2671,9 @@ class SeedStore:
             self.user_memory_settings.pop(user_id, None)
             removed["user_memories"] = len(memory_ids)
             _release_tools_of_deleted_user(self.tool_configs.values(), user_id)
+            _release_library_items_of_deleted_user(
+                [*self.prompt_templates.values(), *self.skill_files.values()], user_id
+            )
             return removed
 
     def _forget_group_creator_locked(self, user_id: str) -> None:
@@ -6030,6 +6033,20 @@ def _release_tools_of_deleted_user(tool_configs: Iterable[ToolConfig], user_id: 
         if config.only_me and config.owner_user_id == user_id:
             config.owner_user_id = None
             config.enabled = False
+
+
+def _release_library_items_of_deleted_user(
+    items: Iterable[PromptTemplate | SkillFile], user_id: str
+) -> None:
+    """A later account may reuse a deleted account's id, and must inherit none
+    of its prompts or skills. Its Only me items turn off and, with no owner,
+    are left to platform owners alone; its shared items stay shared."""
+    for item in items:
+        if item.owner_user_id != user_id:
+            continue
+        item.owner_user_id = None
+        if item.only_me:
+            item.enabled = False
 
 
 def _audit_action_type(action: str, metadata: dict[str, object]) -> str:

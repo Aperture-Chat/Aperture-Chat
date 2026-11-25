@@ -31,7 +31,15 @@ describe("parseStreamActivity", () => {
     [{ kind: "provider-filter", attempt: 2 }, { kind: "provider-filter", attempt: 2, servedBy: "" }],
     [
       { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", served_by: "Azure" },
-      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "filter" },
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", served_by: "Azure", reason: "unavailable" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "Azure", why: "unavailable" },
+    ],
+    [
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", reason: "something new" },
+      { kind: "model-fallback", from: "GPT-6 Astra", to: "Claude Opus 5.5", servedBy: "", why: "filter" },
     ],
     [
       { kind: "hermes", memories: 1, skills: ["Style"], automations: [] },

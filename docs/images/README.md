@@ -61,6 +61,18 @@ Assistant's three suggestions are the application's built-in prompts.
   approval**, picks **Only me** under **Who can use it**, and saves. The
   connection was never turned on or tested.
 
+One picture was added on November 25, 2026 from the v0.5.29 interface:
+`prompt-audience-light.png`. It was taken on an isolated local instance (API
+and Vite on loopback ports) started from the release source on a fresh, empty
+data directory with seeds off. The first owner was created through the
+bootstrap flow; the organization was renamed Meridian Advisory Group, and
+Legal, Operations, and Finance groups and a workspace admin, Priya Shah, were
+added through the admin API. The groups have no members, so each reads "0
+people". The picture is signed in as Priya Shah in the light theme at
+1440×900 and 2× scale, and was compressed with `oxipng -o 4 --strip safe`. No
+model was registered on the instance, and none was called: the prompt's text
+was typed into the editor by the capture script. The prompt was not saved.
+
 ## Capture content
 
 - `product-tour-light.gif`, `product-tour-light.png`: the README hero, a
@@ -133,6 +145,11 @@ Assistant's three suggestions are the application's built-in prompts.
   Search on **Access & approval**, with **Only me** chosen on the **Who can
   use it** rail beside **Everyone** and **Specific groups**, and the line
   "Only you can use this connection."
+- `prompt-audience-light.png`: a new prompt, Deposition outline, in Library →
+  Tools → **Prompts**, scrolled to the foot of its editor. **Specific groups**
+  is chosen on the **Who can use it** rail, the Legal group is ticked, and the
+  lines read "Only people in the groups you tick can use this prompt." and
+  "Administrators can also open and edit it."
 
 ## Data and honesty
 
